@@ -48,7 +48,7 @@ async function replaceQrWithLocalDataUrl(html) {
 
   try {
     const dataUrl = await QRCode.toDataURL(qrData, {
-      width: 200,
+      width: 152,
       margin: 1,
       errorCorrectionLevel: 'M',
       color: { dark: '#000000', light: '#ffffff' },
