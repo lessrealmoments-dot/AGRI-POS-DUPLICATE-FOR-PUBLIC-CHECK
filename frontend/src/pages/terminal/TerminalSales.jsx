@@ -33,7 +33,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   const scannerRef = useRef(null);
   const scannerContainerRef = useRef(null);
   const lastScanRef = useRef({ barcode: '', time: 0 });
-  const SCAN_COOLDOWN = 2000;
+  const CAMERA_SCAN_COOLDOWN = 2000;
   const [lastSaleData, setLastSaleData] = useState(null); // for print prompt
   const [showPrintPrompt, setShowPrintPrompt] = useState(false);
   const [businessInfo, setBusinessInfo] = useState({});
@@ -44,6 +44,12 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   const [overridePin, setOverridePin] = useState('');
   const [overrideSubmitting, setOverrideSubmitting] = useState(false);
   const [overrideError, setOverrideError] = useState('');
+  // HID Barcode Scanner (H10) — scan detection & quantity prompt
+  const [scanQtyModal, setScanQtyModal] = useState(false);
+  const [scanQtyProduct, setScanQtyProduct] = useState(null);
+  const [scanQty, setScanQty] = useState('1');
+  const autoAddProductsRef = useRef(new Set());
+  const scanDetectRef = useRef({ keyTimes: [], processTimer: null, cooldownUntil: 0 });
 
   // Load cached data
   useEffect(() => {
@@ -94,6 +100,99 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
     toast.success(product.name, { duration: 1500 });
   }, [activeScheme]);
 
+  // ── HID Barcode Scanner Detection ──────────────────────────────────────────
+  const SCAN_CHAR_SPEED = 50;      // max ms between chars for scanner
+  const SCAN_MIN_CHARS = 4;        // minimum barcode length
+  const SCAN_SETTLE_DELAY = 120;   // ms of silence before processing
+  const SCAN_COOLDOWN = 1500;      // ms cooldown after scan (prevents "types twice")
+
+  const processBarcodeScan = useCallback((barcode) => {
+    const product = products.find(p => p.barcode === barcode);
+    if (!product) {
+      toast.error(`Barcode "${barcode}" not found. Scan again or add product on computer.`, { duration: 3000 });
+      if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+      searchRef.current?.focus();
+      return;
+    }
+    // Auto-add if already confirmed for this transaction
+    if (autoAddProductsRef.current.has(product.id)) {
+      addToCart(product);
+      if (navigator.vibrate) navigator.vibrate(100);
+      searchRef.current?.focus();
+      return;
+    }
+    // First scan of this product — show quantity prompt
+    setScanQtyProduct(product);
+    setScanQty('1');
+    setScanQtyModal(true);
+  }, [products, addToCart]);
+
+  const handleSearchKeyDown = useCallback((e) => {
+    const now = Date.now();
+    const detect = scanDetectRef.current;
+    // During cooldown after a scan, block all input
+    if (now < detect.cooldownUntil) { e.preventDefault(); return; }
+    if (e.key.length === 1) {
+      detect.keyTimes.push(now);
+      detect.keyTimes = detect.keyTimes.filter(t => now - t < 500);
+      clearTimeout(detect.processTimer);
+      detect.processTimer = setTimeout(() => {
+        const times = detect.keyTimes;
+        if (times.length >= SCAN_MIN_CHARS) {
+          let allFast = true;
+          for (let i = 1; i < times.length; i++) {
+            if (times[i] - times[i - 1] > SCAN_CHAR_SPEED) { allFast = false; break; }
+          }
+          if (allFast) {
+            const barcode = (searchRef.current?.value || '').trim();
+            if (barcode.length >= SCAN_MIN_CHARS) {
+              detect.cooldownUntil = Date.now() + SCAN_COOLDOWN;
+              detect.keyTimes = [];
+              setSearch('');
+              setResults([]);
+              processBarcodeScan(barcode);
+              return;
+            }
+          }
+        }
+        detect.keyTimes = [];
+      }, SCAN_SETTLE_DELAY);
+    }
+  }, [processBarcodeScan]);
+
+  const handleSearchChange = useCallback((e) => {
+    if (Date.now() < scanDetectRef.current.cooldownUntil) { setSearch(''); return; }
+    setSearch(e.target.value);
+  }, []);
+
+  const handleScanQtyConfirm = useCallback((autoAdd = false) => {
+    if (!scanQtyProduct) return;
+    const qty = Math.max(1, parseInt(scanQty) || 1);
+    if (autoAdd) autoAddProductsRef.current.add(scanQtyProduct.id);
+    const price = scanQtyProduct.prices?.[activeScheme] ?? 0;
+    setCart(prev => {
+      const existing = prev.find(c => c.product_id === scanQtyProduct.id);
+      if (existing) {
+        const newQty = existing.quantity + qty;
+        return prev.map(c => c.product_id === scanQtyProduct.id
+          ? { ...c, quantity: newQty, total: newQty * c.price } : c);
+      }
+      return [...prev, {
+        product_id: scanQtyProduct.id, product_name: scanQtyProduct.name, sku: scanQtyProduct.sku,
+        price, quantity: qty, total: price * qty, unit: scanQtyProduct.unit, is_repack: scanQtyProduct.is_repack,
+        cost_price: scanQtyProduct.cost_price || 0,
+        effective_capital: scanQtyProduct.effective_capital || scanQtyProduct.cost_price || 0,
+        capital_method: scanQtyProduct.capital_method || 'manual',
+        original_price: price,
+      }];
+    });
+    toast.success(`${scanQtyProduct.name} x${qty}`, { duration: 1500 });
+    if (navigator.vibrate) navigator.vibrate(100);
+    setScanQtyModal(false);
+    setScanQtyProduct(null);
+    setTimeout(() => searchRef.current?.focus(), 100);
+  }, [scanQtyProduct, scanQty, activeScheme]);
+
   const updateQty = (productId, delta) => {
     setCart(prev => prev.map(c => {
       if (c.product_id !== productId) return c;
@@ -103,7 +202,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   };
 
   const removeItem = (productId) => setCart(prev => prev.filter(c => c.product_id !== productId));
-  const clearCart = () => { setCart([]); setSelectedCustomer(null); setCustSearch(''); };
+  const clearCart = () => { setCart([]); setSelectedCustomer(null); setCustSearch(''); autoAddProductsRef.current.clear(); };
 
   const grandTotal = cart.reduce((s, c) => s + c.total, 0);
 
@@ -123,7 +222,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
         (decodedText) => {
           // Debounce: skip if same barcode within cooldown
           const now = Date.now();
-          if (decodedText === lastScanRef.current.barcode && now - lastScanRef.current.time < SCAN_COOLDOWN) return;
+          if (decodedText === lastScanRef.current.barcode && now - lastScanRef.current.time < CAMERA_SCAN_COOLDOWN) return;
           lastScanRef.current = { barcode: decodedText, time: now };
 
           const product = products.find(p => p.barcode === decodedText);
@@ -151,7 +250,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
     setScannerActive(false);
   };
 
-  // Barcode keyboard listener (for hardware scanners like Newland)
+  // Barcode keyboard listener (for hardware scanners — works both with and without Enter key)
   const scanBufferRef = useRef('');
   const scanTimerRef = useRef(null);
 
@@ -163,24 +262,24 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
         const barcode = scanBufferRef.current.trim();
         scanBufferRef.current = '';
         clearTimeout(scanTimerRef.current);
-        const product = products.find(p => p.barcode === barcode);
-        if (product) {
-          addToCart(product);
-          if (navigator.vibrate) navigator.vibrate(100);
-        } else {
-          toast.error(`No product: ${barcode}`);
-        }
+        processBarcodeScan(barcode);
         return;
       }
       if (e.key.length === 1) {
         scanBufferRef.current += e.key;
         clearTimeout(scanTimerRef.current);
-        scanTimerRef.current = setTimeout(() => { scanBufferRef.current = ''; }, 100);
+        scanTimerRef.current = setTimeout(() => {
+          const buffer = scanBufferRef.current.trim();
+          if (buffer.length >= SCAN_MIN_CHARS) {
+            processBarcodeScan(buffer);
+          }
+          scanBufferRef.current = '';
+        }, 100);
       }
     };
     window.addEventListener('keydown', handleKeyPress);
     return () => { window.removeEventListener('keydown', handleKeyPress); clearTimeout(scanTimerRef.current); };
-  }, [products, addToCart]);
+  }, [products, addToCart, processBarcodeScan]); // eslint-disable-line
 
   // Process sale
   // ── Checkout state ──
@@ -339,7 +438,8 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
             <Input
               ref={searchRef}
               value={search}
-              onChange={e => setSearch(e.target.value)}
+              onChange={handleSearchChange}
+              onKeyDown={handleSearchKeyDown}
               placeholder="Search product or scan barcode..."
               className="pl-9 h-10 text-base"
               data-testid="terminal-search-input"
@@ -809,6 +909,61 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
                 Skip
               </Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Barcode Scan — Quantity Prompt */}
+      <Dialog open={scanQtyModal} onOpenChange={(o) => { if (!o) { setScanQtyModal(false); setScanQtyProduct(null); setTimeout(() => searchRef.current?.focus(), 100); } }}>
+        <DialogContent className="max-w-xs mx-auto">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold" style={{ fontFamily: 'Manrope' }} data-testid="scan-qty-title">
+              Scanned Product
+            </DialogTitle>
+            <DialogDescription className="sr-only">Enter quantity for scanned product</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3">
+              <p className="text-sm font-semibold text-slate-800">{scanQtyProduct?.name}</p>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-lg font-bold text-[#1A4D2E]">{formatPHP(scanQtyProduct?.prices?.[activeScheme] ?? 0)}</span>
+                <span className="text-xs text-slate-400 font-mono">{scanQtyProduct?.barcode}</span>
+              </div>
+              {scanQtyProduct && (
+                <p className="text-[10px] text-slate-500 mt-1">
+                  {scanQtyProduct.available != null ? `Stock: ${scanQtyProduct.available} ${scanQtyProduct.unit || ''}` : ''}
+                </p>
+              )}
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 font-medium mb-1 block">Quantity</label>
+              <Input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                value={scanQty}
+                onChange={e => setScanQty(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleScanQtyConfirm(false); }}
+                className="h-12 text-xl font-mono text-center font-bold"
+                data-testid="scan-qty-input"
+                autoFocus
+              />
+            </div>
+            <Button
+              onClick={() => handleScanQtyConfirm(false)}
+              className="w-full bg-[#1A4D2E] hover:bg-[#15412a] text-white h-11"
+              data-testid="scan-qty-confirm-btn"
+            >
+              <Check size={16} className="mr-2" /> Add to Cart
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => handleScanQtyConfirm(true)}
+              className="w-full text-slate-600 h-10"
+              data-testid="scan-qty-auto-btn"
+            >
+              Skip Qty — Auto +1 for This Transaction
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
