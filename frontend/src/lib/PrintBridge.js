@@ -65,14 +65,19 @@ const PrintBridge = {
   /**
    * Main print function — matches PrintEngine.print() signature exactly.
    * Drop-in replacement: swap `import PrintEngine` → `import PrintBridge`.
+   * @param {number} [opts.feedLinesAfter] - Blank lines to feed after receipt (default controlled by Java). Use 6–10 if tear cut is tight.
    */
-  async print({ type, data, format = 'thermal', businessInfo = {}, docCode = '' }) {
+  async print({ type, data, format = 'thermal', businessInfo = {}, docCode = '', feedLinesAfter } = {}) {
     if (Capacitor.isNativePlatform()) {
       // Native H10P path: generate HTML, replace QR with local data URL, then send to printer SDK
       try {
         let html = PrintEngine.generateHtml({ type, data, format, businessInfo, docCode });
         html = await replaceQrWithLocalDataUrl(html);
-        await H10PPrinter.printHtml({ html, format });
+        const payload = { html, format };
+        if (feedLinesAfter != null && Number.isFinite(Number(feedLinesAfter))) {
+          payload.feedLinesAfter = Math.max(0, Math.min(24, Math.round(Number(feedLinesAfter))));
+        }
+        await H10PPrinter.printHtml(payload);
       } catch (err) {
         console.error('[PrintBridge] Native print failed:', err);
         throw err;
@@ -107,6 +112,13 @@ const PrintBridge = {
   /** Pass-through so callers don't need to import PrintEngine for doc type detection */
   getDocType(invoice) {
     return PrintEngine.getDocType(invoice);
+  },
+
+  /** Advance paper only (H10P). No-op in browser. */
+  async feedPaper(lines = 8) {
+    if (!Capacitor.isNativePlatform()) return;
+    const n = Math.max(1, Math.min(40, Math.round(Number(lines)) || 8));
+    await H10PPrinter.feedPaper({ lines: n });
   },
 };
 
