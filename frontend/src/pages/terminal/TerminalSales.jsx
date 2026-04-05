@@ -882,14 +882,18 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
             <p className="text-lg font-bold text-[#1A4D2E]">{formatPHP(lastSaleData?.grand_total || 0)}</p>
             <p className="text-xs text-slate-500">Would you like to print a receipt?</p>
             <div className="space-y-2 pt-1">
-              <Button onClick={() => {
-                PrintBridge.print({ type: PrintEngine.getDocType(lastSaleData), data: lastSaleData, format: 'thermal', businessInfo });
+              <Button onClick={async () => {
+                try {
+                  await PrintBridge.print({ type: PrintEngine.getDocType(lastSaleData), data: lastSaleData, format: 'thermal', businessInfo });
+                } catch (err) { toast.error(`Print failed: ${err.message || 'Unknown error'}`); }
                 setShowPrintPrompt(false); setLastSaleData(null);
               }} className="w-full bg-[#1A4D2E] hover:bg-[#15412a] text-white h-11" data-testid="print-thermal-btn">
                 <Printer size={16} className="mr-2" /> Print Receipt (58mm)
               </Button>
-              <Button variant="outline" onClick={() => {
-                PrintBridge.print({ type: PrintEngine.getDocType(lastSaleData), data: lastSaleData, format: 'full_page', businessInfo });
+              <Button variant="outline" onClick={async () => {
+                try {
+                  await PrintBridge.print({ type: PrintEngine.getDocType(lastSaleData), data: lastSaleData, format: 'full_page', businessInfo });
+                } catch (err) { toast.error(`Print failed: ${err.message || 'Unknown error'}`); }
                 setShowPrintPrompt(false); setLastSaleData(null);
               }} className="w-full h-10" data-testid="print-full-btn">
                 <Printer size={14} className="mr-2" /> Print Full Page

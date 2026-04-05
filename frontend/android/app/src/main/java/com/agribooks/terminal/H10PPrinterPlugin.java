@@ -9,6 +9,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.os.IBinder;
 import android.os.RemoteException;
+import android.util.Log;
 import android.view.View;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -63,6 +64,8 @@ public class H10PPrinterPlugin extends Plugin {
         bindPrinterService();
     }
 
+    private static final String TAG = "H10PPrinter";
+
     private void bindPrinterService() {
         try {
             Intent intent = new Intent();
@@ -70,9 +73,13 @@ public class H10PPrinterPlugin extends Plugin {
                 "recieptservice.com.recieptservice",
                 "recieptservice.com.recieptservice.service.PrinterService"
             );
-            getContext().bindService(intent, printerServiceConnection, Context.BIND_AUTO_CREATE);
+            boolean bound = getContext().bindService(intent, printerServiceConnection, Context.BIND_AUTO_CREATE);
+            Log.d(TAG, "bindService returned: " + bound);
+            if (!bound) {
+                Log.e(TAG, "bindService failed — is recieptservice app installed?");
+            }
         } catch (Exception e) {
-            // Non-H10P device — plugin is unavailable, graceful fallback
+            Log.e(TAG, "bindPrinterService exception: " + e.getMessage());
         }
     }
 
@@ -93,39 +100,50 @@ public class H10PPrinterPlugin extends Plugin {
             return;
         }
 
-        if (!printerConnected || printer == null) {
-            // Try reconnecting
-            bindPrinterService();
-            call.reject("Printer service not connected. Please wait a moment and try again.");
-            return;
-        }
+        // Wait for printer service on a background thread (bindService is async)
+        new Thread(() -> {
+            if (!printerConnected || printer == null) {
+                bindPrinterService();
+                // Poll up to 12 seconds for the service to connect
+                int waited = 0;
+                while ((!printerConnected || printer == null) && waited < 12000) {
+                    try { Thread.sleep(300); } catch (InterruptedException ignored) {}
+                    waited += 300;
+                }
+            }
 
-        // 58mm @ 203 DPI = 384px; full page approximation = 576px
-        final int widthPx = "full_page".equals(format) ? 576 : 384;
-
-        // Must run on main thread — WebView requires it
-        getActivity().runOnUiThread(() -> renderHtmlToBitmap(html, widthPx, bitmap -> {
-            if (bitmap == null) {
-                call.reject("Failed to render receipt HTML to bitmap");
+            if (!printerConnected || printer == null) {
+                call.reject("Printer service not connected after 12s. Is the recieptservice app installed?");
                 return;
             }
 
-            // Print on a background thread to avoid blocking the UI
-            new Thread(() -> {
-                try {
-                    printer.beginWork();
-                    printer.printBitmap(bitmap);
-                    printer.nextLine(3);   // Feed 3 blank lines so receipt tears cleanly
-                    printer.endWork();
-                    bitmap.recycle();
-                    call.resolve(new JSObject().put("success", true));
-                } catch (RemoteException e) {
-                    call.reject("Print SDK error: " + e.getMessage());
-                } catch (Exception e) {
-                    call.reject("Print failed: " + e.getMessage());
+            // 58mm @ 203 DPI = 384px; full page approximation = 576px
+            final int widthPx = "full_page".equals(format) ? 576 : 384;
+
+            // Must run on main thread — WebView requires it
+            getActivity().runOnUiThread(() -> renderHtmlToBitmap(html, widthPx, bitmap -> {
+                if (bitmap == null) {
+                    call.reject("Failed to render receipt HTML to bitmap");
+                    return;
                 }
-            }).start();
-        }));
+
+                // Print on a background thread to avoid blocking the UI
+                new Thread(() -> {
+                    try {
+                        printer.beginWork();
+                        printer.printBitmap(bitmap);
+                        printer.nextLine(3);   // Feed 3 blank lines so receipt tears cleanly
+                        printer.endWork();
+                        bitmap.recycle();
+                        call.resolve(new JSObject().put("success", true));
+                    } catch (RemoteException e) {
+                        call.reject("Print SDK error: " + e.getMessage());
+                    } catch (Exception e) {
+                        call.reject("Print failed: " + e.getMessage());
+                    }
+                }).start();
+            }));
+        }).start();
     }
 
     /**
@@ -135,7 +153,19 @@ public class H10PPrinterPlugin extends Plugin {
     @PluginMethod
     public void checkStatus(PluginCall call) {
         if (!printerConnected || printer == null) {
-            bindPrinterService(); // Attempt reconnect
+            bindPrinterService();
+            // Wait up to 4 seconds for connection
+            new Thread(() -> {
+                int waited = 0;
+                while ((!printerConnected || printer == null) && waited < 4000) {
+                    try { Thread.sleep(300); } catch (InterruptedException ignored) {}
+                    waited += 300;
+                }
+                JSObject result = new JSObject();
+                result.put("connected", printerConnected && printer != null);
+                call.resolve(result);
+            }).start();
+            return;
         }
         JSObject result = new JSObject();
         result.put("connected", printerConnected && printer != null);

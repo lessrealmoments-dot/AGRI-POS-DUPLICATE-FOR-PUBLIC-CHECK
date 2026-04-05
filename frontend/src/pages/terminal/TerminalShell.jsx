@@ -840,12 +840,14 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
                 {/* Action buttons */}
                 <div className="grid grid-cols-2 gap-2" data-testid="quickscan-actions">
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       const printData = basicDocToPrintData(quickScanDoc.basic);
                       const docType = quickScanDoc.basic.doc_type === 'invoice'
                         ? PrintEngine.getDocType(printData)
                         : quickScanDoc.basic.doc_type === 'purchase_order' ? 'purchase_order' : 'branch_transfer';
-                      PrintBridge.print({ type: docType, data: printData, format: 'thermal', businessInfo, docCode: quickScanDoc.code });
+                      try {
+                        await PrintBridge.print({ type: docType, data: printData, format: 'thermal', businessInfo, docCode: quickScanDoc.code });
+                      } catch (err) { toast.error(`Print failed: ${err.message || 'Unknown error'}`); }
                       setQuickScanDoc(null);
                     }}
                     className="flex items-center justify-center gap-2 py-3 rounded-2xl bg-[#1A4D2E] text-white font-semibold text-sm active:scale-95 transition-transform"
@@ -854,12 +856,14 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
                     <Printer size={15} /> Print 58mm
                   </button>
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       const printData = basicDocToPrintData(quickScanDoc.basic);
                       const docType = quickScanDoc.basic.doc_type === 'invoice'
                         ? PrintEngine.getDocType(printData)
                         : quickScanDoc.basic.doc_type === 'purchase_order' ? 'purchase_order' : 'branch_transfer';
-                      PrintBridge.print({ type: docType, data: printData, format: 'full_page', businessInfo, docCode: quickScanDoc.code });
+                      try {
+                        await PrintBridge.print({ type: docType, data: printData, format: 'full_page', businessInfo, docCode: quickScanDoc.code });
+                      } catch (err) { toast.error(`Print failed: ${err.message || 'Unknown error'}`); }
                       setQuickScanDoc(null);
                     }}
                     className="flex items-center justify-center gap-2 py-3 rounded-2xl bg-slate-100 text-slate-700 font-semibold text-sm active:scale-95 transition-transform"

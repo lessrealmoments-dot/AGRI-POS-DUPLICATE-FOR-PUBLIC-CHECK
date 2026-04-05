@@ -968,7 +968,7 @@ export default function DocViewerPage() {
   };
 
   // Reprint using PrintEngine (proper formatted receipt, not raw window.print)
-  const handleReprint = (format = 'thermal') => {
+  const handleReprint = async (format = 'thermal') => {
     if (!fullData?.document) return;
     const doc = fullData.document;
     let docType;
@@ -976,7 +976,9 @@ export default function DocViewerPage() {
     else if (basic.doc_type === 'purchase_order') docType = 'purchase_order';
     else if (basic.doc_type === 'branch_transfer') docType = 'branch_transfer';
     else docType = 'order_slip';
-    PrintBridge.print({ type: docType, data: doc, format, businessInfo, docCode: code?.toUpperCase() });
+    try {
+      await PrintBridge.print({ type: docType, data: doc, format, businessInfo, docCode: code?.toUpperCase() });
+    } catch (err) { toast.error(`Print failed: ${err.message || 'Unknown error'}`); }
   };
 
   // Cross-branch TOTP verification — only 6-digit time-based code accepted
