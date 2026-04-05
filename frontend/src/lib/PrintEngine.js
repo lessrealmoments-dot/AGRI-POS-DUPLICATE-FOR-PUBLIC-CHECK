@@ -534,7 +534,7 @@ function orderSlipThermal(data, biz, docCode) {
     if (change > 0) html += `<div class="meta-row"><span class="label">Change:</span><span>${formatPHP(change)}</span></div>`;
   }
   html += '</div>';
-  if (docCode) html += qrImgTag(docCode, 90);
+  if (docCode) html += qrImgTag(docCode, 200);
   html += `<div class="footer">Thank you!${biz.receipt_footer ? ' ' + biz.receipt_footer : ''}</div>`;
   return html;
 }
@@ -559,7 +559,7 @@ function trustReceiptThermal(data, biz, docCode) {
   const terms = (biz.trust_receipt_terms || '').replace('{business_name}', biz.business_name || '');
   if (terms) html += `<div class="trust-terms"><div class="terms-title">TERMS</div>${terms}</div>`;
   html += '<div class="signature-line"><div style="margin-top:8px"></div><div class="line"></div><div class="sig-label">Customer Signature &amp; Printed Name</div></div>';
-  if (docCode) html += qrImgTag(docCode, 80);
+  if (docCode) html += qrImgTag(docCode, 200);
   html += `<div class="footer">${TAX_DISCLAIMER}</div>`;
   return html;
 }
@@ -577,7 +577,7 @@ function returnSlipThermal(data, biz, docCode) {
   html += '<div class="totals">';
   html += `<div class="row grand"><span>REFUND</span><span>${formatPHP(r.refund_amount || r.total_refund || 0)}</span></div>`;
   html += '</div>';
-  if (docCode) html += qrImgTag(docCode, 80);
+  if (docCode) html += qrImgTag(docCode, 200);
   html += `<div class="footer">${biz.receipt_footer || ''}</div>`;
   return html;
 }
@@ -602,7 +602,7 @@ function purchaseOrderThermal(data, biz, docCode) {
   html += `<div class="row grand"><span>TOTAL</span><span>${formatPHP(po.grand_total)}</span></div>`;
   if (po.balance > 0) html += `<div class="row" style="font-weight:bold"><span>BALANCE</span><span>${formatPHP(po.balance)}</span></div>`;
   html += '</div>';
-  if (docCode) html += qrImgTag(docCode, 80);
+  if (docCode) html += qrImgTag(docCode, 200);
   html += `<div class="footer">${biz.receipt_footer || 'AgriBooks — Purchase Order'}</div>`;
   return html;
 }
@@ -633,7 +633,7 @@ function branchTransferThermal(data, biz, docCode) {
   html += `<div class="row"><span>Items</span><span>${items.length}</span></div>`;
   html += `<div class="row grand"><span>TOTAL</span><span>${formatPHP(totalTransfer)}</span></div>`;
   html += '</div>';
-  if (docCode) html += qrImgTag(docCode, 80);
+  if (docCode) html += qrImgTag(docCode, 200);
   html += `<div class="footer">AgriBooks — Branch Transfer</div>`;
   return html;
 }

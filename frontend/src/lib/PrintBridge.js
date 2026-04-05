@@ -24,6 +24,7 @@
 import { Capacitor } from '@capacitor/core';
 import PrintEngine from './PrintEngine';
 import { H10PPrinter } from './H10PPrinterPlugin';
+import QRCode from 'qrcode'; // static import — ensures it's always bundled (dynamic import can fail in Capacitor WebView)
 
 /**
  * Replace the api.qrserver.com QR image URL with a locally-generated
@@ -46,9 +47,8 @@ async function replaceQrWithLocalDataUrl(html) {
   if (!qrData) return html;
 
   try {
-    const QRCode = (await import('qrcode')).default;
     const dataUrl = await QRCode.toDataURL(qrData, {
-      width: 100,
+      width: 200,
       margin: 1,
       errorCorrectionLevel: 'M',
       color: { dark: '#000000', light: '#ffffff' },
@@ -56,7 +56,6 @@ async function replaceQrWithLocalDataUrl(html) {
     return html.replace(qrUrl, dataUrl);
   } catch (e) {
     console.warn('[PrintBridge] Local QR generation failed, removing QR img:', e);
-    // Remove the broken img tag rather than leaving a broken external URL
     return html.replace(/<img[^>]*api\.qrserver\.com[^>]*/gi, '');
   }
 }
