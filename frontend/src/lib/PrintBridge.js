@@ -5,7 +5,7 @@
  * Routes print calls to the correct execution path:
  *
  *   Capacitor APK (H10P device):
- *     PrintEngine.generateHtml() → inline images → H10PPrinterPlugin.printHtml() → native SDK → 58mm paper
+ *     PrintEngine.generateHtml() → local QR data URL → H10PPrinterPlugin.printHtml() → native SDK → 58mm paper
  *
  *   Web browser (desktop admin / dev):
  *     PrintEngine.print() → window.open() + window.print() → browser print dialog
@@ -26,34 +26,39 @@ import PrintEngine from './PrintEngine';
 import { H10PPrinter } from './H10PPrinterPlugin';
 
 /**
- * Inline external <img src="https://..."> as base64 data URLs.
- * The H10P native plugin renders HTML in a headless WebView — external images
- * (like QR codes from api.qrserver.com) often fail to load in time before
- * bitmap capture. Converting to data URLs guarantees they render.
+ * Replace the api.qrserver.com QR image URL with a locally-generated
+ * base64 PNG data URL using the 'qrcode' npm package.
+ *
+ * Why: The H10P renders HTML in a headless Android WebView. External network
+ * requests from that WebView are unreliable and slow. Generating locally
+ * guarantees the QR code is always embedded and renders instantly.
  */
-async function inlineExternalImages(html) {
-  const imgRegex = /<img\s[^>]*src="(https?:\/\/[^"]+)"[^>]*/gi;
-  const matches = [...html.matchAll(imgRegex)];
-  for (const match of matches) {
-    const url = match[1];
-    try {
-      const resp = await fetch(url, { mode: 'cors' });
-      if (!resp.ok) continue;
-      const blob = await resp.blob();
-      const dataUrl = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
-      html = html.replace(url, dataUrl);
-    } catch (e) {
-      console.warn('[PrintBridge] Failed to inline image, removing:', url);
-      // Remove the entire img tag if we can't inline it
-      html = html.replace(match[0], '');
-    }
+async function replaceQrWithLocalDataUrl(html) {
+  const qrMatch = html.match(/src="(https:\/\/api\.qrserver\.com[^"]+)"/);
+  if (!qrMatch) return html;
+
+  const qrUrl = qrMatch[1];
+  let qrData = null;
+  try {
+    qrData = new URL(qrUrl).searchParams.get('data');
+  } catch (_) { /* malformed URL, skip */ }
+
+  if (!qrData) return html;
+
+  try {
+    const QRCode = (await import('qrcode')).default;
+    const dataUrl = await QRCode.toDataURL(qrData, {
+      width: 100,
+      margin: 1,
+      errorCorrectionLevel: 'M',
+      color: { dark: '#000000', light: '#ffffff' },
+    });
+    return html.replace(qrUrl, dataUrl);
+  } catch (e) {
+    console.warn('[PrintBridge] Local QR generation failed, removing QR img:', e);
+    // Remove the broken img tag rather than leaving a broken external URL
+    return html.replace(/<img[^>]*api\.qrserver\.com[^>]*/gi, '');
   }
-  return html;
 }
 
 const PrintBridge = {
@@ -63,10 +68,10 @@ const PrintBridge = {
    */
   async print({ type, data, format = 'thermal', businessInfo = {}, docCode = '' }) {
     if (Capacitor.isNativePlatform()) {
-      // Native H10P path: generate HTML, inline images, then send to printer SDK
+      // Native H10P path: generate HTML, replace QR with local data URL, then send to printer SDK
       try {
         let html = PrintEngine.generateHtml({ type, data, format, businessInfo, docCode });
-        html = await inlineExternalImages(html);
+        html = await replaceQrWithLocalDataUrl(html);
         await H10PPrinter.printHtml({ html, format });
       } catch (err) {
         console.error('[PrintBridge] Native print failed:', err);

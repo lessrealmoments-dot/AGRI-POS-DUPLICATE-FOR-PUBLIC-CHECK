@@ -212,6 +212,8 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
     if (!lastSaleData) return;
     const type = PrintEngine.getDocType(lastSaleData);
     const html = PrintEngine.generateHtml({ type, data: lastSaleData, format, businessInfo });
+    // Close "Sale Complete" dialog first so Android WebView doesn't stack dialogs
+    setShowPrintPrompt(false);
     setReceiptPreview({ html, type, format });
   };
 

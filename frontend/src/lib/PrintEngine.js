@@ -47,33 +47,33 @@ function qrImgTag(code, size = 100) {
 const thermalCSS = `
   @page { size: 58mm auto; margin: 0; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'Courier New', monospace; font-size: 13px; line-height: 1.3; width: 384px; padding: 4px 12px; color: #000; }
+  body { font-family: 'Courier New', monospace; font-size: 14px; line-height: 1.35; width: 384px; padding: 4px 10px; color: #000; }
   .header { text-align: center; margin-bottom: 6px; }
-  .header .biz-name { font-size: 16px; font-weight: bold; text-transform: uppercase; }
-  .header .biz-detail { font-size: 11px; }
-  .doc-title { text-align: center; font-size: 15px; font-weight: bold; border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 4px 0; margin: 6px 0; letter-spacing: 1px; }
-  .meta-row { display: flex; justify-content: space-between; font-size: 12px; }
+  .header .biz-name { font-size: 18px; font-weight: bold; text-transform: uppercase; }
+  .header .biz-detail { font-size: 12px; }
+  .doc-title { text-align: center; font-size: 16px; font-weight: bold; border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 4px 0; margin: 6px 0; letter-spacing: 1px; }
+  .meta-row { display: flex; justify-content: space-between; font-size: 13px; }
   .meta-row .label { color: #333; }
   .sep { border-top: 1px dashed #000; margin: 4px 0; }
-  .items-table { width: 100%; font-size: 12px; }
+  .items-table { width: 100%; font-size: 13px; }
   .items-table td { padding: 2px 0; vertical-align: top; }
-  .items-table .item-name { font-weight: bold; font-size: 13px; }
-  .items-table .item-detail { padding-left: 8px; font-size: 11px; color: #333; }
+  .items-table .item-name { font-weight: bold; font-size: 14px; }
+  .items-table .item-detail { padding-left: 8px; font-size: 12px; color: #333; }
   .items-table .item-total { text-align: right; font-weight: bold; }
   .totals { margin-top: 4px; }
-  .totals .row { display: flex; justify-content: space-between; font-size: 12px; padding: 2px 0; }
-  .totals .grand { font-size: 16px; font-weight: bold; border-top: 2px solid #000; padding-top: 4px; margin-top: 3px; }
-  .payment-info { margin-top: 4px; font-size: 12px; }
-  .trust-terms { margin-top: 6px; font-size: 10px; line-height: 1.3; border-top: 1px dashed #000; padding-top: 4px; }
-  .trust-terms .terms-title { font-weight: bold; font-size: 11px; margin-bottom: 2px; text-align: center; }
-  .signature-line { margin-top: 14px; text-align: center; }
+  .totals .row { display: flex; justify-content: space-between; font-size: 13px; padding: 2px 0; }
+  .totals .grand { font-size: 18px; font-weight: bold; border-top: 2px solid #000; padding-top: 4px; margin-top: 3px; }
+  .payment-info { margin-top: 4px; font-size: 13px; }
+  .trust-terms { margin-top: 6px; font-size: 11px; line-height: 1.3; border-top: 1px dashed #000; padding-top: 4px; }
+  .trust-terms .terms-title { font-weight: bold; font-size: 12px; margin-bottom: 2px; text-align: center; }
+  .signature-line { margin-top: 10px; text-align: center; }
   .signature-line .line { border-top: 1px solid #000; width: 70%; margin: 0 auto; }
-  .signature-line .sig-label { font-size: 10px; color: #444; margin-top: 2px; }
-  .footer { text-align: center; font-size: 9px; color: #444; margin-top: 6px; border-top: 1px dashed #000; padding-top: 4px; }
-  .qr-block { text-align: center; margin: 8px 0 4px; }
+  .signature-line .sig-label { font-size: 11px; color: #444; margin-top: 2px; }
+  .footer { text-align: center; font-size: 11px; color: #444; margin-top: 6px; border-top: 1px dashed #000; padding-top: 4px; }
+  .qr-block { text-align: center; margin: 6px 0 4px; }
   .qr-block img { display: block; margin: 0 auto; }
   .qr-code-text { font-size: 13px; font-weight: bold; letter-spacing: 2px; margin-top: 3px; }
-  .qr-hint { font-size: 9px; color: #444; }
+  .qr-hint { font-size: 10px; color: #444; }
   @media print { body { width: 384px; } }
 `;
 
@@ -529,16 +529,8 @@ function orderSlipThermal(data, biz, docCode) {
     if (change > 0) html += `<div class="meta-row"><span class="label">Change:</span><span>${formatPHP(change)}</span></div>`;
   }
   html += '</div>';
-  if (docCode) html += qrImgTag(docCode, 80);
-  // Acknowledgment — compact for thermal
-  const todayThermal = fmtDate(new Date().toISOString());
-  html += '<div class="sep"></div>';
-  html += `<div style="font-size:9px;line-height:1.3;margin:3px 0">I acknowledge receipt of the items listed above in good condition.</div>`;
-  html += `<div class="meta-row" style="margin-top:10px"><span class="label">Signature:</span><span>______________</span></div>`;
-  html += `<div class="meta-row" style="margin-top:6px"><span class="label">Name:</span><span>______________</span></div>`;
-  html += `<div class="meta-row" style="margin-top:4px"><span class="label">Date:</span><span>${todayThermal}</span></div>`;
-  html += '<div class="sep"></div>';
-  html += `<div class="footer">${TAX_DISCLAIMER}</div>`;
+  if (docCode) html += qrImgTag(docCode, 90);
+  html += `<div class="footer">Thank you!${biz.receipt_footer ? ' ' + biz.receipt_footer : ''}</div>`;
   return html;
 }
 
@@ -561,7 +553,7 @@ function trustReceiptThermal(data, biz, docCode) {
   html += '</div>';
   const terms = (biz.trust_receipt_terms || '').replace('{business_name}', biz.business_name || '');
   if (terms) html += `<div class="trust-terms"><div class="terms-title">TERMS</div>${terms}</div>`;
-  html += '<div class="signature-line"><div style="margin-top:20px"></div><div class="line"></div><div class="sig-label">Customer Signature &amp; Printed Name</div></div>';
+  html += '<div class="signature-line"><div style="margin-top:8px"></div><div class="line"></div><div class="sig-label">Customer Signature &amp; Printed Name</div></div>';
   if (docCode) html += qrImgTag(docCode, 80);
   html += `<div class="footer">${TAX_DISCLAIMER}</div>`;
   return html;

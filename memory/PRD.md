@@ -34,7 +34,25 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 - Scheduled jobs (`_daily_sms_reminders`, `_monthly_sms_summary`) now iterate per active organization using `_raw_db`
 - **Result:** Company A's Android gateway only sees Company A's `pending` queue; Company B's templates, settings, and queue are completely isolated
 
-### HID Barcode Scanner Integration — H10 POS Terminal (2026-04-05) — Complete
+### H10 Thermal Printing — Round 3 Fixes (2026-04-05) — Deployed, Awaiting Physical Test
+
+**All four printing issues addressed:**
+
+1. **Print Preview Dialog Not Showing** (Android WebView stacking bug)
+   - Fixed `handleShowReceiptPreview` in `TerminalSales.jsx` to call `setShowPrintPrompt(false)` BEFORE `setReceiptPreview(...)` — prevents two overlapping Dialogs in Capacitor WebView
+
+2. **No QR Code on Receipt** (External fetch failure)
+   - Replaced `inlineExternalImages` (network fetch via `fetch()`) in `PrintBridge.js` with `replaceQrWithLocalDataUrl` which uses `qrcode` npm package (installed: v1.5.4) to generate QR codes entirely client-side as base64 PNG data URLs — zero network dependency
+
+3. **Ultra Long Rolling Paper** (HTML content height + Java fallback)
+   - Removed verbose acknowledgment + signature block (~150px) from `orderSlipThermal` in `PrintEngine.js`
+   - **Java fix required**: Change `contentHeight` fallback in `H10PPrinterPlugin.java` from 2000→1000, or add `evaluateJavascript` height measurement — see `H10_PRINTER_COORDINATION.md` for code
+
+4. **Small Font** (Font sizes too small for 384px→58mm scaling)
+   - Increased `thermalCSS` font sizes: body 13→14px, biz-name 16→18px, grand total 16→18px, meta rows 12→13px, footer 9→11px
+
+**Files modified:** `TerminalSales.jsx`, `PrintBridge.js`, `PrintEngine.js`, `H10_PRINTER_COORDINATION.md`
+
 - **Scan Detection**: Keystroke timing analysis in `TerminalSales.jsx` detects HID scanner input (<50ms between chars, 4+ chars) vs human typing — no Enter key required
 - **Cooldown System**: 1.5s cooldown after processing a scan prevents "types twice" issue from HID scanners
 - **Quantity Prompt**: First scan of a product shows qty dialog; "Auto +1 for This Transaction" enables instant add for subsequent scans

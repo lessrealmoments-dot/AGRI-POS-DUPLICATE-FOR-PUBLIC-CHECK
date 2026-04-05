@@ -31,22 +31,50 @@
 
 | File | Change |
 |------|--------|
-| **PrintEngine.js** `thermalCSS` | `width: 384px` (matches bitmap exactly), `padding: 4px 12px` (safe area for H10 margins), all font sizes increased ~30-40% |
-| **PrintEngine.js** thermal builders | Compact acknowledgment section, reduced signature line spacing |
-| **PrintEngine.js** `qrImgTag` | Reduced default size from 120px to 100px, reduced margin from 4 to 2 |
-| **PrintBridge.js** | Added `inlineExternalImages()` — fetches all `<img src="https://...">` and converts to base64 data URLs before sending HTML to native plugin |
+| **PrintEngine.js** `thermalCSS` | `width: 384px`, `padding: 4px 10px`, all font sizes increased ~40% (body 14px, biz-name 18px, grand total 18px) |
+| **PrintEngine.js** `orderSlipThermal` | Removed verbose acknowledgment + signature block → shorter, cleaner POS receipt |
+| **PrintEngine.js** `trustReceiptThermal` | Reduced signature spacer from 20px to 8px |
+| **PrintBridge.js** | Replaced `inlineExternalImages` (external fetch) with `replaceQrWithLocalDataUrl` which uses the `qrcode` npm package to generate QR data URLs entirely client-side — no network dependency |
+| **TerminalSales.jsx** `handleShowReceiptPreview` | Closes "Sale Complete" dialog BEFORE opening "Receipt Preview" dialog to prevent Android WebView dialog stacking |
 
-### Font size mapping (384px bitmap → 58mm paper):
+---
 
-| Element | Old | New | ~Paper size |
-|---------|-----|-----|-------------|
-| Body text | 10px | 13px | ~2mm |
-| Business name | 12px | 16px | ~2.5mm |
-| Doc title | 11px | 15px | ~2.3mm |
-| Meta rows | 9px | 12px | ~1.8mm |
-| Items table | 9px | 12px | ~1.8mm |
-| Grand total | 12px | 16px | ~2.5mm |
-| Footer/disclaimer | 7px | 9px | ~1.4mm |
+## IMPORTANT — Fix needed in H10PPrinterPlugin.java (Android AI)
+
+### Problem: "Ultra long rolling paper" — prints excessive blank space
+
+**Root cause**: `view.getContentHeight()` can return 0 for headless (off-screen) WebViews. When it does, the Java fallback is `contentHeight = 2000`, which creates a 2000px tall bitmap with ~1600px of blank white space printed after the receipt content.
+
+**Recommended Java fix** (in `renderHtmlToBitmap`):
+
+1. Enable JavaScript on the headless WebView (needed for height evaluation):
+```java
+settings.setJavaScriptEnabled(true);
+```
+
+2. After `onPageFinished`, use `evaluateJavascript` to measure the TRUE scroll height:
+```java
+view.post(() -> {
+    view.evaluateJavascript(
+        "(function(){ return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight); })()",
+        value -> {
+            int contentHeight;
+            try {
+                contentHeight = Integer.parseInt(value.trim());
+            } catch (Exception e) {
+                contentHeight = view.getContentHeight();
+            }
+            if (contentHeight <= 0 || contentHeight > 4000) contentHeight = 1000;
+            // continue with measure/layout/bitmap as before ...
+        }
+    );
+});
+```
+
+3. If enabling JS is not desired, change the fallback from `2000` to `1000` as a minimum fix:
+```java
+if (contentHeight <= 0) contentHeight = 1000; // was 2000
+```
 
 ---
 
@@ -55,14 +83,26 @@
 ```
 User taps "Print Receipt (58mm)"
   |
+  v  (closes "Sale Complete" dialog, opens "Receipt Preview" dialog)
+handleShowReceiptPreview('thermal')
+  |
+  v
+User sees receipt preview in iframe (384px wide)
+  |
+  v
+User taps "Print 1 Copy" or "Print 2 Copies"
+  |
   v
 await PrintBridge.print({ type, data, format: 'thermal', businessInfo })
   |
   v  (Capacitor.isNativePlatform() === true inside APK)
-PrintEngine.generateHtml({ ... }) → HTML string (384px wide, inline CSS)
+PrintEngine.generateHtml({ ... }) → HTML string (384px wide, inline CSS, QR src = api.qrserver.com)
   |
   v
-inlineExternalImages(html) → fetch QR image → replace src with base64 data URL
+replaceQrWithLocalDataUrl(html)
+  → import('qrcode').then(QRCode => QRCode.toDataURL(qrData, { width: 100 }))
+  → replace api.qrserver.com src with base64 PNG data URL
+  → no external network request needed!
   |
   v
 H10PPrinter.printHtml({ html, format: 'thermal' })
