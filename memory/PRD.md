@@ -34,7 +34,15 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 - Scheduled jobs (`_daily_sms_reminders`, `_monthly_sms_summary`) now iterate per active organization using `_raw_db`
 - **Result:** Company A's Android gateway only sees Company A's `pending` queue; Company B's templates, settings, and queue are completely isolated
 
-### Gateway Activity Log (2026-04-02) — Complete
+### HID Barcode Scanner Integration — H10 POS Terminal (2026-04-05) — Complete
+- **Scan Detection**: Keystroke timing analysis in `TerminalSales.jsx` detects HID scanner input (<50ms between chars, 4+ chars) vs human typing — no Enter key required
+- **Cooldown System**: 1.5s cooldown after processing a scan prevents "types twice" issue from HID scanners
+- **Quantity Prompt**: First scan of a product shows qty dialog; "Auto +1 for This Transaction" enables instant add for subsequent scans
+- **Global Keyboard Listener**: Updated to also work without Enter key for scanners that don't send it
+- **Camera Scanner**: Existing html5-qrcode camera scanner preserved with separate cooldown
+- **Auto-add Reset**: `autoAddProducts` set clears on cart clear (new transaction)
+- Files modified: `TerminalSales.jsx` (lines 48-55 state, 104-170 handlers, 394-409 input, 924-973 dialog)
+- Tests: 100% pass — 16/16 backend + all frontend elements (`test_reports/iteration_157.json`)
 - **New `POST /api/sms/gateway/log`** — Android APK posts single log entry (level, event_type, message, phone, queue_id, device_id)
 - **New `POST /api/sms/gateway/logs/batch`** — Batch POST up to 500 buffered entries (offline-first support)
 - **New `GET /api/sms/gateway/logs`** — Web fetches logs with level/event_type filter, org-scoped
@@ -477,7 +485,13 @@ See `/app/memory/ROADMAP.md` for full spec on each item.
 - Data already available via `GET /api/documents/compliance/summary`
 - Add to dashboard grid layout (`DashboardPage.js`)
 
-### P1 — Terminal Features (prioritize one)
+### P1 — Terminal Features
+- **HID Barcode Scanner (H10) — DONE (2026-04-05)**
+  - Scan detection via keystroke timing (<50ms = scanner, >100ms = human)
+  - Cooldown system (1.5s) prevents "types twice" from HID scanners without Enter key
+  - Quantity prompt on first scan of a product
+  - "Auto +1 for This Transaction" mode — subsequent scans just increment
+  - Works alongside existing camera scanner and Enter-key hardware scanners
 - **Quick Stock Check** — scan barcode → instant stock level (read-only, no PIN)
 - **Price Check** — scan barcode → price card (respects view_cost permission)
 - **Quick Count** — scan + enter qty → submit count sheet (PIN required)
