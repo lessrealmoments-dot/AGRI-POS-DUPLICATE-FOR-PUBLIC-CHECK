@@ -5,7 +5,7 @@
  * Routes print calls to the correct execution path:
  *
  *   Capacitor APK (H10P device):
- *     PrintEngine.generateHtml() → H10PPrinterPlugin.printHtml() → native SDK → 58mm paper
+ *     PrintEngine.generateHtml() → inline images → H10PPrinterPlugin.printHtml() → native SDK → 58mm paper
  *
  *   Web browser (desktop admin / dev):
  *     PrintEngine.print() → window.open() + window.print() → browser print dialog
@@ -25,7 +25,36 @@ import { Capacitor } from '@capacitor/core';
 import PrintEngine from './PrintEngine';
 import { H10PPrinter } from './H10PPrinterPlugin';
 
-let _nativePrinterReady = null; // Cached status check promise
+/**
+ * Inline external <img src="https://..."> as base64 data URLs.
+ * The H10P native plugin renders HTML in a headless WebView — external images
+ * (like QR codes from api.qrserver.com) often fail to load in time before
+ * bitmap capture. Converting to data URLs guarantees they render.
+ */
+async function inlineExternalImages(html) {
+  const imgRegex = /<img\s[^>]*src="(https?:\/\/[^"]+)"[^>]*/gi;
+  const matches = [...html.matchAll(imgRegex)];
+  for (const match of matches) {
+    const url = match[1];
+    try {
+      const resp = await fetch(url, { mode: 'cors' });
+      if (!resp.ok) continue;
+      const blob = await resp.blob();
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+      html = html.replace(url, dataUrl);
+    } catch (e) {
+      console.warn('[PrintBridge] Failed to inline image, removing:', url);
+      // Remove the entire img tag if we can't inline it
+      html = html.replace(match[0], '');
+    }
+  }
+  return html;
+}
 
 const PrintBridge = {
   /**
@@ -34,13 +63,13 @@ const PrintBridge = {
    */
   async print({ type, data, format = 'thermal', businessInfo = {}, docCode = '' }) {
     if (Capacitor.isNativePlatform()) {
-      // Native H10P path: generate HTML then send to the printer SDK
+      // Native H10P path: generate HTML, inline images, then send to printer SDK
       try {
-        const html = PrintEngine.generateHtml({ type, data, format, businessInfo, docCode });
+        let html = PrintEngine.generateHtml({ type, data, format, businessInfo, docCode });
+        html = await inlineExternalImages(html);
         await H10PPrinter.printHtml({ html, format });
       } catch (err) {
         console.error('[PrintBridge] Native print failed:', err);
-        // Fallback: let the user know the printer isn't ready
         throw err;
       }
     } else {

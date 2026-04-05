@@ -1,12 +1,12 @@
-# H10 Printer Integration — Web AI <> Android AI Coordination
+# H10 Printer Integration — Web <> Android Coordination
 
-## Current State (as of 2026-04-05)
+## Current State (as of 2026-04-05, updated after first print test)
 
 ### What the Web AI (Emergent) owns:
-- **PrintBridge.js** — Routes print calls: `Capacitor.isNativePlatform()` → native path, else browser popup
+- **PrintBridge.js** — Routes print calls: native path with **QR image inlining** (fetch → base64 data URL before sending to native), else browser popup
 - **H10PPrinterPlugin.js** — Capacitor JS interface, registered via `registerPlugin('H10PPrinter', { web: fallback })`
-- **PrintEngine.js** — Generates receipt HTML (thermal 58mm + full page) from sale/PO/transfer data
-- **TerminalSales.jsx / TerminalShell.jsx / DocViewerPage.jsx** — All print button call sites
+- **PrintEngine.js** — Generates receipt HTML. **Thermal CSS optimized for 384px bitmap** (H10P physical width)
+- **TerminalSales.jsx / TerminalShell.jsx / DocViewerPage.jsx** — All print button call sites (await + toast)
 
 ### What the Android AI (Cursor) owns:
 - **H10PPrinterPlugin.java** — Native Capacitor plugin: HTML → Bitmap → PrinterService SDK
@@ -17,117 +17,63 @@
 
 ---
 
-## Changes Applied (Both Sides) — UNCOMMITTED
+## Issues Fixed (2026-04-05 — second round)
 
-### Web side (applied by Emergent):
-1. **All 5 print call sites** now `await PrintBridge.print(...)` inside try/catch
-2. **Errors show toast**: `toast.error('Print failed: ' + err.message)`
-3. Files changed: `TerminalSales.jsx`, `TerminalShell.jsx`, `DocViewerPage.jsx`
+### Problem: Receipt too long, not centered, fonts too small, QR not printing
 
-### Android side (applied by Cursor):
-1. **`printHtml()`** — Polls up to 12s for `printerConnected` before printing (background thread)
-2. **`checkStatus()`** — Waits up to 4s before responding
-3. **`bindPrinterService()`** — Checks `bindService()` return value, logs with tag `H10PPrinter`
-4. File changed: `H10PPrinterPlugin.java`
+**Root causes:**
+1. `thermalCSS` used `width: 58mm` which WebView interprets at screen DPI, not printer DPI → content too narrow
+2. Font sizes (7-10px) designed for screen were tiny when rendered to 384px bitmap and printed on paper
+3. Excessive padding/margins in acknowledgment and signature sections
+4. QR code from `api.qrserver.com` loaded as external URL — headless WebView often can't fetch it in time before bitmap capture
+
+**Fixes applied (Web side — Emergent):**
+
+| File | Change |
+|------|--------|
+| **PrintEngine.js** `thermalCSS` | `width: 384px` (matches bitmap exactly), `padding: 4px 12px` (safe area for H10 margins), all font sizes increased ~30-40% |
+| **PrintEngine.js** thermal builders | Compact acknowledgment section, reduced signature line spacing |
+| **PrintEngine.js** `qrImgTag` | Reduced default size from 120px to 100px, reduced margin from 4 to 2 |
+| **PrintBridge.js** | Added `inlineExternalImages()` — fetches all `<img src="https://...">` and converts to base64 data URLs before sending HTML to native plugin |
+
+### Font size mapping (384px bitmap → 58mm paper):
+
+| Element | Old | New | ~Paper size |
+|---------|-----|-----|-------------|
+| Body text | 10px | 13px | ~2mm |
+| Business name | 12px | 16px | ~2.5mm |
+| Doc title | 11px | 15px | ~2.3mm |
+| Meta rows | 9px | 12px | ~1.8mm |
+| Items table | 9px | 12px | ~1.8mm |
+| Grand total | 12px | 16px | ~2.5mm |
+| Footer/disclaimer | 7px | 9px | ~1.4mm |
 
 ---
 
-## The Print Flow (after both fixes)
+## The Print Flow (current)
 
 ```
-User taps "Print Receipt (58mm)" in TerminalSales.jsx
+User taps "Print Receipt (58mm)"
   |
   v
 await PrintBridge.print({ type, data, format: 'thermal', businessInfo })
   |
   v  (Capacitor.isNativePlatform() === true inside APK)
-PrintEngine.generateHtml({ ... }) → full HTML string
+PrintEngine.generateHtml({ ... }) → HTML string (384px wide, inline CSS)
+  |
+  v
+inlineExternalImages(html) → fetch QR image → replace src with base64 data URL
   |
   v
 H10PPrinter.printHtml({ html, format: 'thermal' })
   |  (Capacitor bridge → native Java)
   v
 H10PPrinterPlugin.java :: printHtml()
-  |
-  |  [1] Check printerConnected — if false, call bindPrinterService()
-  |  [2] Poll every 300ms, up to 12 seconds, for onServiceConnected
-  |  [3] If still not connected → call.reject("Printer service not connected after 12s")
-  |      → JS catches → toast.error("Print failed: ...")
-  |
-  |  [4] If connected:
-  v
-renderHtmlToBitmap(html, 384px) via headless WebView
-  |
-  v
-printer.beginWork()
-printer.printBitmap(bitmap)
-printer.nextLine(3)
-printer.endWork()
-  |
-  v
-call.resolve({ success: true }) → JS promise resolves → no toast (success)
+  → waitForPrinterConnection(12000) on background thread
+  → renderHtmlToBitmap(html, 384px) via headless WebView
+  → printer.beginWork() → printer.printBitmap(bitmap) → printer.endWork()
+  → call.resolve({ success: true })
 ```
-
----
-
-## What Needs To Happen Next
-
-### Step 1: Commit + Push from Emergent
-- User clicks "Save to GitHub" in Emergent chat
-- This pushes: updated JS files (await/toast) + updated Java file (wait-for-bind + logging)
-- **Note**: `printer-release.aar` is gitignored — won't be in the push (already on local machine)
-
-### Step 2: Pull on Local Machine
-```bash
-cd /path/to/project
-git pull origin main
-```
-- If Cursor already made the same Java changes locally, there may be merge conflicts in `H10PPrinterPlugin.java` — resolve by keeping the version with wait-for-bind (both sides wrote the same fix)
-
-### Step 3: Rebuild APK
-```bash
-cd frontend/android
-./gradlew assembleDebug
-# APK at: app/build/outputs/apk/debug/app-debug.apk
-```
-Or use Android Studio: Build → Build APK
-
-### Step 4: Install on H10
-```bash
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-```
-Or sideload via USB/file manager
-
-### Step 5: Deploy Web to agri-books.com
-- The APK uses live URL mode (`capacitor.config.ts` → `server.url: 'https://agri-books.com'`)
-- The `await` + toast changes in JS only take effect when the live site is updated
-- Until deployed: print errors will be silent (old JS), but the native wait-for-bind fix still works
-
----
-
-## Debugging Checklist (if print still fails after rebuild)
-
-1. **Is the recieptservice app installed?**
-   ```bash
-   adb shell pm list packages | findstr reciept
-   ```
-   Should show: `package:recieptservice.com.recieptservice`
-
-2. **Check printer logs:**
-   ```bash
-   adb logcat | findstr H10PPrinter
-   ```
-   Expected: `bindService returned: true` → then print succeeds
-   Problem: `bindService returned: false` → recieptservice APK missing
-
-3. **Is the APK the latest build?**
-   ```bash
-   adb shell dumpsys package com.agribooks.terminal | findstr versionName
-   ```
-
-4. **Is the web content current?**
-   - Open Chrome on H10 → navigate to agri-books.com → check if toast errors appear on print failure
-   - If no toasts → web deploy hasn't happened yet (but native fix still works)
 
 ---
 
@@ -135,6 +81,9 @@ Or sideload via USB/file manager
 
 - **Do NOT modify PrintBridge.js, PrintEngine.js, or H10PPrinterPlugin.js** — these are managed by the Web AI
 - **Do NOT change the Capacitor plugin name** — it must stay `H10PPrinter` (matches JS registration)
-- **The HTML received by `printHtml()`** is a complete `<!DOCTYPE html>` document with inline CSS, no external stylesheets. The only external resource is the QR code image from `api.qrserver.com` (loads over H10's 4G)
+- **The HTML received by `printHtml()`** is a complete `<!DOCTYPE html>` document with:
+  - Inline CSS (no external stylesheets)
+  - QR images already converted to base64 data URLs (no external fetch needed)
+  - Body width set to 384px (matches thermal bitmap width exactly)
 - **Bitmap width**: 384px for thermal (58mm @ 203 DPI), 576px for full page
 - **The `format` parameter** comes from JS as either `"thermal"` or `"full_page"`
