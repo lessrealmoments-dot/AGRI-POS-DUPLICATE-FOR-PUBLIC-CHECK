@@ -77,6 +77,20 @@ H10PPrinterPlugin.java :: printHtml()
 
 ---
 
+## Receipt Preview Feature (2026-04-05)
+
+After a sale completes, the "Print Receipt (58mm)" button now opens a **receipt preview** instead of printing immediately. The preview shows the exact receipt content in an iframe (384px wide, scaled to fit the modal). The user can then choose:
+
+- **Print 1 Copy** → single `PrintBridge.print()` call
+- **Print 2 Copies** → two `PrintBridge.print()` calls with a 2-second gap between them
+- **Skip** → close everything, no print
+
+The "Print Full Page" button still prints directly (no preview) since full-page is for admin/desktop use.
+
+**Android AI note**: No native changes needed for this feature. The JS generates the preview HTML client-side. The actual print flow is identical — `PrintBridge.print()` → `inlineExternalImages()` → `H10PPrinter.printHtml()`.
+
+---
+
 ## Important Notes for Android AI
 
 - **Do NOT modify PrintBridge.js, PrintEngine.js, or H10PPrinterPlugin.js** — these are managed by the Web AI

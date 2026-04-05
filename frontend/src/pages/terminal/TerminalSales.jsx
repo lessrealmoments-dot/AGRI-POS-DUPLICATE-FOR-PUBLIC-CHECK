@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, Plus, Minus, Trash2, ShoppingCart, Camera, X, Check, CreditCard, Banknote, ChevronUp, ChevronDown, Wallet, Upload, Loader2, Clock, Printer, AlertTriangle, ShieldAlert, PackageX } from 'lucide-react';
+import { Search, Plus, Minus, Trash2, ShoppingCart, Camera, X, Check, CreditCard, Banknote, ChevronUp, ChevronDown, Wallet, Upload, Loader2, Clock, Printer, AlertTriangle, ShieldAlert, PackageX, Eye } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
@@ -50,6 +50,9 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   const [scanQty, setScanQty] = useState('1');
   const autoAddProductsRef = useRef(new Set());
   const scanDetectRef = useRef({ keyTimes: [], processTimer: null, cooldownUntil: 0 });
+  // Receipt preview before printing
+  const [receiptPreview, setReceiptPreview] = useState(null); // { html, type, format }
+  const [printingCopies, setPrintingCopies] = useState(false);
 
   // Load cached data
   useEffect(() => {
@@ -203,6 +206,32 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
 
   const removeItem = (productId) => setCart(prev => prev.filter(c => c.product_id !== productId));
   const clearCart = () => { setCart([]); setSelectedCustomer(null); setCustSearch(''); autoAddProductsRef.current.clear(); };
+
+  // Receipt preview → print copies
+  const handleShowReceiptPreview = (format) => {
+    if (!lastSaleData) return;
+    const type = PrintEngine.getDocType(lastSaleData);
+    const html = PrintEngine.generateHtml({ type, data: lastSaleData, format, businessInfo });
+    setReceiptPreview({ html, type, format });
+  };
+
+  const handlePrintCopies = async (copies) => {
+    if (!receiptPreview || !lastSaleData) return;
+    setPrintingCopies(true);
+    try {
+      for (let i = 0; i < copies; i++) {
+        await PrintBridge.print({ type: receiptPreview.type, data: lastSaleData, format: receiptPreview.format, businessInfo });
+        if (i < copies - 1) await new Promise(r => setTimeout(r, 2000));
+      }
+      toast.success(`Printed ${copies} ${copies === 1 ? 'copy' : 'copies'}`);
+    } catch (err) {
+      toast.error(`Print failed: ${err.message || 'Unknown error'}`);
+    }
+    setPrintingCopies(false);
+    setReceiptPreview(null);
+    setShowPrintPrompt(false);
+    setLastSaleData(null);
+  };
 
   const grandTotal = cart.reduce((s, c) => s + c.total, 0);
 
@@ -882,12 +911,8 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
             <p className="text-lg font-bold text-[#1A4D2E]">{formatPHP(lastSaleData?.grand_total || 0)}</p>
             <p className="text-xs text-slate-500">Would you like to print a receipt?</p>
             <div className="space-y-2 pt-1">
-              <Button onClick={async () => {
-                try {
-                  await PrintBridge.print({ type: PrintEngine.getDocType(lastSaleData), data: lastSaleData, format: 'thermal', businessInfo });
-                } catch (err) { toast.error(`Print failed: ${err.message || 'Unknown error'}`); }
-                setShowPrintPrompt(false); setLastSaleData(null);
-              }} className="w-full bg-[#1A4D2E] hover:bg-[#15412a] text-white h-11" data-testid="print-thermal-btn">
+              <Button onClick={() => handleShowReceiptPreview('thermal')}
+                className="w-full bg-[#1A4D2E] hover:bg-[#15412a] text-white h-11" data-testid="print-thermal-btn">
                 <Printer size={16} className="mr-2" /> Print Receipt (58mm)
               </Button>
               <Button variant="outline" onClick={async () => {
@@ -913,6 +938,60 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
                 Skip
               </Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Receipt Preview — shows before actual print */}
+      <Dialog open={!!receiptPreview} onOpenChange={(o) => { if (!o && !printingCopies) setReceiptPreview(null); }}>
+        <DialogContent className="max-w-sm mx-auto p-0 overflow-hidden" style={{ maxHeight: '85vh' }}>
+          <DialogHeader className="px-4 pt-4 pb-2">
+            <DialogTitle className="text-sm font-bold flex items-center gap-2" style={{ fontFamily: 'Manrope' }} data-testid="receipt-preview-title">
+              <Eye size={16} /> Receipt Preview
+            </DialogTitle>
+            <DialogDescription className="sr-only">Preview receipt before printing</DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto px-2" style={{ maxHeight: '55vh' }}>
+            <div className="mx-auto bg-white border border-slate-200 rounded shadow-inner" style={{ width: '384px', maxWidth: '100%', transform: 'scale(0.85)', transformOrigin: 'top center' }}>
+              {receiptPreview?.html && (
+                <iframe
+                  srcDoc={receiptPreview.html}
+                  title="Receipt Preview"
+                  className="w-full border-0"
+                  style={{ width: '384px', minHeight: '400px', maxHeight: '600px', pointerEvents: 'none' }}
+                  sandbox=""
+                  data-testid="receipt-preview-iframe"
+                />
+              )}
+            </div>
+          </div>
+          <div className="space-y-2 px-4 pb-4 pt-2 border-t bg-slate-50">
+            <Button
+              onClick={() => handlePrintCopies(1)}
+              disabled={printingCopies}
+              className="w-full bg-[#1A4D2E] hover:bg-[#15412a] text-white h-11"
+              data-testid="print-1-copy-btn"
+            >
+              <Printer size={16} className="mr-2" /> {printingCopies ? 'Printing...' : 'Print 1 Copy'}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => handlePrintCopies(2)}
+              disabled={printingCopies}
+              className="w-full h-10"
+              data-testid="print-2-copies-btn"
+            >
+              <Printer size={14} className="mr-2" /> {printingCopies ? 'Printing...' : 'Print 2 Copies'}
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => { setReceiptPreview(null); setShowPrintPrompt(false); setLastSaleData(null); }}
+              disabled={printingCopies}
+              className="w-full text-slate-500"
+              data-testid="skip-preview-btn"
+            >
+              Skip
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
