@@ -47,38 +47,41 @@ function qrImgTag(code, size = 100) {
 // so a fixed 384px body overflows and gets clipped. 100% fills exactly the WebView's CSS viewport.
 const thermalCSS = `
   @page { size: 58mm auto; margin: 0; }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  * { margin: 0; padding: 0; box-sizing: border-box;
+      -webkit-font-smoothing: none;
+      -moz-osx-font-smoothing: unset;
+      text-rendering: optimizeSpeed; }
   html, body { width: 100%; max-width: 100%; overflow-x: hidden; }
-  body { font-family: 'Courier New', monospace; font-size: 13px; line-height: 1.35; padding: 2px 4px; color: #000; word-wrap: break-word; overflow-wrap: anywhere; }
+  body { font-family: 'Courier New', monospace; font-size: 13px; font-weight: bold; line-height: 1.35; padding: 2px 4px; color: #000; word-wrap: break-word; overflow-wrap: anywhere; }
   .header { text-align: center; margin-bottom: 5px; }
   .header .biz-name { font-size: 15px; font-weight: bold; text-transform: uppercase; line-height: 1.2; }
-  .header .biz-detail { font-size: 11px; line-height: 1.25; }
-  .doc-title { text-align: center; font-size: 14px; font-weight: bold; border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 4px 0; margin: 4px 0; letter-spacing: 0.5px; }
+  .header .biz-detail { font-size: 11px; font-weight: normal; line-height: 1.25; }
+  .doc-title { text-align: center; font-size: 14px; font-weight: bold; border-top: 1px solid #000; border-bottom: 1px solid #000; padding: 4px 0; margin: 4px 0; letter-spacing: 0.5px; }
   .meta-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 4px; font-size: 11px; }
   .meta-row > span { min-width: 0; }
   .meta-row > span:last-child { text-align: right; }
-  .meta-row .label { color: #444; flex-shrink: 0; }
-  .sep { border-top: 1px dashed #000; margin: 4px 0; }
+  .meta-row .label { color: #000; flex-shrink: 0; }
+  .sep { border-top: 1px solid #000; margin: 4px 0; }
   .items-table { width: 100%; table-layout: fixed; font-size: 11px; border-collapse: collapse; }
   .items-table td { padding: 2px 0; vertical-align: top; word-break: break-word; }
   .items-table .item-name { font-weight: bold; font-size: 12px; }
-  .items-table .item-detail { width: 58%; padding-left: 4px; font-size: 10px; color: #333; }
+  .items-table .item-detail { width: 58%; padding-left: 4px; font-size: 10px; color: #000; }
   .items-table .item-total { width: 42%; text-align: right; font-weight: bold; white-space: nowrap; }
   .totals { margin-top: 5px; }
   .totals .row { display: flex; justify-content: space-between; gap: 4px; font-size: 11px; padding: 2px 0; }
   .totals .row > span:last-child { text-align: right; white-space: nowrap; }
-  .totals .grand { font-size: 15px; font-weight: bold; border-top: 1px solid #000; padding-top: 4px; margin-top: 2px; }
+  .totals .grand { font-size: 15px; font-weight: bold; border-top: 2px solid #000; padding-top: 4px; margin-top: 2px; }
   .payment-info { margin-top: 5px; font-size: 11px; }
-  .trust-terms { margin-top: 6px; font-size: 9px; line-height: 1.25; border-top: 1px dashed #000; padding-top: 4px; word-break: break-word; }
+  .trust-terms { margin-top: 6px; font-size: 9px; line-height: 1.25; border-top: 1px solid #000; padding-top: 4px; word-break: break-word; }
   .trust-terms .terms-title { font-weight: bold; font-size: 10px; margin-bottom: 2px; text-align: center; }
   .signature-line { margin-top: 10px; text-align: center; }
   .signature-line .line { border-top: 1px solid #000; width: 70%; margin: 0 auto; }
-  .signature-line .sig-label { font-size: 9px; color: #444; margin-top: 2px; }
-  .footer { text-align: center; font-size: 9px; color: #666; margin-top: 6px; border-top: 1px dashed #000; padding-top: 4px; line-height: 1.25; }
+  .signature-line .sig-label { font-size: 9px; color: #000; margin-top: 2px; }
+  .footer { text-align: center; font-size: 9px; color: #000; margin-top: 6px; border-top: 1px solid #000; padding-top: 4px; line-height: 1.25; }
   .qr-block { text-align: center; margin: 6px 0 4px; }
-  .qr-block img { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+  .qr-block img { display: block; margin: 0 auto; max-width: 100%; height: auto; image-rendering: pixelated; }
   .qr-code-text { font-size: 12px; font-weight: bold; letter-spacing: 1px; margin-top: 2px; word-break: break-all; }
-  .qr-hint { font-size: 9px; color: #666; }
+  .qr-hint { font-size: 9px; color: #000; }
   @media print { body { width: 100%; } }
 `;
 
