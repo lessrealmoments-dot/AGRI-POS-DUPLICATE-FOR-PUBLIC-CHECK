@@ -211,7 +211,8 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   const handleShowReceiptPreview = (format) => {
     if (!lastSaleData) return;
     const type = PrintEngine.getDocType(lastSaleData);
-    const html = PrintEngine.generateHtml({ type, data: lastSaleData, format, businessInfo });
+    const docCode = lastSaleData.doc_code || lastSaleData.invoice_number || '';
+    const html = PrintEngine.generateHtml({ type, data: lastSaleData, format, businessInfo, docCode });
     // Close "Sale Complete" dialog first so Android WebView doesn't stack dialogs
     setShowPrintPrompt(false);
     setReceiptPreview({ html, type, format });
@@ -222,7 +223,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
     setPrintingCopies(true);
     try {
       for (let i = 0; i < copies; i++) {
-        await PrintBridge.print({ type: receiptPreview.type, data: lastSaleData, format: receiptPreview.format, businessInfo });
+        await PrintBridge.print({ type: receiptPreview.type, data: lastSaleData, format: receiptPreview.format, businessInfo, docCode: lastSaleData.doc_code || lastSaleData.invoice_number || '' });
         if (i < copies - 1) await new Promise(r => setTimeout(r, 2000));
       }
       toast.success(`Printed ${copies} ${copies === 1 ? 'copy' : 'copies'}`);
@@ -919,7 +920,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
               </Button>
               <Button variant="outline" onClick={async () => {
                 try {
-                  await PrintBridge.print({ type: PrintEngine.getDocType(lastSaleData), data: lastSaleData, format: 'full_page', businessInfo });
+                  await PrintBridge.print({ type: PrintEngine.getDocType(lastSaleData), data: lastSaleData, format: 'full_page', businessInfo, docCode: lastSaleData.doc_code || lastSaleData.invoice_number || '' });
                 } catch (err) { toast.error(`Print failed: ${err.message || 'Unknown error'}`); }
                 setShowPrintPrompt(false); setLastSaleData(null);
               }} className="w-full h-10" data-testid="print-full-btn">
