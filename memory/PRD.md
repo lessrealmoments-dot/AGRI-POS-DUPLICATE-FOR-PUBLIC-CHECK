@@ -74,6 +74,9 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 - Receipt Preview modal: closes "Sale Complete" dialog BEFORE opening preview (prevents WebView stacking)
 - Print 1 or 2 copies with 2-second gap between copies
 - `feedLinesAfter` and `feedPaper()` support for paper positioning
+- **Stock Release Status on Receipts:** Thermal and full-page receipts now show release mode:
+  - Full Release: "FULLY RELEASED" status indicator
+  - Partial Release: Amber highlighted banner "PARTIAL RELEASE - SCAN QR CODE TO RELEASE ITEMS"
 
 #### HID Barcode Scanner
 - Capture-phase global listener (`addEventListener('keydown', fn, true)`)
@@ -85,6 +88,22 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 - **See `/app/memory/H10_PRINTER_COORDINATION.md` for complete technical reference**
 
 **Files:** `TerminalSales.jsx`, `PrintBridge.js`, `PrintEngine.js`, `H10_PRINTER_COORDINATION.md`
+
+### Terminal Stock Release Mode (2026-01-XX) — COMPLETE
+- Added **Stock Release Mode selector** to Terminal Sales checkout flow
+- **Placement:** After payment type selection, before final confirmation
+- **Two options:**
+  - **Full Release** (green) — All items released immediately, stock deducted now
+  - **Partial Release** (amber) — Items staged for pickup, customer scans QR to release in batches
+- **Validation:** User MUST select a release mode; shows error if not selected
+- **UI:** Clean two-button selector with explanations, "Change" button after selection
+- **Backend:** Sends `release_mode` field to `/unified-sale` endpoint
+- **Receipts:** Both thermal (58mm) and full-page prints show release status prominently
+  - Full: "FULLY RELEASED" status line
+  - Partial: Large amber banner with instructions to scan QR code
+- **Feature Parity:** Terminal now matches web sales interface capabilities
+- **Files:** `TerminalSales.jsx`, `PrintEngine.js`
+- **Documentation:** `/app/memory/STOCK_RELEASE_FEATURE.md`
 
 - **New `POST /api/sms/gateway/log`** — Android APK posts single log entry (level, event_type, message, phone, queue_id, device_id)
 - **New `POST /api/sms/gateway/logs/batch`** — Batch POST up to 500 buffered entries (offline-first support)

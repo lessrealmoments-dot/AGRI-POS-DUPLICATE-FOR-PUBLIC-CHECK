@@ -358,12 +358,13 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   const [splitCash, setSplitCash] = useState('');
   const [splitDigital, setSplitDigital] = useState('');
   const [splitScreenshot, setSplitScreenshot] = useState(null);
+  const [releaseMode, setReleaseMode] = useState(''); // 'full' | 'partial'
   const fileInputRef = useRef(null);
   const splitFileInputRef = useRef(null);
 
   const resetCheckout = () => {
     setPaymentType(''); setAmountTendered(''); setDigitalScreenshot(null); setDigitalRef('');
-    setCreditDays(15); setSplitCash(''); setSplitDigital(''); setSplitScreenshot(null);
+    setCreditDays(15); setSplitCash(''); setSplitDigital(''); setSplitScreenshot(null); setReleaseMode('');
   };
 
   const changeAmount = paymentType === 'cash' && amountTendered
@@ -372,6 +373,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   const processSale = async () => {
     if (cart.length === 0) { toast.error('Cart is empty'); return; }
     if (!paymentType) { toast.error('Select a payment type'); return; }
+    if (!releaseMode) { toast.error('Select stock release mode'); return; }
     if (paymentType === 'cash' && (!amountTendered || parseFloat(amountTendered) < grandTotal)) {
       toast.error('Amount tendered must be at least the total'); return;
     }
@@ -422,6 +424,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
       status: paymentType === 'credit' ? 'unpaid' : 'paid',
       created_at: new Date().toISOString(),
       digital_reference: digitalRef || undefined,
+      release_mode: releaseMode,
     };
 
     if (paymentType === 'split') {
@@ -859,16 +862,62 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
               </div>
             )}
 
+            {/* Stock Release Mode — shown after payment type is selected */}
+            {paymentType && !releaseMode && (
+              <div className="space-y-2" data-testid="release-mode-selection">
+                <label className="text-xs text-slate-500 font-medium block">Stock Release</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setReleaseMode('full')}
+                    className="flex flex-col items-start p-3 rounded-xl border-2 border-emerald-400 bg-emerald-50 hover:bg-emerald-100 transition-colors text-left"
+                    data-testid="release-mode-full"
+                  >
+                    <span className="text-sm font-semibold text-[#1A4D2E]">Full Release</span>
+                    <span className="text-[11px] text-emerald-700 mt-0.5">All items released now</span>
+                  </button>
+                  <button
+                    onClick={() => setReleaseMode('partial')}
+                    className="flex flex-col items-start p-3 rounded-xl border-2 border-amber-400 bg-amber-50 hover:bg-amber-100 transition-colors text-left"
+                    data-testid="release-mode-partial"
+                  >
+                    <span className="text-sm font-semibold text-amber-700">Partial Release</span>
+                    <span className="text-[11px] text-amber-600 mt-0.5">Items staged for pickup</span>
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 leading-relaxed">
+                  <strong>Full Release:</strong> Stock deducted immediately. Customer receives all items now.<br/>
+                  <strong>Partial Release:</strong> Stock reserved. Customer scans QR code to release items in batches.
+                </p>
+              </div>
+            )}
+
             {/* Action buttons */}
-            {paymentType && (
-              <div className="flex gap-2 pt-1">
-                <Button variant="outline" onClick={resetCheckout} className="flex-1">Back</Button>
-                <Button onClick={processSale} disabled={saving}
-                  className="flex-1 bg-[#1A4D2E] hover:bg-[#15412a] text-white h-12"
-                  data-testid="confirm-payment-btn">
-                  {saving ? <Loader2 size={16} className="animate-spin mr-2" /> : <Check size={16} className="mr-2" />}
-                  {saving ? 'Processing...' : paymentType === 'credit' ? 'Confirm Credit Sale' : `Pay ${formatPHP(grandTotal)}`}
-                </Button>
+            {paymentType && releaseMode && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-lg">
+                  <span className="text-xs text-slate-600">Release Mode:</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className={`text-xs font-semibold ${releaseMode === 'full' ? 'text-emerald-700' : 'text-amber-700'}`}>
+                      {releaseMode === 'full' ? 'Full Release' : 'Partial Release'}
+                    </span>
+                    <button
+                      onClick={() => setReleaseMode('')}
+                      className="text-xs text-blue-600 hover:underline"
+                      data-testid="change-release-mode"
+                    >
+                      Change
+                    </button>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={resetCheckout} className="flex-1">Back</Button>
+                  <Button onClick={processSale} disabled={saving}
+                    className="flex-1 bg-[#1A4D2E] hover:bg-[#15412a] text-white h-12"
+                    data-testid="confirm-payment-btn">
+                    {saving ? <Loader2 size={16} className="animate-spin mr-2" /> : <Check size={16} className="mr-2" />}
+                    {saving ? 'Processing...' : paymentType === 'credit' ? 'Confirm Credit Sale' : `Pay ${formatPHP(grandTotal)}`}
+                  </Button>
+                </div>
               </div>
             )}
 

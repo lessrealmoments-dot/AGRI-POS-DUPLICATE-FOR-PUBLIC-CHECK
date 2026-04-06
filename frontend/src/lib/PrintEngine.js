@@ -214,6 +214,7 @@ function orderSlipFullPage(data, biz, docCode) {
   const inv = data;
   let html = buildPageHeader(biz, 'Order Slip', inv.invoice_number || '', inv.created_at || inv.order_date, [
     inv.cashier_name ? `Cashier: ${inv.cashier_name}` : '',
+    inv.release_mode === 'full' ? 'Status: FULLY RELEASED' : inv.release_mode === 'partial' ? 'Status: PARTIAL RELEASE' : '',
   ].filter(Boolean));
 
   // Customer info box (only if not walk-in)
@@ -225,6 +226,14 @@ function orderSlipFullPage(data, biz, docCode) {
     if (inv.terms && inv.terms !== 'COD') html += `<div class="box-sub">Terms: ${inv.terms}</div>`;
     if (inv.due_date) html += `<div class="box-sub">Due: ${fmtDate(inv.due_date)}</div>`;
     html += `</div></div>`;
+  }
+
+  // Partial release notice
+  if (inv.release_mode === 'partial') {
+    html += `<div style="background:#fef3c7;border:2px solid #f59e0b;border-radius:8px;padding:12px;margin:16px 0;text-align:center">`;
+    html += `<p style="font-size:13px;font-weight:700;color:#92400e;margin:0">⚠ PARTIAL RELEASE — Items must be scanned via QR code for release</p>`;
+    html += `<p style="font-size:11px;color:#78350f;margin:4px 0 0">Scan the QR code below to manage item releases.</p>`;
+    html += `</div>`;
   }
 
   // Items table
@@ -280,6 +289,7 @@ function trustReceiptFullPage(data, biz, docCode) {
   let html = buildPageHeader(biz, 'Charge Agreement', inv.invoice_number || '', inv.order_date || inv.created_at, [
     inv.terms && inv.terms !== 'COD' ? `Terms: ${inv.terms}` : '',
     inv.due_date ? `Due: ${fmtDate(inv.due_date)}` : '',
+    inv.release_mode === 'full' ? 'Status: FULLY RELEASED' : inv.release_mode === 'partial' ? 'Status: PARTIAL RELEASE' : '',
   ].filter(Boolean));
 
   html += `<div class="info-row">`;
@@ -289,6 +299,14 @@ function trustReceiptFullPage(data, biz, docCode) {
   html += `</div>`;
   html += `<div class="info-box"><div class="box-label">Cashier</div><div class="box-value">${inv.cashier_name || ''}</div></div>`;
   html += `</div>`;
+
+  // Partial release notice
+  if (inv.release_mode === 'partial') {
+    html += `<div style="background:#fef3c7;border:2px solid #f59e0b;border-radius:8px;padding:12px;margin:16px 0;text-align:center">`;
+    html += `<p style="font-size:13px;font-weight:700;color:#92400e;margin:0">⚠ PARTIAL RELEASE — Items must be scanned via QR code for release</p>`;
+    html += `<p style="font-size:11px;color:#78350f;margin:4px 0 0">Scan the QR code below to manage item releases.</p>`;
+    html += `</div>`;
+  }
 
   // Items
   const items = inv.items || [];
@@ -529,6 +547,12 @@ function orderSlipThermal(data, biz, docCode) {
   html += `<div class="meta-row"><span class="label">Date:</span><span>${fmtDateMaybeTime(inv.created_at || inv.order_date)}</span></div>`;
   if (inv.customer_name && inv.customer_name !== 'Walk-in') html += `<div class="meta-row"><span class="label">Customer:</span><span>${inv.customer_name}</span></div>`;
   html += `<div class="meta-row"><span class="label">Cashier:</span><span>${inv.cashier_name || ''}</span></div>`;
+  // Stock release status
+  if (inv.release_mode === 'full') {
+    html += `<div class="meta-row"><span class="label">Status:</span><span style="font-weight:bold;color:#000">FULLY RELEASED</span></div>`;
+  } else if (inv.release_mode === 'partial') {
+    html += `<div class="meta-row" style="background:#fef3c7;padding:4px 2px;margin:2px 0;border:1px solid #f59e0b"><span style="font-size:10px;font-weight:bold;color:#92400e">PARTIAL RELEASE - SCAN QR CODE TO RELEASE ITEMS</span></div>`;
+  }
   html += '<div class="sep"></div>';
   html += buildItemsThermal(inv.items || []);
   html += '<div class="sep"></div>';
@@ -558,6 +582,12 @@ function trustReceiptThermal(data, biz, docCode) {
   html += `<div class="meta-row"><span class="label">Date:</span><span>${fmtDateMaybeTime(inv.order_date || inv.created_at)}</span></div>`;
   html += `<div class="meta-row"><span class="label">Customer:</span><span>${inv.customer_name || ''}</span></div>`;
   if (inv.due_date) html += `<div class="meta-row"><span class="label">Due:</span><span>${fmtDate(inv.due_date)}</span></div>`;
+  // Stock release status
+  if (inv.release_mode === 'full') {
+    html += `<div class="meta-row"><span class="label">Status:</span><span style="font-weight:bold;color:#000">FULLY RELEASED</span></div>`;
+  } else if (inv.release_mode === 'partial') {
+    html += `<div class="meta-row" style="background:#fef3c7;padding:4px 2px;margin:2px 0;border:1px solid #f59e0b"><span style="font-size:10px;font-weight:bold;color:#92400e">PARTIAL RELEASE - SCAN QR CODE TO RELEASE ITEMS</span></div>`;
+  }
   html += '<div class="sep"></div>';
   html += buildItemsThermal(inv.items || []);
   html += '<div class="sep"></div>';
