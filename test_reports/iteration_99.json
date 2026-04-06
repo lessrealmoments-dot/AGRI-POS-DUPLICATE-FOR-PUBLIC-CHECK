@@ -83,6 +83,6 @@
       "role": "Super Admin",
       "manager_pin": "521325"
     },
-    "test_url": "https://barcode-thermal.preview.emergentagent.com/sales-new"
+    "test_url": "https://device-auth-qr.preview.emergentagent.com/sales-new"
   }
 }
