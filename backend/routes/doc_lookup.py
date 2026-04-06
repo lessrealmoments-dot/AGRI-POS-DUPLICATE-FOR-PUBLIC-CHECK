@@ -172,6 +172,7 @@ async def lookup_document(data: dict):
             "customer": customer,
             "attached_files": files,
             "verifier": verifier.get("verifier_name", ""),
+            "verifier_method": verifier.get("method", ""),
         }
 
     elif doc_type == "purchase_order":

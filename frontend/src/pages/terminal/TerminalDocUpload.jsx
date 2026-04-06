@@ -126,6 +126,7 @@ export default function TerminalDocUpload({ branchId, onClose }) {
         <input
           type="password"
           inputMode="numeric"
+          autoComplete="new-password"
           value={pin}
           onChange={e => setPin(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && handleVerifyPin()}

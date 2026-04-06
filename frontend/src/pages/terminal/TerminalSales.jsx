@@ -912,6 +912,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
               value={overridePin}
               onChange={e => { setOverridePin(e.target.value); setOverrideError(''); }}
               onKeyDown={e => e.key === 'Enter' && handleStockOverride()}
+              autoComplete="new-password"
               className="h-10"
               data-testid="stock-override-pin"
             />

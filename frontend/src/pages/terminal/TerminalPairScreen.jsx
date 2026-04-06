@@ -311,6 +311,7 @@ export default function TerminalPairScreen({ onPaired }) {
                     <Label className="text-xs text-slate-400 uppercase tracking-wide">Password</Label>
                     <Input
                       type="password"
+                      autoComplete="new-password"
                       value={password}
                       onChange={e => setPassword(e.target.value)}
                       placeholder="Enter password"

@@ -34,6 +34,30 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 - Scheduled jobs (`_daily_sms_reminders`, `_monthly_sms_summary`) now iterate per active organization using `_raw_db`
 - **Result:** Company A's Android gateway only sees Company A's `pending` queue; Company B's templates, settings, and queue are completely isolated
 
+### DocViewer Security Redesign + Terminal Back Navigation (2026-04-06) — Complete
+
+#### Back to Terminal
+- Sticky "← Back to Terminal" bar at top of DocViewerPage when accessed from a paired terminal
+- Also shown on the error state (doc not found) screen
+- Calls `navigate('/terminal')` to return to TerminalShell
+
+#### Security Tier Redesign (Regular Phone)
+- **Tier 1 (Public):** Receipt items, total, balance — always visible (no change)
+- **Tier 2 (PIN gate):** Payment history, attached files — manager/admin/TOTP PIN (no change)
+- **Tier 3 (NEW — Apply Payment):** Independent of Tier 2:
+  - `WebPaymentSection` component — visible to non-terminal devices when balance > 0
+  - **Path A (TOTP only):** Enter 6-digit time-based code at payment submission — TOTP-only, static PINs rejected
+  - **Path B (Staff Login):** Email + password login → admin/owner = all branches; manager = own branch only; other roles → toast error "You don't have the necessary authority"
+  - Backend: `_verify_staff_jwt()` helper validates JWT + role + branch restriction
+  - Backend: `receive_payment` endpoint now accepts 3 auth paths (terminal_id / web_auth_token / TOTP-only pin)
+
+#### Autocomplete Disabled (Terminal Security)
+- `autoComplete="new-password"` on all terminal PIN/password inputs: TerminalSales, TerminalDocUpload, TerminalPairScreen, DocViewerPage (Tier 2 PIN, terminal pull PIN)
+- `autoComplete="off"` on all TOTP and reference inputs
+
+**Backend files:** `routes/qr_actions.py`, `routes/doc_lookup.py`
+**Frontend files:** `DocViewerPage.jsx`, `TerminalSales.jsx`, `TerminalDocUpload.jsx`, `TerminalPairScreen.jsx`
+
 ### H10 Hardware Integration — FINAL STABLE STATE (2026-04-05) — COMPLETE & WORKING
 
 **All hardware features complete and tested on physical H10 device:**

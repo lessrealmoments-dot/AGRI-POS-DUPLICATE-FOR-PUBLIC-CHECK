@@ -6,9 +6,10 @@ import { Input } from '../components/ui/input';
 import {
   Lock, FileText, Building2, ArrowRight, CreditCard, CheckCircle2,
   AlertTriangle, Printer, Image, Smartphone, Package, ChevronDown,
-  ShieldCheck, RefreshCw, Search, Boxes, Banknote, Wifi, Camera, X, MapPin
+  ShieldCheck, RefreshCw, Search, Boxes, Banknote, Wifi, Camera, X, MapPin, ArrowLeft
 } from 'lucide-react';
 import axios from 'axios';
+import { toast } from 'sonner';
 import PrintEngine from '../lib/PrintEngine';
 import PrintBridge from '../lib/PrintBridge';
 
@@ -57,6 +58,235 @@ function LockoutBanner({ retryAfter, onExpired }) {
     </div>
   );
 }
+
+// ── Web Payment Section — non-terminal payment via TOTP or staff login ─────────
+function WebPaymentSection({ basic, docCode, onPaymentRecorded }) {
+  const METHODS = ['Cash', 'GCash', 'Maya', 'Bank Transfer', 'Check'];
+  const php = v => `₱${(parseFloat(v) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
+
+  const [stage, setStage] = React.useState('idle');
+  const [balance, setBalance] = React.useState(basic.balance);
+  const [authMethod, setAuthMethod] = React.useState(null); // 'totp' | 'staff_login'
+  const [webAuthToken, setWebAuthToken] = React.useState('');
+  const [staffName, setStaffName] = React.useState('');
+  const [loginEmail, setLoginEmail] = React.useState('');
+  const [loginPassword, setLoginPassword] = React.useState('');
+  const [loginLoading, setLoginLoading] = React.useState(false);
+  const [loginError, setLoginError] = React.useState('');
+  const [amount, setAmount] = React.useState('');
+  const [method, setMethod] = React.useState('Cash');
+  const [reference, setReference] = React.useState('');
+  const [totpCode, setTotpCode] = React.useState('');
+  const [paySubmitting, setPaySubmitting] = React.useState(false);
+  const [payError, setPayError] = React.useState('');
+  const isDigital = method !== 'Cash' && method !== 'Check';
+
+  const handleStaffLogin = async () => {
+    setLoginLoading(true); setLoginError('');
+    try {
+      const res = await axios.post(`${BACKEND}/api/auth/login`, { email: loginEmail, password: loginPassword });
+      const { token, user } = res.data;
+      const role = user?.role || '';
+      if (!['admin', 'owner', 'manager'].includes(role)) {
+        toast.error("You don't have the necessary authority for this action");
+        setLoginLoading(false);
+        return;
+      }
+      setWebAuthToken(token);
+      setStaffName(user?.full_name || user?.username || 'Staff');
+      setAuthMethod('staff_login');
+      setStage('form');
+    } catch (e) {
+      const d = e.response?.data?.detail;
+      setLoginError(typeof d === 'string' ? d : 'Invalid credentials. Please try again.');
+    }
+    setLoginLoading(false);
+  };
+
+  const handlePaySubmit = async () => {
+    const amt = parseFloat(amount);
+    if (!amt || amt <= 0) { setPayError('Enter a valid amount'); return; }
+    if (amt > balance + 0.01) { setPayError(`Amount exceeds balance ${php(balance)}`); return; }
+    if (authMethod === 'totp' && (!totpCode || totpCode.length !== 6)) {
+      setPayError('Enter your 6-digit time-based code'); return;
+    }
+    setPaySubmitting(true); setPayError('');
+    const paymentRef = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`;
+    try {
+      const payload = { amount: amt, method, reference, payment_ref: paymentRef };
+      if (authMethod === 'staff_login') payload.web_auth_token = webAuthToken;
+      else payload.pin = totpCode;
+      const res = await axios.post(`${BACKEND}/api/qr-actions/${docCode}/receive_payment`, payload);
+      setBalance(res.data.new_balance);
+      if (onPaymentRecorded) onPaymentRecorded(res.data);
+      setStage('done');
+    } catch (e) {
+      const d = e.response?.data?.detail;
+      setPayError(typeof d === 'string' ? d : (d?.message || 'Payment failed. Please try again.'));
+    }
+    setPaySubmitting(false);
+  };
+
+  if (!basic.available_actions?.includes('receive_payment') && stage === 'idle') return null;
+
+  if (stage === 'done') return (
+    <div className="bg-white rounded-xl border overflow-hidden" data-testid="web-payment-done">
+      <div className="p-5 text-center space-y-2">
+        <CheckCircle2 size={28} className="text-emerald-500 mx-auto" />
+        <p className="text-sm font-semibold text-emerald-800">Payment Applied</p>
+        <p className="text-xs text-emerald-600">Remaining balance: {php(balance)}</p>
+      </div>
+    </div>
+  );
+
+  if (stage === 'idle') return (
+    <div className="bg-white rounded-xl border overflow-hidden" data-testid="web-payment-section">
+      <button onClick={() => setStage('auth_choice')}
+        className="w-full px-5 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors"
+        data-testid="web-receive-payment-btn">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-emerald-50 flex items-center justify-center">
+            <Banknote size={16} className="text-emerald-600" />
+          </div>
+          <div className="text-left">
+            <p className="text-sm font-semibold text-slate-800">Apply Payment</p>
+            <p className="text-xs text-slate-400">{php(balance)} due — requires TOTP or staff login</p>
+          </div>
+        </div>
+        <ChevronDown size={16} className="text-slate-400" />
+      </button>
+    </div>
+  );
+
+  if (stage === 'auth_choice') return (
+    <div className="bg-white rounded-xl border overflow-hidden" data-testid="web-auth-choice">
+      <div className="px-5 py-3 bg-slate-50 border-b flex items-center gap-2">
+        <Lock size={14} className="text-slate-600" />
+        <span className="text-sm font-semibold text-slate-700">Verify Identity to Apply Payment</span>
+      </div>
+      <div className="p-5 space-y-3">
+        <p className="text-xs text-slate-400">Payment requires a time-based code or a staff login (manager/admin only).</p>
+        <button onClick={() => { setAuthMethod('totp'); setStage('form'); }}
+          className="w-full flex items-center gap-3 p-3 rounded-xl border border-slate-200 hover:bg-slate-50 transition-colors text-left"
+          data-testid="web-pay-totp-btn">
+          <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
+            <ShieldCheck size={16} className="text-blue-600" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-slate-800">Time-Based Code (TOTP)</p>
+            <p className="text-xs text-slate-400">6-digit code from authenticator app</p>
+          </div>
+        </button>
+        <button onClick={() => setStage('staff_login')}
+          className="w-full flex items-center gap-3 p-3 rounded-xl border border-slate-200 hover:bg-slate-50 transition-colors text-left"
+          data-testid="web-pay-login-btn">
+          <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center shrink-0">
+            <Lock size={16} className="text-amber-600" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-slate-800">Login as Manager / Admin</p>
+            <p className="text-xs text-slate-400">Email and password required</p>
+          </div>
+        </button>
+        <button onClick={() => setStage('idle')} className="text-xs text-slate-400 hover:underline w-full text-center pt-1">Cancel</button>
+      </div>
+    </div>
+  );
+
+  if (stage === 'staff_login') return (
+    <div className="bg-white rounded-xl border overflow-hidden" data-testid="web-staff-login">
+      <div className="px-5 py-3 bg-amber-50 border-b flex items-center gap-2">
+        <Lock size={14} className="text-amber-600" />
+        <span className="text-sm font-semibold text-amber-800">Manager / Admin Login</span>
+      </div>
+      <div className="p-5 space-y-3">
+        <input type="email" autoComplete="off" value={loginEmail}
+          onChange={e => { setLoginEmail(e.target.value); setLoginError(''); }}
+          placeholder="Email address" data-testid="web-login-email"
+          className="w-full h-11 rounded-lg border border-input bg-background px-3 text-sm" />
+        <input type="password" autoComplete="new-password" value={loginPassword}
+          onChange={e => { setLoginPassword(e.target.value); setLoginError(''); }}
+          onKeyDown={e => e.key === 'Enter' && handleStaffLogin()}
+          placeholder="Password" data-testid="web-login-password"
+          className="w-full h-11 rounded-lg border border-input bg-background px-3 text-sm" />
+        {loginError && <p className="text-red-500 text-xs flex items-center gap-1"><AlertTriangle size={12} />{loginError}</p>}
+        <div className="flex gap-2">
+          <button onClick={() => { setStage('auth_choice'); setLoginEmail(''); setLoginPassword(''); setLoginError(''); }}
+            className="flex-1 h-10 rounded-lg border border-slate-200 text-slate-600 text-sm hover:bg-slate-50">Back</button>
+          <Button className="flex-1 h-10 bg-[#1A4D2E] hover:bg-[#14532d] text-white text-sm"
+            onClick={handleStaffLogin} disabled={loginLoading || !loginEmail || !loginPassword}
+            data-testid="web-login-submit">
+            {loginLoading ? <RefreshCw size={14} className="animate-spin mr-1.5" /> : null}
+            {loginLoading ? 'Verifying...' : 'Login'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // stage === 'form' — payment form (shared between TOTP and staff login paths)
+  return (
+    <div className="bg-white rounded-xl border overflow-hidden" data-testid="web-payment-form">
+      <div className="px-5 py-3 bg-emerald-50 border-b flex items-center gap-2">
+        <ShieldCheck size={14} className="text-emerald-600" />
+        <span className="text-xs font-semibold text-emerald-700">
+          {authMethod === 'staff_login' ? `Authorized: ${staffName}` : 'TOTP required at submission'}
+        </span>
+      </div>
+      <div className="p-5 space-y-3">
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Record Payment</p>
+        <div className="flex gap-2 flex-wrap">
+          {METHODS.map(m => (
+            <button key={m} onClick={() => setMethod(m)} data-testid={`web-method-${m.toLowerCase().replace(' ', '-')}`}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${method === m ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}>
+              {m}
+            </button>
+          ))}
+        </div>
+        <div>
+          <label className="text-xs text-slate-500 mb-1 block">Amount</label>
+          <input type="text" inputMode="decimal" autoComplete="off"
+            value={amount} onChange={e => setAmount(e.target.value)}
+            placeholder={`Max ${php(balance)}`}
+            className="w-full h-11 text-center text-xl font-bold font-mono rounded-lg border border-input bg-background px-3"
+            data-testid="web-payment-amount" autoFocus />
+          <button onClick={() => setAmount(String(balance))} className="text-xs text-emerald-600 hover:underline mt-1">Full balance</button>
+        </div>
+        {isDigital && (
+          <div>
+            <label className="text-xs text-slate-500 mb-1 block">Reference No. <span className="text-slate-300">(optional)</span></label>
+            <input type="text" autoComplete="off" value={reference} onChange={e => setReference(e.target.value)}
+              placeholder="Transaction ref number" data-testid="web-payment-reference"
+              className="w-full h-9 rounded-lg border border-input bg-background px-3 text-sm" />
+          </div>
+        )}
+        {authMethod === 'totp' && (
+          <div>
+            <label className="text-xs font-semibold text-blue-700 mb-1 block">Time-Based Code (TOTP)</label>
+            <input type="text" inputMode="numeric" autoComplete="off"
+              value={totpCode} maxLength={6}
+              onChange={e => { setTotpCode(e.target.value.replace(/\D/g, '')); setPayError(''); }}
+              placeholder="6-digit code" data-testid="web-totp-input"
+              className="w-full h-11 text-center text-2xl font-mono tracking-widest rounded-lg border border-input bg-background px-3" />
+          </div>
+        )}
+        {payError && <p className="text-red-500 text-xs flex items-center gap-1"><AlertTriangle size={12} />{payError}</p>}
+        <div className="flex gap-2">
+          <button
+            onClick={() => { setStage(authMethod === 'staff_login' ? 'staff_login' : 'auth_choice'); setPayError(''); setAmount(''); setTotpCode(''); }}
+            className="flex-1 h-10 rounded-lg border border-slate-200 text-slate-600 text-sm hover:bg-slate-50">Back</button>
+          <Button className="flex-1 h-10 bg-emerald-700 hover:bg-emerald-800 text-white"
+            onClick={handlePaySubmit} disabled={paySubmitting || !amount}
+            data-testid="web-pay-submit">
+            {paySubmitting ? <RefreshCw size={14} className="animate-spin mr-1.5" /> : <Banknote size={14} className="mr-1.5" />}
+            {paySubmitting ? 'Processing...' : `Pay ${amount ? php(parseFloat(amount) || 0) : ''}`}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 function getTerminalSession() {
   try { const s = localStorage.getItem('agrismart_terminal'); return s ? JSON.parse(s) : null; } catch { return null; }
@@ -1066,8 +1296,16 @@ export default function DocViewerPage() {
   if (loading) return <div className="min-h-screen bg-slate-50 flex items-center justify-center"><RefreshCw size={24} className="animate-spin text-slate-400" /></div>;
 
   if (error) return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-lg p-8 text-center max-w-sm space-y-4">
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
+      {isTerminal && (
+        <div className="fixed top-0 left-0 right-0 z-20 bg-[#1A4D2E] px-4 py-2.5 flex items-center justify-between shadow-sm">
+          <button onClick={() => navigate('/terminal')} className="flex items-center gap-2 text-white/90 hover:text-white transition-colors" data-testid="back-to-terminal-btn-error">
+            <ArrowLeft size={16} /><span className="text-sm font-semibold">Back to Terminal</span>
+          </button>
+          <span className="text-emerald-300 text-xs font-medium">{terminalSession?.branchName || 'Terminal'}</span>
+        </div>
+      )}
+      <div className={`bg-white rounded-2xl shadow-lg p-8 text-center max-w-sm space-y-4 ${isTerminal ? 'mt-12' : ''}`}>
         <AlertTriangle size={40} className="text-amber-500 mx-auto" />
         <h2 className="text-lg font-bold text-slate-800">Document Not Found</h2>
         <p className="text-slate-500 text-sm">Code: <span className="font-mono font-bold">{code?.toUpperCase()}</span></p>
@@ -1085,6 +1323,18 @@ export default function DocViewerPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
+      {/* Back to Terminal bar — only shown when accessed from a paired terminal */}
+      {isTerminal && (
+        <div className="sticky top-0 z-20 bg-[#1A4D2E] px-4 py-2.5 flex items-center justify-between shadow-sm" data-testid="back-to-terminal-bar">
+          <button onClick={() => navigate('/terminal')}
+            className="flex items-center gap-2 text-white/90 hover:text-white transition-colors"
+            data-testid="back-to-terminal-btn">
+            <ArrowLeft size={16} />
+            <span className="text-sm font-semibold">Back to Terminal</span>
+          </button>
+          <span className="text-emerald-300 text-xs font-medium">{terminalSession?.branchName || 'Terminal'}</span>
+        </div>
+      )}
       <div className="max-w-2xl mx-auto p-4 sm:p-6 space-y-4">
 
         {/* Tier 1: Basic View */}
@@ -1182,7 +1432,7 @@ export default function DocViewerPage() {
               <Input
                 type="text"
                 inputMode="numeric"
-                autoComplete="one-time-code"
+                autoComplete="off"
                 value={crossBranchPin}
                 maxLength={6}
                 onChange={e => { setCrossBranchPin(e.target.value.replace(/\D/g, '')); setCrossBranchError(''); }}
@@ -1245,6 +1495,7 @@ export default function DocViewerPage() {
                   onChange={e => { setPin(e.target.value); setPinError(''); }}
                   onKeyDown={e => e.key === 'Enter' && handleUnlockFull()}
                   placeholder="Manager PIN, Admin PIN, or TOTP"
+                  autoComplete="new-password"
                   className="h-11 text-center text-lg font-mono tracking-widest" autoFocus />
                 {pinError && <p className="text-red-500 text-xs flex items-center gap-1"><AlertTriangle size={12} />{pinError}</p>}
                 {tier2AttemptsRemaining != null && tier2AttemptsRemaining <= 4 && (
@@ -1287,10 +1538,6 @@ export default function DocViewerPage() {
                       setFullData(prev => ({ ...prev, payments: [...(prev.payments || []), r.payment] }));
                     }}
                   />
-                ) : basic.available_actions?.includes('receive_payment') ? (
-                  <div className="mt-3 pt-3 border-t border-slate-100">
-                    <TerminalRequiredBanner />
-                  </div>
                 ) : null}
               </div>
             )}
@@ -1310,8 +1557,6 @@ export default function DocViewerPage() {
                       setFullData(prev => ({ ...prev, payments: [r.payment] }));
                     }}
                   />
-                ) : basic.available_actions?.includes('receive_payment') ? (
-                  <TerminalRequiredBanner />
                 ) : null}
               </div>
             )}
@@ -1340,6 +1585,17 @@ export default function DocViewerPage() {
           </div>
         )}
 
+        {/* Non-terminal payment — Apply Payment via TOTP or Staff Login */}
+        {!isTerminal && (
+          <WebPaymentSection
+            basic={basic}
+            docCode={code?.toUpperCase()}
+            onPaymentRecorded={(r) => {
+              setBasic(prev => ({ ...prev, balance: r.new_balance, available_actions: r.new_balance <= 0 ? prev.available_actions?.filter(a => a !== 'receive_payment') : prev.available_actions }));
+            }}
+          />
+        )}
+
         {/* Tier 3: Terminal Actions */}
         {isTerminal && (
           <div className="bg-white rounded-xl border-2 border-amber-200 overflow-hidden" data-testid="terminal-actions">
@@ -1355,7 +1611,7 @@ export default function DocViewerPage() {
                 {basic.doc_type === 'purchase_order' && ['Draft', 'Ordered', 'In Progress'].includes(basic.status) && (
                   <>
                     <p className="text-sm text-slate-600 mb-2"><Package size={14} className="inline mr-1.5 text-blue-500" />Pull this PO to your terminal for product checking</p>
-                    <Input type="password" value={terminalPin} onChange={e => { setTerminalPin(e.target.value); setTerminalError(''); }} onKeyDown={e => e.key === 'Enter' && handleTerminalPull()} placeholder="Enter PIN to pull" className="h-11 text-center font-mono tracking-widest" data-testid="terminal-pin-input" />
+                    <Input type="password" value={terminalPin} onChange={e => { setTerminalPin(e.target.value); setTerminalError(''); }} onKeyDown={e => e.key === 'Enter' && handleTerminalPull()} placeholder="Enter PIN to pull" className="h-11 text-center font-mono tracking-widest" autoComplete="new-password" data-testid="terminal-pin-input" />
                     {terminalError && <p className="text-red-500 text-xs flex items-center gap-1"><AlertTriangle size={12} />{terminalError}</p>}
                     <Button className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white font-semibold" onClick={handleTerminalPull} disabled={terminalLoading || !terminalPin} data-testid="terminal-pull-btn">
                       {terminalLoading ? <RefreshCw size={14} className="animate-spin mr-2" /> : <Package size={14} className="mr-2" />}Pull PO to Terminal
@@ -1365,7 +1621,7 @@ export default function DocViewerPage() {
                 {basic.doc_type === 'branch_transfer' && basic.raw_status === 'sent' && (
                   <>
                     <p className="text-sm text-slate-600 mb-2"><Building2 size={14} className="inline mr-1.5 text-blue-500" />Pull this transfer to your terminal for receiving</p>
-                    <Input type="password" value={terminalPin} onChange={e => { setTerminalPin(e.target.value); setTerminalError(''); }} onKeyDown={e => e.key === 'Enter' && handleTerminalPull()} placeholder="Enter PIN to pull" className="h-11 text-center font-mono tracking-widest" data-testid="terminal-pin-input" />
+                    <Input type="password" value={terminalPin} onChange={e => { setTerminalPin(e.target.value); setTerminalError(''); }} onKeyDown={e => e.key === 'Enter' && handleTerminalPull()} placeholder="Enter PIN to pull" className="h-11 text-center font-mono tracking-widest" autoComplete="new-password" data-testid="terminal-pin-input" />
                     {terminalError && <p className="text-red-500 text-xs flex items-center gap-1"><AlertTriangle size={12} />{terminalError}</p>}
                     <Button className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold" onClick={handleTerminalPull} disabled={terminalLoading || !terminalPin} data-testid="terminal-pull-btn">
                       {terminalLoading ? <RefreshCw size={14} className="animate-spin mr-2" /> : <Building2 size={14} className="mr-2" />}Pull Transfer to Terminal
