@@ -34,33 +34,28 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 - Scheduled jobs (`_daily_sms_reminders`, `_monthly_sms_summary`) now iterate per active organization using `_raw_db`
 - **Result:** Company A's Android gateway only sees Company A's `pending` queue; Company B's templates, settings, and queue are completely isolated
 
-### H10 Thermal Printing — Round 3 Fixes (2026-04-05) — Deployed, Awaiting Physical Test
+### H10 Hardware Integration — FINAL STABLE STATE (2026-04-05) — COMPLETE & WORKING
 
-**All four printing issues addressed:**
+**All hardware features complete and tested on physical H10 device:**
 
-1. **Print Preview Dialog Not Showing** (Android WebView stacking bug)
-   - Fixed `handleShowReceiptPreview` in `TerminalSales.jsx` to call `setShowPrintPrompt(false)` BEFORE `setReceiptPreview(...)` — prevents two overlapping Dialogs in Capacitor WebView
+#### Thermal Printer
+- `PrintEngine.js`: `width: 100%` CSS (not fixed px), viewport meta `width=384`, `-webkit-font-smoothing: none`, all colors pure `#000`, solid borders, font-weight normal on body
+- `PrintBridge.js`: Static `import QRCode from 'qrcode'`, `replaceQrWithLocalDataUrl()` generates 152px (0.75 inch) QR locally — no network
+- Receipt Preview modal: closes "Sale Complete" dialog BEFORE opening preview (prevents WebView stacking)
+- Print 1 or 2 copies with 2-second gap between copies
+- `feedLinesAfter` and `feedPaper()` support for paper positioning
 
-2. **No QR Code on Receipt** (External fetch failure)
-   - Replaced `inlineExternalImages` (network fetch via `fetch()`) in `PrintBridge.js` with `replaceQrWithLocalDataUrl` which uses `qrcode` npm package (installed: v1.5.4) to generate QR codes entirely client-side as base64 PNG data URLs — zero network dependency
+#### HID Barcode Scanner
+- Capture-phase global listener (`addEventListener('keydown', fn, true)`)
+- `SCAN_CHAR_SPEED=50ms` (confirm mode), `SCAN_HUMAN_RESET=300ms` (buffer reset threshold), `SCAN_SETTLE_DELAY=200ms` (process after silence), `elapsed<400ms` validation
+- 300ms human threshold (NOT 50ms) prevents dropping uppercase letters with Shift overhead
+- `scanQtyModalOpenRef` blocks scanner when qty modal is open
+- `lastScanRef` 500ms same-barcode dedup (shared with camera scanner)
+- Skip modes: per-product and skip-all for this receipt
+- **See `/app/memory/H10_PRINTER_COORDINATION.md` for complete technical reference**
 
-3. **Ultra Long Rolling Paper** (HTML content height + Java fallback)
-   - Removed verbose acknowledgment + signature block (~150px) from `orderSlipThermal` in `PrintEngine.js`
-   - **Java fix required**: Change `contentHeight` fallback in `H10PPrinterPlugin.java` from 2000→1000, or add `evaluateJavascript` height measurement — see `H10_PRINTER_COORDINATION.md` for code
+**Files:** `TerminalSales.jsx`, `PrintBridge.js`, `PrintEngine.js`, `H10_PRINTER_COORDINATION.md`
 
-4. **Small Font** (Font sizes too small for 384px→58mm scaling)
-   - Increased `thermalCSS` font sizes: body 13→14px, biz-name 16→18px, grand total 16→18px, meta rows 12→13px, footer 9→11px
-
-**Files modified:** `TerminalSales.jsx`, `PrintBridge.js`, `PrintEngine.js`, `H10_PRINTER_COORDINATION.md`
-
-- **Scan Detection**: Keystroke timing analysis in `TerminalSales.jsx` detects HID scanner input (<50ms between chars, 4+ chars) vs human typing — no Enter key required
-- **Cooldown System**: 1.5s cooldown after processing a scan prevents "types twice" issue from HID scanners
-- **Quantity Prompt**: First scan of a product shows qty dialog; "Auto +1 for This Transaction" enables instant add for subsequent scans
-- **Global Keyboard Listener**: Updated to also work without Enter key for scanners that don't send it
-- **Camera Scanner**: Existing html5-qrcode camera scanner preserved with separate cooldown
-- **Auto-add Reset**: `autoAddProducts` set clears on cart clear (new transaction)
-- Files modified: `TerminalSales.jsx` (lines 48-55 state, 104-170 handlers, 394-409 input, 924-973 dialog)
-- Tests: 100% pass — 16/16 backend + all frontend elements (`test_reports/iteration_157.json`)
 - **New `POST /api/sms/gateway/log`** — Android APK posts single log entry (level, event_type, message, phone, queue_id, device_id)
 - **New `POST /api/sms/gateway/logs/batch`** — Batch POST up to 500 buffered entries (offline-first support)
 - **New `GET /api/sms/gateway/logs`** — Web fetches logs with level/event_type filter, org-scoped
