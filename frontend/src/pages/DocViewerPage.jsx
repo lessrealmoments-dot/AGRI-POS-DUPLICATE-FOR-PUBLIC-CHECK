@@ -1768,6 +1768,29 @@ export default function DocViewerPage() {
               <div className="p-5 text-center"><CheckCircle2 size={32} className="text-emerald-500 mx-auto mb-2" /><p className="text-sm font-semibold text-emerald-700">Action completed successfully</p></div>
             ) : (
               <div className="p-5 space-y-3">
+                {/* Invoice/Sales Receipt Actions */}
+                {basic.doc_type === 'invoice' && (
+                  <>
+                    <div className="border-t border-amber-100 -mx-5 px-5 pt-3 mt-2">
+                      <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide mb-3 text-center">
+                        ──── CORRECTIONS ────
+                      </p>
+                    </div>
+                    <Button 
+                      className="w-full h-11 bg-red-600 hover:bg-red-700 text-white font-semibold flex items-center justify-center gap-2"
+                      onClick={() => toast.info('Return & Refund feature coming soon!')}
+                      data-testid="terminal-return-refund-btn"
+                    >
+                      <RotateCcw size={14} />
+                      Return & Refund
+                    </Button>
+                    <p className="text-xs text-slate-400 text-center -mt-1">
+                      Process customer returns and issue refunds
+                    </p>
+                  </>
+                )}
+                
+                {/* Purchase Order Actions */}
                 {basic.doc_type === 'purchase_order' && ['Draft', 'Ordered', 'In Progress'].includes(basic.status) && (
                   <>
                     <p className="text-sm text-slate-600 mb-2"><Package size={14} className="inline mr-1.5 text-blue-500" />Pull this PO to your terminal for product checking</p>
@@ -1778,6 +1801,8 @@ export default function DocViewerPage() {
                     </Button>
                   </>
                 )}
+                
+                {/* Branch Transfer Actions */}
                 {basic.doc_type === 'branch_transfer' && basic.raw_status === 'sent' && (
                   <>
                     <p className="text-sm text-slate-600 mb-2"><Building2 size={14} className="inline mr-1.5 text-blue-500" />Pull this transfer to your terminal for receiving</p>
@@ -1788,7 +1813,10 @@ export default function DocViewerPage() {
                     </Button>
                   </>
                 )}
-                {!(basic.doc_type === 'purchase_order' && ['Draft', 'Ordered', 'In Progress'].includes(basic.status)) &&
+                
+                {/* No actions available */}
+                {basic.doc_type !== 'invoice' &&
+                 !(basic.doc_type === 'purchase_order' && ['Draft', 'Ordered', 'In Progress'].includes(basic.status)) &&
                  !(basic.doc_type === 'branch_transfer' && basic.raw_status === 'sent') && (
                   <p className="text-sm text-slate-400 text-center py-2">No terminal actions available for this document's current status</p>
                 )}
