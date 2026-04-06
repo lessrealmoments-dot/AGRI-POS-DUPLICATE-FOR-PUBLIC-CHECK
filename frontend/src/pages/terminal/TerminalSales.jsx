@@ -50,7 +50,6 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   const [scanQty, setScanQty] = useState('1');
   const autoAddProductsRef = useRef(new Set());
   const skipAllRef = useRef(false); // when true, all HID scans add 1 with no prompt this receipt
-  const scanDetectRef = useRef({ keyTimes: [], processTimer: null, cooldownUntil: 0 });
   // Receipt preview before printing
   const [receiptPreview, setReceiptPreview] = useState(null); // { html, type, format }
   const [printingCopies, setPrintingCopies] = useState(false);
@@ -108,7 +107,6 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   const SCAN_CHAR_SPEED = 50;      // max ms between chars for scanner
   const SCAN_MIN_CHARS = 4;        // minimum barcode length
   const SCAN_SETTLE_DELAY = 120;   // ms of silence before processing
-  const SCAN_COOLDOWN = 1500;      // ms cooldown after scan (prevents "types twice")
 
   const processBarcodeScan = useCallback((barcode) => {
     const product = products.find(p => p.barcode === barcode);
@@ -139,40 +137,11 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   }, [products, addToCart]);
 
   const handleSearchKeyDown = useCallback((e) => {
-    const now = Date.now();
-    const detect = scanDetectRef.current;
-    // During cooldown after a scan, block all input
-    if (now < detect.cooldownUntil) { e.preventDefault(); return; }
-    if (e.key.length === 1) {
-      detect.keyTimes.push(now);
-      detect.keyTimes = detect.keyTimes.filter(t => now - t < 500);
-      clearTimeout(detect.processTimer);
-      detect.processTimer = setTimeout(() => {
-        const times = detect.keyTimes;
-        if (times.length >= SCAN_MIN_CHARS) {
-          let allFast = true;
-          for (let i = 1; i < times.length; i++) {
-            if (times[i] - times[i - 1] > SCAN_CHAR_SPEED) { allFast = false; break; }
-          }
-          if (allFast) {
-            const barcode = (searchRef.current?.value || '').trim();
-            if (barcode.length >= SCAN_MIN_CHARS) {
-              detect.cooldownUntil = Date.now() + SCAN_COOLDOWN;
-              detect.keyTimes = [];
-              setSearch('');
-              setResults([]);
-              processBarcodeScan(barcode);
-              return;
-            }
-          }
-        }
-        detect.keyTimes = [];
-      }, SCAN_SETTLE_DELAY);
-    }
-  }, [processBarcodeScan]);
+    // Enter on search field picks the first result
+    if (e.key === 'Enter' && results.length > 0) addToCart(results[0]);
+  }, [results, addToCart]);
 
   const handleSearchChange = useCallback((e) => {
-    if (Date.now() < scanDetectRef.current.cooldownUntil) { setSearch(''); return; }
     setSearch(e.target.value);
   }, []);
 
@@ -292,36 +261,62 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
     setScannerActive(false);
   };
 
-  // Barcode keyboard listener (for hardware scanners — works both with and without Enter key)
-  const scanBufferRef = useRef('');
-  const scanTimerRef = useRef(null);
-
+  // Single capture-phase barcode listener — fires BEFORE the input receives the event.
+  // e.preventDefault() in capture phase blocks chars from being inserted into any input field.
   useEffect(() => {
-    const handleKeyPress = (e) => {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-      if (e.key === 'Enter' && scanBufferRef.current.length >= 3) {
-        e.preventDefault();
-        const barcode = scanBufferRef.current.trim();
-        scanBufferRef.current = '';
-        clearTimeout(scanTimerRef.current);
-        processBarcodeScan(barcode);
+    const state = { buf: '', lastMs: 0, scanning: false, timer: null };
+
+    const onKey = (e) => {
+      if (e.key.length !== 1 && e.key !== 'Enter') return;
+      // Let modal inputs (qty fields etc.) work normally — only intercept search or unfocused
+      const tag = (e.target || {}).tagName;
+      if ((tag === 'INPUT' || tag === 'TEXTAREA') && e.target !== searchRef.current) return;
+
+      const now = Date.now();
+
+      if (e.key === 'Enter') {
+        if (state.buf.length >= SCAN_MIN_CHARS && state.scanning) {
+          e.preventDefault();
+          const barcode = state.buf.trim();
+          state.buf = ''; state.lastMs = 0; state.scanning = false;
+          clearTimeout(state.timer);
+          setSearch(''); setResults([]);
+          processBarcodeScan(barcode);
+        }
         return;
       }
-      if (e.key.length === 1) {
-        scanBufferRef.current += e.key;
-        clearTimeout(scanTimerRef.current);
-        scanTimerRef.current = setTimeout(() => {
-          const buffer = scanBufferRef.current.trim();
-          if (buffer.length >= SCAN_MIN_CHARS) {
-            processBarcodeScan(buffer);
+
+      const gap = now - state.lastMs;
+      const isFast = state.lastMs > 0 && gap < SCAN_CHAR_SPEED;
+
+      if (state.buf.length === 0 || isFast) {
+        if (state.buf.length >= 1 && isFast) state.scanning = true;
+        if (state.scanning) {
+          e.preventDefault();           // block char from reaching the input
+          setSearch(''); setResults([]); // clear any char that slipped through
+        }
+        state.buf += e.key;
+        state.lastMs = now;
+        clearTimeout(state.timer);
+        state.timer = setTimeout(() => {
+          if (state.buf.length >= SCAN_MIN_CHARS && state.scanning) {
+            const barcode = state.buf.trim();
+            setSearch(''); setResults([]);
+            processBarcodeScan(barcode);
           }
-          scanBufferRef.current = '';
-        }, 100);
+          state.buf = ''; state.lastMs = 0; state.scanning = false;
+        }, SCAN_SETTLE_DELAY);
+      } else {
+        // Gap too long — human typing, reset buffer
+        state.buf = e.key; state.lastMs = now; state.scanning = false;
+        clearTimeout(state.timer);
+        state.timer = setTimeout(() => { state.buf = ''; state.lastMs = 0; }, SCAN_SETTLE_DELAY);
       }
     };
-    window.addEventListener('keydown', handleKeyPress);
-    return () => { window.removeEventListener('keydown', handleKeyPress); clearTimeout(scanTimerRef.current); };
-  }, [products, addToCart, processBarcodeScan]); // eslint-disable-line
+
+    window.addEventListener('keydown', onKey, true); // true = capture phase
+    return () => { window.removeEventListener('keydown', onKey, true); clearTimeout(state.timer); };
+  }, [processBarcodeScan]); // eslint-disable-line
 
   // Process sale
   // ── Checkout state ──
@@ -1052,14 +1047,14 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
             >
               <Check size={16} className="mr-2" /> Add to Cart
             </Button>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="flex flex-col gap-2">
               <Button
                 variant="outline"
                 onClick={() => handleScanQtyConfirm('skip_product')}
                 className="w-full text-slate-600 h-10 text-xs"
                 data-testid="scan-qty-skip-product-btn"
               >
-                Skip — this product
+                Skip — this product only (auto +1)
               </Button>
               <Button
                 variant="outline"
@@ -1067,7 +1062,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
                 className="w-full text-amber-700 border-amber-300 hover:bg-amber-50 h-10 text-xs"
                 data-testid="scan-qty-skip-all-btn"
               >
-                Skip — all products
+                Skip — all products this receipt (auto +1)
               </Button>
             </div>
             <p className="text-[10px] text-slate-400 text-center -mt-1">Skip adds 1 and removes prompts for this receipt</p>
