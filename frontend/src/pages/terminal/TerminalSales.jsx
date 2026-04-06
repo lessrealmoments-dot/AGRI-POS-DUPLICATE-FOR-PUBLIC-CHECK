@@ -109,7 +109,8 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   }, [activeScheme]);
 
   // ── HID Barcode Scanner Detection ──────────────────────────────────────────
-  const SCAN_CHAR_SPEED = 50;      // max ms between chars for scanner
+  const SCAN_CHAR_SPEED = 100;     // max ms between chars for scanner (raised from 50 — Shift modifier adds overhead for uppercase letters)
+  const SCAN_CHAR_SPEED_MID = 150; // more lenient gap allowed once scanning mode is confirmed
   const SCAN_MIN_CHARS = 4;        // minimum barcode length
   const SCAN_SETTLE_DELAY = 120;   // ms of silence before processing
 
@@ -301,7 +302,8 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
       }
 
       const gap = now - state.lastMs;
-      const isFast = state.lastMs > 0 && gap < SCAN_CHAR_SPEED;
+      const threshold = state.scanning ? SCAN_CHAR_SPEED_MID : SCAN_CHAR_SPEED;
+      const isFast = state.lastMs > 0 && gap < threshold;
 
       if (state.buf.length === 0 || isFast) {
         if (state.buf.length >= 1 && isFast) state.scanning = true;
@@ -321,10 +323,28 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
           state.buf = ''; state.lastMs = 0; state.scanning = false;
         }, SCAN_SETTLE_DELAY);
       } else {
-        // Gap too long — human typing, reset buffer
-        state.buf = e.key; state.lastMs = now; state.scanning = false;
-        clearTimeout(state.timer);
-        state.timer = setTimeout(() => { state.buf = ''; state.lastMs = 0; }, SCAN_SETTLE_DELAY);
+        // Gap too long — if already scanning, keep buffer and wait (single slow char mid-scan)
+        // Only fully reset if we haven't confirmed scan mode yet
+        if (state.scanning) {
+          // Stay in scan mode, keep accumulating — this char was just slow (e.g. Shift overhead)
+          e.preventDefault();
+          state.buf += e.key;
+          state.lastMs = now;
+          clearTimeout(state.timer);
+          state.timer = setTimeout(() => {
+            if (state.buf.length >= SCAN_MIN_CHARS && state.scanning) {
+              const barcode = state.buf.trim();
+              setSearch(''); setResults([]);
+              processBarcodeScan(barcode);
+            }
+            state.buf = ''; state.lastMs = 0; state.scanning = false;
+          }, SCAN_SETTLE_DELAY);
+        } else {
+          // Not yet in scan mode — treat as start of new input
+          state.buf = e.key; state.lastMs = now; state.scanning = false;
+          clearTimeout(state.timer);
+          state.timer = setTimeout(() => { state.buf = ''; state.lastMs = 0; }, SCAN_SETTLE_DELAY);
+        }
       }
     };
 
