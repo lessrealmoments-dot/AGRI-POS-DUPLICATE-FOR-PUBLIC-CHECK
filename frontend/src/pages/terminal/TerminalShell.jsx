@@ -9,6 +9,7 @@ import TerminalDocUpload from './TerminalDocUpload';
 import axios from 'axios';
 import PrintEngine from '../../lib/PrintEngine';
 import PrintBridge from '../../lib/PrintBridge';
+import { DeviceIdentity } from '../../plugins/DeviceIdentityPlugin';
 import {
   cacheProducts, getProducts, cacheCustomers,
   cachePriceSchemes, cacheInventory,
@@ -279,7 +280,7 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
         setQuickScanDoc({ code: docCode, basic: res.data, loading: false });
       } catch {
         setQuickScanDoc(null);
-        navigate(`/doc/${docCode}?branch=${session.branchId}`);
+        navigate(`/doc/${docCode}?branch=${session.branchId}&device=${session.deviceId || ''}`);
       }
       return;
     }
@@ -290,7 +291,7 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
       return;
     }
     // Falls through — product barcode handled by TerminalSales keyboard listener
-  }, [navigate, session.branchId, session.token, performDocSearch]); // eslint-disable-line
+  }, [navigate, session.branchId, session.token, session.deviceId, performDocSearch]); // eslint-disable-line
 
   // ── QR Camera Scanner (for scanning document QR codes) ──────────────────
   const startQrScanner = useCallback(async () => {
@@ -484,6 +485,24 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // Bind this device's ID to the terminal session (handles code-based pairing
+  // where device_id wasn't available at pairing time; idempotent, fire-and-forget)
+  useEffect(() => {
+    if (!session.terminalId) return;
+    DeviceIdentity.getDeviceId()
+      .then(({ deviceId }) => {
+        if (!deviceId) return;
+        // Update local session with deviceId if not already set
+        if (!session.deviceId && onSessionUpdate) onSessionUpdate({ deviceId });
+        // Bind to backend session
+        axios.post(`${BACKEND_URL}/api/terminal/bind-device`, {
+          terminal_id: session.terminalId,
+          device_id: deviceId,
+        }, { headers: { Authorization: `Bearer ${tokenRef.current}` } }).catch(() => {}); // fire-and-forget
+      })
+      .catch(() => {});
+  }, [session.terminalId]); // eslint-disable-line
+
   // Auto sync
   useEffect(() => {
     startAutoSync(() => session.branchId);
@@ -538,7 +557,7 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
                     // Auto-navigate if it looks like a raw 8-char doc code
                     const code = v.trim();
                     if (/^[A-Z0-9]{8}$/.test(code) && !/^\d+$/.test(code)) {
-                      navigate(`/doc/${code}?branch=${session.branchId}`);
+                      navigate(`/doc/${code}?branch=${session.branchId}&device=${session.deviceId || ''}`);
                       setShowDocSearch(false); setDocCodeInput(''); setDocSearchResults([]);
                       return;
                     }
@@ -565,7 +584,7 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
               {docSearchResults.length > 0 && (
                 <div className="absolute top-8 left-0 right-0 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden min-w-[240px]" data-testid="doc-search-results">
                   {docSearchResults.map((r, i) => (
-                    <button key={i} onClick={() => { navigate(`/doc/${r.doc_code}?branch=${session.branchId}`); setShowDocSearch(false); setDocCodeInput(''); setDocSearchResults([]); }}
+                    <button key={i} onClick={() => { navigate(`/doc/${r.doc_code}?branch=${session.branchId}&device=${session.deviceId || ''}`); setShowDocSearch(false); setDocCodeInput(''); setDocSearchResults([]); }}
                       className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-emerald-50 border-b border-slate-50 last:border-0"
                       data-testid={`doc-search-result-${r.doc_code}`}
                     >
@@ -873,7 +892,7 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
                   </button>
                   <button
                     onClick={() => {
-                      navigate(`/doc/${quickScanDoc.code}?branch=${session.branchId}`);
+                      navigate(`/doc/${quickScanDoc.code}?branch=${session.branchId}&device=${session.deviceId || ''}`);
                       setQuickScanDoc(null);
                     }}
                     className="col-span-2 flex items-center justify-center gap-2 py-3 rounded-2xl border-2 border-slate-200 text-slate-600 font-medium text-sm active:scale-95 transition-transform"

@@ -3,6 +3,7 @@ import { Loader2, Smartphone, RefreshCw, KeyRound, Hash, ChevronRight } from 'lu
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
+import { DeviceIdentity } from '../../plugins/DeviceIdentityPlugin';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const WS_URL = BACKEND_URL.replace(/^http/, 'ws');
@@ -33,31 +34,37 @@ export default function TerminalPairScreen({ onPaired }) {
       window.history.replaceState({}, '', window.location.pathname);
       setStatus('qr_pairing');
       setQrMessage('Connecting to branch...');
-      fetch(`${BACKEND_URL}/api/terminal/qr-pair`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: pairToken }),
-      })
-        .then(res => res.json().then(data => ({ ok: res.ok, data })))
-        .then(({ ok, data }) => {
-          if (ok && data.status === 'paired') {
-            onPaired({
-              token: data.token,
-              terminalId: data.terminal_id,
-              branchId: data.branch_id,
-              branchName: data.branch_name,
-              userName: data.user_name,
-              organizationId: data.organization_id,
-            });
-          } else {
-            setQrMessage(data.detail || 'QR pairing failed — use the code instead');
-            setTimeout(() => { setStatus('loading'); generateCode(); }, 2000);
-          }
+      DeviceIdentity.getDeviceId().then(({ deviceId }) => {
+        fetch(`${BACKEND_URL}/api/terminal/qr-pair`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: pairToken, device_id: deviceId }),
         })
-        .catch(() => {
-          setQrMessage('Connection failed — falling back to code');
-          setTimeout(() => { setStatus('loading'); generateCode(); }, 2000);
-        });
+          .then(res => res.json().then(data => ({ ok: res.ok, data })))
+          .then(({ ok, data }) => {
+            if (ok && data.status === 'paired') {
+              onPaired({
+                token: data.token,
+                terminalId: data.terminal_id,
+                branchId: data.branch_id,
+                branchName: data.branch_name,
+                userName: data.user_name,
+                organizationId: data.organization_id,
+                deviceId,
+              });
+            } else {
+              setQrMessage(data.detail || 'QR pairing failed — use the code instead');
+              setTimeout(() => { setStatus('loading'); generateCode(); }, 2000);
+            }
+          })
+          .catch(() => {
+            setQrMessage('Connection failed — falling back to code');
+            setTimeout(() => { setStatus('loading'); generateCode(); }, 2000);
+          });
+      }).catch(() => {
+        setQrMessage('Connection failed — falling back to code');
+        setTimeout(() => { setStatus('loading'); generateCode(); }, 2000);
+      });
       return;
     }
     generateCode();
@@ -100,13 +107,25 @@ export default function TerminalPairScreen({ onPaired }) {
           if (msg.type === 'paired') {
             clearInterval(pollRef.current);
             clearInterval(countdownRef.current);
-            onPaired({
-              token: msg.data.token,
-              terminalId: msg.data.terminal_id,
-              branchId: msg.data.branch_id,
-              branchName: msg.data.branch_name,
-              userName: msg.data.user_name,
-              organizationId: msg.data.organization_id,
+            DeviceIdentity.getDeviceId().then(({ deviceId }) => {
+              onPaired({
+                token: msg.data.token,
+                terminalId: msg.data.terminal_id,
+                branchId: msg.data.branch_id,
+                branchName: msg.data.branch_name,
+                userName: msg.data.user_name,
+                organizationId: msg.data.organization_id,
+                deviceId,
+              });
+            }).catch(() => {
+              onPaired({
+                token: msg.data.token,
+                terminalId: msg.data.terminal_id,
+                branchId: msg.data.branch_id,
+                branchName: msg.data.branch_name,
+                userName: msg.data.user_name,
+                organizationId: msg.data.organization_id,
+              });
             });
           }
         };
@@ -128,13 +147,25 @@ export default function TerminalPairScreen({ onPaired }) {
         if (data.status === 'paired') {
           clearInterval(pollRef.current);
           clearInterval(countdownRef.current);
-          onPaired({
-            token: data.token,
-            terminalId: data.terminal_id,
-            branchId: data.branch_id,
-            branchName: data.branch_name,
-            userName: data.user_name,
-            organizationId: data.organization_id,
+          DeviceIdentity.getDeviceId().then(({ deviceId }) => {
+            onPaired({
+              token: data.token,
+              terminalId: data.terminal_id,
+              branchId: data.branch_id,
+              branchName: data.branch_name,
+              userName: data.user_name,
+              organizationId: data.organization_id,
+              deviceId,
+            });
+          }).catch(() => {
+            onPaired({
+              token: data.token,
+              terminalId: data.terminal_id,
+              branchId: data.branch_id,
+              branchName: data.branch_name,
+              userName: data.user_name,
+              organizationId: data.organization_id,
+            });
           });
         } else if (data.status === 'expired') {
           setStatus('expired');
@@ -149,10 +180,11 @@ export default function TerminalPairScreen({ onPaired }) {
     setCredLoading(true);
     setCredError('');
     try {
+      const { deviceId } = await DeviceIdentity.getDeviceId().catch(() => ({ deviceId: '' }));
       const res = await fetch(`${BACKEND_URL}/api/terminal/credential-pair`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, branch_id: selectedBranchId || undefined }),
+        body: JSON.stringify({ email, password, branch_id: selectedBranchId || undefined, device_id: deviceId }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -174,6 +206,7 @@ export default function TerminalPairScreen({ onPaired }) {
           branchName: data.branch_name,
           userName: data.user_name,
           organizationId: data.organization_id,
+          deviceId,
         });
       }
     } catch {

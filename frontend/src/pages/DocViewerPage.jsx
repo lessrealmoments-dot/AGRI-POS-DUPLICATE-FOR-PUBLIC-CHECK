@@ -306,7 +306,7 @@ function TerminalRequiredBanner() {
 }
 
 // ── Unified Stock Release Manager (PIN-gated: history + form + confirmation) ──
-function StockReleaseManager({ basic, docCode, onStatusChange, terminalId }) {
+function StockReleaseManager({ basic, docCode, onStatusChange, terminalId, deviceId = '' }) {
   // States: 'locked' | 'verifying' | 'unlocked' | 'confirming' | 'done'
   const [state, setState] = useState('locked');
   const [lockout, setLockout] = useState(null); // { retryAfter }
@@ -380,7 +380,7 @@ function StockReleaseManager({ basic, docCode, onStatusChange, terminalId }) {
     const items = confirmItems.map(it => ({ sold_product_id: it.sold_product_id, qty_release: parseFloat(it.input_qty) }));
     try {
       const res = await axios.post(`${BACKEND}/api/qr-actions/${docCode}/release_stocks`, {
-        pin: verifiedPin, release_ref: releaseRef, items, terminal_id: terminalId,
+        pin: verifiedPin, release_ref: releaseRef, items, terminal_id: terminalId, device_id: deviceId,
       });
       setReleaseResult(res.data);
       setReleases(prev => [...prev, {
@@ -668,7 +668,7 @@ function StockReleaseManager({ basic, docCode, onStatusChange, terminalId }) {
 
 
 // ── Receive Payment Panel (lives inside Tier 2 — PIN already verified) ────────
-function ReceivePaymentPanel({ basic, docCode, storedPin, onPaymentRecorded, terminalId }) {
+function ReceivePaymentPanel({ basic, docCode, storedPin, onPaymentRecorded, terminalId, deviceId = '' }) {
   const [state, setState] = useState('idle'); // idle | form | confirming | done
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState('Cash');
@@ -731,6 +731,7 @@ function ReceivePaymentPanel({ basic, docCode, storedPin, onPaymentRecorded, ter
         upload_session_id: uploadSessionId || undefined,
         payment_ref: paymentRef,
         terminal_id: terminalId,
+        device_id: deviceId,
       });
       setResult(res.data);
       setBalance(res.data.new_balance);
@@ -883,7 +884,7 @@ function ReceivePaymentPanel({ basic, docCode, storedPin, onPaymentRecorded, ter
 }
 
 // ── Transfer Receive Panel (top-level PIN-gated panel for branch transfers) ───
-function TransferReceivePanel({ basic, docCode, onReceived, terminalId }) {
+function TransferReceivePanel({ basic, docCode, onReceived, terminalId, deviceId = '' }) {
   const [state, setState] = useState('locked'); // locked | verifying | unlocked | confirming | done
   const [pin, setPin] = useState('');
   const [pinError, setPinError] = useState('');
@@ -942,7 +943,7 @@ function TransferReceivePanel({ basic, docCode, onReceived, terminalId }) {
     }));
     try {
       const res = await axios.post(`${BACKEND}/api/qr-actions/${docCode}/transfer_receive`, {
-        pin: verifiedPin, items, notes, transfer_ref: transferRef, terminal_id: terminalId,
+        pin: verifiedPin, items, notes, transfer_ref: transferRef, terminal_id: terminalId, device_id: deviceId,
       });
       setResult(res.data);
       if (onReceived) onReceived(res.data);
@@ -1131,6 +1132,7 @@ export default function DocViewerPage() {
 
   // Terminal branch context — passed as ?branch= when navigating from terminal
   const terminalBranchId = searchParams.get('branch') || '';
+  const terminalDeviceId = searchParams.get('device') || terminalSession?.deviceId || '';
 
   const [basic, setBasic] = useState(null);
   const [loading, setLoading] = useState(!!code);
@@ -1399,6 +1401,7 @@ export default function DocViewerPage() {
               docCode={code?.toUpperCase()}
               onStatusChange={(s) => setReleaseStatus(s)}
               terminalId={terminalSession?.terminalId}
+              deviceId={terminalDeviceId}
             />
           ) : <TerminalRequiredBanner />
         )}
@@ -1411,6 +1414,7 @@ export default function DocViewerPage() {
               docCode={code?.toUpperCase()}
               onReceived={(r) => setBasic(prev => ({ ...prev, status: r.status === 'received_pending' ? 'Pending Review' : 'Completed', available_actions: [] }))}
               terminalId={terminalSession?.terminalId}
+              deviceId={terminalDeviceId}
             />
           ) : <TerminalRequiredBanner />
         )}
@@ -1533,6 +1537,7 @@ export default function DocViewerPage() {
                     docCode={code?.toUpperCase()}
                     storedPin={unlockedPin}
                     terminalId={terminalSession?.terminalId}
+                    deviceId={terminalDeviceId}
                     onPaymentRecorded={(r) => {
                       setBasic(prev => ({ ...prev, balance: r.new_balance, available_actions: r.new_balance <= 0 ? prev.available_actions?.filter(a => a !== 'receive_payment') : prev.available_actions }));
                       setFullData(prev => ({ ...prev, payments: [...(prev.payments || []), r.payment] }));
@@ -1552,6 +1557,7 @@ export default function DocViewerPage() {
                     docCode={code?.toUpperCase()}
                     storedPin={unlockedPin}
                     terminalId={terminalSession?.terminalId}
+                    deviceId={terminalDeviceId}
                     onPaymentRecorded={(r) => {
                       setBasic(prev => ({ ...prev, balance: r.new_balance, available_actions: r.new_balance <= 0 ? prev.available_actions?.filter(a => a !== 'receive_payment') : prev.available_actions }));
                       setFullData(prev => ({ ...prev, payments: [r.payment] }));

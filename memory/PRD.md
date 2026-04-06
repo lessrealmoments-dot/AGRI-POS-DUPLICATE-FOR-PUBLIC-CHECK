@@ -35,6 +35,7 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 - **Result:** Company A's Android gateway only sees Company A's `pending` queue; Company B's templates, settings, and queue are completely isolated
 
 ### DocViewer Security Redesign + Terminal Back Navigation (2026-04-06) — Complete
+### Terminal Device Authentication Hardening (2026-04-06) — Complete
 
 #### Back to Terminal
 - Sticky "← Back to Terminal" bar at top of DocViewerPage when accessed from a paired terminal

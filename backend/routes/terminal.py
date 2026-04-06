@@ -219,6 +219,7 @@ async def qr_pair_terminal(data: dict):
     initiating_user = await _raw_db.users.find_one({"id": doc["user_id"]}, {"_id": 0, "role": 1})
     actual_role = initiating_user.get("role", "manager") if initiating_user else "manager"
     session_token = create_token(doc["user_id"], actual_role, org_id=doc.get("organization_id"))
+    device_id = (data.get("device_id") or "").strip()
     session = {
         "id": new_id(), "terminal_id": terminal_id, "code": f"QR-{token[:8]}",
         "branch_id": doc["branch_id"], "branch_name": doc["branch_name"],
@@ -226,6 +227,7 @@ async def qr_pair_terminal(data: dict):
         "organization_id": doc.get("organization_id"), "token": session_token,
         "status": "active", "paired_at": now_iso(), "last_seen": now_iso(),
         "paired_via": "qr",
+        "device_id": device_id,
     }
     await _raw_db.terminal_sessions.insert_one(session)
     await _raw_db.qr_pair_tokens.update_one(
@@ -293,6 +295,7 @@ async def credential_pair_terminal(data: dict):
     # Create terminal session
     terminal_id = new_id()
     token = create_token(user["id"], user["role"], org_id=org_id)
+    device_id = (data.get("device_id") or "").strip()
 
     session = {
         "id": new_id(), "terminal_id": terminal_id, "code": f"CRED-{email[:8]}",
@@ -303,6 +306,7 @@ async def credential_pair_terminal(data: dict):
         "status": "active", "paired_at": now_iso(), "last_seen": now_iso(),
         "paired_via": "credential",
         "is_admin": is_admin,
+        "device_id": device_id,
     }
     await _raw_db.terminal_sessions.insert_one(session)
 
@@ -349,6 +353,45 @@ async def get_terminal_session(user=Depends(get_current_user)):
         "user_name": session.get("user_name", ""),
         "paired_at": session["paired_at"],
     }
+
+
+@router.post("/bind-device")
+async def bind_device_to_session(data: dict):
+    """
+    Bind a physical device ID to an active terminal session.
+    Called by TerminalShell on first load — handles code-based pairing where
+    the terminal couldn't send device_id during the pairing flow (admin initiated it).
+    Idempotent: safe to call multiple times with the same device_id.
+    No auth required — terminal_id + token are used as proof of identity.
+    """
+    terminal_id = (data.get("terminal_id") or "").strip()
+    device_id   = (data.get("device_id")   or "").strip()
+
+    if not terminal_id or not device_id:
+        raise HTTPException(status_code=400, detail="terminal_id and device_id required")
+
+    session = await _raw_db.terminal_sessions.find_one(
+        {"terminal_id": terminal_id, "status": "active"}, {"_id": 0, "device_id": 1}
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Active terminal session not found")
+
+    stored_device_id = session.get("device_id", "")
+
+    # If session already has a device_id that differs from what's being sent → reject
+    # (prevents a different device from hijacking an already-bound session)
+    if stored_device_id and stored_device_id != device_id:
+        raise HTTPException(
+            status_code=403,
+            detail="This terminal session is already bound to a different device. Re-pair to link a new device."
+        )
+
+    # Bind device_id (or update if unbound)
+    await _raw_db.terminal_sessions.update_one(
+        {"terminal_id": terminal_id},
+        {"$set": {"device_id": device_id, "last_seen": now_iso()}}
+    )
+    return {"bound": True, "terminal_id": terminal_id}
 
 
 @router.get("/active")

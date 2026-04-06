@@ -24,8 +24,9 @@ from utils.security import (
 router = APIRouter(prefix="/qr-actions", tags=["QR Actions"])
 
 
-async def _verify_terminal_session(terminal_id: str):
+async def _verify_terminal_session(terminal_id: str, device_id: str = ""):
     """Verify that a terminal_id corresponds to an active terminal session.
+    Also verifies device binding if the session was paired with a device_id.
     QR actions (stock release, payment, transfer/PO receive) require a paired terminal."""
     if not terminal_id:
         raise HTTPException(
@@ -34,12 +35,23 @@ async def _verify_terminal_session(terminal_id: str):
         )
     from config import _raw_db
     session = await _raw_db.terminal_sessions.find_one(
-        {"terminal_id": terminal_id, "status": "active"}, {"_id": 0, "terminal_id": 1}
+        {"terminal_id": terminal_id, "status": "active"}, {"_id": 0, "terminal_id": 1, "device_id": 1}
     )
     if not session:
         raise HTTPException(
             status_code=403,
             detail="Invalid or expired terminal session. Please re-pair the terminal."
+        )
+
+    # Device binding — only enforce when BOTH session and caller have a non-empty device_id
+    stored_device_id = session.get("device_id", "")
+    if stored_device_id and device_id and stored_device_id != device_id:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "message": "Device mismatch. This session was paired on a different device. Please re-pair.",
+                "code": "DEVICE_MISMATCH",
+            }
         )
 
 
@@ -173,7 +185,7 @@ async def release_stocks(code: str, data: dict, request: Request):
       terminal_id: str (required — active terminal session)
     }
     """
-    await _verify_terminal_session(data.get("terminal_id", ""))
+    await _verify_terminal_session(data.get("terminal_id", ""), data.get("device_id", ""))
 
     pin = (data.get("pin") or "").strip()
     release_ref = (data.get("release_ref") or "").strip()
@@ -471,7 +483,7 @@ async def receive_payment(code: str, data: dict, request: Request):
 
     # Path 1: Terminal device — verify session early (fail-fast)
     if terminal_id:
-        await _verify_terminal_session(terminal_id)
+        await _verify_terminal_session(terminal_id, data.get("device_id", ""))
 
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be greater than zero")
@@ -674,7 +686,7 @@ async def qr_transfer_receive(code: str, data: dict, request: Request):
 
     Body: { pin, items: [{product_id, qty_received}], notes, transfer_ref (idempotency UUID), terminal_id }
     """
-    await _verify_terminal_session(data.get("terminal_id", ""))
+    await _verify_terminal_session(data.get("terminal_id", ""), data.get("device_id", ""))
 
     pin          = (data.get("pin") or "").strip()
     items_input  = data.get("items", [])

@@ -348,22 +348,24 @@ QR ACTION (new):
 
 ## 10. FILES CHANGED SUMMARY
 
-### Cursor (Android) creates/modifies:
+### Cursor (Android) — ✅ DONE
 | File | Change |
 |---|---|
 | `frontend/android/app/src/main/java/com/agribooks/terminal/DeviceIdentityPlugin.java` | **NEW** — exposes `getDeviceId()` |
-| `frontend/android/app/src/main/java/com/agribooks/terminal/MainActivity.java` | Register `DeviceIdentityPlugin` |
+| `frontend/android/app/src/main/java/com/agribooks/terminal/MainActivity.java` | Registers `DeviceIdentityPlugin` before `super.onCreate()` |
 
-### Emergent (Web) creates/modifies:
+### Emergent (Web) — ✅ DONE
 | File | Change |
 |---|---|
-| `frontend/src/plugins/DeviceIdentityPlugin.js` | **NEW** — Capacitor JS bridge with browser fallback |
-| `frontend/src/pages/terminal/TerminalPairScreen.jsx` | Call `getDeviceId()`, send in pairing request, include in `onPaired()` data |
-| `frontend/src/pages/terminal/TerminalShell.jsx` | Pass `session.deviceId` to DocViewer navigation |
-| `frontend/src/pages/DocViewerPage.jsx` | Read `device=` param, pass `deviceId` to action panels |
-| `frontend/src/pages/DocViewerPage.jsx` (panels) | Send `device_id` in all three panel API calls |
-| `backend/routes/terminal.py` | Store `device_id` in session on pairing (both flows) |
-| `backend/routes/qr_actions.py` | Accept + verify `device_id` in `_verify_terminal_session()` |
+| `frontend/src/plugins/DeviceIdentityPlugin.js` | **NEW** — Capacitor JS bridge + browser fallback |
+| `frontend/src/pages/terminal/TerminalPairScreen.jsx` | Calls `getDeviceId()` in all 4 pairing flows (QR URL, WebSocket, polling, credential); sends `device_id` in backend requests; includes `deviceId` in `onPaired()` data |
+| `frontend/src/pages/terminal/TerminalShell.jsx` | Calls `POST /api/terminal/bind-device` on init (handles code-pairing); passes `?device=` param in all `/doc/` navigations |
+| `frontend/src/pages/DocViewerPage.jsx` | Reads `terminalDeviceId` from `?device=` param; passes `deviceId` prop to all 3 action panels |
+| `frontend/src/pages/DocViewerPage.jsx` (StockReleaseManager) | Sends `device_id` in `release_stocks` API call |
+| `frontend/src/pages/DocViewerPage.jsx` (ReceivePaymentPanel) | Sends `device_id` in `receive_payment` API call |
+| `frontend/src/pages/DocViewerPage.jsx` (TransferReceivePanel) | Sends `device_id` in `transfer_receive` API call |
+| `backend/routes/terminal.py` | Stores `device_id` in session on QR pair + credential pair; new `POST /api/terminal/bind-device` for code pairing |
+| `backend/routes/qr_actions.py` | `_verify_terminal_session(terminal_id, device_id)` now verifies device binding; all 3 action endpoints pass `device_id` |
 
 ---
 
