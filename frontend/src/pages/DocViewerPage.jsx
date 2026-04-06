@@ -1321,12 +1321,10 @@ export default function DocViewerPage() {
   };
 
   // Tier 1 reprint — uses public view data (basic), available without PIN.
-  // Uses buildTier1PrintData to fix field mapping and template selection.
-  // Pass updatedBasic to override balance/amount_paid after payment actions.
+  // Always uses basic (never fullData.document) because basic is kept live-updated
+  // after payments, whereas fullData.document is fetched once at PIN unlock time.
   const handleTier1Reprint = async (format = 'thermal', updatedBasic = null) => {
     const src = updatedBasic || basic;
-    // Prefer full document data if already unlocked (better quality)
-    if (fullData?.document && !updatedBasic) return handleReprint(format);
     const printData = buildTier1PrintData(src);
     let docType;
     if (src.doc_type === 'invoice') docType = PrintEngine.getDocType(printData);
@@ -1685,7 +1683,12 @@ export default function DocViewerPage() {
                     onReprintRequested={() => handleTier1Reprint('thermal')}
                     onPaymentRecorded={(r) => {
                       setBasic(prev => ({ ...prev, balance: r.new_balance, available_actions: r.new_balance <= 0 ? prev.available_actions?.filter(a => a !== 'receive_payment') : prev.available_actions }));
-                      setFullData(prev => ({ ...prev, payments: [...(prev.payments || []), r.payment] }));
+                      // Keep fullData.document in sync so Tier 2 reprint buttons also show correct balance
+                      setFullData(prev => prev ? ({
+                        ...prev,
+                        payments: [...(prev.payments || []), r.payment],
+                        document: prev.document ? { ...prev.document, balance: Math.max(0, r.new_balance), amount_paid: (prev.document.amount_paid || 0) + r.payment.amount, status: r.new_balance <= 0 ? 'paid' : 'partial' } : prev.document,
+                      }) : prev);
                     }}
                   />
                 ) : null}
@@ -1706,7 +1709,11 @@ export default function DocViewerPage() {
                     onReprintRequested={() => handleTier1Reprint('thermal')}
                     onPaymentRecorded={(r) => {
                       setBasic(prev => ({ ...prev, balance: r.new_balance, available_actions: r.new_balance <= 0 ? prev.available_actions?.filter(a => a !== 'receive_payment') : prev.available_actions }));
-                      setFullData(prev => ({ ...prev, payments: [r.payment] }));
+                      setFullData(prev => prev ? ({
+                        ...prev,
+                        payments: [r.payment],
+                        document: prev.document ? { ...prev.document, balance: Math.max(0, r.new_balance), amount_paid: (prev.document.amount_paid || 0) + r.payment.amount, status: r.new_balance <= 0 ? 'paid' : 'partial' } : prev.document,
+                      }) : prev);
                     }}
                   />
                 ) : null}
