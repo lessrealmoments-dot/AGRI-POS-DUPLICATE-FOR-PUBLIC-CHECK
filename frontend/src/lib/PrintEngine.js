@@ -14,7 +14,7 @@ const TAX_DISCLAIMER = 'THIS DOCUMENT IS NOT VALID FOR CLAIMING INPUT TAX. THIS 
 
 function formatPHP(v) {
   const n = parseFloat(v) || 0;
-  return `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `P${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function fmtDate(d) {
