@@ -109,10 +109,10 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   }, [activeScheme]);
 
   // ── HID Barcode Scanner Detection ──────────────────────────────────────────
-  const SCAN_CHAR_SPEED = 100;     // max ms between chars for scanner (raised from 50 — Shift modifier adds overhead for uppercase letters)
-  const SCAN_CHAR_SPEED_MID = 150; // more lenient gap allowed once scanning mode is confirmed
-  const SCAN_MIN_CHARS = 4;        // minimum barcode length
-  const SCAN_SETTLE_DELAY = 120;   // ms of silence before processing
+  const SCAN_CHAR_SPEED = 50;       // ms gap to confirm scanning mode (two consecutive fast chars)
+  const SCAN_HUMAN_RESET = 300;     // ms gap that means human typing → hard reset buffer
+  const SCAN_MIN_CHARS = 4;         // minimum barcode length
+  const SCAN_SETTLE_DELAY = 200;    // ms silence after last char before processing (200ms > Shift overhead)
 
   const processBarcodeScan = useCallback((barcode) => {
     // Dedup: ignore same barcode scanned within 500ms (scanner bounce protection)
@@ -275,7 +275,22 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   // Single capture-phase barcode listener — fires BEFORE the input receives the event.
   // e.preventDefault() in capture phase blocks chars from being inserted into any input field.
   useEffect(() => {
-    const state = { buf: '', lastMs: 0, scanning: false, timer: null };
+    // buf    — accumulated chars for the current scan
+    // firstMs — timestamp of first char (for total elapsed validation)
+    // lastMs  — timestamp of last char (for gap checks)
+    // scanning — true once two consecutive chars arrived within SCAN_CHAR_SPEED
+    const state = { buf: '', firstMs: 0, lastMs: 0, scanning: false, timer: null };
+
+    const flush = () => {
+      const barcode = state.buf.trim();
+      const elapsed = state.lastMs - state.firstMs;
+      state.buf = ''; state.firstMs = 0; state.lastMs = 0; state.scanning = false;
+      // Validate it's a real scan: enough chars AND arrived fast enough for a scanner
+      if (barcode.length >= SCAN_MIN_CHARS && elapsed < 400) {
+        setSearch(''); setResults([]);
+        processBarcodeScan(barcode);
+      }
+    };
 
     const onKey = (e) => {
       if (e.key.length !== 1 && e.key !== 'Enter') return;
@@ -283,69 +298,50 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
       // Qty modal is open — block ALL scanner input so it doesn't type into the qty field
       if (scanQtyModalOpenRef.current) { e.preventDefault(); return; }
 
-      // Let modal inputs (qty fields etc.) work normally — only intercept search or unfocused
+      // Let other modal inputs work normally — only intercept search field or unfocused page
       const tag = (e.target || {}).tagName;
       if ((tag === 'INPUT' || tag === 'TEXTAREA') && e.target !== searchRef.current) return;
 
       const now = Date.now();
 
+      // Enter = process immediately (scanner sends Enter at end of barcode)
       if (e.key === 'Enter') {
         if (state.buf.length >= SCAN_MIN_CHARS && state.scanning) {
           e.preventDefault();
-          const barcode = state.buf.trim();
-          state.buf = ''; state.lastMs = 0; state.scanning = false;
           clearTimeout(state.timer);
-          setSearch(''); setResults([]);
-          processBarcodeScan(barcode);
+          flush();
         }
         return;
       }
 
       const gap = now - state.lastMs;
-      const threshold = state.scanning ? SCAN_CHAR_SPEED_MID : SCAN_CHAR_SPEED;
-      const isFast = state.lastMs > 0 && gap < threshold;
 
-      if (state.buf.length === 0 || isFast) {
-        if (state.buf.length >= 1 && isFast) state.scanning = true;
-        if (state.scanning) {
-          e.preventDefault();           // block char from reaching the input
-          setSearch(''); setResults([]); // clear any char that slipped through
-        }
-        state.buf += e.key;
-        state.lastMs = now;
+      // Hard reset: gap > 300ms with chars in buffer = definitely human typing, start fresh
+      if (state.buf.length > 0 && gap > SCAN_HUMAN_RESET) {
         clearTimeout(state.timer);
-        state.timer = setTimeout(() => {
-          if (state.buf.length >= SCAN_MIN_CHARS && state.scanning) {
-            const barcode = state.buf.trim();
-            setSearch(''); setResults([]);
-            processBarcodeScan(barcode);
-          }
-          state.buf = ''; state.lastMs = 0; state.scanning = false;
-        }, SCAN_SETTLE_DELAY);
-      } else {
-        // Gap too long — if already scanning, keep buffer and wait (single slow char mid-scan)
-        // Only fully reset if we haven't confirmed scan mode yet
-        if (state.scanning) {
-          // Stay in scan mode, keep accumulating — this char was just slow (e.g. Shift overhead)
-          e.preventDefault();
-          state.buf += e.key;
-          state.lastMs = now;
-          clearTimeout(state.timer);
-          state.timer = setTimeout(() => {
-            if (state.buf.length >= SCAN_MIN_CHARS && state.scanning) {
-              const barcode = state.buf.trim();
-              setSearch(''); setResults([]);
-              processBarcodeScan(barcode);
-            }
-            state.buf = ''; state.lastMs = 0; state.scanning = false;
-          }, SCAN_SETTLE_DELAY);
-        } else {
-          // Not yet in scan mode — treat as start of new input
-          state.buf = e.key; state.lastMs = now; state.scanning = false;
-          clearTimeout(state.timer);
-          state.timer = setTimeout(() => { state.buf = ''; state.lastMs = 0; }, SCAN_SETTLE_DELAY);
-        }
+        state.buf = ''; state.firstMs = 0; state.lastMs = 0; state.scanning = false;
       }
+
+      // Record first char timestamp
+      if (state.buf.length === 0) state.firstMs = now;
+
+      // Confirm scanning mode when two consecutive chars arrive within SCAN_CHAR_SPEED
+      if (state.buf.length >= 1 && state.lastMs > 0 && gap < SCAN_CHAR_SPEED) {
+        state.scanning = true;
+      }
+
+      // Once in scanning mode, block chars from reaching the input field
+      if (state.scanning) {
+        e.preventDefault();
+        setSearch(''); setResults([]);
+      }
+
+      state.buf += e.key;
+      state.lastMs = now;
+      clearTimeout(state.timer);
+      // Use longer settle delay — gives Shift-modified uppercase chars time to arrive
+      // before the timer fires and wipes the buffer
+      state.timer = setTimeout(flush, SCAN_SETTLE_DELAY);
     };
 
     window.addEventListener('keydown', onKey, true); // true = capture phase
