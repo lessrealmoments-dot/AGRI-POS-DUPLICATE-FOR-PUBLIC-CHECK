@@ -6,12 +6,13 @@ import { Input } from '../components/ui/input';
 import {
   Lock, FileText, Building2, ArrowRight, CreditCard, CheckCircle2,
   AlertTriangle, Printer, Image, Smartphone, Package, ChevronDown,
-  ShieldCheck, RefreshCw, Search, Boxes, Banknote, Wifi, Camera, X, MapPin, ArrowLeft
+  ShieldCheck, RefreshCw, Search, Boxes, Banknote, Wifi, Camera, X, MapPin, ArrowLeft, RotateCcw
 } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'sonner';
 import PrintEngine from '../lib/PrintEngine';
 import PrintBridge from '../lib/PrintBridge';
+import TerminalReturnRefundModal from '../components/TerminalReturnRefundModal';
 
 const BACKEND = process.env.REACT_APP_BACKEND_URL || '';
 const php = (v) => `₱${(parseFloat(v) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -1262,6 +1263,7 @@ export default function DocViewerPage() {
   const [terminalPin, setTerminalPin] = useState('');
   const [terminalLoading, setTerminalLoading] = useState(false);
   const [terminalError, setTerminalError] = useState('');
+  const [showReturnModal, setShowReturnModal] = useState(false);
 
   // Cross-branch: TOTP-only gate for foreign branch documents
   const [crossBranchPin, setCrossBranchPin] = useState('');
@@ -1778,7 +1780,7 @@ export default function DocViewerPage() {
                     </div>
                     <Button 
                       className="w-full h-11 bg-red-600 hover:bg-red-700 text-white font-semibold flex items-center justify-center gap-2"
-                      onClick={() => toast.info('Return & Refund feature coming soon!')}
+                      onClick={() => setShowReturnModal(true)}
                       data-testid="terminal-return-refund-btn"
                     >
                       <RotateCcw size={14} />
@@ -1831,6 +1833,21 @@ export default function DocViewerPage() {
           </button>
         </div>
       </div>
+
+      {/* Return & Refund Modal */}
+      {showReturnModal && fullData && (
+        <TerminalReturnRefundModal
+          invoice={fullData.document || fullData}
+          terminalSession={terminalSession}
+          onSuccess={() => {
+            // Refresh document data
+            fetchBasic();
+            setTerminalAction('success');
+            setTimeout(() => setTerminalAction(''), 3000);
+          }}
+          onClose={() => setShowReturnModal(false)}
+        />
+      )}
     </div>
   );
 }

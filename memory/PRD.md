@@ -105,6 +105,20 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 - **Files:** `TerminalSales.jsx`, `PrintEngine.js`
 - **Documentation:** `/app/memory/STOCK_RELEASE_FEATURE.md`
 
+### Terminal Return & Refund (2026-01-XX) — COMPLETE (Phase 1)
+- Added **Return & Refund** button to Terminal Actions in DocViewerPage (invoice receipts)
+- **Multi-step modal workflow:**
+  1. **Select Items** — Checkbox selection from original receipt
+  2. **Configure Details** — Quantity, condition (Sellable/Damaged/Expired/Defective), inventory action (Shelf/Pullout)
+  3. **PIN Authorization** — Manager/Admin/TOTP verification
+  4. **Success** — Shows RMA number, refund amount, optional print slip
+- **Backend Integration:** Uses existing `/api/returns` endpoint
+- **Stock Handling:** Automatically returns sellable items to inventory, logs pull-out losses
+- **Fund Management:** Refunds from cashier wallet, creates expense record for Z-report
+- **Audit Trail:** Complete RMA records, inventory movements, wallet deductions
+- **Files:** `DocViewerPage.jsx`, `TerminalReturnRefundModal.jsx`
+- **Documentation:** `/app/memory/RETURN_REFUND_ARCHITECTURE.md`, `/app/memory/PHASE1_IMPLEMENTATION.md`
+
 - **New `POST /api/sms/gateway/log`** — Android APK posts single log entry (level, event_type, message, phone, queue_id, device_id)
 - **New `POST /api/sms/gateway/logs/batch`** — Batch POST up to 500 buffered entries (offline-first support)
 - **New `GET /api/sms/gateway/logs`** — Web fetches logs with level/event_type filter, org-scoped
