@@ -857,52 +857,20 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
                 </div>
 
                 {/* Action buttons */}
-                <div className="grid grid-cols-2 gap-2" data-testid="quickscan-actions">
-                  <button
-                    onClick={async () => {
-                      const printData = basicDocToPrintData(quickScanDoc.basic);
-                      const docType = quickScanDoc.basic.doc_type === 'invoice'
-                        ? PrintEngine.getDocType(printData)
-                        : quickScanDoc.basic.doc_type === 'purchase_order' ? 'purchase_order' : 'branch_transfer';
-                      try {
-                        await PrintBridge.print({ type: docType, data: printData, format: 'thermal', businessInfo, docCode: quickScanDoc.code });
-                      } catch (err) { toast.error(`Print failed: ${err.message || 'Unknown error'}`); }
-                      setQuickScanDoc(null);
-                    }}
-                    className="flex items-center justify-center gap-2 py-3 rounded-2xl bg-[#1A4D2E] text-white font-semibold text-sm active:scale-95 transition-transform"
-                    data-testid="quickscan-print-thermal"
-                  >
-                    <Printer size={15} /> Print 58mm
-                  </button>
-                  <button
-                    onClick={async () => {
-                      const printData = basicDocToPrintData(quickScanDoc.basic);
-                      const docType = quickScanDoc.basic.doc_type === 'invoice'
-                        ? PrintEngine.getDocType(printData)
-                        : quickScanDoc.basic.doc_type === 'purchase_order' ? 'purchase_order' : 'branch_transfer';
-                      try {
-                        await PrintBridge.print({ type: docType, data: printData, format: 'full_page', businessInfo, docCode: quickScanDoc.code });
-                      } catch (err) { toast.error(`Print failed: ${err.message || 'Unknown error'}`); }
-                      setQuickScanDoc(null);
-                    }}
-                    className="flex items-center justify-center gap-2 py-3 rounded-2xl bg-slate-100 text-slate-700 font-semibold text-sm active:scale-95 transition-transform"
-                    data-testid="quickscan-print-fullpage"
-                  >
-                    <FileText size={15} /> Full Page
-                  </button>
+                <div className="space-y-2" data-testid="quickscan-actions">
                   <button
                     onClick={() => {
                       navigate(`/doc/${quickScanDoc.code}?branch=${session.branchId}&device=${session.deviceId || ''}`);
                       setQuickScanDoc(null);
                     }}
-                    className="col-span-2 flex items-center justify-center gap-2 py-3 rounded-2xl border-2 border-slate-200 text-slate-600 font-medium text-sm active:scale-95 transition-transform"
+                    className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-[#1A4D2E] text-white font-semibold text-sm active:scale-95 transition-transform"
                     data-testid="quickscan-view-doc"
                   >
-                    <ExternalLink size={14} /> View / Take Action
+                    <ExternalLink size={15} /> View & Reprint
                   </button>
                   <button
                     onClick={() => setQuickScanDoc(null)}
-                    className="col-span-2 py-2.5 text-sm text-slate-400 hover:text-slate-600 transition-colors"
+                    className="w-full py-2.5 text-sm text-slate-400 hover:text-slate-600 transition-colors"
                     data-testid="quickscan-close"
                   >
                     Close

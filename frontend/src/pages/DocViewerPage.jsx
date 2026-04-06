@@ -60,7 +60,7 @@ function LockoutBanner({ retryAfter, onExpired }) {
 }
 
 // ── Web Payment Section — non-terminal payment via TOTP or staff login ─────────
-function WebPaymentSection({ basic, docCode, onPaymentRecorded }) {
+function WebPaymentSection({ basic, docCode, onPaymentRecorded, onReprintRequested }) {
   const METHODS = ['Cash', 'GCash', 'Maya', 'Bank Transfer', 'Check'];
   const php = v => `₱${(parseFloat(v) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 
@@ -131,10 +131,27 @@ function WebPaymentSection({ basic, docCode, onPaymentRecorded }) {
 
   if (stage === 'done') return (
     <div className="bg-white rounded-xl border overflow-hidden" data-testid="web-payment-done">
-      <div className="p-5 text-center space-y-2">
+      <div className="p-5 text-center space-y-3">
         <CheckCircle2 size={28} className="text-emerald-500 mx-auto" />
         <p className="text-sm font-semibold text-emerald-800">Payment Applied</p>
         <p className="text-xs text-emerald-600">Remaining balance: {php(balance)}</p>
+        {onReprintRequested && (
+          <div className="pt-1 space-y-2">
+            <p className="text-xs text-slate-500">Print updated receipt?</p>
+            <div className="flex gap-2 justify-center">
+              <button onClick={onReprintRequested}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#1A4D2E] text-white text-xs font-semibold active:scale-95 transition-all"
+                data-testid="web-payment-reprint-btn">
+                <Printer size={13} /> Reprint 58mm
+              </button>
+              <button onClick={() => setStage('idle')}
+                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-xs font-medium hover:bg-slate-50"
+                data-testid="web-payment-skip-reprint-btn">
+                Skip
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -288,6 +305,61 @@ function WebPaymentSection({ basic, docCode, onPaymentRecorded }) {
 }
 
 
+// ── Tier 1 print data — maps public view fields to PrintEngine-compatible format ──
+// Used for terminal Tier-1 reprint (no PIN needed) and post-action reprint prompts.
+// Fixes: correct status for getDocType, all required field names, safe fallbacks.
+function buildTier1PrintData(basic) {
+  if (!basic) return {};
+  if (basic.doc_type === 'invoice') {
+    return {
+      invoice_number: basic.number,
+      customer_name: basic.customer_name,
+      order_date: basic.order_date || basic.date,
+      created_at: basic.order_date || basic.date,
+      items: (basic.items || []).map(i => ({
+        product_name: i.name, quantity: i.qty, rate: i.price, total: i.total, discount_amount: 0,
+      })),
+      subtotal: basic.subtotal || basic.grand_total,
+      overall_discount: basic.discount || 0,
+      grand_total: basic.grand_total,
+      amount_paid: basic.amount_paid,
+      balance: basic.balance,
+      payment_method: basic.payment_method,
+      payment_type: basic.payment_type,
+      // Explicit raw status so getDocType picks the right template
+      status: (parseFloat(basic.balance) > 0) ? 'partial' : 'paid',
+    };
+  }
+  if (basic.doc_type === 'purchase_order') {
+    return {
+      po_number: basic.number,
+      purchase_date: basic.date,
+      vendor: basic.supplier_name,
+      status: basic.raw_status || '',
+      items: (basic.items || []).map(i => ({
+        product_name: i.name, quantity: i.qty, unit_price: i.price, total: i.total,
+      })),
+      subtotal: basic.grand_total,
+      grand_total: basic.grand_total,
+      payment_status: basic.payment_status || 'unpaid',
+    };
+  }
+  if (basic.doc_type === 'branch_transfer') {
+    return {
+      order_number: basic.number,
+      created_at: basic.date,
+      from_branch_name: basic.from_branch,
+      to_branch_name: basic.to_branch,
+      status: basic.raw_status || basic.status || '',
+      items: (basic.items || []).map(i => ({
+        product_name: i.name, qty: i.qty, transfer_capital: i.price, branch_retail: 0,
+      })),
+    };
+  }
+  return basic;
+}
+
+
 function getTerminalSession() {
   try { const s = localStorage.getItem('agrismart_terminal'); return s ? JSON.parse(s) : null; } catch { return null; }
 }
@@ -306,7 +378,7 @@ function TerminalRequiredBanner() {
 }
 
 // ── Unified Stock Release Manager (PIN-gated: history + form + confirmation) ──
-function StockReleaseManager({ basic, docCode, onStatusChange, terminalId, deviceId = '' }) {
+function StockReleaseManager({ basic, docCode, onStatusChange, terminalId, deviceId = '', onReprintRequested }) {
   // States: 'locked' | 'verifying' | 'unlocked' | 'confirming' | 'done'
   const [state, setState] = useState('locked');
   const [lockout, setLockout] = useState(null); // { retryAfter }
@@ -594,14 +666,31 @@ function StockReleaseManager({ basic, docCode, onStatusChange, terminalId, devic
         {canRelease && (
           <div className={releases.length > 0 ? 'border-t border-slate-100 pt-5' : ''}>
             {state === 'done' && releaseResult ? (
-              <div className="text-center space-y-2 py-2">
+              <div className="text-center space-y-3 py-2">
                 <CheckCircle2 size={32} className="text-emerald-500 mx-auto" />
                 <p className="font-semibold text-emerald-700">Release #{releaseResult.release_number} recorded!</p>
                 {releaseResult.fully_released
                   ? <p className="text-sm text-emerald-600">All stock fully released.</p>
                   : <p className="text-sm text-amber-600">{releaseResult.remaining_qty} units still pending.</p>
                 }
-                {!releaseResult.fully_released && (
+                {onReprintRequested && (
+                  <div className="pt-1 space-y-2">
+                    <p className="text-xs text-slate-500">Print receipt?</p>
+                    <div className="flex gap-2 justify-center">
+                      <button onClick={onReprintRequested}
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#1A4D2E] text-white text-xs font-semibold active:scale-95 transition-all"
+                        data-testid="release-reprint-btn">
+                        <Printer size={13} /> Reprint 58mm
+                      </button>
+                      <button onClick={() => { if (!releaseResult.fully_released) { setState('unlocked'); setReleaseResult(null); } }}
+                        className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-xs font-medium hover:bg-slate-50"
+                        data-testid="release-skip-reprint-btn">
+                        {releaseResult.fully_released ? 'Done' : 'Release More'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {!onReprintRequested && !releaseResult.fully_released && (
                   <Button variant="outline" size="sm" className="mt-2" onClick={() => { setState('unlocked'); setReleaseResult(null); }}>
                     Release More
                   </Button>
@@ -668,7 +757,7 @@ function StockReleaseManager({ basic, docCode, onStatusChange, terminalId, devic
 
 
 // ── Receive Payment Panel (lives inside Tier 2 — PIN already verified) ────────
-function ReceivePaymentPanel({ basic, docCode, storedPin, onPaymentRecorded, terminalId, deviceId = '' }) {
+function ReceivePaymentPanel({ basic, docCode, storedPin, onPaymentRecorded, terminalId, deviceId = '', onReprintRequested }) {
   const [state, setState] = useState('idle'); // idle | form | confirming | done
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState('Cash');
@@ -869,11 +958,28 @@ function ReceivePaymentPanel({ basic, docCode, storedPin, onPaymentRecorded, ter
       )}
 
       {state === 'done' && result && (
-        <div className="text-center space-y-2 py-3">
+        <div className="text-center space-y-3 py-3">
           <CheckCircle2 size={32} className="text-emerald-500 mx-auto" />
           <p className="font-semibold text-emerald-700">{result.message}</p>
           <p className="text-xs text-slate-400">Authorized by {result.authorized_by}</p>
-          {result.new_balance > 0 && (
+          {onReprintRequested && (
+            <div className="pt-1 space-y-2">
+              <p className="text-xs text-slate-500">Print updated receipt?</p>
+              <div className="flex gap-2 justify-center">
+                <button onClick={onReprintRequested}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#1A4D2E] text-white text-xs font-semibold active:scale-95 transition-all"
+                  data-testid="payment-reprint-btn">
+                  <Printer size={13} /> Reprint 58mm
+                </button>
+                <button onClick={() => { setState('idle'); setAmount(''); setReference(''); setProofFile(null); setUploadToken(null); setUploadSessionId(null); }}
+                  className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-xs font-medium hover:bg-slate-50"
+                  data-testid="payment-skip-reprint-btn">
+                  Skip
+                </button>
+              </div>
+            </div>
+          )}
+          {!onReprintRequested && result.new_balance > 0 && (
             <button onClick={() => { setState('idle'); setAmount(''); setReference(''); setProofFile(null); setUploadToken(null); setUploadSessionId(null); }}
               className="text-xs text-emerald-600 hover:underline mt-1">Record another payment</button>
           )}
@@ -1132,7 +1238,6 @@ export default function DocViewerPage() {
 
   // Terminal branch context — passed as ?branch= when navigating from terminal
   const terminalBranchId = searchParams.get('branch') || '';
-  const terminalDeviceId = searchParams.get('device') || terminalSession?.deviceId || '';
 
   const [basic, setBasic] = useState(null);
   const [loading, setLoading] = useState(!!code);
@@ -1151,6 +1256,8 @@ export default function DocViewerPage() {
 
   const [terminalSession] = useState(() => getTerminalSession());
   const isTerminal = !!terminalSession;
+  // deviceId must be declared AFTER terminalSession to avoid TDZ
+  const terminalDeviceId = searchParams.get('device') || terminalSession?.deviceId || '';
   const [terminalAction, setTerminalAction] = useState('');
   const [terminalPin, setTerminalPin] = useState('');
   const [terminalLoading, setTerminalLoading] = useState(false);
@@ -1210,6 +1317,23 @@ export default function DocViewerPage() {
     else docType = 'order_slip';
     try {
       await PrintBridge.print({ type: docType, data: doc, format, businessInfo, docCode: code?.toUpperCase() });
+    } catch (err) { toast.error(`Print failed: ${err.message || 'Unknown error'}`); }
+  };
+
+  // Tier 1 reprint — uses public view data (basic), available without PIN.
+  // Uses buildTier1PrintData to fix field mapping and template selection.
+  // Pass updatedBasic to override balance/amount_paid after payment actions.
+  const handleTier1Reprint = async (format = 'thermal', updatedBasic = null) => {
+    const src = updatedBasic || basic;
+    // Prefer full document data if already unlocked (better quality)
+    if (fullData?.document && !updatedBasic) return handleReprint(format);
+    const printData = buildTier1PrintData(src);
+    let docType;
+    if (src.doc_type === 'invoice') docType = PrintEngine.getDocType(printData);
+    else if (src.doc_type === 'purchase_order') docType = 'purchase_order';
+    else docType = 'branch_transfer';
+    try {
+      await PrintBridge.print({ type: docType, data: printData, format, businessInfo, docCode: code?.toUpperCase() });
     } catch (err) { toast.error(`Print failed: ${err.message || 'Unknown error'}`); }
   };
 
@@ -1391,6 +1515,25 @@ export default function DocViewerPage() {
             </div>
             {basic.balance > 0 && <p className="text-xs text-red-500 text-right mt-1 font-semibold">Balance due: {php(basic.balance)}</p>}
           </div>
+          {/* Tier 1 Reprint — terminal only, no PIN needed */}
+          {isTerminal && (
+            <div className="px-5 py-3 border-t border-slate-100 flex gap-2">
+              <button
+                onClick={() => handleTier1Reprint('thermal')}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-700 text-xs font-semibold hover:bg-slate-50 active:scale-95 transition-all"
+                data-testid="tier1-reprint-thermal"
+              >
+                <Printer size={13} /> Reprint 58mm
+              </button>
+              <button
+                onClick={() => handleTier1Reprint('full_page')}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-700 text-xs font-semibold hover:bg-slate-50 active:scale-95 transition-all"
+                data-testid="tier1-reprint-fullpage"
+              >
+                <FileText size={13} /> Full Page
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Stock Release Manager (PIN-gated: history + form) — Terminal only */}
@@ -1402,6 +1545,7 @@ export default function DocViewerPage() {
               onStatusChange={(s) => setReleaseStatus(s)}
               terminalId={terminalSession?.terminalId}
               deviceId={terminalDeviceId}
+              onReprintRequested={() => handleTier1Reprint('thermal')}
             />
           ) : <TerminalRequiredBanner />
         )}
@@ -1538,6 +1682,7 @@ export default function DocViewerPage() {
                     storedPin={unlockedPin}
                     terminalId={terminalSession?.terminalId}
                     deviceId={terminalDeviceId}
+                    onReprintRequested={() => handleTier1Reprint('thermal')}
                     onPaymentRecorded={(r) => {
                       setBasic(prev => ({ ...prev, balance: r.new_balance, available_actions: r.new_balance <= 0 ? prev.available_actions?.filter(a => a !== 'receive_payment') : prev.available_actions }));
                       setFullData(prev => ({ ...prev, payments: [...(prev.payments || []), r.payment] }));
@@ -1558,6 +1703,7 @@ export default function DocViewerPage() {
                     storedPin={unlockedPin}
                     terminalId={terminalSession?.terminalId}
                     deviceId={terminalDeviceId}
+                    onReprintRequested={() => handleTier1Reprint('thermal')}
                     onPaymentRecorded={(r) => {
                       setBasic(prev => ({ ...prev, balance: r.new_balance, available_actions: r.new_balance <= 0 ? prev.available_actions?.filter(a => a !== 'receive_payment') : prev.available_actions }));
                       setFullData(prev => ({ ...prev, payments: [r.payment] }));
@@ -1596,6 +1742,7 @@ export default function DocViewerPage() {
           <WebPaymentSection
             basic={basic}
             docCode={code?.toUpperCase()}
+            onReprintRequested={() => handleTier1Reprint('thermal')}
             onPaymentRecorded={(r) => {
               setBasic(prev => ({ ...prev, balance: r.new_balance, available_actions: r.new_balance <= 0 ? prev.available_actions?.filter(a => a !== 'receive_payment') : prev.available_actions }));
             }}
