@@ -1668,7 +1668,7 @@ export default function DocViewerPage() {
                   {fullData.payments.map((p, i) => (
                     <div key={i} className="flex items-center justify-between text-sm py-2 border-b border-slate-50 last:border-0">
                       <div><span className="font-semibold">{php(p.amount)}</span><span className="text-slate-400 ml-2">{p.method || 'Cash'}</span></div>
-                      <span className="text-slate-400 text-xs">{fmtDateTime(p.date || p.paid_at)}</span>
+                      <span className="text-slate-400 text-xs">{fmtDateTime(p.recorded_at || p.paid_at || p.date)}</span>
                     </div>
                   ))}
                 </div>

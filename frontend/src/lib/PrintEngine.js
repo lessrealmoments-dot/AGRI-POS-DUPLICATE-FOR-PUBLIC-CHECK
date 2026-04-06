@@ -29,6 +29,14 @@ function fmtDateTime(d) {
   catch { return d; }
 }
 
+// Shows date + time only when the string has a time component (contains 'T').
+// Date-only strings (e.g. "2026-04-06") show date only — avoids UTC-midnight-to-PHT-8AM bug.
+function fmtDateMaybeTime(d) {
+  if (!d) return '';
+  if (typeof d === 'string' && d.includes('T')) return fmtDateTime(d);
+  return fmtDate(d);
+}
+
 // ── QR Code helper (uses public API for print-friendly inline image) ────────
 function qrImgTag(code, size = 100) {
   if (!code) return '';
@@ -518,7 +526,7 @@ function orderSlipThermal(data, biz, docCode) {
   let html = buildThermalHeader(biz);
   html += `<div class="doc-title">ORDER SLIP</div>`;
   html += `<div class="meta-row"><span class="label">No:</span><span>${inv.invoice_number || ''}</span></div>`;
-  html += `<div class="meta-row"><span class="label">Date:</span><span>${fmtDateTime(inv.created_at || inv.order_date)}</span></div>`;
+  html += `<div class="meta-row"><span class="label">Date:</span><span>${fmtDateMaybeTime(inv.created_at || inv.order_date)}</span></div>`;
   if (inv.customer_name && inv.customer_name !== 'Walk-in') html += `<div class="meta-row"><span class="label">Customer:</span><span>${inv.customer_name}</span></div>`;
   html += `<div class="meta-row"><span class="label">Cashier:</span><span>${inv.cashier_name || ''}</span></div>`;
   html += '<div class="sep"></div>';
@@ -547,7 +555,7 @@ function trustReceiptThermal(data, biz, docCode) {
   let html = buildThermalHeader(biz);
   html += `<div class="doc-title">CHARGE AGREEMENT</div>`;
   html += `<div class="meta-row"><span class="label">No:</span><span>${inv.invoice_number || ''}</span></div>`;
-  html += `<div class="meta-row"><span class="label">Date:</span><span>${fmtDate(inv.order_date || inv.created_at)}</span></div>`;
+  html += `<div class="meta-row"><span class="label">Date:</span><span>${fmtDateMaybeTime(inv.order_date || inv.created_at)}</span></div>`;
   html += `<div class="meta-row"><span class="label">Customer:</span><span>${inv.customer_name || ''}</span></div>`;
   if (inv.due_date) html += `<div class="meta-row"><span class="label">Due:</span><span>${fmtDate(inv.due_date)}</span></div>`;
   html += '<div class="sep"></div>';
