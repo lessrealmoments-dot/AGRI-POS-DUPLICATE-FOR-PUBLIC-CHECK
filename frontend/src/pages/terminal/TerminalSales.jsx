@@ -50,9 +50,14 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   const [scanQty, setScanQty] = useState('1');
   const autoAddProductsRef = useRef(new Set());
   const skipAllRef = useRef(false); // when true, all HID scans add 1 with no prompt this receipt
+  const scanQtyModalOpenRef = useRef(false); // mirrors scanQtyModal — readable inside capture listener
+  // lastScanRef already declared above (shared with camera scanner for unified 500ms dedup)
   // Receipt preview before printing
   const [receiptPreview, setReceiptPreview] = useState(null); // { html, type, format }
   const [printingCopies, setPrintingCopies] = useState(false);
+
+  // Keep ref in sync with state so the capture-phase listener can read it without stale closure
+  useEffect(() => { scanQtyModalOpenRef.current = scanQtyModal; }, [scanQtyModal]);
 
   // Load cached data
   useEffect(() => {
@@ -109,6 +114,11 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   const SCAN_SETTLE_DELAY = 120;   // ms of silence before processing
 
   const processBarcodeScan = useCallback((barcode) => {
+    // Dedup: ignore same barcode scanned within 500ms (scanner bounce protection)
+    const now = Date.now();
+    if (barcode === lastScanRef.current.barcode && now - lastScanRef.current.time < 500) return;
+    lastScanRef.current = { barcode, time: now };
+
     const product = products.find(p => p.barcode === barcode);
     if (!product) {
       toast.error(`Barcode "${barcode}" not found. Scan again or add product on computer.`, { duration: 3000 });
@@ -268,6 +278,10 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
 
     const onKey = (e) => {
       if (e.key.length !== 1 && e.key !== 'Enter') return;
+
+      // Qty modal is open — block ALL scanner input so it doesn't type into the qty field
+      if (scanQtyModalOpenRef.current) { e.preventDefault(); return; }
+
       // Let modal inputs (qty fields etc.) work normally — only intercept search or unfocused
       const tag = (e.target || {}).tagName;
       if ((tag === 'INPUT' || tag === 'TEXTAREA') && e.target !== searchRef.current) return;
