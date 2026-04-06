@@ -638,6 +638,19 @@ async def receive_payment(code: str, data: dict, request: Request):
             {"$set": {"is_pending": False, "linked_at": now_iso(), "linked_payment_ref": reference}}
         )
 
+    # SMS notification to customer (same hook as standard accounting payment)
+    if invoice.get("customer_id"):
+        try:
+            from routes.sms_hooks import on_payment_received
+            await on_payment_received(
+                customer_id=invoice["customer_id"],
+                amount_paid=amount,
+                remaining_balance=max(0, new_balance),
+                branch_id=branch_id,
+            )
+        except Exception:
+            pass  # Non-critical — payment is already recorded
+
     return {
         "success":        True,
         "invoice_number": invoice.get("invoice_number"),

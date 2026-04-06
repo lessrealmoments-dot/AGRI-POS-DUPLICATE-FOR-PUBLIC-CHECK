@@ -58,6 +58,11 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 **Backend files:** `routes/qr_actions.py`, `routes/doc_lookup.py`
 **Frontend files:** `DocViewerPage.jsx`, `TerminalSales.jsx`, `TerminalDocUpload.jsx`, `TerminalPairScreen.jsx`
 
+#### QR Payment SMS Hook (also fixed in this session)
+- `on_payment_received` SMS hook now called from `qr_actions.py` receive_payment endpoint
+- Previously only triggered from `accounting.py` standard payment path
+- Now all payment paths (terminal QR, web TOTP, web staff login) send SMS to customer
+
 ### H10 Hardware Integration — FINAL STABLE STATE (2026-04-05) — COMPLETE & WORKING
 
 **All hardware features complete and tested on physical H10 device:**
