@@ -49,6 +49,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   const [scanQtyProduct, setScanQtyProduct] = useState(null);
   const [scanQty, setScanQty] = useState('1');
   const autoAddProductsRef = useRef(new Set());
+  const skipAllRef = useRef(false); // when true, all HID scans add 1 with no prompt this receipt
   const scanDetectRef = useRef({ keyTimes: [], processTimer: null, cooldownUntil: 0 });
   // Receipt preview before printing
   const [receiptPreview, setReceiptPreview] = useState(null); // { html, type, format }
@@ -117,7 +118,14 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
       searchRef.current?.focus();
       return;
     }
-    // Auto-add if already confirmed for this transaction
+    // Skip-all mode — silent 1-per-scan for everything this receipt
+    if (skipAllRef.current) {
+      addToCart(product);
+      if (navigator.vibrate) navigator.vibrate(100);
+      searchRef.current?.focus();
+      return;
+    }
+    // Product already marked for auto-add this receipt
     if (autoAddProductsRef.current.has(product.id)) {
       addToCart(product);
       if (navigator.vibrate) navigator.vibrate(100);
@@ -168,10 +176,12 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
     setSearch(e.target.value);
   }, []);
 
-  const handleScanQtyConfirm = useCallback((autoAdd = false) => {
+  // mode: 'add' (use qty input) | 'skip_product' (auto+1 this product) | 'skip_all' (auto+1 everything)
+  const handleScanQtyConfirm = useCallback((mode = 'add') => {
     if (!scanQtyProduct) return;
-    const qty = Math.max(1, parseInt(scanQty) || 1);
-    if (autoAdd) autoAddProductsRef.current.add(scanQtyProduct.id);
+    const qty = (mode === 'add') ? Math.max(1, parseInt(scanQty) || 1) : 1;
+    if (mode === 'skip_product') autoAddProductsRef.current.add(scanQtyProduct.id);
+    if (mode === 'skip_all') skipAllRef.current = true;
     const price = scanQtyProduct.prices?.[activeScheme] ?? 0;
     setCart(prev => {
       const existing = prev.find(c => c.product_id === scanQtyProduct.id);
@@ -205,7 +215,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   };
 
   const removeItem = (productId) => setCart(prev => prev.filter(c => c.product_id !== productId));
-  const clearCart = () => { setCart([]); setSelectedCustomer(null); setCustSearch(''); autoAddProductsRef.current.clear(); };
+  const clearCart = () => { setCart([]); setSelectedCustomer(null); setCustSearch(''); autoAddProductsRef.current.clear(); skipAllRef.current = false; };
 
   // Receipt preview → print copies
   const handleShowReceiptPreview = (format) => {
@@ -1036,20 +1046,31 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
               />
             </div>
             <Button
-              onClick={() => handleScanQtyConfirm(false)}
+              onClick={() => handleScanQtyConfirm('add')}
               className="w-full bg-[#1A4D2E] hover:bg-[#15412a] text-white h-11"
               data-testid="scan-qty-confirm-btn"
             >
               <Check size={16} className="mr-2" /> Add to Cart
             </Button>
-            <Button
-              variant="outline"
-              onClick={() => handleScanQtyConfirm(true)}
-              className="w-full text-slate-600 h-10"
-              data-testid="scan-qty-auto-btn"
-            >
-              Skip Qty — Auto +1 for This Transaction
-            </Button>
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                variant="outline"
+                onClick={() => handleScanQtyConfirm('skip_product')}
+                className="w-full text-slate-600 h-10 text-xs"
+                data-testid="scan-qty-skip-product-btn"
+              >
+                Skip — this product
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => handleScanQtyConfirm('skip_all')}
+                className="w-full text-amber-700 border-amber-300 hover:bg-amber-50 h-10 text-xs"
+                data-testid="scan-qty-skip-all-btn"
+              >
+                Skip — all products
+              </Button>
+            </div>
+            <p className="text-[10px] text-slate-400 text-center -mt-1">Skip adds 1 and removes prompts for this receipt</p>
           </div>
         </DialogContent>
       </Dialog>
