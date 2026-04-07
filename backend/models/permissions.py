@@ -165,6 +165,7 @@ ROLE_PRESETS = {
             "dashboard": {"view": True},
             "branches": {"view": True, "create": False, "edit": True, "delete": False},
             "products": {"view": True, "create": True, "edit": True, "delete": False, "view_cost": True, "edit_cost": True},
+            "inventory": {"view": True, "adjust": False, "transfer": False},
             "purchase_orders": {"view": True, "create": True, "edit": True, "receive": True, "delete": False},
             "suppliers": {"view": True, "create": True, "edit": True, "delete": False},
             "customers": {"view": True, "create": True, "edit": True, "delete": False, "view_balance": True, "manage_credit": True},
@@ -196,12 +197,12 @@ ROLE_PRESETS = {
     },
     "inventory_clerk": {
         "label": "Inventory Clerk",
-        "description": "Manage inventory and stock operations",
+        "description": "Manage inventory through POs and transfers — direct stock editing requires explicit admin grant",
         "permissions": {
             "dashboard": {"view": True},
             "branches": {"view": True, "create": False, "edit": False, "delete": False},
-            "products": {"view": True, "create": True, "edit": True, "delete": False, "view_cost": True, "edit_cost": True},
-            "inventory": {"view": True, "adjust": True, "transfer": True},
+            "products": {"view": True, "create": True, "edit": True, "delete": False, "view_cost": True, "edit_cost": False},
+            "inventory": {"view": True, "adjust": False, "transfer": False},
             "sales": {"view": True, "create": False, "edit": False, "void": False, "sell_below_cost": False, "give_discount": False},
             "purchase_orders": {"view": True, "create": True, "edit": True, "receive": True, "delete": False},
             "suppliers": {"view": True, "create": True, "edit": True, "delete": False},

@@ -607,7 +607,18 @@ See `/app/memory/ROADMAP.md` for full spec on each item.
 - Email field disabled on edit (login identifier cannot change)
 - TeamPage user table and permissions panel now display email instead of `@username`
 
-### Phase 0/1/2 — Role & PIN System Foundation (2026-04-07) — Complete
+### inventory.adjust Permission Lockdown (2026-04-07) — Complete
+- `purchase_orders.py`: 4 `check_perm(user, "inventory", "adjust")` calls replaced with their correct logical permissions:
+  - Create PO → `purchase_orders.create`
+  - Receive PO → `purchase_orders.receive`
+  - Cancel PO → `purchase_orders.delete`
+  - Reopen PO → `purchase_orders.edit`
+- `permissions.py`: `inventory.adjust` and `inventory.transfer` set to `False` by default in `inventory_clerk`, `manager`, and `cashier` presets. Admin preset unchanged (`True`).
+- `inventory_clerk` description updated: "direct stock editing requires explicit admin grant"
+- Existing users unaffected (permissions stored per-user). Only new users get the safer defaults.
+- Admin can still grant `inventory.adjust` per-user via the Permissions tab in /team.
+
+
 - `DEFAULT_PERMISSIONS` now includes `inventory` (→ inventory_clerk preset), `inventory_clerk`, `staff`. New inventory users get correct stock permissions instead of cashier fallback.
 - `SYSTEM_ROLES` set exported for future custom role validation.
 - Login + `/me` endpoints: Raw PINs stripped from responses. Added `has_manager_pin`/`has_staff_pin`/`has_auditor_pin` boolean flags.

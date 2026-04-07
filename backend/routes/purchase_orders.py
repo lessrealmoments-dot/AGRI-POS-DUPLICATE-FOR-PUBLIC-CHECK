@@ -254,7 +254,7 @@ async def create_purchase_order(data: dict, user=Depends(get_current_user)):
       'terms'  — receive immediately + create accounts payable
     Legacy: payment_method='cash'|'credit' still accepted for backward compatibility.
     """
-    check_perm(user, "inventory", "adjust")
+    check_perm(user, "purchase_orders", "create")
 
     branch_id = data.get("branch_id", "") or user.get("branch_id", "")
     
@@ -902,7 +902,7 @@ async def receive_purchase_order(po_id: str, data: dict = None, user=Depends(get
     """
     if data is None:
         data = {}
-    check_perm(user, "inventory", "adjust")
+    check_perm(user, "purchase_orders", "receive")
 
     po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
     if not po:
@@ -1265,7 +1265,7 @@ async def generate_branch_transfer_from_request(po_id: str, user=Depends(get_cur
 @router.delete("/{po_id}")
 async def cancel_purchase_order(po_id: str, data: dict = None, user=Depends(get_current_user)):
     """Cancel a purchase order. Requires PIN verification. Cannot cancel received POs — use Reopen instead."""
-    check_perm(user, "inventory", "adjust")
+    check_perm(user, "purchase_orders", "delete")
 
     # PIN verification
     pin = (data or {}).get("pin", "")
@@ -1685,7 +1685,7 @@ async def reopen_purchase_order(po_id: str, data: dict = None, user=Depends(get_
     """
     Reopen a received PO: reverses inventory AND fully reverses the payment.
     """
-    check_perm(user, "inventory", "adjust")
+    check_perm(user, "purchase_orders", "edit")
 
     # PIN enforcement for PO reopen (mandatory)
     pin = (data or {}).get("pin", "")
