@@ -289,8 +289,9 @@ export function startAutoSync(getBranchId) {
   }, CACHE_REFRESH_MS);
 
   // Inventory pulse every 60 seconds (super lightweight — just stock counts)
+  // Skips when on metered connection (Android injects window.__isMeteredConnection)
   inventoryPulseInterval = setInterval(async () => {
-    if (navigator.onLine && !syncInProgress) {
+    if (navigator.onLine && !syncInProgress && !window.__isMeteredConnection) {
       const branchId = typeof getBranchId === 'function' ? getBranchId() : getBranchId;
       if (branchId && branchId !== 'all') {
         await inventoryPulse(branchId);

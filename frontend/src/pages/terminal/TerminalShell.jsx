@@ -641,6 +641,12 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
     return () => { mounted = false; clearInterval(timer); };
   }, [syncVersion]); // re-run when sync completes
 
+  // Expose __triggerBackgroundSync for Android Capacitor onResume hook
+  useEffect(() => {
+    window.__triggerBackgroundSync = () => backgroundSync(false);
+    return () => { delete window.__triggerBackgroundSync; };
+  }, [backgroundSync]);
+
   const handleManualSync = async () => {
     setSyncing(true);
     await backgroundSync(true); // Force full sync on manual trigger
