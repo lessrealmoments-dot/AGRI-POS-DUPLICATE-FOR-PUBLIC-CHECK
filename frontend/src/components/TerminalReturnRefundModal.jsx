@@ -402,12 +402,12 @@ export default function TerminalReturnRefundModal({
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
         <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden">
           {/* Header */}
-          <div className="px-6 py-4 bg-amber-50 border-b border-amber-100">
+          <div className="px-6 py-4 bg-red-50 border-b border-red-100">
             <div className="flex items-center gap-3">
-              <ShieldCheck size={20} className="text-amber-600" />
+              <ShieldCheck size={20} className="text-red-600" />
               <div>
-                <h2 className="text-lg font-bold text-amber-900">Authorization Required</h2>
-                <p className="text-xs text-amber-600">Manager PIN, Admin PIN, or TOTP</p>
+                <h2 className="text-lg font-bold text-red-900">Confirm Return & Refund</h2>
+                <p className="text-xs text-red-600">Financial transaction - Re-enter PIN to confirm</p>
               </div>
             </div>
           </div>
@@ -430,15 +430,23 @@ export default function TerminalReturnRefundModal({
               </div>
             </div>
 
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+              <p className="text-xs text-amber-800 flex items-center gap-1.5">
+                <AlertTriangle size={12} />
+                <span>This will refund money from cashier wallet and update inventory. Confirm with your PIN.</span>
+              </p>
+            </div>
+
             {/* PIN Input */}
             <div>
+              <label className="text-xs text-slate-500 mb-1.5 block font-medium">Manager PIN, Admin PIN, or TOTP</label>
               <Input
                 type="password"
                 autoComplete="one-time-code"
                 value={pin}
                 onChange={(e) => { setPin(e.target.value); setPinError(''); }}
                 onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
-                placeholder="Enter PIN"
+                placeholder="Re-enter PIN to confirm"
                 className="h-12 text-center text-xl font-mono tracking-widest"
                 autoFocus
               />
@@ -467,7 +475,7 @@ export default function TerminalReturnRefundModal({
                 ) : (
                   <>
                     <CheckCircle2 size={14} className="mr-2" />
-                    Process Return
+                    Confirm Refund
                   </>
                 )}
               </Button>

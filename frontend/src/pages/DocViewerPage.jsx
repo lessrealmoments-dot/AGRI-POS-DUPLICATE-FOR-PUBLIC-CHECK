@@ -1638,7 +1638,8 @@ export default function DocViewerPage() {
               </button>
             ) : (
               <div className="p-5 space-y-3">
-                <div className="flex items-center gap-3 mb-1"><Lock size={16} className="text-amber-600" /><p className="text-sm font-semibold text-slate-800">Enter PIN to view full details</p></div>
+                <div className="flex items-center gap-3 mb-1"><Lock size={16} className="text-amber-600" /><p className="text-sm font-semibold text-slate-800">Enter PIN to unlock full details and actions</p></div>
+                <p className="text-xs text-slate-500 -mt-2 mb-2">Unlocks payment history, documents, and all available actions for this receipt</p>
                 <Input data-testid="tier2-pin-input" type="password" value={pin}
                   onChange={e => { setPin(e.target.value); setPinError(''); }}
                   onKeyDown={e => e.key === 'Enter' && handleUnlockFull()}
