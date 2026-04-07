@@ -1788,7 +1788,7 @@ export default function DocViewerPage() {
         )}
 
         {/* Tier 3: Terminal Actions */}
-        {isTerminal && (
+        {isTerminal && unlocked && (
           <div className="bg-white rounded-xl border-2 border-amber-200 overflow-hidden" data-testid="terminal-actions">
             <div className="px-5 py-3 bg-amber-50 flex items-center gap-2">
               <Smartphone size={16} className="text-amber-600" />
