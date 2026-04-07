@@ -6,13 +6,14 @@ import { Input } from '../components/ui/input';
 import {
   Lock, FileText, Building2, ArrowRight, CreditCard, CheckCircle2,
   AlertTriangle, Printer, Image, Smartphone, Package, ChevronDown,
-  ShieldCheck, RefreshCw, Search, Boxes, Banknote, Wifi, Camera, X, MapPin, ArrowLeft, RotateCcw
+  ShieldCheck, RefreshCw, Search, Boxes, Banknote, Wifi, Camera, X, MapPin, ArrowLeft, RotateCcw, FileEdit
 } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'sonner';
 import PrintEngine from '../lib/PrintEngine';
 import PrintBridge from '../lib/PrintBridge';
 import TerminalReturnRefundModal from '../components/TerminalReturnRefundModal';
+import TerminalUpdateReceiptModal from '../components/TerminalUpdateReceiptModal';
 
 const BACKEND = process.env.REACT_APP_BACKEND_URL || '';
 const php = (v) => `₱${(parseFloat(v) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -1264,6 +1265,8 @@ export default function DocViewerPage() {
   const [terminalLoading, setTerminalLoading] = useState(false);
   const [terminalError, setTerminalError] = useState('');
   const [showReturnModal, setShowReturnModal] = useState(false);
+  const [showUpdateReceiptModal, setShowUpdateReceiptModal] = useState(false);
+  const [dayIsClosed, setDayIsClosed] = useState(false);
 
   // Cross-branch: TOTP-only gate for foreign branch documents
   const [crossBranchPin, setCrossBranchPin] = useState('');
@@ -1298,7 +1301,21 @@ export default function DocViewerPage() {
     if (!code) return;
     setLoading(true);
     axios.get(`${BACKEND}/api/doc/view/${code?.toUpperCase()}`)
-      .then(res => { setBasic(res.data); setReleaseStatus(res.data.stock_release_status); setError(''); })
+      .then(res => { 
+        setBasic(res.data); 
+        setReleaseStatus(res.data.stock_release_status); 
+        setError(''); 
+        
+        // Check if day is closed (for invoice receipts)
+        if (res.data.doc_type === 'invoice' && res.data.order_date && res.data.branch_id) {
+          axios.get(`${BACKEND}/api/daily-close/last-close`, {
+            params: { branch_id: res.data.branch_id }
+          }).then(closeRes => {
+            const lastCloseDate = closeRes.data?.last_close_date;
+            setDayIsClosed(lastCloseDate && res.data.order_date <= lastCloseDate);
+          }).catch(() => setDayIsClosed(false));
+        }
+      })
       .catch(e => setError(extractDetail(e, 'Document not found')))
       .finally(() => setLoading(false));
   }, [code]);
@@ -1306,6 +1323,17 @@ export default function DocViewerPage() {
   const handleManualLookup = () => {
     const c = manualCode.trim().toUpperCase();
     if (c.length >= 6) navigate(`/doc/${c}`);
+  };
+  
+  // Refresh basic document data
+  const fetchBasic = () => {
+    if (!code) return;
+    axios.get(`${BACKEND}/api/doc/view/${code.toUpperCase()}`)
+      .then(res => {
+        setBasic(res.data);
+        setReleaseStatus(res.data.stock_release_status);
+      })
+      .catch(e => console.error('Failed to refresh:', e));
   };
 
   // Reprint using PrintEngine (proper formatted receipt, not raw window.print)
@@ -1790,6 +1818,32 @@ export default function DocViewerPage() {
                     <p className="text-xs text-slate-400 text-center -mt-1">
                       Process customer returns and issue refunds
                     </p>
+                    
+                    {/* Update Receipt for Incomplete Stock - Only if day not closed */}
+                    {!dayIsClosed && (
+                      <>
+                        <Button 
+                          className="w-full h-11 bg-amber-600 hover:bg-amber-700 text-white font-semibold flex items-center justify-center gap-2"
+                          onClick={() => setShowUpdateReceiptModal(true)}
+                          data-testid="terminal-update-receipt-btn"
+                        >
+                          <FileEdit size={14} />
+                          Update for Incomplete Stock
+                        </Button>
+                        <p className="text-xs text-slate-400 text-center -mt-1">
+                          Correct receipt when items weren't given
+                        </p>
+                      </>
+                    )}
+                    
+                    {dayIsClosed && (
+                      <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                        <p className="text-xs text-slate-500 text-center">
+                          <Lock size={12} className="inline mr-1" />
+                          Day closed - Receipt updates disabled. Use Return & Refund instead.
+                        </p>
+                      </div>
+                    )}
                   </>
                 )}
                 
@@ -1847,6 +1901,33 @@ export default function DocViewerPage() {
             setTimeout(() => setTerminalAction(''), 3000);
           }}
           onClose={() => setShowReturnModal(false)}
+        />
+      )}
+
+      {/* Update Receipt Modal */}
+      {showUpdateReceiptModal && fullData && (
+        <TerminalUpdateReceiptModal
+          invoice={fullData.document || fullData}
+          onSuccess={(result) => {
+            // Refresh document data
+            setBasic(prev => ({
+              ...prev,
+              grand_total: result.invoice.grand_total,
+              balance: result.invoice.balance,
+              correction_applied: true
+            }));
+            setFullData(prev => prev ? ({
+              ...prev,
+              document: result.invoice
+            }) : null);
+            setTerminalAction('success');
+            setTimeout(() => setTerminalAction(''), 3000);
+            
+            if (result.reprint) {
+              toast.info('Receipt reprint ready');
+            }
+          }}
+          onClose={() => setShowUpdateReceiptModal(false)}
         />
       )}
     </div>

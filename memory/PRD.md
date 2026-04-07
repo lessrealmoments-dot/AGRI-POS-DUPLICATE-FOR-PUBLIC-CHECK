@@ -124,6 +124,29 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 - **Files:** `DocViewerPage.jsx`, `TerminalReturnRefundModal.jsx`
 - **Documentation:** `/app/memory/RETURN_REFUND_ARCHITECTURE.md`, `/app/memory/PHASE1_IMPLEMENTATION.md`, `/app/memory/PIN_FLOW_OPTIMIZATION.md`
 
+### Terminal Update Receipt (Incomplete Stock) (2026-01-XX) — COMPLETE (Phase 2)
+- Added **Update for Incomplete Stock** button to Terminal Actions (only if day not closed)
+- **Use Case:** Items printed on receipt but not physically given to customer
+- **Visibility:** Terminal only, invoice only, day not closed only
+- **3-Step Modal Workflow:**
+  1. **Configure Quantities** — Side-by-side comparison (Receipt Shows vs Actually Given)
+  2. **PIN Confirmation** — Re-enter PIN + choose reprint option (Yes/No/Later)
+  3. **Success** — Shows correction ID, refund amount, items returned to shelf
+- **Backend Endpoint:** NEW `POST /api/invoices/{id}/correct-incomplete-stock`
+- **Complete Integration:**
+  - ✅ Date validation (blocks if day closed)
+  - ✅ Updates original invoice (items, totals, balance)
+  - ✅ Returns stock to shelves
+  - ✅ Refunds from cashier wallet, creates expense record
+  - ✅ Updates customer balance (if credit)
+  - ✅ Sends SMS notification
+  - ✅ Creates correction audit log
+  - ✅ Preserves original invoice in `invoice_corrections` collection
+- **Reprint Options:** Professional wording (Yes, Print / No, Skip / Later)
+- **Data Integrity:** All accounting systems updated atomically
+- **Files:** `DocViewerPage.jsx`, `TerminalUpdateReceiptModal.jsx`, `/app/backend/routes/invoice_corrections.py`
+- **Documentation:** `/app/memory/RETURN_REFUND_ARCHITECTURE.md`
+
 - **New `POST /api/sms/gateway/log`** — Android APK posts single log entry (level, event_type, message, phone, queue_id, device_id)
 - **New `POST /api/sms/gateway/logs/batch`** — Batch POST up to 500 buffered entries (offline-first support)
 - **New `GET /api/sms/gateway/logs`** — Web fetches logs with level/event_type filter, org-scoped
