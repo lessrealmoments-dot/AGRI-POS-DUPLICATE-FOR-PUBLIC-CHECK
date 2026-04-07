@@ -48,18 +48,28 @@ async def create_user(data: dict, user=Depends(get_current_user)):
 
     role = data.get("role", "cashier")
 
-    # Resolve default permissions: prefer ROLE_PRESETS, fallback to DEFAULT_PERMISSIONS
-    # Normalise inventory alias → inventory_clerk for preset lookup
-    preset_key = "inventory_clerk" if role == "inventory" else role
-    default_perms = (
-        data.get("permissions")
-        or ROLE_PRESETS.get(preset_key, {}).get("permissions")
-        or DEFAULT_PERMISSIONS.get(role, DEFAULT_PERMISSIONS["cashier"])
-    )
-
-    # Determine pin_tier for future custom-role support
+    # Resolve permissions + pin_tier
     staff_roles = {"cashier", "staff", "inventory", "inventory_clerk"}
-    pin_tier = "staff" if role in staff_roles else "manager"
+
+    if role in SYSTEM_ROLES:
+        # System role — use preset permissions
+        preset_key = "inventory_clerk" if role in {"inventory", "inventory_clerk"} else role
+        default_perms = (
+            data.get("permissions")
+            or ROLE_PRESETS.get(preset_key, {}).get("permissions")
+            or DEFAULT_PERMISSIONS.get(role, DEFAULT_PERMISSIONS["cashier"])
+        )
+        pin_tier = "staff" if role in staff_roles else "manager"
+    else:
+        # Custom role — look up from DB
+        from config import db as _db
+        custom_role = await _db.custom_roles.find_one(
+            {"id": role, "active": True}, {"_id": 0}
+        )
+        if not custom_role:
+            raise HTTPException(status_code=400, detail=f"Invalid role: '{role}' is not a recognised system or custom role")
+        default_perms = data.get("permissions") or custom_role["permissions"]
+        pin_tier = custom_role.get("pin_tier", "staff")
 
     new_user = {
         "id": new_id(),

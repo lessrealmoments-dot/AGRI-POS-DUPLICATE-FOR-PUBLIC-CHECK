@@ -15,7 +15,7 @@ import {
   Users, Plus, Search, Edit2, KeyRound, Trash2, Ban, CheckCircle2,
   Building2, Lock, Unlock, User, Shield, Settings, Save, RefreshCw,
   X, Check, Eye, ShoppingCart, Package, Warehouse, DollarSign, FileText,
-  Truck, UserCog, BarChart3, AlertTriangle
+  Truck, UserCog, BarChart3, AlertTriangle, Layers
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -43,6 +43,7 @@ const MODULE_ICONS = {
 
 export default function TeamPage() {
   const { user: currentUser, branches } = useAuth();
+  const isAdmin = currentUser?.role === 'admin';
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState('');
   const [showInactive, setShowInactive] = useState(false);
@@ -56,6 +57,17 @@ export default function TeamPage() {
   const [pinForm, setPinForm] = useState({ pin: '', confirm: '' });
   const [saving, setSaving] = useState(false);
   const [expandedUser, setExpandedUser] = useState(null);
+
+  // Custom roles state
+  const [systemRoles, setSystemRoles] = useState([]);
+  const [customRoles, setCustomRoles] = useState([]);
+  const [roleDialog, setRoleDialog] = useState(false);
+  const [editingRole, setEditingRole] = useState(null);
+  const [deleteRoleDialog, setDeleteRoleDialog] = useState(false);
+  const [deleteRoleTarget, setDeleteRoleTarget] = useState(null);
+  const [roleForm, setRoleForm] = useState({ label: '', description: '', pin_tier: 'staff', base_preset: 'cashier', permissions: {} });
+  const [roleFormPerms, setRoleFormPerms] = useState({});
+  const [savingRole, setSavingRole] = useState(false);
 
   // Permissions state
   const [modules, setModules] = useState({});
@@ -73,6 +85,14 @@ export default function TeamPage() {
     } catch { toast.error('Failed to load users'); }
   }, [showInactive]);
 
+  const fetchRoles = useCallback(async () => {
+    try {
+      const res = await api.get('/roles');
+      setSystemRoles(res.data.system_roles || []);
+      setCustomRoles(res.data.custom_roles || []);
+    } catch {}
+  }, []);
+
   const loadPermData = useCallback(async () => {
     try {
       const [modulesRes, presetsRes] = await Promise.all([
@@ -85,16 +105,104 @@ export default function TeamPage() {
   }, []);
 
   useEffect(() => { fetchUsers(); }, [fetchUsers]);
+  useEffect(() => { fetchRoles(); }, [fetchRoles]);
   useEffect(() => { loadPermData(); }, [loadPermData]);
 
   const filteredUsers = users.filter(u =>
     !search || u.full_name?.toLowerCase().includes(search.toLowerCase()) ||
     u.username?.toLowerCase().includes(search.toLowerCase()) ||
-    u.role?.toLowerCase().includes(search.toLowerCase())
+    u.role?.toLowerCase().includes(search.toLowerCase()) ||
+    getRoleLabel(u.role)?.toLowerCase().includes(search.toLowerCase())
   );
 
-  const getRoleMeta = (role) => ROLES.find(r => r.key === role) || { label: role, color: 'bg-slate-100 text-slate-600', avatar: 'bg-slate-500' };
+  // Resolve role display info — system roles first, then custom roles
+  function getRoleLabel(roleKey) {
+    const sys = ROLES.find(r => r.key === roleKey);
+    if (sys) return sys.label;
+    const custom = customRoles.find(r => r.id === roleKey);
+    return custom ? custom.label : roleKey;
+  }
+
+  const getRoleMeta = (roleKey) => {
+    const sys = ROLES.find(r => r.key === roleKey);
+    if (sys) return sys;
+    const custom = customRoles.find(r => r.id === roleKey);
+    if (custom) return { key: custom.id, label: custom.label, color: 'bg-cyan-100 text-cyan-700', avatar: 'bg-cyan-600' };
+    return { label: roleKey, color: 'bg-slate-100 text-slate-600', avatar: 'bg-slate-500' };
+  };
+
   const getBranchName = (id) => branches.find(b => b.id === id)?.name || (id ? 'Unknown' : 'All Branches');
+
+  // ── Custom Role CRUD ────────────────────────────────────────────────────────
+  const openCreateRole = () => {
+    setEditingRole(null);
+    setRoleForm({ label: '', description: '', pin_tier: 'staff', base_preset: 'cashier', permissions: {} });
+    setRoleFormPerms({});
+    setRoleDialog(true);
+  };
+
+  const openEditRole = async (role) => {
+    setEditingRole(role);
+    setRoleForm({ label: role.label, description: role.description || '', pin_tier: role.pin_tier, base_preset: role.base_preset || 'cashier', permissions: role.permissions });
+    setRoleFormPerms(JSON.parse(JSON.stringify(role.permissions || {})));
+    setRoleDialog(true);
+  };
+
+  // When base_preset changes in role form, load those permissions as starting point
+  const handleBasePresetChange = (preset) => {
+    // Permissions will be loaded from backend when we save; just track choice
+    setRoleForm(f => ({ ...f, base_preset: preset }));
+  };
+
+  const handleRolePermToggle = (module, action) => {
+    setRoleFormPerms(prev => {
+      const n = { ...prev, [module]: { ...(prev[module] || {}), [action]: !prev[module]?.[action] } };
+      return n;
+    });
+  };
+
+  const handleRoleModuleToggleAll = (module, enabled) => {
+    const actions = modules[module]?.actions || {};
+    setRoleFormPerms(prev => ({
+      ...prev,
+      [module]: Object.fromEntries(Object.keys(actions).map(a => [a, enabled]))
+    }));
+  };
+
+  const handleSaveRole = async () => {
+    if (!roleForm.label.trim()) { toast.error('Role name is required'); return; }
+    setSavingRole(true);
+    try {
+      const payload = {
+        label: roleForm.label,
+        description: roleForm.description,
+        pin_tier: roleForm.pin_tier,
+        base_preset: roleForm.base_preset,
+        permissions: Object.keys(roleFormPerms).length > 0 ? roleFormPerms : undefined,
+      };
+      if (editingRole) {
+        await api.put(`/roles/${editingRole.id}`, payload);
+        toast.success(`Role "${roleForm.label}" updated`);
+      } else {
+        await api.post('/roles', payload);
+        toast.success(`Role "${roleForm.label}" created`);
+      }
+      setRoleDialog(false);
+      fetchRoles();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed to save role'); }
+    setSavingRole(false);
+  };
+
+  const openDeleteRole = (role) => { setDeleteRoleTarget(role); setDeleteRoleDialog(true); };
+
+  const handleDeleteRole = async () => {
+    try {
+      await api.delete(`/roles/${deleteRoleTarget.id}`);
+      toast.success(`Role "${deleteRoleTarget.label}" deleted`);
+      setDeleteRoleDialog(false);
+      fetchRoles();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed to delete role'); }
+  };
 
   // ── User CRUD ──────────────────────────────────────────────────────────────
   const openCreate = () => { setEditingUser(null); setForm(BLANK_FORM); setUserDialog(true); };
@@ -299,6 +407,11 @@ export default function TeamPage() {
           <TabsTrigger value="permissions" data-testid="permissions-tab" className="flex items-center gap-1.5">
             <Shield size={14} /> Permissions
           </TabsTrigger>
+          {isAdmin && (
+            <TabsTrigger value="roles" data-testid="roles-tab" className="flex items-center gap-1.5">
+              <Layers size={14} /> Roles
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {/* ── Members Tab ─────────────────────────────────────────────── */}
@@ -539,6 +652,85 @@ export default function TeamPage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* ── Roles Tab ────────────────────────────────────────────────── */}
+        {isAdmin && (
+          <TabsContent value="roles" className="space-y-5">
+            {/* System Roles — read only */}
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">System Roles</p>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {systemRoles.map(r => (
+                  <Card key={r.id} className="border-slate-200">
+                    <CardContent className="p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Badge className={`text-[10px] ${getRoleMeta(r.id).color}`}>{r.label}</Badge>
+                        <Badge className={`text-[10px] ${r.pin_tier === 'manager' ? 'bg-blue-100 text-blue-600' : 'bg-teal-100 text-teal-600'}`}>
+                          {r.pin_tier === 'manager' ? 'Manager PIN' : 'Staff PIN'}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-slate-500">{r.description}</p>
+                      <p className="text-[10px] text-slate-300 mt-2 font-mono">System — read only</p>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+
+            {/* Custom Roles */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Custom Roles</p>
+                <Button size="sm" onClick={openCreateRole} className="bg-[#1A4D2E] hover:bg-[#14532d] text-white h-8 text-xs gap-1.5" data-testid="create-role-btn">
+                  <Plus size={13} /> New Role
+                </Button>
+              </div>
+              {customRoles.length === 0 ? (
+                <Card className="border-dashed border-slate-200">
+                  <CardContent className="p-10 text-center">
+                    <Layers size={36} className="mx-auto text-slate-200 mb-3" />
+                    <p className="text-sm text-slate-400 font-medium">No custom roles yet</p>
+                    <p className="text-xs text-slate-300 mt-1">Create roles tailored to your business — e.g. "Warehouse Lead", "Delivery Staff"</p>
+                    <Button size="sm" onClick={openCreateRole} variant="outline" className="mt-4 text-xs">
+                      <Plus size={12} className="mr-1" /> Create First Role
+                    </Button>
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {customRoles.map(r => (
+                    <Card key={r.id} className="border-slate-200 hover:border-slate-300 transition-colors" data-testid={`role-card-${r.id}`}>
+                      <CardContent className="p-4">
+                        <div className="flex items-start justify-between mb-2">
+                          <div>
+                            <p className="font-semibold text-sm text-slate-800">{r.label}</p>
+                            <p className="text-xs text-slate-400 mt-0.5">{r.description || 'No description'}</p>
+                          </div>
+                          <div className="flex gap-1 shrink-0 ml-2">
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-slate-400 hover:text-slate-700" onClick={() => openEditRole(r)} data-testid={`edit-role-${r.id}`}>
+                              <Edit2 size={13} />
+                            </Button>
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-slate-400 hover:text-red-500" onClick={() => openDeleteRole(r)} data-testid={`delete-role-${r.id}`}>
+                              <Trash2 size={13} />
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 mt-3">
+                          <Badge className={`text-[10px] ${r.pin_tier === 'manager' ? 'bg-blue-100 text-blue-600' : 'bg-teal-100 text-teal-600'}`}>
+                            {r.pin_tier === 'manager' ? 'Manager PIN' : 'Staff PIN'}
+                          </Badge>
+                          {r.user_count > 0 && (
+                            <Badge className="text-[10px] bg-slate-100 text-slate-600">{r.user_count} user{r.user_count !== 1 ? 's' : ''}</Badge>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </div>
+          </TabsContent>
+        )}
       </Tabs>
 
       {/* ── Create/Edit User Dialog ─────────────────────────────────────── */}
@@ -563,6 +755,14 @@ export default function TeamPage() {
                     <SelectItem value="manager">Manager</SelectItem>
                     <SelectItem value="cashier">Cashier</SelectItem>
                     <SelectItem value="inventory">Inventory Clerk</SelectItem>
+                    {customRoles.length > 0 && (
+                      <>
+                        <div className="px-2 py-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider border-t border-slate-100 mt-1">Custom Roles</div>
+                        {customRoles.map(r => (
+                          <SelectItem key={r.id} value={r.id}>{r.label}</SelectItem>
+                        ))}
+                      </>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -667,6 +867,129 @@ export default function TeamPage() {
             <Button variant="outline" className="flex-1" onClick={() => setDeleteDialog(false)}>Cancel</Button>
             <Button className="flex-1 bg-red-600 hover:bg-red-700 text-white" onClick={handlePermanentDelete} data-testid="confirm-delete-btn">
               <Trash2 size={14} className="mr-1" /> Delete Forever
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Role Create/Edit Dialog ──────────────────────────────────────── */}
+      <Dialog open={roleDialog} onOpenChange={setRoleDialog}>
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle style={{ fontFamily: 'Manrope' }} className="flex items-center gap-2">
+              <Layers size={18} className="text-cyan-600" />
+              {editingRole ? `Edit Role: ${editingRole.label}` : 'Create Custom Role'}
+            </DialogTitle>
+            <DialogDescription>
+              {editingRole ? 'Update this role\'s name, PIN tier, and permissions.' : 'Define a new role with a name, PIN tier, and permission set.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">Role Name <span className="text-red-500">*</span></Label>
+                <Input value={roleForm.label} onChange={e => setRoleForm(f => ({ ...f, label: e.target.value }))} placeholder="e.g. Warehouse Lead" className="h-9" data-testid="role-label-input" />
+              </div>
+              <div>
+                <Label className="text-xs">PIN Tier</Label>
+                <Select value={roleForm.pin_tier} onValueChange={v => setRoleForm(f => ({ ...f, pin_tier: v }))}>
+                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="staff">Staff PIN — stock releases only</SelectItem>
+                    <SelectItem value="manager">Manager PIN — financial approvals</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs">Description (optional)</Label>
+              <Input value={roleForm.description} onChange={e => setRoleForm(f => ({ ...f, description: e.target.value }))} placeholder="Brief description of this role's purpose" className="h-9" />
+            </div>
+            {!editingRole && (
+              <div>
+                <Label className="text-xs">Start from preset</Label>
+                <Select value={roleForm.base_preset} onValueChange={handleBasePresetChange}>
+                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="admin">Administrator (full access)</SelectItem>
+                    <SelectItem value="manager">Branch Manager</SelectItem>
+                    <SelectItem value="cashier">Cashier</SelectItem>
+                    <SelectItem value="inventory_clerk">Inventory Clerk</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-[10px] text-slate-400 mt-1">You can fine-tune permissions below after selecting a base.</p>
+              </div>
+            )}
+
+            {/* Permission editor */}
+            <div>
+              <Label className="text-xs font-semibold">Permissions</Label>
+              <div className="mt-2 border border-slate-200 rounded-lg overflow-hidden">
+                <ScrollArea className="h-64">
+                  <div className="divide-y divide-slate-100">
+                    {Object.entries(modules).map(([mk, md]) => {
+                      const mp = roleFormPerms[mk] || {};
+                      const total = Object.keys(md.actions || {}).length;
+                      const enabled = Object.values(mp).filter(Boolean).length;
+                      const status = enabled === 0 ? { label: 'None', cls: 'text-slate-400' } : enabled === total ? { label: 'Full', cls: 'text-emerald-600' } : { label: `${enabled}/${total}`, cls: 'text-amber-600' };
+                      return (
+                        <div key={mk} className="p-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-semibold text-slate-700">{md.label}</span>
+                              <span className={`text-[10px] font-medium ${status.cls}`}>{status.label}</span>
+                            </div>
+                            <div className="flex gap-1">
+                              <button className="text-[10px] text-slate-400 hover:text-slate-600 px-1.5 py-0.5 rounded hover:bg-slate-100" onClick={() => handleRoleModuleToggleAll(mk, false)}>None</button>
+                              <button className="text-[10px] text-slate-400 hover:text-slate-600 px-1.5 py-0.5 rounded hover:bg-slate-100" onClick={() => handleRoleModuleToggleAll(mk, true)}>All</button>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {Object.entries(md.actions).map(([ak, al]) => (
+                              <button key={ak} onClick={() => handleRolePermToggle(mk, ak)}
+                                className={`text-[10px] px-2 py-1 rounded-md border transition-colors ${mp[ak] ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-white border-slate-200 text-slate-400 hover:border-slate-300'}`}>
+                                {al}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </ScrollArea>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <Button variant="outline" className="flex-1" onClick={() => setRoleDialog(false)}>Cancel</Button>
+              <Button className="flex-1 bg-[#1A4D2E] hover:bg-[#14532d] text-white" onClick={handleSaveRole} disabled={savingRole} data-testid="save-role-btn">
+                {savingRole ? <RefreshCw size={13} className="animate-spin mr-1.5" /> : null}
+                {editingRole ? 'Save Changes' : 'Create Role'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete Role Dialog ───────────────────────────────────────────── */}
+      <Dialog open={deleteRoleDialog} onOpenChange={setDeleteRoleDialog}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600" style={{ fontFamily: 'Manrope' }}>
+              <AlertTriangle size={18} /> Delete Role
+            </DialogTitle>
+            <DialogDescription>
+              Delete <strong>{deleteRoleTarget?.label}</strong>?
+              {deleteRoleTarget?.user_count > 0
+                ? <span className="text-red-500 block mt-1"> {deleteRoleTarget.user_count} user(s) are still assigned. Reassign them first.</span>
+                : ' This cannot be undone.'
+              }
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex gap-2 mt-2">
+            <Button variant="outline" className="flex-1" onClick={() => setDeleteRoleDialog(false)}>Cancel</Button>
+            <Button className="flex-1 bg-red-600 hover:bg-red-700 text-white" onClick={handleDeleteRole} disabled={deleteRoleTarget?.user_count > 0} data-testid="confirm-delete-role-btn">
+              <Trash2 size={14} className="mr-1" /> Delete Role
             </Button>
           </div>
         </DialogContent>

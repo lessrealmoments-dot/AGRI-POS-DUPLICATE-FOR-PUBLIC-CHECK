@@ -607,7 +607,18 @@ See `/app/memory/ROADMAP.md` for full spec on each item.
 - Email field disabled on edit (login identifier cannot change)
 - TeamPage user table and permissions panel now display email instead of `@username`
 
-### inventory.adjust Permission Lockdown (2026-04-07) — Complete
+### Phase 3 — Custom Roles (2026-04-07) — Complete
+- New `custom_roles` MongoDB collection + full CRUD: `GET/POST/PUT/DELETE /api/roles`
+- Per-org isolation, soft-delete, user_count guard (cannot delete if users assigned)
+- Custom role fields: `label`, `description`, `pin_tier` (manager/staff), `base_preset`, `permissions{}`
+- `POST /api/users`: if role is not a system role, fetches custom role from DB and applies its permissions + pin_tier
+- Frontend: new **Roles** tab in `/team` (admin only):
+  - System roles shown as read-only reference cards with PIN tier + description
+  - Custom roles: create/edit/delete with inline permission editor (per-module toggles, None/All shortcuts)
+  - Role dropdown in user create/edit form now includes custom roles under a "Custom Roles" divider
+- Custom role users display with cyan badge in Members table
+
+
 - `purchase_orders.py`: 4 `check_perm(user, "inventory", "adjust")` calls replaced with their correct logical permissions:
   - Create PO → `purchase_orders.create`
   - Receive PO → `purchase_orders.receive`
