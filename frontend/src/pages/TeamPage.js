@@ -20,10 +20,12 @@ import {
 import { toast } from 'sonner';
 
 const ROLES = [
-  { key: 'admin', label: 'Administrator', color: 'bg-purple-100 text-purple-700', avatar: 'bg-purple-600' },
-  { key: 'manager', label: 'Manager', color: 'bg-blue-100 text-blue-700', avatar: 'bg-blue-600' },
-  { key: 'cashier', label: 'Cashier', color: 'bg-green-100 text-green-700', avatar: 'bg-green-600' },
-  { key: 'inventory', label: 'Inventory Clerk', color: 'bg-orange-100 text-orange-700', avatar: 'bg-orange-500' },
+  { key: 'admin',            label: 'Administrator',     color: 'bg-purple-100 text-purple-700', avatar: 'bg-purple-600' },
+  { key: 'manager',          label: 'Manager',            color: 'bg-blue-100 text-blue-700',     avatar: 'bg-blue-600' },
+  { key: 'cashier',          label: 'Cashier',            color: 'bg-green-100 text-green-700',   avatar: 'bg-green-600' },
+  { key: 'inventory',        label: 'Inventory Clerk',    color: 'bg-orange-100 text-orange-700', avatar: 'bg-orange-500' },
+  { key: 'inventory_clerk',  label: 'Inventory Clerk',    color: 'bg-orange-100 text-orange-700', avatar: 'bg-orange-500' },
+  { key: 'staff',            label: 'Staff',              color: 'bg-slate-100 text-slate-700',   avatar: 'bg-slate-500' },
 ];
 
 const BLANK_FORM = {
@@ -264,10 +266,15 @@ export default function TeamPage() {
         </Button>
       </div>
 
-      {/* Stats row */}
+      {/* Stats row — only primary roles */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {ROLES.map(r => {
-          const count = activeUsers.filter(u => u.role === r.key).length;
+        {[
+          { key: 'admin',     label: 'Admins',      avatar: 'bg-purple-600', match: r => r === 'admin' },
+          { key: 'manager',   label: 'Managers',    avatar: 'bg-blue-600',   match: r => r === 'manager' },
+          { key: 'cashier',   label: 'Cashiers',    avatar: 'bg-green-600',  match: r => r === 'cashier' },
+          { key: 'inventory', label: 'Inv. Clerks', avatar: 'bg-orange-500', match: r => r === 'inventory' || r === 'inventory_clerk' || r === 'staff' },
+        ].map(r => {
+          const count = activeUsers.filter(u => r.match(u.role)).length;
           return (
             <Card key={r.key} className="border-slate-200">
               <CardContent className="p-3 flex items-center gap-3">
@@ -276,7 +283,7 @@ export default function TeamPage() {
                 </div>
                 <div>
                   <p className="text-xl font-bold">{count}</p>
-                  <p className="text-xs text-slate-500">{r.label}s</p>
+                  <p className="text-xs text-slate-500">{r.label}</p>
                 </div>
               </CardContent>
             </Card>
@@ -551,7 +558,12 @@ export default function TeamPage() {
                 <Label className="text-xs">Role <span className="text-red-500">*</span></Label>
                 <Select value={form.role} onValueChange={v => setForm({ ...form, role: v })}>
                   <SelectTrigger className="h-9" data-testid="user-role-select"><SelectValue /></SelectTrigger>
-                  <SelectContent>{ROLES.map(r => <SelectItem key={r.key} value={r.key}>{r.label}</SelectItem>)}</SelectContent>
+                  <SelectContent>
+                    <SelectItem value="admin">Administrator</SelectItem>
+                    <SelectItem value="manager">Manager</SelectItem>
+                    <SelectItem value="cashier">Cashier</SelectItem>
+                    <SelectItem value="inventory">Inventory Clerk</SelectItem>
+                  </SelectContent>
                 </Select>
               </div>
             </div>

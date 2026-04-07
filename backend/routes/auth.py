@@ -56,7 +56,11 @@ async def login(data: dict):
             )
 
     token = create_token(user["id"], user["role"], org_id=org_id, is_super_admin=is_super)
-    safe_user = {k: v for k, v in user.items() if k != "password_hash"}
+    safe_user = {k: v for k, v in user.items() if k not in ("password_hash", "staff_pin", "manager_pin", "auditor_pin")}
+    # Expose PIN status flags only (not raw PIN values)
+    safe_user["has_manager_pin"] = bool(user.get("manager_pin"))
+    safe_user["has_staff_pin"] = bool(user.get("staff_pin"))
+    safe_user["has_auditor_pin"] = bool(user.get("auditor_pin"))
 
     # Attach subscription info for the frontend
     subscription = None
@@ -117,7 +121,11 @@ async def register(data: dict, user=Depends(get_current_user)):
 
 @router.get("/me")
 async def get_me(user=Depends(get_current_user)):
-    result = {k: v for k, v in user.items() if k != "password_hash"}
+    result = {k: v for k, v in user.items() if k not in ("password_hash", "staff_pin", "manager_pin", "auditor_pin")}
+    # Expose PIN status flags (not the actual PIN values)
+    result["has_manager_pin"] = bool(user.get("manager_pin"))
+    result["has_staff_pin"] = bool(user.get("staff_pin"))
+    result["has_auditor_pin"] = bool(user.get("auditor_pin"))
     org_id = user.get("organization_id")
     if org_id:
         from routes.organizations import get_effective_plan, PLAN_LIMITS, get_grace_info, get_live_feature_flags
@@ -282,43 +290,55 @@ async def section_override(data: dict, user=Depends(get_current_user)):
 
 @router.put("/set-manager-pin")
 async def set_manager_pin(data: dict, user=Depends(get_current_user)):
-    if user.get("role") not in ["admin", "manager"]:
-        raise HTTPException(status_code=403, detail="Only managers/admins can set PINs")
+    """Set own PIN — routes to manager_pin or staff_pin based on role."""
     pin = data.get("pin", "")
     if len(pin) < 4:
         raise HTTPException(status_code=400, detail="PIN must be at least 4 digits")
-    await db.users.update_one({"id": user["id"]}, {"$set": {"manager_pin": pin}})
-    return {"message": "PIN set successfully"}
+    staff_roles = {"cashier", "staff", "inventory", "inventory_clerk"}
+    pin_field = "staff_pin" if user.get("role") in staff_roles else "manager_pin"
+    await db.users.update_one({"id": user["id"]}, {"$set": {pin_field: pin}})
+    return {"message": "PIN set successfully", "pin_field": pin_field}
 
 
 @router.put("/change-my-pin")
 async def change_my_pin(data: dict, user=Depends(get_current_user)):
-    """Manager/admin changes their own PIN — must provide current PIN first."""
-    if user.get("role") not in ["admin", "manager"]:
-        raise HTTPException(status_code=403, detail="Only managers/admins have PINs")
+    """
+    Any user changes their own PIN.
+    - admin/manager → manager_pin
+    - cashier/inventory/staff → staff_pin
+    """
+    staff_roles = {"cashier", "staff", "inventory", "inventory_clerk"}
+    role = user.get("role", "")
+    is_staff_role = role in staff_roles
+    is_manager_role = role in {"admin", "manager", "owner"}
+
+    if not is_staff_role and not is_manager_role:
+        raise HTTPException(status_code=403, detail="Your role does not support PIN authentication")
 
     current_pin = data.get("current_pin", "")
     new_pin = data.get("new_pin", "")
 
-    if not new_pin or len(new_pin) < 4:
+    if not new_pin or len(str(new_pin)) < 4:
         raise HTTPException(status_code=400, detail="New PIN must be at least 4 digits")
 
-    stored_pin = user.get("manager_pin", "")
-    # If user already has a PIN, require current PIN
+    pin_field = "staff_pin" if is_staff_role else "manager_pin"
+    stored_pin = str(user.get(pin_field, "") or "")
+
+    # If user already has a PIN set, require current PIN to change it
     if stored_pin:
         if not current_pin:
-            raise HTTPException(status_code=400, detail="Current PIN is required")
+            raise HTTPException(status_code=400, detail="Current PIN is required to change it")
         if current_pin != stored_pin:
             raise HTTPException(status_code=400, detail="Current PIN is incorrect")
 
     await db.users.update_one(
         {"id": user["id"]},
         {"$set": {
-            "manager_pin": new_pin,
+            pin_field: str(new_pin),
             "pin_changed_at": now_iso(),
         }}
     )
-    return {"message": "PIN changed successfully"}
+    return {"message": "PIN changed successfully", "pin_field": pin_field}
 
 
 # ── TOTP ──────────────────────────────────────────────────────────────────────

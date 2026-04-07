@@ -7,7 +7,7 @@ from utils import (
     get_current_user, check_perm, has_perm,
     hash_password, now_iso, new_id
 )
-from models import PERMISSION_MODULES, ROLE_PRESETS, DEFAULT_PERMISSIONS
+from models import PERMISSION_MODULES, ROLE_PRESETS, DEFAULT_PERMISSIONS, SYSTEM_ROLES
 
 router = APIRouter(tags=["Users & Permissions"])
 
@@ -47,6 +47,20 @@ async def create_user(data: dict, user=Depends(get_current_user)):
         raise HTTPException(status_code=400, detail="A user with this email already exists")
 
     role = data.get("role", "cashier")
+
+    # Resolve default permissions: prefer ROLE_PRESETS, fallback to DEFAULT_PERMISSIONS
+    # Normalise inventory alias → inventory_clerk for preset lookup
+    preset_key = "inventory_clerk" if role == "inventory" else role
+    default_perms = (
+        data.get("permissions")
+        or ROLE_PRESETS.get(preset_key, {}).get("permissions")
+        or DEFAULT_PERMISSIONS.get(role, DEFAULT_PERMISSIONS["cashier"])
+    )
+
+    # Determine pin_tier for future custom-role support
+    staff_roles = {"cashier", "staff", "inventory", "inventory_clerk"}
+    pin_tier = "staff" if role in staff_roles else "manager"
+
     new_user = {
         "id": new_id(),
         "username": username,
@@ -54,8 +68,9 @@ async def create_user(data: dict, user=Depends(get_current_user)):
         "email": email,
         "password_hash": hash_password(password),
         "role": role,
+        "pin_tier": pin_tier,
         "branch_id": data.get("branch_id"),
-        "permissions": data.get("permissions", DEFAULT_PERMISSIONS.get(role, DEFAULT_PERMISSIONS["cashier"])),
+        "permissions": default_perms,
         "active": True,
         "created_at": now_iso(),
     }
@@ -146,16 +161,19 @@ async def admin_set_user_pin(user_id: str, data: dict, user=Depends(get_current_
     if pin and len(str(pin)) < 4:
         raise HTTPException(status_code=400, detail="PIN must be at least 4 digits")
 
-    # Route PIN to the correct field based on role
+    # Route PIN to the correct field based on role (or pin_tier for custom roles)
     staff_roles = {"cashier", "staff", "inventory", "inventory_clerk"}
-    pin_field = "staff_pin" if target.get("role") in staff_roles else "manager_pin"
+    is_staff = target.get("pin_tier") == "staff" or target.get("role") in staff_roles
+    pin_field = "staff_pin" if is_staff else "manager_pin"
     other_field = "manager_pin" if pin_field == "staff_pin" else "staff_pin"
+    pin_tier = "staff" if is_staff else "manager"
 
     await db.users.update_one(
         {"id": user_id},
         {"$set": {
             pin_field: str(pin) if pin else None,
-            other_field: None,  # Clear the other PIN field to avoid conflicts
+            other_field: None,  # Clear the conflicting field to avoid ambiguity
+            "pin_tier": pin_tier,  # Ensure pin_tier stays in sync
             "pin_set_by": user["id"],
             "pin_set_by_name": user.get("full_name", user["username"]),
             "pin_set_at": now_iso(),

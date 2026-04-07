@@ -607,13 +607,18 @@ See `/app/memory/ROADMAP.md` for full spec on each item.
 - Email field disabled on edit (login identifier cannot change)
 - TeamPage user table and permissions panel now display email instead of `@username`
 
+### Phase 0/1/2 — Role & PIN System Foundation (2026-04-07) — Complete
+- `DEFAULT_PERMISSIONS` now includes `inventory` (→ inventory_clerk preset), `inventory_clerk`, `staff`. New inventory users get correct stock permissions instead of cashier fallback.
+- `SYSTEM_ROLES` set exported for future custom role validation.
+- Login + `/me` endpoints: Raw PINs stripped from responses. Added `has_manager_pin`/`has_staff_pin`/`has_auditor_pin` boolean flags.
+- `staff_pin` added to PIN Policies UI as "Staff PIN" (teal). Now visible and configurable in `/settings → Security → PIN Policies`.
+- Auditor Access table: fixed to show email instead of `@username`.
+- `change-my-pin` extended to ALL roles: inventory/cashier/staff → `staff_pin`; admin/manager → `manager_pin`. Requires current PIN if one already exists.
+- "My PIN" section in My Account shown for ALL roles with correct label + description.
+- All new users get `pin_tier: "staff"|"manager"` field set at creation.
+- `verify.py` manager + staff PIN queries include `pin_tier` `$or` clause (backward-compatible with existing users).
+- Stats cards in TeamPage: `inventory`+`inventory_clerk`+`staff` counted together under "Inv. Clerks".
 
-- **Root cause 1**: `verify.py` staff PIN check was missing `"inventory"` role — frontend creates `inventory` role but verify only had `inventory_clerk`
-- **Root cause 2**: `PUT /api/users/{user_id}/pin` always stored PIN as `manager_pin` regardless of role, but QR stock release checks `staff_pin` field for cashier/inventory users
-- **Fix**: `users.py` — `/pin` endpoint now routes to `staff_pin` for `cashier/staff/inventory/inventory_clerk` roles, `manager_pin` for `admin/manager/owner`. Clears conflicting field on save.
-- **Fix**: `verify.py` — Added `"inventory"` to staff_pin roles check list
-- **Fix**: `TeamPage.js` — PIN dialog and form now show "Staff PIN" label for cashier/inventory roles; PIN status column checks both fields
-- **VPS action needed**: Re-set Elline M's PIN via TeamPage after deploying (enter 8888 again — will now correctly store as staff_pin)
 
 - Discount cashier drill-down report (`/reports` Discounts tab)
 - AP payment history per supplier in PaySupplierPage

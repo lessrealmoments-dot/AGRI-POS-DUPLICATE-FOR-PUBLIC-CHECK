@@ -19,7 +19,7 @@ import { toast } from 'sonner';
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
 // ── My PIN change form ───────────────────────────────────────────────────────
-function MyPinForm({ hasExistingPin }) {
+function MyPinForm({ hasExistingPin, pinLabel = 'PIN' }) {
   const [currentPin, setCurrentPin] = useState('');
   const [newPin, setNewPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
@@ -45,14 +45,14 @@ function MyPinForm({ hasExistingPin }) {
     <div className="max-w-sm space-y-3">
       {hasExistingPin && (
         <div>
-          <Label className="text-xs text-slate-500">Current PIN</Label>
+          <Label className="text-xs text-slate-500">Current {pinLabel}</Label>
           <Input data-testid="my-current-pin" type="password" autoComplete="new-password" value={currentPin}
             onChange={e => setCurrentPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
-            placeholder="Enter current PIN" className="mt-1" />
+            placeholder={`Enter current ${pinLabel}`} className="mt-1" />
         </div>
       )}
       <div>
-        <Label className="text-xs text-slate-500">{hasExistingPin ? 'New PIN' : 'Set PIN'}</Label>
+        <Label className="text-xs text-slate-500">{hasExistingPin ? `New ${pinLabel}` : `Set ${pinLabel}`}</Label>
         <div className="relative mt-1">
           <Input data-testid="my-new-pin" type={showPin ? 'text' : 'password'} value={newPin}
             onChange={e => setNewPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
@@ -63,17 +63,17 @@ function MyPinForm({ hasExistingPin }) {
         </div>
       </div>
       <div>
-        <Label className="text-xs text-slate-500">Confirm PIN</Label>
+        <Label className="text-xs text-slate-500">Confirm {pinLabel}</Label>
         <Input data-testid="my-confirm-pin" type="password" autoComplete="new-password" value={confirmPin}
           onChange={e => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
-          placeholder="Re-enter PIN" className="mt-1" />
+          placeholder={`Re-enter ${pinLabel}`} className="mt-1" />
       </div>
       {newPin && confirmPin && newPin !== confirmPin && <p className="text-xs text-red-500">PINs do not match</p>}
       <Button data-testid="save-my-pin-btn" onClick={handleSave}
         disabled={saving || !newPin || newPin !== confirmPin || (hasExistingPin && !currentPin)}
         className="bg-[#1A4D2E] hover:bg-[#14532d] text-white">
         {saving ? <RefreshCw size={13} className="animate-spin mr-1.5" /> : <Key size={13} className="mr-1.5" />}
-        {hasExistingPin ? 'Change My PIN' : 'Set My PIN'}
+        {hasExistingPin ? `Change My ${pinLabel}` : `Set My ${pinLabel}`}
       </Button>
     </div>
   );
@@ -441,10 +441,11 @@ export default function SettingsPage() {
   }, {});
 
   const METHOD_LABELS = {
-    admin_pin: { label: 'Owner PIN', color: 'bg-red-100 text-red-700 border-red-200' },
-    manager_pin: { label: 'Manager PIN', color: 'bg-blue-100 text-blue-700 border-blue-200' },
-    totp: { label: 'TOTP', color: 'bg-purple-100 text-purple-700 border-purple-200' },
-    auditor_pin: { label: 'Auditor PIN', color: 'bg-amber-100 text-amber-700 border-amber-200' },
+    admin_pin:   { label: 'Owner PIN',    color: 'bg-red-100 text-red-700 border-red-200' },
+    manager_pin: { label: 'Manager PIN',  color: 'bg-blue-100 text-blue-700 border-blue-200' },
+    totp:        { label: 'TOTP',         color: 'bg-purple-100 text-purple-700 border-purple-200' },
+    auditor_pin: { label: 'Auditor PIN',  color: 'bg-amber-100 text-amber-700 border-amber-200' },
+    staff_pin:   { label: 'Staff PIN',    color: 'bg-teal-100 text-teal-700 border-teal-200' },
   };
 
   const loadTotpControls = useCallback(async () => {
@@ -647,24 +648,34 @@ export default function SettingsPage() {
             <CardContent><ChangePasswordForm /></CardContent>
           </Card>
 
-          {/* My PIN (managers/admins) */}
-          {(currentUser?.role === 'admin' || currentUser?.role === 'manager') && (
-            <Card className="border-slate-200">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base font-semibold flex items-center gap-2" style={{ fontFamily: 'Manrope' }}>
-                  <Key size={18} className="text-blue-600" /> My PIN
-                  {currentUser?.manager_pin
-                    ? <Badge className="text-[10px] bg-emerald-100 text-emerald-700 ml-2">Set</Badge>
-                    : <Badge className="text-[10px] bg-amber-100 text-amber-700 ml-2">Not Set</Badge>
-                  }
-                </CardTitle>
-                <p className="text-sm text-slate-500">
-                  Your personal PIN for verifying transactions and approving actions.
-                </p>
-              </CardHeader>
-              <CardContent><MyPinForm hasExistingPin={!!currentUser?.manager_pin} /></CardContent>
-            </Card>
-          )}
+          {/* My PIN — all roles that support PIN auth */}
+          {(() => {
+            const staffRoles = ['cashier', 'inventory', 'inventory_clerk', 'staff'];
+            const managerRoles = ['admin', 'manager'];
+            const isStaff = staffRoles.includes(currentUser?.role);
+            const isManager = managerRoles.includes(currentUser?.role);
+            if (!isStaff && !isManager) return null;
+            const pinLabel = isStaff ? 'Staff PIN' : 'Manager PIN';
+            const hasPin = isStaff ? currentUser?.has_staff_pin : currentUser?.has_manager_pin;
+            const pinDesc = isStaff
+              ? 'Your personal PIN used by your manager to authorize stock releases on your behalf.'
+              : 'Your personal PIN for verifying transactions and approving actions.';
+            return (
+              <Card className="border-slate-200">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base font-semibold flex items-center gap-2" style={{ fontFamily: 'Manrope' }}>
+                    <Key size={18} className={isStaff ? 'text-teal-600' : 'text-blue-600'} /> My {pinLabel}
+                    {hasPin
+                      ? <Badge className="text-[10px] bg-emerald-100 text-emerald-700 ml-2">Set</Badge>
+                      : <Badge className="text-[10px] bg-amber-100 text-amber-700 ml-2">Not Set</Badge>
+                    }
+                  </CardTitle>
+                  <p className="text-sm text-slate-500">{pinDesc}</p>
+                </CardHeader>
+                <CardContent><MyPinForm hasExistingPin={!!hasPin} pinLabel={pinLabel} /></CardContent>
+              </Card>
+            );
+          })()}
         </TabsContent>
 
         {/* ── Security Tab (Admin Only) ──────────────────────────────── */}
@@ -904,8 +915,8 @@ export default function SettingsPage() {
                       return (
                         <TableRow key={u.id}>
                           <TableCell>
-                            <p className="font-medium text-sm">{u.full_name || u.username}</p>
-                            <p className="text-xs text-slate-400">@{u.username} &middot; {u.role}</p>
+                            <p className="font-medium text-sm">{u.full_name || u.email}</p>
+                            <p className="text-xs text-slate-400">{u.email || u.username} &middot; {u.role}</p>
                           </TableCell>
                           <TableCell>
                             <button onClick={() => updateAuditorEdit(u.id, 'is_auditor', !state.is_auditor)}

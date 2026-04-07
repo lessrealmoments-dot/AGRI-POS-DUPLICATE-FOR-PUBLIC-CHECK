@@ -216,8 +216,15 @@ ROLE_PRESETS = {
 }
 
 # Legacy mapping for backward compatibility
+# "inventory" and "inventory_clerk" are treated as aliases — both use inventory_clerk preset
 DEFAULT_PERMISSIONS = {
     "admin": ROLE_PRESETS["admin"]["permissions"],
     "manager": ROLE_PRESETS["manager"]["permissions"],
     "cashier": ROLE_PRESETS["cashier"]["permissions"],
+    "inventory": ROLE_PRESETS["inventory_clerk"]["permissions"],
+    "inventory_clerk": ROLE_PRESETS["inventory_clerk"]["permissions"],
+    "staff": ROLE_PRESETS["cashier"]["permissions"],  # staff defaults to cashier-level access
 }
+
+# All known system role names (used for validation)
+SYSTEM_ROLES = {"admin", "manager", "cashier", "inventory", "inventory_clerk", "staff"}

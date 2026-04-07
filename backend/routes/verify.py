@@ -76,7 +76,14 @@ async def _resolve_pin(pin: str, allowed_methods: list = None, branch_id: str = 
     managers = None
     if check_all or "manager_pin" in methods:
         managers = await db.users.find(
-            {"role": {"$in": ["admin", "manager", "owner"]}, "active": True}, {"_id": 0}
+            {
+                "$or": [
+                    {"role": {"$in": ["admin", "manager", "owner"]}},
+                    {"pin_tier": "manager"},  # future custom roles with manager-level PIN
+                ],
+                "active": True
+            },
+            {"_id": 0}
         ).to_list(50)
         logger.info(f"Manager PIN check: found {len(managers)} admin/manager/owner users")
         for mgr in managers:
@@ -134,9 +141,12 @@ async def _resolve_pin(pin: str, allowed_methods: list = None, branch_id: str = 
     if check_all or "staff_pin" in methods:
         staff_users = await db.users.find(
             {
-                "role": {"$in": ["staff", "inventory_clerk", "inventory", "cashier"]},
+                "$or": [
+                    {"role": {"$in": ["staff", "inventory_clerk", "inventory", "cashier"]}},
+                    {"pin_tier": "staff"},  # future custom roles with staff-level PIN
+                ],
                 "active": True,
-                "staff_pin": {"$exists": True, "$ne": ""}
+                "staff_pin": {"$exists": True, "$not": {"$in": ["", None]}}
             },
             {"_id": 0}
         ).to_list(100)
