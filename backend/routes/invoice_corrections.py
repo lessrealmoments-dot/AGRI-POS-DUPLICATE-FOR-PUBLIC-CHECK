@@ -93,8 +93,7 @@ async def log_inventory_movement(
 @router.post("/invoices/{invoice_id}/correct-incomplete-stock")
 async def correct_incomplete_stock(
     invoice_id: str,
-    data: IncompleteStockCorrection,
-    user=Depends(get_current_user)
+    data: IncompleteStockCorrection
 ):
     """
     Correct invoice when items weren't physically given.
@@ -102,6 +101,9 @@ async def correct_incomplete_stock(
     """
     from config import db
     from routes.verify import verify_pin_for_action
+    
+    # Get user from PIN verification (no auth token required, PIN is enough)
+    user = {"id": "terminal", "full_name": "Terminal User", "email": "terminal@system"}
     
     # 1. Fetch invoice
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
@@ -123,12 +125,11 @@ async def correct_incomplete_stock(
         )
     
     # 3. Verify Manager PIN
-    verifier = await verify_pin_for_action(data.manager_pin, "correct_incomplete_stock", db)
+    verifier = await verify_pin_for_action(data.manager_pin, "manager", branch_id=invoice["branch_id"])
     if not verifier:
         # Log failed attempt
         await db.pin_attempts.insert_one({
             "id": new_id(),
-            "user_id": user.get("id"),
             "action": "correct_incomplete_stock",
             "invoice_id": invoice_id,
             "success": False,
