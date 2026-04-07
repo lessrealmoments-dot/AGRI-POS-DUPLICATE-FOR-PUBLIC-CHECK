@@ -134,7 +134,7 @@ async def _resolve_pin(pin: str, allowed_methods: list = None, branch_id: str = 
     if check_all or "staff_pin" in methods:
         staff_users = await db.users.find(
             {
-                "role": {"$in": ["staff", "inventory_clerk", "cashier"]},
+                "role": {"$in": ["staff", "inventory_clerk", "inventory", "cashier"]},
                 "active": True,
                 "staff_pin": {"$exists": True, "$ne": ""}
             },

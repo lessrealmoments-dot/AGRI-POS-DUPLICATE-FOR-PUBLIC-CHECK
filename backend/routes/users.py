@@ -129,18 +129,24 @@ async def admin_set_user_pin(user_id: str, data: dict, user=Depends(get_current_
     pin = data.get("pin", "")
     if pin and len(str(pin)) < 4:
         raise HTTPException(status_code=400, detail="PIN must be at least 4 digits")
-    
+
+    # Route PIN to the correct field based on role
+    staff_roles = {"cashier", "staff", "inventory", "inventory_clerk"}
+    pin_field = "staff_pin" if target.get("role") in staff_roles else "manager_pin"
+    other_field = "manager_pin" if pin_field == "staff_pin" else "staff_pin"
+
     await db.users.update_one(
         {"id": user_id},
         {"$set": {
-            "manager_pin": str(pin) if pin else None,
+            pin_field: str(pin) if pin else None,
+            other_field: None,  # Clear the other PIN field to avoid conflicts
             "pin_set_by": user["id"],
             "pin_set_by_name": user.get("full_name", user["username"]),
             "pin_set_at": now_iso(),
             "updated_at": now_iso(),
         }}
     )
-    return {"message": f"PIN {'set' if pin else 'cleared'} for {target['username']}"}
+    return {"message": f"PIN {'set' if pin else 'cleared'} for {target['username']}", "pin_field": pin_field}
 
 
 # ==================== PERMISSIONS ====================

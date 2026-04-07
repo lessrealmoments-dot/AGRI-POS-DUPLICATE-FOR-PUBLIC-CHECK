@@ -182,7 +182,7 @@ See above.
 - Super Admin: `janmarkeahig@gmail.com` / `Aa@58798546521325`
 - Company Admin: `jovelyneahig@gmail.com` / `Aa@050772`
 - Manager PIN: `521325`
-- App URL: `https://device-auth-qr.preview.emergentagent.com`
+- App URL: `https://pos-pin-hierarchy.preview.emergentagent.com`
 
 ## Test Reports From This Session
 - `iteration_144.json` — Compliance Deadline Notifications

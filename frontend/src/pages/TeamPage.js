@@ -362,8 +362,8 @@ export default function TeamPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3">
-                          {u.manager_pin
-                            ? <span className="flex items-center gap-1 text-xs text-emerald-600"><Lock size={11} /> Set</span>
+                          {(u.manager_pin || u.staff_pin)
+                            ? <span className="flex items-center gap-1 text-xs text-emerald-600"><Lock size={11} /> {['cashier','inventory','staff','inventory_clerk'].includes(u.role) ? 'Staff PIN' : 'Set'}</span>
                             : <span className="flex items-center gap-1 text-xs text-slate-400"><Unlock size={11} /> Not set</span>
                           }
                         </td>
@@ -589,6 +589,12 @@ export default function TeamPage() {
                 <Input type="password" autoComplete="new-password" value={form.manager_pin} onChange={e => setForm({ ...form, manager_pin: e.target.value.replace(/\D/g, '').slice(0, 8) })} placeholder="Used for approvals" className="h-9 tracking-widest text-center" data-testid="user-pin" />
               </div>
             )}
+            {(form.role === 'cashier' || form.role === 'inventory') && (
+              <div>
+                <Label className="text-xs flex items-center gap-1"><KeyRound size={11} /> Staff PIN (4-8 digits, optional)</Label>
+                <Input type="password" autoComplete="new-password" value={form.manager_pin} onChange={e => setForm({ ...form, manager_pin: e.target.value.replace(/\D/g, '').slice(0, 8) })} placeholder="Used for stock releases" className="h-9 tracking-widest text-center" data-testid="user-staff-pin" />
+              </div>
+            )}
             <div className="flex gap-2 pt-2">
               <Button variant="outline" className="flex-1" onClick={() => setUserDialog(false)}>Cancel</Button>
               <Button className="flex-1 bg-[#1A4D2E] hover:bg-[#14532d] text-white" onClick={handleSave} disabled={saving} data-testid="save-user-btn">
@@ -603,8 +609,16 @@ export default function TeamPage() {
       <Dialog open={pinDialog} onOpenChange={setPinDialog}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle style={{ fontFamily: 'Manrope' }} className="flex items-center gap-2"><KeyRound size={18} className="text-amber-500" /> Manager PIN</DialogTitle>
-            <DialogDescription>Set or clear PIN for <strong>{pinTarget?.full_name || pinTarget?.username}</strong></DialogDescription>
+            <DialogTitle style={{ fontFamily: 'Manrope' }} className="flex items-center gap-2">
+              <KeyRound size={18} className="text-amber-500" />
+              {['cashier','inventory','staff','inventory_clerk'].includes(pinTarget?.role) ? 'Staff PIN' : 'Manager PIN'}
+            </DialogTitle>
+            <DialogDescription>
+              {['cashier','inventory','staff','inventory_clerk'].includes(pinTarget?.role)
+                ? <>Set Staff PIN for <strong>{pinTarget?.full_name || pinTarget?.username}</strong> — used for stock releases</>
+                : <>Set or clear PIN for <strong>{pinTarget?.full_name || pinTarget?.username}</strong></>
+              }
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div>
@@ -619,7 +633,7 @@ export default function TeamPage() {
             )}
             <div className="flex gap-2">
               <Button variant="outline" className="flex-1" onClick={() => setPinDialog(false)}>Cancel</Button>
-              {pinTarget?.manager_pin && !pinForm.pin && (
+              {(pinTarget?.manager_pin || pinTarget?.staff_pin) && !pinForm.pin && (
                 <Button variant="outline" className="text-red-600 border-red-200 hover:bg-red-50" onClick={handleSetPin}>Clear PIN</Button>
               )}
               <Button className="flex-1 bg-amber-500 hover:bg-amber-600 text-white" onClick={handleSetPin} data-testid="set-pin-btn">

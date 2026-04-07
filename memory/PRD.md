@@ -600,7 +600,14 @@ See `/app/memory/ROADMAP.md` for full spec on each item.
 - **Price Check** — scan barcode → price card (respects view_cost permission)
 - **Quick Count** — scan + enter qty → submit count sheet (PIN required)
 
-### P1 — Finance
+### Staff PIN Bug Fix — Role-aware PIN Storage (2026-04-07) — Complete
+- **Root cause 1**: `verify.py` staff PIN check was missing `"inventory"` role — frontend creates `inventory` role but verify only had `inventory_clerk`
+- **Root cause 2**: `PUT /api/users/{user_id}/pin` always stored PIN as `manager_pin` regardless of role, but QR stock release checks `staff_pin` field for cashier/inventory users
+- **Fix**: `users.py` — `/pin` endpoint now routes to `staff_pin` for `cashier/staff/inventory/inventory_clerk` roles, `manager_pin` for `admin/manager/owner`. Clears conflicting field on save.
+- **Fix**: `verify.py` — Added `"inventory"` to staff_pin roles check list
+- **Fix**: `TeamPage.js` — PIN dialog and form now show "Staff PIN" label for cashier/inventory roles; PIN status column checks both fields
+- **VPS action needed**: Re-set Elline M's PIN via TeamPage after deploying (enter 8888 again — will now correctly store as staff_pin)
+
 - Discount cashier drill-down report (`/reports` Discounts tab)
 - AP payment history per supplier in PaySupplierPage
 
