@@ -146,7 +146,41 @@ async def update_role(role_id: str, data: dict, user=Depends(get_current_user)):
     return updated
 
 
-@router.delete("/{role_id}")
+@router.post("/{role_id}/clone")
+async def clone_role(role_id: str, user=Depends(get_current_user)):
+    """Clone a custom role — creates an identical copy with 'Copy of' prefix."""
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    org_id = user.get("organization_id")
+    query = {"id": role_id, "active": True}
+    if org_id:
+        query["organization_id"] = org_id
+
+    source = await db.custom_roles.find_one(query, {"_id": 0})
+    if not source:
+        raise HTTPException(status_code=404, detail="Role not found")
+
+    new_label = f"Copy of {source['label']}"
+    clone = {
+        "id": new_id(),
+        "organization_id": org_id,
+        "name": new_label.lower().replace(" ", "_"),
+        "label": new_label,
+        "description": source.get("description", ""),
+        "pin_tier": source["pin_tier"],
+        "base_preset": source.get("base_preset", "cashier"),
+        "permissions": source["permissions"],
+        "is_system": False,
+        "created_by": user["id"],
+        "created_by_name": user.get("full_name", user.get("username", "")),
+        "created_at": now_iso(),
+        "active": True,
+    }
+    await db.custom_roles.insert_one(clone)
+    del clone["_id"]
+    clone["user_count"] = 0
+    return clone
 async def delete_role(role_id: str, user=Depends(get_current_user)):
     """Soft-delete a custom role. Blocked if users are currently assigned."""
     if user.get("role") != "admin":

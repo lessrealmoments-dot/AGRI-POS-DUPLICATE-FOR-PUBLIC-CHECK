@@ -15,7 +15,7 @@ import {
   Users, Plus, Search, Edit2, KeyRound, Trash2, Ban, CheckCircle2,
   Building2, Lock, Unlock, User, Shield, Settings, Save, RefreshCw,
   X, Check, Eye, ShoppingCart, Package, Warehouse, DollarSign, FileText,
-  Truck, UserCog, BarChart3, AlertTriangle, Layers
+  Truck, UserCog, BarChart3, AlertTriangle, Layers, Copy
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -202,6 +202,16 @@ export default function TeamPage() {
       setDeleteRoleDialog(false);
       fetchRoles();
     } catch (e) { toast.error(e.response?.data?.detail || 'Failed to delete role'); }
+  };
+
+  const handleCloneRole = async (role) => {
+    try {
+      const res = await api.post(`/roles/${role.id}/clone`);
+      toast.success(`Cloned as "${res.data.label}"`);
+      fetchRoles();
+      // Auto-open edit dialog so user can rename right away
+      openEditRole(res.data);
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed to clone role'); }
   };
 
   // ── User CRUD ──────────────────────────────────────────────────────────────
@@ -707,6 +717,9 @@ export default function TeamPage() {
                             <p className="text-xs text-slate-400 mt-0.5">{r.description || 'No description'}</p>
                           </div>
                           <div className="flex gap-1 shrink-0 ml-2">
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-slate-400 hover:text-cyan-600" onClick={() => handleCloneRole(r)} title="Clone role" data-testid={`clone-role-${r.id}`}>
+                              <Copy size={13} />
+                            </Button>
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-slate-400 hover:text-slate-700" onClick={() => openEditRole(r)} data-testid={`edit-role-${r.id}`}>
                               <Edit2 size={13} />
                             </Button>
