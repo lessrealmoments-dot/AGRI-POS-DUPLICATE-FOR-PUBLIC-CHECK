@@ -600,7 +600,14 @@ See `/app/memory/ROADMAP.md` for full spec on each item.
 - **Price Check** — scan barcode → price card (respects view_cost permission)
 - **Quick Count** — scan + enter qty → submit count sheet (PIN required)
 
-### Staff PIN Bug Fix — Role-aware PIN Storage (2026-04-07) — Complete
+### Team Creation — Email-first, All Fields Required (2026-04-07) — Complete
+- Removed `username` field from create/edit form — email is now the login identifier; username auto-set to email in backend
+- All fields required: Full Name, Email (validated format), Password (new users), Role
+- Backend `POST /api/users`: rejects if email/full_name/password missing; checks for duplicate email; auto-derives username from email
+- Email field disabled on edit (login identifier cannot change)
+- TeamPage user table and permissions panel now display email instead of `@username`
+
+
 - **Root cause 1**: `verify.py` staff PIN check was missing `"inventory"` role — frontend creates `inventory` role but verify only had `inventory_clerk`
 - **Root cause 2**: `PUT /api/users/{user_id}/pin` always stored PIN as `manager_pin` regardless of role, but QR stock release checks `staff_pin` field for cashier/inventory users
 - **Fix**: `users.py` — `/pin` endpoint now routes to `staff_pin` for `cashier/staff/inventory/inventory_clerk` roles, `manager_pin` for `admin/manager/owner`. Clears conflicting field on save.

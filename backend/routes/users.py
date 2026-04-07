@@ -23,20 +23,36 @@ async def list_users(include_inactive: bool = False, user=Depends(get_current_us
 
 @router.post("/users")
 async def create_user(data: dict, user=Depends(get_current_user)):
-    """Create a new user."""
+    """Create a new user. Email is the primary login identifier (username auto-derived from email)."""
     check_perm(user, "settings", "manage_users")
-    
-    existing = await db.users.find_one({"username": data["username"]}, {"_id": 0})
+
+    email = (data.get("email") or "").strip().lower()
+    full_name = (data.get("full_name") or "").strip()
+    password = data.get("password") or ""
+
+    if not email:
+        raise HTTPException(status_code=400, detail="Email address is required")
+    if not full_name:
+        raise HTTPException(status_code=400, detail="Full name is required")
+    if not password:
+        raise HTTPException(status_code=400, detail="Password is required")
+
+    # Use email as the unique username (multi-tenant login identifier)
+    username = data.get("username") or email
+
+    existing = await db.users.find_one(
+        {"$or": [{"username": username}, {"email": email}]}, {"_id": 0}
+    )
     if existing:
-        raise HTTPException(status_code=400, detail="Username already exists")
-    
+        raise HTTPException(status_code=400, detail="A user with this email already exists")
+
     role = data.get("role", "cashier")
     new_user = {
         "id": new_id(),
-        "username": data["username"],
-        "full_name": data.get("full_name", ""),
-        "email": data.get("email", ""),
-        "password_hash": hash_password(data["password"]),
+        "username": username,
+        "full_name": full_name,
+        "email": email,
+        "password_hash": hash_password(password),
         "role": role,
         "branch_id": data.get("branch_id"),
         "permissions": data.get("permissions", DEFAULT_PERMISSIONS.get(role, DEFAULT_PERMISSIONS["cashier"])),

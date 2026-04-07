@@ -27,7 +27,7 @@ const ROLES = [
 ];
 
 const BLANK_FORM = {
-  username: '', full_name: '', email: '', role: 'cashier',
+  full_name: '', email: '', role: 'cashier',
   branch_id: '', password: '', confirm_password: '', manager_pin: ''
 };
 
@@ -99,7 +99,7 @@ export default function TeamPage() {
   const openEdit = (u) => {
     setEditingUser(u);
     setForm({
-      username: u.username, full_name: u.full_name || '', email: u.email || '',
+      full_name: u.full_name || '', email: u.email || '',
       role: u.role || 'cashier', branch_id: u.branch_id || '',
       password: '', confirm_password: '', manager_pin: ''
     });
@@ -107,22 +107,25 @@ export default function TeamPage() {
   };
 
   const handleSave = async () => {
-    if (!form.username.trim()) { toast.error('Username is required'); return; }
+    if (!form.full_name.trim()) { toast.error('Full name is required'); return; }
+    if (!form.email.trim()) { toast.error('Email address is required'); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) { toast.error('Please enter a valid email address'); return; }
     if (!editingUser && !form.password) { toast.error('Password is required'); return; }
+    if (form.password && form.password.length < 6) { toast.error('Password must be at least 6 characters'); return; }
     if (form.password && form.password !== form.confirm_password) { toast.error('Passwords do not match'); return; }
     setSaving(true);
     try {
-      const payload = { username: form.username, full_name: form.full_name, email: form.email, role: form.role, branch_id: form.branch_id || null };
+      const payload = { full_name: form.full_name, email: form.email, role: form.role, branch_id: form.branch_id || null };
       if (form.password) payload.password = form.password;
       let savedUser;
       if (editingUser) {
         const res = await api.put(`/users/${editingUser.id}`, payload);
         savedUser = res.data;
-        toast.success(`${form.full_name || form.username} updated`);
+        toast.success(`${form.full_name} updated`);
       } else {
         const res = await api.post('/users', payload);
         savedUser = res.data;
-        toast.success(`User ${form.username} created`);
+        toast.success(`${form.full_name} added to team`);
       }
       if (form.manager_pin && form.manager_pin.length >= 4 && savedUser?.id) {
         await api.put(`/users/${savedUser.id}/pin`, { pin: form.manager_pin });
@@ -329,14 +332,14 @@ export default function TeamPage() {
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-3">
                             <div className={`w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-bold ${role.avatar}`}>
-                              {(u.full_name?.[0] || u.username?.[0] || 'U').toUpperCase()}
+                              {(u.full_name?.[0] || u.email?.[0] || 'U').toUpperCase()}
                             </div>
                             <div>
                               <p className="font-medium text-slate-800">
-                                {u.full_name || u.username}
+                                {u.full_name || u.email}
                                 {isMe && <span className="text-[10px] text-slate-400 ml-1">(you)</span>}
                               </p>
-                              <p className="text-xs text-slate-400">@{u.username}{u.email ? ` · ${u.email}` : ''}</p>
+                              <p className="text-xs text-slate-400">{u.email || u.username}</p>
                               {expandedUser === u.id && (
                                 <div className="mt-2 pt-2 border-t border-slate-100 space-y-1 text-xs text-slate-500" onClick={e => e.stopPropagation()}>
                                   <p>Created: {u.created_at ? new Date(u.created_at).toLocaleDateString() : 'N/A'}</p>
@@ -427,8 +430,8 @@ export default function TeamPage() {
                         className={`w-full text-left px-4 py-3 border-b border-slate-50 hover:bg-slate-50 transition-colors ${selectedPermUser?.id === u.id ? 'bg-[#1A4D2E]/5 border-l-2 border-l-[#1A4D2E]' : ''}`}>
                         <div className="flex items-center justify-between">
                           <div>
-                            <p className="font-medium text-sm">{u.full_name || u.username}</p>
-                            <p className="text-xs text-slate-400">@{u.username}</p>
+                            <p className="font-medium text-sm">{u.full_name || u.email}</p>
+                            <p className="text-xs text-slate-400">{u.email || u.username}</p>
                           </div>
                           <Badge className={`text-[10px] ${role.color}`}>{u.permission_preset || u.role}</Badge>
                         </div>
@@ -445,8 +448,8 @@ export default function TeamPage() {
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
                       <div>
-                        <CardTitle className="text-lg font-bold" style={{ fontFamily: 'Manrope' }}>{selectedPermUser.full_name || selectedPermUser.username}</CardTitle>
-                        <p className="text-sm text-slate-500 mt-0.5">@{selectedPermUser.username}</p>
+                        <CardTitle className="text-lg font-bold" style={{ fontFamily: 'Manrope' }}>{selectedPermUser.full_name || selectedPermUser.email}</CardTitle>
+                        <p className="text-sm text-slate-500 mt-0.5">{selectedPermUser.email || selectedPermUser.username}</p>
                       </div>
                       <Select onValueChange={applyPreset}>
                         <SelectTrigger className="w-40 h-9"><SelectValue placeholder="Apply Preset" /></SelectTrigger>
@@ -536,46 +539,41 @@ export default function TeamPage() {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle style={{ fontFamily: 'Manrope' }}>{editingUser ? 'Edit User' : 'Create New User'}</DialogTitle>
-            <DialogDescription>{editingUser ? `Editing @${editingUser.username}` : 'Create a new team member'}</DialogDescription>
+            <DialogDescription>{editingUser ? `Editing ${editingUser.full_name || editingUser.email}` : 'Add a new team member'}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label className="text-xs">Username *</Label>
-                <Input value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} placeholder="e.g. cashier01" className="h-9" disabled={!!editingUser} data-testid="user-username" />
-              </div>
-              <div>
-                <Label className="text-xs">Full Name</Label>
+                <Label className="text-xs">Full Name <span className="text-red-500">*</span></Label>
                 <Input value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} placeholder="Juan dela Cruz" className="h-9" data-testid="user-fullname" />
               </div>
-            </div>
-            <div>
-              <Label className="text-xs">Email</Label>
-              <Input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="user@example.com" className="h-9" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label className="text-xs">Role *</Label>
+                <Label className="text-xs">Role <span className="text-red-500">*</span></Label>
                 <Select value={form.role} onValueChange={v => setForm({ ...form, role: v })}>
                   <SelectTrigger className="h-9" data-testid="user-role-select"><SelectValue /></SelectTrigger>
                   <SelectContent>{ROLES.map(r => <SelectItem key={r.key} value={r.key}>{r.label}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
-              <div>
-                <Label className="text-xs">Branch</Label>
-                <Select value={form.branch_id || 'all'} onValueChange={v => setForm({ ...form, branch_id: v === 'all' ? '' : v })}>
-                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Branches</SelectItem>
-                    {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
+            </div>
+            <div>
+              <Label className="text-xs">Email Address <span className="text-red-500">*</span></Label>
+              <Input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="user@example.com" className="h-9" data-testid="user-email" disabled={!!editingUser} />
+              {!editingUser && <p className="text-[10px] text-slate-400 mt-1">Used as login. Cannot be changed after creation.</p>}
+            </div>
+            <div>
+              <Label className="text-xs">Branch</Label>
+              <Select value={form.branch_id || 'all'} onValueChange={v => setForm({ ...form, branch_id: v === 'all' ? '' : v })}>
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Branches</SelectItem>
+                  {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
             <Separator />
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label className="text-xs">{editingUser ? 'New Password (optional)' : 'Password *'}</Label>
+                <Label className="text-xs">{editingUser ? 'New Password (optional)' : 'Password'} {!editingUser && <span className="text-red-500">*</span>}</Label>
                 <Input type="password" autoComplete="new-password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="Min. 6 characters" className="h-9" data-testid="user-password" />
               </div>
               <div>
