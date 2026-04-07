@@ -15,7 +15,7 @@ import pytest
 import requests
 import os
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://pos-pin-hierarchy.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://pin-gating-inventory.preview.emergentagent.com').rstrip('/')
 
 SUPER_ADMIN_EMAIL = "janmarkeahig@gmail.com"
 SUPER_ADMIN_PASSWORD = "Aa@58798546521325"
