@@ -50,6 +50,7 @@ from routes.stock_releases import router as stock_releases_router
 from routes.qr_actions import router as qr_actions_router
 from routes.documents import router as documents_router
 from routes.sms import router as sms_router
+from routes.invoice_corrections import router as invoice_corrections_router
 
 # =============================================================================
 # APP SETUP
@@ -142,6 +143,9 @@ api_router.include_router(reports_router)
 
 # Returns & Refunds
 api_router.include_router(returns_router)
+
+# Invoice Corrections (Incomplete Stock)
+api_router.include_router(invoice_corrections_router)
 
 # Audit Center
 api_router.include_router(audit_router)
