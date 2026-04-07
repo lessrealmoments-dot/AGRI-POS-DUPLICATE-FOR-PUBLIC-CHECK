@@ -584,12 +584,13 @@ See `/app/memory/ROADMAP.md` for full implementation spec.
 ## Next Up (P0 — Immediate)
 See `/app/memory/ROADMAP.md` for full spec on each item.
 
-### Terminal Smart Sync — Phases 1-3 (2026-04-08) — Complete
+### Terminal Smart Sync — Phases 1-3 + Last Synced Enhancement (2026-04-08) — Complete
 - **Phase 1 — Instant Load from Cache**: `TerminalShell.loadData()` now checks IndexedDB for cached products first. If cache exists (products > 0), terminal shows **immediately** (<200ms) — no loading spinner. Background delta sync kicks off silently.
 - **Phase 2 — Backend True Delta Sync**: `GET /api/sync/pos-data?last_sync=<ISO>` now applies time filter to ALL collections (products, customers, inventory, branch_prices) — not just products. Returns `deleted_ids[]` for products deactivated since last sync. Products enriched with current inventory even during delta.
 - **Phase 3 — Inventory Pulse Polling**: New `GET /api/sync/inventory-pulse?branch_id=X&since=<ISO>` lightweight endpoint returns only changed stock quantities. `syncManager.js` polls every 60 seconds for near-real-time stock visibility. Catalog delta sync remains at 5-minute intervals.
 - **Sync Indicator**: Non-blocking header indicator: "Syncing..." → "Up to date" → "Sync failed" with appropriate icons.
 - **TerminalSales Cache Refresh**: `syncVersion` prop triggers TerminalSales to re-read products/customers from IndexedDB after background sync completes.
+- **Last Synced Display**: Settings panel shows "Last Synced: X min ago" with live-updating relative timestamp (refreshes every 30s). Tapping the row triggers a manual sync. Spinner animation while syncing.
 - **Phase 4 — Cursor AI Prompt**: Android WebView IndexedDB persistence guide saved at `/app/memory/CURSOR_TERMINAL_SMART_SYNC_PROMPT.md`
 - **Impact**: Terminal open time: 5-15s → <200ms (returning users). Stock freshness: manual → 60 seconds. Data per QR→Back navigation: ~5MB → ~0KB (cache hit).
 - **Backend:** `routes/sync.py` (enhanced pos-data delta + new inventory-pulse endpoint)

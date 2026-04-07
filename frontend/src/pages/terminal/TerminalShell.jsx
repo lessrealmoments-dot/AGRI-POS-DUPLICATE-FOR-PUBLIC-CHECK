@@ -16,6 +16,7 @@ import {
   cacheBranchPrices, setOfflineOrg, getPendingSaleCount,
   getProductCount, getLastSyncTime, setLastSyncTime,
   mergeProducts, mergeCustomers, updateInventoryBatch,
+  getMeta,
 } from '../../lib/offlineDB';
 import { syncPendingSales, startAutoSync, stopAutoSync } from '../../lib/syncManager';
 
@@ -73,6 +74,21 @@ function basicDocToPrintData(basic) {
   return basic;
 }
 
+// Format relative time: "Just now", "2 min ago", "1 hr ago", etc.
+function formatRelativeTime(isoString) {
+  if (!isoString) return 'Never';
+  const diff = Date.now() - new Date(isoString).getTime();
+  if (diff < 0) return 'Just now';
+  const secs = Math.floor(diff / 1000);
+  if (secs < 30) return 'Just now';
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs} hr ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
 
 
 const TABS = [
@@ -100,6 +116,7 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
   const [syncProgress, setSyncProgress] = useState('');
   const [backgroundSyncStatus, setBackgroundSyncStatus] = useState(''); // '', 'syncing', 'done', 'error'
   const [syncVersion, setSyncVersion] = useState(0); // Incremented after background sync to trigger TerminalSales re-read
+  const [lastSyncDisplay, setLastSyncDisplay] = useState(''); // "2 min ago", "Just now", etc.
   const [notifications, setNotifications] = useState([]);
   const wsRef = useRef(null);
   const poRefreshRef = useRef(null); // callback to refresh PO list
@@ -561,6 +578,7 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
 
           setSyncProgress('');
           setDataReady(true);
+          setSyncVersion(v => v + 1); // Update last-synced display
           toast.success(`Data synced — ${posRes.data.products?.length || 0} products loaded`);
           api.get('/settings/business-info').then(r => setBusinessInfo(r.data || {})).catch(() => {});
         } catch (e) {
@@ -610,6 +628,18 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
     startAutoSync(() => session.branchId);
     return () => stopAutoSync();
   }, [session.branchId]);
+
+  // "Last Synced: X min ago" ticker — updates display every 30s
+  useEffect(() => {
+    let mounted = true;
+    const updateDisplay = async () => {
+      const ts = await getLastSyncTime();
+      if (mounted) setLastSyncDisplay(formatRelativeTime(ts));
+    };
+    updateDisplay();
+    const timer = setInterval(updateDisplay, 30000);
+    return () => { mounted = false; clearInterval(timer); };
+  }, [syncVersion]); // re-run when sync completes
 
   const handleManualSync = async () => {
     setSyncing(true);
@@ -868,6 +898,21 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
                 <button onClick={() => { setSettingsOpen(false); handleManualSync(); }}
                   className="text-xs text-blue-600 hover:underline">Sync now</button>
               </div>
+              {/* Last Synced display */}
+              <button
+                onClick={() => { setSettingsOpen(false); handleManualSync(); }}
+                className="w-full flex items-center justify-between p-3 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors text-left"
+                data-testid="last-sync-row"
+              >
+                <div>
+                  <p className="text-xs text-slate-500 font-medium">Last Synced</p>
+                  <p className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
+                    <RefreshCw size={12} className={`${backgroundSyncStatus === 'syncing' ? 'animate-spin text-amber-500' : 'text-slate-400'}`} />
+                    {backgroundSyncStatus === 'syncing' ? 'Syncing now...' : lastSyncDisplay || 'Never'}
+                  </p>
+                </div>
+                <span className="text-[10px] text-blue-600 font-medium">Tap to sync</span>
+              </button>
             </div>
             <div className="p-4 border-t border-slate-100 space-y-2">
               <button onClick={() => { setSettingsOpen(false); handleLogout(); }}
