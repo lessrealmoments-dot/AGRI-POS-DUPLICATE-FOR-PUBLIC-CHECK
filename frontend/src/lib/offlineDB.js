@@ -282,6 +282,62 @@ export async function deductLocalInventory(items) {
   });
 }
 
+/** Fast product count — used by TerminalShell to decide instant-load vs full sync */
+export async function getProductCount() {
+  return countStore(STORES.PRODUCTS);
+}
+
+/** Get last sync timestamp from META store */
+export async function getLastSyncTime() {
+  return getMeta('last_sync');
+}
+
+/** Set last sync timestamp */
+export async function setLastSyncTime(isoString) {
+  return setMeta('last_sync', isoString);
+}
+
+/** Merge delta products into existing cache (upsert changed, remove deleted) */
+export async function mergeProducts(changed, deletedIds = []) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORES.PRODUCTS, 'readwrite');
+    const store = tx.objectStore(STORES.PRODUCTS);
+    // Upsert changed products
+    for (const p of changed) store.put(p);
+    // Remove deleted products
+    for (const id of deletedIds) store.delete(id);
+    tx.oncomplete = () => { db.close(); resolve(changed.length + deletedIds.length); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  });
+}
+
+/** Merge delta customers into existing cache */
+export async function mergeCustomers(changed) {
+  if (!changed.length) return 0;
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORES.CUSTOMERS, 'readwrite');
+    const store = tx.objectStore(STORES.CUSTOMERS);
+    for (const c of changed) store.put(c);
+    tx.oncomplete = () => { db.close(); resolve(changed.length); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  });
+}
+
+/** Batch update inventory quantities (for lightweight pulse sync) */
+export async function updateInventoryBatch(items) {
+  if (!items.length) return 0;
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORES.INVENTORY, 'readwrite');
+    const store = tx.objectStore(STORES.INVENTORY);
+    for (const item of items) store.put(item);
+    tx.oncomplete = () => { db.close(); resolve(items.length); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  });
+}
+
 /**
  * Check if there are pending sales that haven't been synced.
  * Used to warn before logout/close.

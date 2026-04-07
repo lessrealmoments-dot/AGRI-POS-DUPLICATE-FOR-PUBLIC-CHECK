@@ -43,60 +43,88 @@ async def get_pos_sync_data(user=Depends(get_current_user), branch_id: str = Non
     """Get data for offline POS sync — includes branch-specific prices.
     If last_sync is provided, only returns records updated since that timestamp (delta sync).
     """
-    query = {"active": True}
+    is_delta = bool(last_sync)
+    product_query = {"active": True}
+    customer_query = {"active": True}
 
     # Delta sync: only fetch records updated since last_sync
+    time_filter = None
     if last_sync:
-        try:
-            query["$or"] = [
-                {"updated_at": {"$gte": last_sync}},
-                {"created_at": {"$gte": last_sync}},
-            ]
-        except Exception:
-            pass  # Invalid date — fall back to full sync
-    
+        time_filter = {"$or": [
+            {"updated_at": {"$gte": last_sync}},
+            {"created_at": {"$gte": last_sync}},
+        ]}
+        product_query = {**product_query, **time_filter}
+        customer_query = {**customer_query, **time_filter}
+
     # Products catalog (global)
-    products = await db.products.find(query, {"_id": 0}).to_list(10000)
+    products = await db.products.find(product_query, {"_id": 0}).to_list(10000)
     
-    # Customers (branch-scoped)
-    customers = await db.customers.find({"active": True}, {"_id": 0}).to_list(5000)
+    # Customers (branch-scoped) — apply delta filter if available
+    customers = await db.customers.find(customer_query, {"_id": 0}).to_list(5000)
     
-    # Price schemes (global)
+    # Price schemes (global) — always full (tiny collection)
     schemes = await db.price_schemes.find({"active": True}, {"_id": 0}).to_list(50)
     
-    # Inventory quantities for branch (or aggregated across all branches)
+    # Inventory quantities for branch — apply delta filter
     inventory = []
     if branch_id:
-        inventory = await db.inventory.find({"branch_id": branch_id}, {"_id": 0}).to_list(10000)
-    else:
-        # No branch specified — aggregate total stock across all branches
+        inv_query = {"branch_id": branch_id}
+        if time_filter:
+            inv_query = {**inv_query, **time_filter}
+        inventory = await db.inventory.find(inv_query, {"_id": 0}).to_list(10000)
+    elif not is_delta:
+        # Full sync without branch — aggregate total stock across all branches
         agg = await db.inventory.aggregate([
             {"$group": {"_id": "$product_id", "quantity": {"$sum": "$quantity"}}}
         ]).to_list(10000)
         inventory = [{"product_id": r["_id"], "quantity": r["quantity"]} for r in agg]
     
-    # Branch price overrides — so cashiers sell at correct branch price offline
+    # Branch price overrides — apply delta filter
     branch_prices = []
     if branch_id:
-        branch_prices = await db.branch_prices.find({"branch_id": branch_id}, {"_id": 0}).to_list(10000)
+        bp_query = {"branch_id": branch_id}
+        if time_filter:
+            bp_query = {**bp_query, **time_filter}
+        branch_prices = await db.branch_prices.find(bp_query, {"_id": 0}).to_list(10000)
 
-    # Merge inventory into products — inject `available` field per product
-    inv_map = {inv["product_id"]: float(inv.get("quantity", 0)) for inv in inventory}
-    bp_map  = {bp["product_id"]: bp for bp in branch_prices}
+    # Deleted/deactivated products since last_sync (for delta cache cleanup)
+    deleted_ids = []
+    if last_sync:
+        deactivated = await db.products.find(
+            {"active": False, "$or": [
+                {"updated_at": {"$gte": last_sync}},
+                {"deactivated_at": {"$gte": last_sync}},
+            ]},
+            {"_id": 0, "id": 1}
+        ).to_list(1000)
+        deleted_ids = [d["id"] for d in deactivated]
+
+    # For delta sync: we need ALL inventory for enrichment (product.available field)
+    # because even unchanged products need current stock levels
+    all_inv_map = {}
+    all_bp_map = {}
+    if is_delta and branch_id:
+        # Fetch full inventory + branch prices for enrichment of delta products
+        all_inv = await db.inventory.find({"branch_id": branch_id}, {"_id": 0}).to_list(10000)
+        all_inv_map = {inv["product_id"]: float(inv.get("quantity", 0)) for inv in all_inv}
+        all_bp = await db.branch_prices.find({"branch_id": branch_id}, {"_id": 0}).to_list(10000)
+        all_bp_map = {bp["product_id"]: bp for bp in all_bp}
+    else:
+        all_inv_map = {inv["product_id"]: float(inv.get("quantity", 0)) for inv in inventory}
+        all_bp_map = {bp["product_id"]: bp for bp in branch_prices}
 
     enriched_products = []
     for p in products:
         p = dict(p)
         if p.get("is_repack") and p.get("parent_id"):
-            # Repack: derive from parent stock
-            parent_qty = inv_map.get(p["parent_id"], 0)
+            parent_qty = all_inv_map.get(p["parent_id"], 0)
             units = p.get("units_per_parent", 1) or 1
             p["available"] = round(parent_qty * units, 4)
         else:
-            p["available"] = inv_map.get(p["id"], 0)
-        # Apply branch price overrides
-        if p["id"] in bp_map:
-            bp = bp_map[p["id"]]
+            p["available"] = all_inv_map.get(p["id"], 0)
+        if p["id"] in all_bp_map:
+            bp = all_bp_map[p["id"]]
             if bp.get("prices"):
                 p["prices"] = {**(p.get("prices") or {}), **bp["prices"]}
             if bp.get("cost_price") is not None:
@@ -109,8 +137,35 @@ async def get_pos_sync_data(user=Depends(get_current_user), branch_id: str = Non
         "price_schemes": schemes,
         "inventory": inventory,
         "branch_prices": branch_prices,
+        "deleted_ids": deleted_ids,
         "sync_time": now_iso(),
-        "is_delta": bool(last_sync),
+        "is_delta": is_delta,
+    }
+
+
+@router.get("/sync/inventory-pulse")
+async def get_inventory_pulse(user=Depends(get_current_user), branch_id: str = None, since: str = None):
+    """Lightweight endpoint — returns only inventory quantities changed since `since`.
+    Used by terminal for frequent stock-level polling (every 60s).
+    """
+    if not branch_id:
+        return {"items": [], "pulse_time": now_iso()}
+    
+    query = {"branch_id": branch_id}
+    if since:
+        query["$or"] = [
+            {"updated_at": {"$gte": since}},
+        ]
+    
+    items = await db.inventory.find(query, {
+        "_id": 0, "product_id": 1, "quantity": 1, "updated_at": 1
+    }).to_list(10000)
+    
+    return {
+        "items": items,
+        "total": len(items),
+        "pulse_time": now_iso(),
+        "is_delta": bool(since),
     }
 
 

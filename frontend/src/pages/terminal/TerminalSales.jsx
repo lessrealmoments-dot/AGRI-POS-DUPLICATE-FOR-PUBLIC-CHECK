@@ -14,7 +14,7 @@ import {
 } from '../../lib/offlineDB';
 import { newEnvelopeId } from '../../lib/syncManager';
 
-export default function TerminalSales({ api, session, isOnline, pendingCount, setPendingCount }) {
+export default function TerminalSales({ api, session, isOnline, pendingCount, setPendingCount, syncVersion }) {
   const [products, setProducts] = useState([]);
   const [search, setSearch] = useState('');
   const [results, setResults] = useState([]);
@@ -59,7 +59,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   // Keep ref in sync with state so the capture-phase listener can read it without stale closure
   useEffect(() => { scanQtyModalOpenRef.current = scanQtyModal; }, [scanQtyModal]);
 
-  // Load cached data
+  // Load cached data — re-reads from IndexedDB when syncVersion changes (background sync completed)
   useEffect(() => {
     (async () => {
       const [prods, custs, schs] = await Promise.all([getProducts(), getCustomers(), getPriceSchemes()]);
@@ -68,7 +68,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
       setSchemes(schs);
     })();
     api.get('/settings/business-info').then(r => setBusinessInfo(r.data || {})).catch(() => {});
-  }, []); // eslint-disable-line
+  }, [syncVersion]); // eslint-disable-line
 
   // Search products
   useEffect(() => {

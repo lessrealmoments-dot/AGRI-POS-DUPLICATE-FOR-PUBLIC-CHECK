@@ -17,13 +17,16 @@ import {
   getPendingSales, removePendingSale,
   cacheProducts, cacheCustomers, cachePriceSchemes, cacheInventory, cacheBranchPrices,
   setMeta, getMeta, getPendingSaleCount, putProduct,
+  updateInventoryBatch,
 } from './offlineDB';
 
 let syncInProgress = false;
 let syncListeners = [];
 let autoSyncInterval = null;
 let cacheRefreshInterval = null;
-const CACHE_REFRESH_MS = 5 * 60 * 1000; // 5 minutes
+let inventoryPulseInterval = null;
+const CACHE_REFRESH_MS = 5 * 60 * 1000; // 5 minutes — catalog delta
+const INVENTORY_PULSE_MS = 60 * 1000;   // 60 seconds — stock levels only
 
 export function onSyncUpdate(callback) {
   syncListeners.push(callback);
@@ -229,6 +232,39 @@ export async function fullSync(branchId = null) {
   return refreshPOSCache(branchId);
 }
 
+/**
+ * Lightweight inventory pulse — fetches only changed stock quantities.
+ * Called every 60 seconds for near-real-time stock visibility.
+ */
+export async function inventoryPulse(branchId) {
+  if (!navigator.onLine || !branchId || branchId === 'all') return false;
+  try {
+    const lastPulse = await getMeta('last_inventory_pulse');
+    const params = { branch_id: branchId };
+    if (lastPulse) params.since = lastPulse;
+
+    const response = await api.get('/sync/inventory-pulse', { params });
+    const { items = [], pulse_time } = response.data;
+
+    if (items.length > 0) {
+      await updateInventoryBatch(
+        items.map(i => ({
+          product_id: i.product_id,
+          quantity: i.quantity ?? 0,
+          branch_id: branchId,
+          updated_at: i.updated_at || new Date().toISOString(),
+        }))
+      );
+      emit({ type: 'inventory_pulse', updated: items.length });
+    }
+
+    await setMeta('last_inventory_pulse', pulse_time || new Date().toISOString());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function startAutoSync(getBranchId) {
   if (autoSyncInterval) return;
 
@@ -251,6 +287,16 @@ export function startAutoSync(getBranchId) {
       }
     }
   }, CACHE_REFRESH_MS);
+
+  // Inventory pulse every 60 seconds (super lightweight — just stock counts)
+  inventoryPulseInterval = setInterval(async () => {
+    if (navigator.onLine && !syncInProgress) {
+      const branchId = typeof getBranchId === 'function' ? getBranchId() : getBranchId;
+      if (branchId && branchId !== 'all') {
+        await inventoryPulse(branchId);
+      }
+    }
+  }, INVENTORY_PULSE_MS);
 
   // On reconnect, wait 2s then run full sync
   const onReconnect = () => {
@@ -275,6 +321,10 @@ export function stopAutoSync() {
   if (cacheRefreshInterval) {
     clearInterval(cacheRefreshInterval);
     cacheRefreshInterval = null;
+  }
+  if (inventoryPulseInterval) {
+    clearInterval(inventoryPulseInterval);
+    inventoryPulseInterval = null;
   }
   if (startAutoSync._onReconnect) {
     window.removeEventListener('online', startAutoSync._onReconnect);

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShoppingCart, ClipboardCheck, ArrowLeftRight, Wifi, WifiOff, RefreshCw, Settings, ChevronRight, Unlink, Search, X, Loader2, Printer, FileText, ExternalLink, CheckCircle2, ScanLine, FolderUp } from 'lucide-react';
+import { ShoppingCart, ClipboardCheck, ArrowLeftRight, Wifi, WifiOff, RefreshCw, Settings, ChevronRight, Unlink, Search, X, Loader2, Printer, FileText, ExternalLink, CheckCircle2, ScanLine, FolderUp, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import TerminalSales from './TerminalSales';
 import TerminalPOCheck from './TerminalPOCheck';
@@ -14,6 +14,8 @@ import {
   cacheProducts, getProducts, cacheCustomers,
   cachePriceSchemes, cacheInventory,
   cacheBranchPrices, setOfflineOrg, getPendingSaleCount,
+  getProductCount, getLastSyncTime, setLastSyncTime,
+  mergeProducts, mergeCustomers, updateInventoryBatch,
 } from '../../lib/offlineDB';
 import { syncPendingSales, startAutoSync, stopAutoSync } from '../../lib/syncManager';
 
@@ -96,6 +98,8 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
   const [businessInfo, setBusinessInfo] = useState({});
   const [pendingCount, setPendingCount] = useState(0);
   const [syncProgress, setSyncProgress] = useState('');
+  const [backgroundSyncStatus, setBackgroundSyncStatus] = useState(''); // '', 'syncing', 'done', 'error'
+  const [syncVersion, setSyncVersion] = useState(0); // Incremented after background sync to trigger TerminalSales re-read
   const [notifications, setNotifications] = useState([]);
   const wsRef = useRef(null);
   const poRefreshRef = useRef(null); // callback to refresh PO list
@@ -414,63 +418,161 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
     return () => { if (wsRef.current) { wsRef.current.close(); wsRef.current = null; } };
   }, [session.terminalId]);
 
-  // Initial data load
+  // ── Background delta sync (non-blocking) ─────────────────────────────────
+  const backgroundSync = useCallback(async (isFullSync = false) => {
+    if (!navigator.onLine) return;
+    setBackgroundSyncStatus('syncing');
+    try {
+      const params = { branch_id: session.branchId };
+      // Delta: pass last_sync timestamp unless forcing full sync
+      if (!isFullSync) {
+        const lastSync = await getLastSyncTime();
+        if (lastSync) params.last_sync = lastSync;
+      }
+
+      const [posRes, custRes, schemeRes] = await Promise.all([
+        api.get('/sync/pos-data', { params }),
+        api.get('/customers', { params: { limit: 500, branch_id: session.branchId } }),
+        api.get('/price-schemes'),
+      ]);
+
+      const isDelta = posRes.data.is_delta;
+      const products = posRes.data.products || [];
+      const customers = custRes.data.customers || posRes.data.customers || [];
+      const inventory = posRes.data.inventory || [];
+      const branchPrices = posRes.data.branch_prices || [];
+      const deletedIds = posRes.data.deleted_ids || [];
+
+      if (isDelta && products.length > 0) {
+        // Delta merge — only upsert changed records
+        await mergeProducts(products, deletedIds);
+      } else if (products.length > 0) {
+        // Full replace
+        await cacheProducts(products);
+      }
+
+      // Always full-replace these (lightweight collections)
+      if (customers.length > 0) await cacheCustomers(customers);
+      await cachePriceSchemes(schemeRes.data || posRes.data.price_schemes || []);
+
+      if (inventory.length) {
+        await cacheInventory(
+          inventory.map(item => ({
+            product_id: item.product_id, quantity: item.quantity ?? 0,
+            branch_id: item.branch_id, updated_at: item.updated_at || new Date().toISOString(),
+          }))
+        );
+      }
+      if (branchPrices.length) {
+        await cacheBranchPrices(
+          branchPrices.map(bp => ({
+            product_id: bp.product_id, prices: bp.prices || {},
+            cost_price: bp.cost_price ?? null, branch_id: bp.branch_id,
+          }))
+        );
+      }
+
+      // Save sync timestamp
+      await setLastSyncTime(posRes.data.sync_time || new Date().toISOString());
+
+      // Sync pending offline sales
+      const count = await getPendingSaleCount();
+      setPendingCount(count);
+      if (count > 0) {
+        await syncPendingSales();
+        setPendingCount(await getPendingSaleCount());
+      }
+
+      // Fetch business info for receipt printing
+      api.get('/settings/business-info').then(r => setBusinessInfo(r.data || {})).catch(() => {});
+
+      setBackgroundSyncStatus('done');
+      // Trigger TerminalSales to re-read cache
+      setSyncVersion(v => v + 1);
+      // Show subtle toast only when delta brought actual changes
+      if (isDelta && products.length > 0) {
+        toast.success(`${products.length} product(s) updated`, { duration: 2000 });
+      }
+      // Clear "done" indicator after 3s
+      setTimeout(() => setBackgroundSyncStatus(''), 3000);
+    } catch (e) {
+      console.error('Background sync failed:', e);
+      setBackgroundSyncStatus('error');
+      setTimeout(() => setBackgroundSyncStatus(''), 5000);
+    }
+  }, [api, session.branchId]);
+
+  // ── Initial data load — Instant from cache, background sync ─────────────
   const loadData = useCallback(async () => {
-    setSyncing(true);
-    setSyncProgress('Connecting...');
     if (session.organizationId) setOfflineOrg(session.organizationId);
 
-    if (navigator.onLine) {
-      try {
-        setSyncProgress('Downloading products...');
-        const params = { branch_id: session.branchId };
-        const [posRes, custRes, schemeRes] = await Promise.all([
-          api.get('/sync/pos-data', { params }),
-          api.get('/customers', { params: { limit: 500, ...params } }),
-          api.get('/price-schemes'),
-        ]);
+    // Step 1: Check if we have cached data in IndexedDB
+    const cachedCount = await getProductCount();
 
-        setSyncProgress('Saving to local storage...');
-        await Promise.all([
-          cacheProducts(posRes.data.products || []),
-          cacheCustomers(custRes.data.customers || posRes.data.customers || []),
-          cachePriceSchemes(schemeRes.data || posRes.data.price_schemes || []),
-          posRes.data.inventory?.length ? cacheInventory(
-            posRes.data.inventory.map(item => ({
-              product_id: item.product_id, quantity: item.quantity ?? 0,
-              branch_id: item.branch_id, updated_at: item.updated_at || new Date().toISOString(),
-            }))
-          ) : Promise.resolve(),
-          posRes.data.branch_prices?.length ? cacheBranchPrices(
-            posRes.data.branch_prices.map(bp => ({
-              product_id: bp.product_id, prices: bp.prices || {},
-              cost_price: bp.cost_price ?? null, branch_id: bp.branch_id,
-            }))
-          ) : Promise.resolve(),
-        ]);
+    if (cachedCount > 0) {
+      // ✅ INSTANT LOAD — show terminal immediately from cache
+      setDataReady(true);
+      setSyncing(false);
+      // Kick off background delta sync (non-blocking)
+      backgroundSync(false);
+    } else {
+      // First time — must do full download (no cache yet)
+      setSyncing(true);
+      setSyncProgress('Connecting...');
 
-        const count = await getPendingSaleCount();
-        setPendingCount(count);
-        if (count > 0) {
-          setSyncProgress(`Syncing ${count} pending sale(s)...`);
-          await syncPendingSales();
-          setPendingCount(await getPendingSaleCount());
+      if (navigator.onLine) {
+        try {
+          setSyncProgress('Downloading products...');
+          const params = { branch_id: session.branchId };
+          const [posRes, custRes, schemeRes] = await Promise.all([
+            api.get('/sync/pos-data', { params }),
+            api.get('/customers', { params: { limit: 500, ...params } }),
+            api.get('/price-schemes'),
+          ]);
+
+          setSyncProgress('Saving to local storage...');
+          await Promise.all([
+            cacheProducts(posRes.data.products || []),
+            cacheCustomers(custRes.data.customers || posRes.data.customers || []),
+            cachePriceSchemes(schemeRes.data || posRes.data.price_schemes || []),
+            posRes.data.inventory?.length ? cacheInventory(
+              posRes.data.inventory.map(item => ({
+                product_id: item.product_id, quantity: item.quantity ?? 0,
+                branch_id: item.branch_id, updated_at: item.updated_at || new Date().toISOString(),
+              }))
+            ) : Promise.resolve(),
+            posRes.data.branch_prices?.length ? cacheBranchPrices(
+              posRes.data.branch_prices.map(bp => ({
+                product_id: bp.product_id, prices: bp.prices || {},
+                cost_price: bp.cost_price ?? null, branch_id: bp.branch_id,
+              }))
+            ) : Promise.resolve(),
+          ]);
+
+          await setLastSyncTime(posRes.data.sync_time || new Date().toISOString());
+
+          const count = await getPendingSaleCount();
+          setPendingCount(count);
+          if (count > 0) {
+            setSyncProgress(`Syncing ${count} pending sale(s)...`);
+            await syncPendingSales();
+            setPendingCount(await getPendingSaleCount());
+          }
+
+          setSyncProgress('');
+          setDataReady(true);
+          toast.success(`Data synced — ${posRes.data.products?.length || 0} products loaded`);
+          api.get('/settings/business-info').then(r => setBusinessInfo(r.data || {})).catch(() => {});
+        } catch (e) {
+          console.error('Sync failed:', e);
+          await loadOfflineData();
         }
-
-        setSyncProgress('');
-        setDataReady(true);
-        toast.success(`Data synced — ${posRes.data.products?.length || 0} products loaded`);
-        // Fetch business info for receipt printing
-        api.get('/settings/business-info').then(r => setBusinessInfo(r.data || {})).catch(() => {});
-      } catch (e) {
-        console.error('Sync failed:', e);
+      } else {
         await loadOfflineData();
       }
-    } else {
-      await loadOfflineData();
+      setSyncing(false);
     }
-    setSyncing(false);
-  }, [api, session.branchId, session.organizationId]);
+  }, [api, session.branchId, session.organizationId, backgroundSync]);
 
   const loadOfflineData = async () => {
     const prods = await getProducts();
@@ -511,7 +613,7 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
 
   const handleManualSync = async () => {
     setSyncing(true);
-    await loadData();
+    await backgroundSync(true); // Force full sync on manual trigger
     setSyncing(false);
   };
 
@@ -541,6 +643,22 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
         <div className="flex items-center gap-2">
           <span className="text-sm font-bold text-[#1A4D2E]" style={{ fontFamily: 'Manrope' }}>AgriSmart</span>
           <span className="text-xs text-slate-500 border-l border-slate-200 pl-2">{session.branchName}</span>
+          {/* Background sync indicator */}
+          {backgroundSyncStatus === 'syncing' && (
+            <span className="flex items-center gap-1 text-[10px] text-amber-600" data-testid="sync-indicator-syncing">
+              <RefreshCw size={10} className="animate-spin" /> Syncing
+            </span>
+          )}
+          {backgroundSyncStatus === 'done' && (
+            <span className="flex items-center gap-1 text-[10px] text-emerald-600" data-testid="sync-indicator-done">
+              <Check size={10} /> Up to date
+            </span>
+          )}
+          {backgroundSyncStatus === 'error' && (
+            <span className="flex items-center gap-1 text-[10px] text-red-500" data-testid="sync-indicator-error">
+              <WifiOff size={10} /> Sync failed
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {/* Smart Doc Search — accepts 8-char doc codes, invoice numbers, PO numbers */}
@@ -624,7 +742,7 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
       {/* Content */}
       <div className="flex-1 overflow-hidden">
         {activeTab === 'sales' && (
-          <TerminalSales api={api} session={session} isOnline={isOnline} pendingCount={pendingCount} setPendingCount={setPendingCount} />
+          <TerminalSales api={api} session={session} isOnline={isOnline} pendingCount={pendingCount} setPendingCount={setPendingCount} syncVersion={syncVersion} />
         )}
         {activeTab === 'po' && (
           <TerminalPOCheck api={api} session={session} isOnline={isOnline} onRefreshRef={poRefreshRef} />
