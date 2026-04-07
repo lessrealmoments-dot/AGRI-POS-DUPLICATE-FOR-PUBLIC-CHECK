@@ -130,6 +130,32 @@ async def _resolve_pin(pin: str, allowed_methods: list = None, branch_id: str = 
                     "method": "auditor_pin",
                 }
 
+    # 5. Staff PIN (inventory clerks, warehouse staff, limited permissions)
+    if check_all or "staff_pin" in methods:
+        staff_users = await db.users.find(
+            {
+                "role": {"$in": ["staff", "inventory_clerk", "cashier"]},
+                "active": True,
+                "staff_pin": {"$exists": True, "$ne": ""}
+            },
+            {"_id": 0}
+        ).to_list(100)
+        logger.info(f"Staff PIN check: found {len(staff_users)} users with staff_pin")
+        for staff in staff_users:
+            staff_pin = str(staff.get("staff_pin", "") or "").strip()
+            if staff_pin and pin == staff_pin:
+                # Branch restriction: staff PINs only work on their assigned branch
+                if branch_id and staff.get("branch_id"):
+                    if staff["branch_id"] != branch_id:
+                        logger.info(f"Staff PIN matched but branch mismatch: staff_branch={staff['branch_id']}, requested={branch_id}")
+                        continue  # Skip — staff not assigned to this branch
+                logger.info(f"PIN matched: staff_pin for user {staff.get('full_name', staff.get('username', '?'))}")
+                return {
+                    "verifier_id": staff["id"],
+                    "verifier_name": staff.get("full_name", staff["username"]),
+                    "method": "staff_pin",
+                }
+
     logger.warning(f"PIN verify FAILED: no match found (pin_len={len(pin)}, checked_methods={methods or 'ALL'})")
     return None
 
@@ -138,7 +164,7 @@ async def _resolve_pin(pin: str, allowed_methods: list = None, branch_id: str = 
 #  PIN Policy definitions & resolver
 # ─────────────────────────────────────────────────────────────────────────────
 
-PIN_METHODS = ["admin_pin", "manager_pin", "totp", "auditor_pin"]
+PIN_METHODS = ["admin_pin", "manager_pin", "totp", "auditor_pin", "staff_pin"]
 
 PIN_POLICY_ACTIONS = [
     # Sales & Invoicing
@@ -182,7 +208,7 @@ PIN_POLICY_ACTIONS = [
     {"key": "kiosk_unlock",           "label": "Unlock Kiosk (Budget Checker)",   "module": "System",            "defaults": ["admin_pin", "manager_pin", "totp"]},
     {"key": "kiosk_cost_reveal",      "label": "Reveal Cost in Kiosk",            "module": "System",            "defaults": ["admin_pin", "manager_pin", "totp"]},
     # QR Operational Workflows
-    {"key": "qr_release_stocks",      "label": "QR — Release Stocks",            "module": "QR Operations",     "defaults": ["admin_pin", "manager_pin", "totp"]},
+    {"key": "qr_release_stocks",      "label": "QR — Release Stocks",            "module": "QR Operations",     "defaults": ["admin_pin", "manager_pin", "totp", "staff_pin"]},
     {"key": "qr_receive_payment",     "label": "QR — Receive Payment",           "module": "QR Operations",     "defaults": ["admin_pin", "manager_pin", "totp"]},
     {"key": "qr_view_payment_history","label": "QR — View Payment History",      "module": "QR Operations",     "defaults": ["admin_pin", "manager_pin", "totp"]},
     {"key": "qr_po_receive",          "label": "QR — Receive Purchase Order",    "module": "QR Operations",     "defaults": ["admin_pin", "manager_pin", "totp"]},
