@@ -10,7 +10,7 @@ import sys
 from datetime import datetime
 
 class AgriPOSAPITester:
-    def __init__(self, base_url="https://pin-gating-inventory.preview.emergentagent.com"):
+    def __init__(self, base_url="https://price-scheme-hub.preview.emergentagent.com"):
         self.base_url = base_url
         self.token = None
         self.tests_run = 0
