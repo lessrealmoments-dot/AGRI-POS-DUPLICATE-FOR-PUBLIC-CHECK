@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { BarcodeDisplay } from '../components/BarcodeDisplay';
+import CategorySelect from '../components/CategorySelect';
 
 export default function ProductDetailPage() {
   const { id } = useParams();
@@ -489,7 +490,7 @@ export default function ProductDetailPage() {
             </div>
             {editMode && (
               <div className="grid grid-cols-3 gap-4 mt-4">
-                <div><Label>Category</Label><Input value={editForm.category} onChange={e => setEditForm({ ...editForm, category: e.target.value })} /></div>
+                <div><Label>Category</Label><CategorySelect value={editForm.category} onChange={v => setEditForm({ ...editForm, category: v })} testId="product-detail-category-input" /></div>
                 <div><Label>Type</Label>
                   <Select value={editForm.product_type || 'stockable'} onValueChange={v => setEditForm({ ...editForm, product_type: v })}>
                     <SelectTrigger><SelectValue /></SelectTrigger>

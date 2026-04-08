@@ -584,7 +584,24 @@ See `/app/memory/ROADMAP.md` for full implementation spec.
 ## Next Up (P0 — Immediate)
 See `/app/memory/ROADMAP.md` for full spec on each item.
 
-### Terminal Price Schemes + Smart Discount (2026-04-08) — Complete
+### Dynamic Product Categories (2026-04-08) — Complete
+- **`product_categories` collection** added to TENANT_COLLECTIONS — per-org, isolated
+- **`GET /api/products/categories`** enhanced — merges categories from active products + manually-defined ones (sorted, deduped)
+- **`POST /api/products/categories`** — create a custom category for the org (idempotent)
+- **`DELETE /api/products/categories/{name}`** — delete category (guarded: fails if active products still use it)
+- **`CategorySelect` component** (`/components/CategorySelect.jsx`) — dynamic org-aware dropdown with inline "Add new category…" option
+- **ProductsPage.js** — replaced 8 hardcoded SelectItems with CategorySelect; added "Categories" button in header opening full Manage Categories dialog (list + add + delete)
+- **ProductDetailPage.js** — upgraded free-text Input to CategorySelect for consistency
+- **Branch Transfers** — already dynamically loaded from API; works automatically with new categories
+- **BranchCapitalWizard** — queries categories from product data directly; works automatically
+- **returns.py veterinary check** — name-based check; any org with "Veterinary" products retains this behavior
+
+### Terminal Smart Margin Guard — UX Fix (2026-04-08) — Complete
+- Moved "Yes, proceed with low margin" button OUT of the order summary box
+- Now shows as a full-width, prominent panel between summary and payment section
+- Covers both low-margin (amber) and loss (red) cases — both now require acknowledgment
+
+
 - **Price Scheme Switcher**: Cart area shows all available price schemes (Retail, Wholesale, etc.) as toggle buttons. Switching to non-retail requires manager/admin/TOTP PIN via `POST /api/verify/verify-pin-action` with `terminal_wholesale_switch` policy. Retail is always free. Switching recalculates all cart prices instantly.
 - **Total Discount Input**: Checkout dialog has discount input with ₱ Amount / % Percentage toggle. Discount applied to subtotal → grandTotal = subtotal - discount. Stored as `overall_discount` in sale data.
 - **Smart Profit Guard**: Real-time margin analysis on the whole receipt. Calculates `totalCost = Σ(effective_capital × qty)`, `margin = revenue - cost`, `marginPercent`. Color-coded display: green (healthy), amber (below configurable threshold, default 1%), red (loss). Amber shows "Yes, proceed with low margin" confirmation button. Configurable via `GET/PUT /api/settings/sales-config` (min_margin_percent, margin_warning_enabled).

@@ -398,9 +398,41 @@ async def barcode_inventory_for_print(branch_id: str, user=Depends(get_current_u
 
 @router.get("/categories")
 async def list_categories(user=Depends(get_current_user)):
-    """Get all product categories."""
-    categories = await db.products.distinct("category", {"active": True})
-    return categories
+    """Get all product categories — merges categories from existing products + manually defined ones."""
+    from_products = await db.products.distinct("category", {"active": True})
+    manual_cursor = db.product_categories.find({}, {"_id": 0, "name": 1})
+    manual_docs = await manual_cursor.to_list(length=None)
+    manual = [d["name"] for d in manual_docs if d.get("name")]
+    merged = sorted(set([c for c in (from_products + manual) if c]))
+    return merged
+
+
+@router.post("/categories")
+async def create_category(data: dict, user=Depends(get_current_user)):
+    """Add a new custom category for this organisation."""
+    check_perm(user, "products", "edit")
+    name = (data.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Category name is required")
+    # Idempotent — don't duplicate
+    existing = await db.product_categories.find_one({"name": name})
+    if not existing:
+        await db.product_categories.insert_one({"name": name, "created_at": now_iso()})
+    return {"name": name}
+
+
+@router.delete("/categories/{name}")
+async def delete_category(name: str, user=Depends(get_current_user)):
+    """Remove a custom category. Fails if any active products still use it."""
+    check_perm(user, "products", "edit")
+    in_use = await db.products.count_documents({"active": True, "category": name})
+    if in_use:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete: {in_use} product(s) still use this category. Reassign them first."
+        )
+    await db.product_categories.delete_many({"name": name})
+    return {"deleted": name}
 
 
 @router.get("/pricing-scan")

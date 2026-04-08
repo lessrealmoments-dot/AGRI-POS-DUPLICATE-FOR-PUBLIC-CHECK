@@ -9,12 +9,13 @@ import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Package, Plus, Pencil, Trash2, Search, Link2, ChevronRight, Eye, Upload, Zap, X, CheckCircle, XCircle, AlertTriangle, History, RefreshCw, Lock, ScanBarcode } from 'lucide-react';
+import { Package, Plus, Pencil, Trash2, Search, Link2, ChevronRight, Eye, Upload, Zap, X, CheckCircle, XCircle, AlertTriangle, History, RefreshCw, Lock, ScanBarcode, Tag } from 'lucide-react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { formatPHP } from '../lib/utils';
 import UploadQRDialog from '../components/UploadQRDialog';
 import { TotpVerifyDialog } from '../components/TotpVerifyDialog';
+import CategorySelect from '../components/CategorySelect';
 
 export default function ProductsPage() {
   const navigate = useNavigate();
@@ -53,6 +54,41 @@ export default function ProductsPage() {
   const [corrUploadQROpen, setCorrUploadQROpen] = useState(false);
   const [corrUploadId, setCorrUploadId] = useState(null);
   const [barcodeGenerating, setBarcodeGenerating] = useState(false);
+
+  // ── Manage Categories ──────────────────────────────────────────────────────
+  const [catMgmtOpen, setCatMgmtOpen] = useState(false);
+  const [catMgmtList, setCatMgmtList] = useState([]);
+  const [catNewName, setCatNewName] = useState('');
+  const [catSaving, setCatSaving] = useState(false);
+
+  const loadCatMgmt = () => {
+    api.get('/products/categories').then(r => {
+      setCatMgmtList(r.data || []);
+      setCategories(r.data || []);
+    }).catch(() => {});
+  };
+
+  const addCatMgmt = async () => {
+    const name = catNewName.trim();
+    if (!name) return;
+    setCatSaving(true);
+    try {
+      await api.post('/products/categories', { name });
+      setCatNewName('');
+      loadCatMgmt();
+      toast.success(`Category "${name}" added`);
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed'); }
+    setCatSaving(false);
+  };
+
+  const deleteCatMgmt = async (cat) => {
+    if (!window.confirm(`Delete category "${cat}"? This fails if products still use it.`)) return;
+    try {
+      await api.delete(`/products/categories/${encodeURIComponent(cat)}`);
+      loadCatMgmt();
+      toast.success(`"${cat}" deleted`);
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed'); }
+  };
 
   // ── Batch Quick Repack ──────────────────────────────────────────────────────
   const [qrOpen, setQrOpen] = useState(false);
@@ -257,7 +293,7 @@ export default function ProductsPage() {
 
   const openCreate = (prefillName = '') => {
     setEditing(null);
-    setForm({ sku: '', name: prefillName, category: 'Pesticide', unit: 'Box', cost_price: 0, prices: {}, barcode: '', description: '', product_type: 'stockable', starting_inventory: 0 });
+    setForm({ sku: '', name: prefillName, category: categories[0] || '', unit: 'Box', cost_price: 0, prices: {}, barcode: '', description: '', product_type: 'stockable', starting_inventory: 0 });
     setDialogOpen(true);
   };
 
@@ -432,6 +468,9 @@ export default function ProductsPage() {
           <Button variant="outline" size="sm" onClick={openQrModal} data-testid="quick-repack-btn">
             <Zap size={15} className="mr-1.5 text-amber-500" /> Quick Repack
           </Button>
+          <Button variant="outline" size="sm" onClick={() => { loadCatMgmt(); setCatMgmtOpen(true); }} data-testid="manage-categories-btn">
+            <Tag size={15} className="mr-1.5 text-violet-500" /> Categories
+          </Button>
           <Button data-testid="create-product-btn" onClick={() => openCreate()} className="bg-[#1A4D2E] hover:bg-[#14532d] text-white">
             <Plus size={16} className="mr-2" /> Add Product
           </Button>
@@ -592,19 +631,11 @@ export default function ProductsPage() {
             <div className="grid grid-cols-3 gap-4">
               <div>
                 <Label>Category</Label>
-                <Select value={form.category} onValueChange={v => setForm({ ...form, category: v })}>
-                  <SelectTrigger data-testid="product-category-input" className="h-9"><SelectValue placeholder="Select category" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Pesticide">Pesticide</SelectItem>
-                    <SelectItem value="Fertilizers">Fertilizers</SelectItem>
-                    <SelectItem value="Seeds">Seeds</SelectItem>
-                    <SelectItem value="Feeds">Feeds</SelectItem>
-                    <SelectItem value="Tools">Tools</SelectItem>
-                    <SelectItem value="Veterinary">Veterinary</SelectItem>
-                    <SelectItem value="Customized">Customized</SelectItem>
-                    <SelectItem value="Others">Others</SelectItem>
-                  </SelectContent>
-                </Select>
+                <CategorySelect
+                  value={form.category}
+                  onChange={v => setForm({ ...form, category: v })}
+                  testId="product-category-input"
+                />
               </div>
               <div>
                 <Label>Unit</Label>
@@ -1185,6 +1216,55 @@ export default function ProductsPage() {
         recordType="inventory_correction"
         recordId={corrUploadId}
       />
+
+      {/* Manage Categories Dialog */}
+      <Dialog open={catMgmtOpen} onOpenChange={v => { setCatMgmtOpen(v); if (!v) setCatNewName(''); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base font-bold" style={{ fontFamily: 'Manrope' }}>
+              <Tag size={17} className="text-violet-500" /> Manage Product Categories
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-xs text-slate-500">Categories are shared across all products in your company. Existing categories from your products are shown automatically.</p>
+            {/* Add new */}
+            <div className="flex gap-2">
+              <input
+                className="flex-1 h-9 border border-slate-200 rounded-md px-3 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
+                placeholder="New category name"
+                value={catNewName}
+                onChange={e => setCatNewName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') addCatMgmt(); }}
+                data-testid="cat-mgmt-new-input"
+              />
+              <Button size="sm" onClick={addCatMgmt} disabled={catSaving || !catNewName.trim()} className="h-9 bg-violet-600 hover:bg-violet-700 text-white" data-testid="cat-mgmt-add-btn">
+                {catSaving ? '…' : <><Plus size={13} className="mr-1" />Add</>}
+              </Button>
+            </div>
+            {/* Category list */}
+            <div className="max-h-64 overflow-y-auto space-y-1.5">
+              {catMgmtList.length === 0 && (
+                <p className="text-xs text-slate-400 italic text-center py-4">No categories yet. Add one above.</p>
+              )}
+              {catMgmtList.map(cat => (
+                <div key={cat} className="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-50 border border-slate-100" data-testid={`cat-row-${cat}`}>
+                  <span className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                    <Tag size={12} className="text-violet-400" /> {cat}
+                  </span>
+                  <button
+                    onClick={() => deleteCatMgmt(cat)}
+                    className="text-slate-300 hover:text-red-500 transition-colors"
+                    title={`Delete "${cat}"`}
+                    data-testid={`cat-delete-${cat}`}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

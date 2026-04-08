@@ -54,6 +54,7 @@ TENANT_COLLECTIONS = {
     'sms_templates',                 # Customizable message templates per company
     'sms_settings',                  # Per-trigger enable/disable settings per company
     'sms_inbox',                     # Incoming SMS replies from customers per company
+    'product_categories',            # Org-defined product category list
 }
 
 
