@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, Plus, Minus, Trash2, ShoppingCart, Camera, X, Check, CreditCard, Banknote, ChevronUp, ChevronDown, Wallet, Upload, Loader2, Clock, Printer, AlertTriangle, ShieldAlert, PackageX, Eye } from 'lucide-react';
+import { Search, Plus, Minus, Trash2, ShoppingCart, Camera, X, Check, CreditCard, Banknote, ChevronUp, ChevronDown, Wallet, Upload, Loader2, Clock, Printer, AlertTriangle, ShieldAlert, PackageX, Eye, Tag, Percent } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
@@ -56,6 +56,19 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   const [receiptPreview, setReceiptPreview] = useState(null); // { html, type, format }
   const [printingCopies, setPrintingCopies] = useState(false);
 
+  // Price scheme switching
+  const [schemePinModal, setSchemePinModal] = useState(false);
+  const [pendingScheme, setPendingScheme] = useState(null);
+  const [schemePin, setSchemePin] = useState('');
+  const [schemePinError, setSchemePinError] = useState('');
+  const [schemePinLoading, setSchemePinLoading] = useState(false);
+
+  // Total discount
+  const [discountInput, setDiscountInput] = useState('');
+  const [discountMode, setDiscountMode] = useState('amount'); // 'amount' | 'percent'
+  const [marginWarningAccepted, setMarginWarningAccepted] = useState(false);
+  const [salesConfig, setSalesConfig] = useState({ min_margin_percent: 1, margin_warning_enabled: true });
+
   // Keep ref in sync with state so the capture-phase listener can read it without stale closure
   useEffect(() => { scanQtyModalOpenRef.current = scanQtyModal; }, [scanQtyModal]);
 
@@ -68,7 +81,56 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
       setSchemes(schs);
     })();
     api.get('/settings/business-info').then(r => setBusinessInfo(r.data || {})).catch(() => {});
+    api.get('/settings/sales-config').then(r => setSalesConfig(r.data || {})).catch(() => {});
   }, [syncVersion]); // eslint-disable-line
+
+  // ── Price Scheme Switching ────────────────────────────────────────────────
+  const switchScheme = useCallback((schemeKey) => {
+    if (schemeKey === activeScheme) return;
+    // Retail is always free. Non-retail requires PIN.
+    if (schemeKey === 'retail') {
+      applyScheme(schemeKey);
+    } else {
+      setPendingScheme(schemeKey);
+      setSchemePin('');
+      setSchemePinError('');
+      setSchemePinModal(true);
+    }
+  }, [activeScheme]);
+
+  const applyScheme = useCallback((schemeKey) => {
+    setActiveScheme(schemeKey);
+    // Recalculate all cart prices for the new scheme
+    setCart(prev => prev.map(item => {
+      const product = products.find(p => p.id === item.product_id);
+      const newPrice = product?.prices?.[schemeKey] ?? item.price;
+      return { ...item, price: newPrice, original_price: newPrice, total: item.quantity * newPrice };
+    }));
+    setDiscountInput('');
+    setMarginWarningAccepted(false);
+    toast.success(`Switched to ${schemeKey} pricing`);
+  }, [products]);
+
+  const confirmSchemePin = async () => {
+    if (!schemePin.trim() || !pendingScheme) return;
+    setSchemePinLoading(true);
+    setSchemePinError('');
+    try {
+      await api.post('/verify/verify-pin-action', {
+        pin: schemePin.trim(),
+        action: 'terminal_wholesale_switch',
+        branch_id: session.branchId,
+      });
+      applyScheme(pendingScheme);
+      setSchemePinModal(false);
+      setPendingScheme(null);
+      setSchemePin('');
+    } catch (e) {
+      const d = e?.response?.data?.detail;
+      setSchemePinError(typeof d === 'string' ? d : 'Invalid PIN');
+    }
+    setSchemePinLoading(false);
+  };
 
   // Search products
   useEffect(() => {
@@ -195,7 +257,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   };
 
   const removeItem = (productId) => setCart(prev => prev.filter(c => c.product_id !== productId));
-  const clearCart = () => { setCart([]); setSelectedCustomer(null); setCustSearch(''); autoAddProductsRef.current.clear(); skipAllRef.current = false; };
+  const clearCart = () => { setCart([]); setSelectedCustomer(null); setCustSearch(''); autoAddProductsRef.current.clear(); skipAllRef.current = false; setDiscountInput(''); setMarginWarningAccepted(false); };
 
   // Receipt preview → print copies
   const handleShowReceiptPreview = (format) => {
@@ -226,7 +288,19 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
     setLastSaleData(null);
   };
 
-  const grandTotal = cart.reduce((s, c) => s + c.total, 0);
+  const subtotal = cart.reduce((s, c) => s + c.total, 0);
+  const discountAmount = discountMode === 'percent'
+    ? subtotal * (parseFloat(discountInput) || 0) / 100
+    : (parseFloat(discountInput) || 0);
+  const grandTotal = Math.max(0, subtotal - discountAmount);
+
+  // Smart profit guard — calculate margin for the whole receipt
+  const totalCost = cart.reduce((s, c) => s + (c.effective_capital || c.cost_price || 0) * c.quantity, 0);
+  const margin = grandTotal - totalCost;
+  const marginPercent = grandTotal > 0 ? (margin / grandTotal) * 100 : 0;
+  const minMargin = salesConfig.min_margin_percent ?? 1;
+  const isBelowMargin = discountAmount > 0 && marginPercent < minMargin && salesConfig.margin_warning_enabled;
+  const isNegativeMargin = discountAmount > 0 && margin <= 0;
 
   // Camera barcode scanner
   const startScanner = async () => {
@@ -365,6 +439,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   const resetCheckout = () => {
     setPaymentType(''); setAmountTendered(''); setDigitalScreenshot(null); setDigitalRef('');
     setCreditDays(15); setSplitCash(''); setSplitDigital(''); setSplitScreenshot(null); setReleaseMode('');
+    setDiscountInput(''); setMarginWarningAccepted(false);
   };
 
   const changeAmount = paymentType === 'cash' && amountTendered
@@ -374,6 +449,11 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
     if (cart.length === 0) { toast.error('Cart is empty'); return; }
     if (!paymentType) { toast.error('Select a payment type'); return; }
     if (!releaseMode) { toast.error('Select stock release mode'); return; }
+    // Margin warning check
+    if (isBelowMargin && !marginWarningAccepted) {
+      toast.error('Please acknowledge the low margin warning before proceeding');
+      return;
+    }
     if (paymentType === 'cash' && (!amountTendered || parseFloat(amountTendered) < grandTotal)) {
       toast.error('Amount tendered must be at least the total'); return;
     }
@@ -412,7 +492,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
       id: saleId, envelope_id: envelopeId, branch_id: session.branchId,
       customer_id: selectedCustomer?.id || null,
       customer_name: selectedCustomer?.name || 'Walk-in',
-      items: saleItems, subtotal: grandTotal, freight: 0, overall_discount: 0,
+      items: saleItems, subtotal, freight: 0, overall_discount: discountAmount,
       grand_total: grandTotal, amount_paid: amountPaid,
       balance: paymentType === 'credit' ? grandTotal : 0,
       terms: paymentType === 'credit' ? 'Credit' : 'COD',
@@ -636,12 +716,27 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
         )}
       </div>
 
-      {/* Bottom: Total + Checkout */}
+      {/* Bottom: Scheme Switcher + Total + Checkout */}
       {cart.length > 0 && (
         <div className="bg-white border-t border-slate-200 p-3 safe-area-bottom">
-          <div className="flex items-center justify-between mb-2">
+          {/* Price scheme switcher */}
+          <div className="flex items-center gap-1.5 mb-2" data-testid="scheme-switcher">
+            {(schemes.length > 0 ? schemes : [{ key: 'retail', name: 'Retail' }]).slice(0, 4).map(s => (
+              <button key={s.key || s.id} onClick={() => switchScheme(s.key || s.id)}
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                  activeScheme === (s.key || s.id)
+                    ? 'bg-[#1A4D2E] text-white'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+                data-testid={`scheme-${s.key || s.id}`}
+              >
+                <Tag size={10} className="inline mr-1" />{s.name}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs text-slate-500">{cart.length} item(s)</p>
+              <p className="text-xs text-slate-500">{cart.length} item(s){discountAmount > 0 ? ` · ${formatPHP(discountAmount)} off` : ''}</p>
               <p className="text-xl font-bold text-[#1A4D2E]" data-testid="cart-total">{formatPHP(grandTotal)}</p>
             </div>
             <div className="flex gap-2">
@@ -699,10 +794,93 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
                   <span className="font-mono text-slate-800">{formatPHP(c.total)}</span>
                 </div>
               ))}
-              <div className="border-t border-slate-200 pt-1.5 mt-2 flex justify-between font-bold text-sm">
+              <div className="border-t border-slate-200 pt-1.5 mt-2 flex justify-between text-xs text-slate-500">
+                <span>Subtotal</span>
+                <span className="font-mono">{formatPHP(subtotal)}</span>
+              </div>
+
+              {/* Total discount input */}
+              <div className="pt-1" data-testid="discount-section">
+                <label className="text-[10px] text-slate-400 font-medium mb-1 block">Discount</label>
+                <div className="flex items-center gap-1.5">
+                  <div className="relative flex-1">
+                    <Input
+                      type="number" inputMode="decimal" min={0} step="0.01"
+                      value={discountInput}
+                      onChange={e => { setDiscountInput(e.target.value); setMarginWarningAccepted(false); }}
+                      placeholder={discountMode === 'percent' ? '0%' : '₱0'}
+                      className="h-8 text-sm font-mono pr-8"
+                      data-testid="discount-input"
+                    />
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-400">
+                      {discountMode === 'percent' ? '%' : '₱'}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => { setDiscountMode(m => m === 'amount' ? 'percent' : 'amount'); setDiscountInput(''); setMarginWarningAccepted(false); }}
+                    className="h-8 px-2 rounded-lg border border-slate-200 text-[10px] font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+                    data-testid="discount-mode-toggle"
+                  >
+                    {discountMode === 'amount' ? <><Percent size={10} className="inline" /> %</> : <>₱ Amt</>}
+                  </button>
+                </div>
+                {discountAmount > 0 && (
+                  <p className="text-[10px] text-red-500 mt-0.5">-{formatPHP(discountAmount)} discount</p>
+                )}
+              </div>
+
+              {/* Grand total */}
+              <div className="border-t border-slate-200 pt-1.5 flex justify-between font-bold text-sm">
                 <span>Total</span>
                 <span className="text-[#1A4D2E]">{formatPHP(grandTotal)}</span>
               </div>
+
+              {/* Smart Profit Guard */}
+              {discountAmount > 0 && (
+                <div className={`mt-1.5 p-2 rounded-lg text-xs ${
+                  isNegativeMargin ? 'bg-red-50 border border-red-200' :
+                  isBelowMargin ? 'bg-amber-50 border border-amber-200' :
+                  'bg-emerald-50 border border-emerald-200'
+                }`} data-testid="margin-guard">
+                  {isNegativeMargin ? (
+                    <div>
+                      <p className="font-semibold text-red-700 flex items-center gap-1">
+                        <AlertTriangle size={12} /> Loss on this receipt
+                      </p>
+                      <p className="text-red-600 mt-0.5">
+                        Cost: {formatPHP(totalCost)} · Revenue: {formatPHP(grandTotal)} · Loss: {formatPHP(Math.abs(margin))}
+                      </p>
+                    </div>
+                  ) : isBelowMargin ? (
+                    <div>
+                      <p className="font-semibold text-amber-700 flex items-center gap-1">
+                        <AlertTriangle size={12} /> Below {minMargin}% profit margin
+                      </p>
+                      <p className="text-amber-600 mt-0.5">
+                        Profit: {formatPHP(margin)} ({marginPercent.toFixed(1)}%) — Are you sure?
+                      </p>
+                      {!marginWarningAccepted && (
+                        <button
+                          onClick={() => setMarginWarningAccepted(true)}
+                          className="mt-1.5 px-3 py-1 rounded-lg bg-amber-600 text-white text-[10px] font-semibold hover:bg-amber-700 transition-colors"
+                          data-testid="margin-warning-accept"
+                        >
+                          Yes, proceed with low margin
+                        </button>
+                      )}
+                      {marginWarningAccepted && (
+                        <p className="mt-1 text-[10px] text-amber-600 flex items-center gap-1">
+                          <Check size={10} /> Acknowledged
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-emerald-700 flex items-center gap-1">
+                      <Check size={12} /> Healthy margin: {formatPHP(margin)} ({marginPercent.toFixed(1)}%)
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Payment Type Selection */}
@@ -1146,6 +1324,39 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
               </Button>
             </div>
             <p className="text-[10px] text-slate-400 text-center -mt-1">Skip adds 1 and removes prompts for this receipt</p>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Price Scheme PIN Modal */}
+      <Dialog open={schemePinModal} onOpenChange={v => { setSchemePinModal(v); if (!v) { setPendingScheme(null); setSchemePin(''); setSchemePinError(''); } }}>
+        <DialogContent className="max-w-xs mx-auto">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-bold" style={{ fontFamily: 'Manrope' }}>
+              Switch to {pendingScheme} pricing
+            </DialogTitle>
+            <DialogDescription className="text-xs text-slate-500">
+              Enter Manager PIN, Admin PIN, or Authenticator code
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input
+              type="password" inputMode="numeric" autoComplete="new-password"
+              value={schemePin} onChange={e => { setSchemePin(e.target.value); setSchemePinError(''); }}
+              onKeyDown={e => { if (e.key === 'Enter') confirmSchemePin(); }}
+              placeholder="Enter PIN" className="h-12 text-xl font-mono text-center tracking-widest"
+              autoFocus data-testid="scheme-pin-input"
+            />
+            {schemePinError && <p className="text-xs text-red-600">{schemePinError}</p>}
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => { setSchemePinModal(false); setPendingScheme(null); setSchemePin(''); setSchemePinError(''); }}
+                data-testid="scheme-pin-cancel">Cancel</Button>
+              <Button className="flex-1 bg-[#1A4D2E] hover:bg-[#15412a] text-white" onClick={confirmSchemePin}
+                disabled={schemePinLoading || !schemePin.trim()} data-testid="scheme-pin-confirm">
+                {schemePinLoading ? <Loader2 size={14} className="animate-spin mr-1.5" /> : <Tag size={14} className="mr-1.5" />}
+                Confirm
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

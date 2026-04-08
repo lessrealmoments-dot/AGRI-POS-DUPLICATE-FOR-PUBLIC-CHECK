@@ -1,0 +1,78 @@
+{
+  "summary": "Iteration 159 — Terminal POS features (price scheme switcher, total discount, smart profit guard) fully tested. All 12 backend API tests passed. Frontend testing verified all UI components work correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_terminal_pos_features_159.py",
+    "/app/test_reports/pytest/pytest_terminal_pos_159.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "PASS: GET /api/settings/sales-config returns min_margin_percent=1 and margin_warning_enabled=true defaults",
+    "PASS: PUT /api/settings/sales-config updates margin threshold (admin only) and clamps values 0-50",
+    "PASS: POST /api/verify/verify-pin-action with valid manager PIN (521325) returns verified:true",
+    "PASS: POST /api/verify/verify-pin-action with wrong PIN returns 403",
+    "PASS: POST /api/verify/verify-pin-action with missing pin returns 400",
+    "PASS: POST /api/verify/verify-pin-action with missing action returns 400",
+    "PASS: POST /api/verify/verify-pin-action with empty pin returns 400",
+    "PASS: POST /api/verify/verify-pin-action with staff PIN fails for terminal_wholesale_switch (correct policy enforcement)",
+    "PASS: terminal_wholesale_switch PIN policy exists with defaults: admin_pin, manager_pin, totp",
+    "PASS: Frontend - Terminal sales page loads with scheme switcher buttons (Special, Retail, Government, Wholesale)",
+    "PASS: Frontend - Clicking Wholesale scheme shows PIN modal with 'Enter Manager PIN, Admin PIN, or Authenticator code'",
+    "PASS: Frontend - Checkout dialog shows discount input with amount/percentage toggle",
+    "PASS: Frontend - Discount reduces grand total correctly (₱1,400 - ₱700 discount = ₱700)",
+    "PASS: Frontend - Smart margin guard appears with red 'Loss on this receipt' warning showing Cost/Revenue/Loss breakdown",
+    "PASS: Frontend - Margin guard shows correct calculation: Cost ₱1,200, Revenue ₱700, Loss ₱500"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_terminal_pos_features_159.py"
+  ],
+  "success_rate": {
+    "backend": "100% (12/12 tests passed)",
+    "frontend": "100% (all UI components verified)"
+  },
+  "test_credentials": {
+    "super_admin": "janmarkeahig@gmail.com / Aa@58798546521325",
+    "manager_pin": "521325",
+    "staff_pin": "8888",
+    "branch_1_id": "c435277f-9fc7-4d83-83e7-38be5b4423ac"
+  },
+  "seed_data_creation": "No new seed data created. Used existing product 'Rice Premium 25kg' (₱1,400 retail price, ₱1,200 cost).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Terminal POS features fully implemented and tested: (1) Price scheme switcher with PIN-gated non-retail access works - clicking Wholesale shows PIN modal requiring manager/admin/TOTP verification via /api/verify/verify-pin-action endpoint. (2) Total discount input in checkout dialog works with amount/percentage toggle. (3) Smart profit margin guard calculates totalCost from effective_capital × quantity and shows green/amber/red based on margin vs min_margin_percent from /api/settings/sales-config. The 'Yes, proceed' button appears for low margin acceptance. Terminal requires login via Login tab then branch selection.",
+  "mocked_apis": {
+    "note": "No mocked APIs - all endpoints are real"
+  },
+  "tests_performed": [
+    {"test": "GET /api/settings/sales-config returns defaults", "result": "PASS"},
+    {"test": "GET /api/settings/sales-config requires auth", "result": "PASS"},
+    {"test": "PUT /api/settings/sales-config updates margin threshold", "result": "PASS"},
+    {"test": "PUT /api/settings/sales-config clamps margin percent 0-50", "result": "PASS"},
+    {"test": "POST /api/verify/verify-pin-action with valid manager PIN", "result": "PASS"},
+    {"test": "POST /api/verify/verify-pin-action with wrong PIN returns 403", "result": "PASS"},
+    {"test": "POST /api/verify/verify-pin-action missing pin returns 400", "result": "PASS"},
+    {"test": "POST /api/verify/verify-pin-action missing action returns 400", "result": "PASS"},
+    {"test": "POST /api/verify/verify-pin-action requires auth", "result": "PASS"},
+    {"test": "POST /api/verify/verify-pin-action staff PIN fails for wholesale switch", "result": "PASS"},
+    {"test": "POST /api/verify/verify-pin-action empty pin returns 400", "result": "PASS"},
+    {"test": "terminal_wholesale_switch policy exists in PIN policies", "result": "PASS"},
+    {"test": "UI: Terminal login and branch selection works", "result": "PASS"},
+    {"test": "UI: TerminalSales component loads", "result": "PASS"},
+    {"test": "UI: Product search and add to cart works", "result": "PASS"},
+    {"test": "UI: Price scheme switcher shows (Special, Retail, Government, Wholesale)", "result": "PASS"},
+    {"test": "UI: Clicking Wholesale shows PIN modal", "result": "PASS"},
+    {"test": "UI: PIN modal shows correct text for manager/admin/TOTP", "result": "PASS"},
+    {"test": "UI: Checkout dialog opens with discount section", "result": "PASS"},
+    {"test": "UI: Discount input with amount/percentage toggle works", "result": "PASS"},
+    {"test": "UI: Margin guard appears with discount applied", "result": "PASS"},
+    {"test": "UI: Margin guard shows Loss warning with Cost/Revenue/Loss breakdown", "result": "PASS"}
+  ]
+}

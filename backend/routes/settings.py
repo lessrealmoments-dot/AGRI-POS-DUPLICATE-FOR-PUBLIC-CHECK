@@ -194,3 +194,32 @@ async def update_business_info(data: dict, user=Depends(get_current_user)):
 
 
 # ── Legacy TOTP Controls kept in lines 69-90 above ──────────────────────────
+
+
+
+# ── Sales Settings (margin threshold, etc.) ──────────────────────────────────
+
+@router.get("/sales-config")
+async def get_sales_config(user=Depends(get_current_user)):
+    """Get sales configuration (margin threshold, etc.)."""
+    doc = await db.system_settings.find_one({"key": "sales_config"}, {"_id": 0})
+    defaults = {"min_margin_percent": 1, "margin_warning_enabled": True}
+    if doc:
+        return {**defaults, **doc.get("config", {})}
+    return defaults
+
+
+@router.put("/sales-config")
+async def update_sales_config(data: dict, user=Depends(get_current_user)):
+    """Update sales configuration. Admin only."""
+    check_perm(user, "settings", "edit")
+    config = {
+        "min_margin_percent": max(0, min(50, float(data.get("min_margin_percent", 1)))),
+        "margin_warning_enabled": bool(data.get("margin_warning_enabled", True)),
+    }
+    await db.system_settings.update_one(
+        {"key": "sales_config"},
+        {"$set": {"key": "sales_config", "config": config, "updated_at": now_iso(), "updated_by": user["id"]}},
+        upsert=True
+    )
+    return {"message": "Sales config updated", **config}

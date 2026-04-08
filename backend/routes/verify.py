@@ -228,6 +228,7 @@ PIN_POLICY_ACTIONS = [
     # Terminal Operations
     {"key": "terminal_pull",          "label": "Terminal — Pull PO or Transfer", "module": "Terminal",          "defaults": ["admin_pin", "manager_pin", "totp"]},
     {"key": "terminal_doc_upload",    "label": "Terminal — Upload Document",     "module": "Terminal",          "defaults": ["admin_pin", "manager_pin", "totp"]},
+    {"key": "terminal_wholesale_switch", "label": "Terminal — Switch to Wholesale Price", "module": "Terminal", "defaults": ["admin_pin", "manager_pin", "totp"]},
     # Supplier Payments — fund-source-aware PIN security
     {"key": "pay_po_standard",        "label": "Pay Supplier Invoice (Cash / Safe)", "module": "Purchase Orders", "defaults": ["admin_pin", "manager_pin", "totp"]},
     {"key": "pay_po_bank",            "label": "Pay Supplier Invoice (Bank / Digital)", "module": "Purchase Orders", "defaults": ["admin_pin", "totp"]},
@@ -260,6 +261,25 @@ async def verify_pin_for_action(pin: str, action_key: str, branch_id: str = None
         allowed = ["admin_pin", "manager_pin", "totp"]
     return await _resolve_pin(pin, allowed_methods=allowed, branch_id=branch_id)
 
+
+
+@router.post("/verify-pin-action")
+async def verify_pin_for_action_endpoint(data: dict, user=Depends(get_current_user)):
+    """Verify a PIN for a specific action (no document context needed).
+    Used by terminal for scheme switching, etc.
+    """
+    pin = str(data.get("pin", ""))
+    action = data.get("action", "")
+    branch_id = data.get("branch_id")
+
+    if not pin or not action:
+        raise HTTPException(status_code=400, detail="PIN and action are required")
+
+    result = await verify_pin_for_action(pin, action, branch_id=branch_id)
+    if not result:
+        raise HTTPException(status_code=403, detail="Invalid PIN or unauthorized for this action")
+
+    return {"verified": True, "verified_by": result.get("full_name", result.get("username", "")), "role": result.get("role", "")}
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  Admin PIN management
