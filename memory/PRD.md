@@ -584,6 +584,14 @@ See `/app/memory/ROADMAP.md` for full implementation spec.
 ## Next Up (P0 — Immediate)
 See `/app/memory/ROADMAP.md` for full spec on each item.
 
+### Terminal Price Schemes + Smart Discount (2026-04-08) — Complete
+- **Price Scheme Switcher**: Cart area shows all available price schemes (Retail, Wholesale, etc.) as toggle buttons. Switching to non-retail requires manager/admin/TOTP PIN via `POST /api/verify/verify-pin-action` with `terminal_wholesale_switch` policy. Retail is always free. Switching recalculates all cart prices instantly.
+- **Total Discount Input**: Checkout dialog has discount input with ₱ Amount / % Percentage toggle. Discount applied to subtotal → grandTotal = subtotal - discount. Stored as `overall_discount` in sale data.
+- **Smart Profit Guard**: Real-time margin analysis on the whole receipt. Calculates `totalCost = Σ(effective_capital × qty)`, `margin = revenue - cost`, `marginPercent`. Color-coded display: green (healthy), amber (below configurable threshold, default 1%), red (loss). Amber shows "Yes, proceed with low margin" confirmation button. Configurable via `GET/PUT /api/settings/sales-config` (min_margin_percent, margin_warning_enabled).
+- **New Backend Endpoints**: `POST /api/verify/verify-pin-action` (standalone PIN verification by action key), `GET/PUT /api/settings/sales-config` (margin threshold config)
+- **Backend:** `routes/verify.py` (verify-pin-action + terminal_wholesale_switch policy), `routes/settings.py` (sales-config)
+- **Frontend:** `TerminalSales.jsx` (scheme switcher, discount input, margin guard, PIN modal)
+
 ### Terminal Smart Sync — Phases 1-3 + Last Synced Enhancement (2026-04-08) — Complete
 - **Phase 1 — Instant Load from Cache**: `TerminalShell.loadData()` now checks IndexedDB for cached products first. If cache exists (products > 0), terminal shows **immediately** (<200ms) — no loading spinner. Background delta sync kicks off silently.
 - **Phase 2 — Backend True Delta Sync**: `GET /api/sync/pos-data?last_sync=<ISO>` now applies time filter to ALL collections (products, customers, inventory, branch_prices) — not just products. Returns `deleted_ids[]` for products deactivated since last sync. Products enriched with current inventory even during delta.
@@ -704,6 +712,7 @@ See `/app/memory/ROADMAP.md` for full spec on each item.
 - `components/Layout.js` — Sidebar nav (Pending Releases added)
 
 ## Test Reports
+- `test_reports/iteration_159.json` — Terminal Price Schemes + Smart Discount (12/12 backend + all frontend passed)
 - `test_reports/iteration_158.json` — Terminal Smart Sync Phase 1-3 (16/16 backend + all frontend tests passed)
 - `test_reports/iteration_15-17.json` — Phase 3 incident resolution
 - Latest: all QR phases tested manually with curl + screenshots
