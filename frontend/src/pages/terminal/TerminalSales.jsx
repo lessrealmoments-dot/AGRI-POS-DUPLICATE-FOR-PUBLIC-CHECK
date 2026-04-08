@@ -450,7 +450,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
     if (!paymentType) { toast.error('Select a payment type'); return; }
     if (!releaseMode) { toast.error('Select stock release mode'); return; }
     // Margin warning check
-    if (isBelowMargin && !marginWarningAccepted) {
+    if ((isBelowMargin || isNegativeMargin) && !marginWarningAccepted) {
       toast.error('Please acknowledge the low margin warning before proceeding');
       return;
     }
@@ -835,7 +835,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
                 <span className="text-[#1A4D2E]">{formatPHP(grandTotal)}</span>
               </div>
 
-              {/* Smart Profit Guard */}
+              {/* Smart Profit Guard — inline status only (no button here) */}
               {discountAmount > 0 && (
                 <div className={`mt-1.5 p-2 rounded-lg text-xs ${
                   isNegativeMargin ? 'bg-red-50 border border-red-200' :
@@ -843,37 +843,14 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
                   'bg-emerald-50 border border-emerald-200'
                 }`} data-testid="margin-guard">
                   {isNegativeMargin ? (
-                    <div>
-                      <p className="font-semibold text-red-700 flex items-center gap-1">
-                        <AlertTriangle size={12} /> Loss on this receipt
-                      </p>
-                      <p className="text-red-600 mt-0.5">
-                        Cost: {formatPHP(totalCost)} · Revenue: {formatPHP(grandTotal)} · Loss: {formatPHP(Math.abs(margin))}
-                      </p>
-                    </div>
+                    <p className="font-semibold text-red-700 flex items-center gap-1">
+                      <AlertTriangle size={12} /> Loss — Cost: {formatPHP(totalCost)} · Revenue: {formatPHP(grandTotal)}
+                    </p>
                   ) : isBelowMargin ? (
-                    <div>
-                      <p className="font-semibold text-amber-700 flex items-center gap-1">
-                        <AlertTriangle size={12} /> Below {minMargin}% profit margin
-                      </p>
-                      <p className="text-amber-600 mt-0.5">
-                        Profit: {formatPHP(margin)} ({marginPercent.toFixed(1)}%) — Are you sure?
-                      </p>
-                      {!marginWarningAccepted && (
-                        <button
-                          onClick={() => setMarginWarningAccepted(true)}
-                          className="mt-1.5 px-3 py-1 rounded-lg bg-amber-600 text-white text-[10px] font-semibold hover:bg-amber-700 transition-colors"
-                          data-testid="margin-warning-accept"
-                        >
-                          Yes, proceed with low margin
-                        </button>
-                      )}
-                      {marginWarningAccepted && (
-                        <p className="mt-1 text-[10px] text-amber-600 flex items-center gap-1">
-                          <Check size={10} /> Acknowledged
-                        </p>
-                      )}
-                    </div>
+                    <p className="font-semibold text-amber-700 flex items-center gap-1">
+                      <AlertTriangle size={12} /> Low margin: {marginPercent.toFixed(1)}% (min {minMargin}%)
+                      {marginWarningAccepted && <span className="ml-1 text-amber-600 font-normal flex items-center gap-0.5"><Check size={10} /> Acknowledged</span>}
+                    </p>
                   ) : (
                     <p className="text-emerald-700 flex items-center gap-1">
                       <Check size={12} /> Healthy margin: {formatPHP(margin)} ({marginPercent.toFixed(1)}%)
@@ -882,6 +859,29 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
                 </div>
               )}
             </div>
+
+            {/* Margin Acknowledgment Blocker — shown OUTSIDE the summary box, full-width, always visible */}
+            {(isBelowMargin || isNegativeMargin) && !marginWarningAccepted && (
+              <div className={`rounded-xl border-2 p-4 text-center ${isNegativeMargin ? 'bg-red-50 border-red-400' : 'bg-amber-50 border-amber-400'}`}
+                data-testid="margin-acknowledge-panel">
+                <AlertTriangle size={28} className={`mx-auto mb-2 ${isNegativeMargin ? 'text-red-500' : 'text-amber-500'}`} />
+                <p className={`font-bold text-sm mb-1 ${isNegativeMargin ? 'text-red-700' : 'text-amber-700'}`}>
+                  {isNegativeMargin ? 'Selling at a Loss!' : 'Low Profit Margin Warning'}
+                </p>
+                <p className={`text-xs mb-3 ${isNegativeMargin ? 'text-red-600' : 'text-amber-600'}`}>
+                  {isNegativeMargin
+                    ? `Cost ₱${totalCost.toFixed(2)} > Revenue ₱${grandTotal.toFixed(2)}. Loss of ${formatPHP(Math.abs(margin))}.`
+                    : `Margin is ${marginPercent.toFixed(1)}%, below the ${minMargin}% threshold.`}
+                </p>
+                <button
+                  onClick={() => setMarginWarningAccepted(true)}
+                  className={`w-full py-3 rounded-xl font-bold text-white text-sm transition-colors active:scale-95 ${isNegativeMargin ? 'bg-red-600 hover:bg-red-700' : 'bg-amber-500 hover:bg-amber-600'}`}
+                  data-testid="margin-warning-accept"
+                >
+                  I Understand — Proceed Anyway
+                </button>
+              </div>
+            )}
 
             {/* Payment Type Selection */}
             {!paymentType && (
