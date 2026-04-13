@@ -584,7 +584,19 @@ See `/app/memory/ROADMAP.md` for full implementation spec.
 ## Next Up (P0 — Immediate)
 See `/app/memory/ROADMAP.md` for full spec on each item.
 
-### Dynamic Product Categories (2026-04-08) — Complete
+### App Download Center (2026-04-13) — Complete
+- Platform-wide APK distribution page at `/downloads` accessible to all authenticated users
+- `app_downloads` collection in `_raw_db` (not tenant-scoped — global platform storage)
+- Two pre-defined app slots: AgriSMS Gateway 2.0 (`com.agrism.gateway`) + AgriSmart Terminal (`com.agribooks.terminal`)
+- `GET /api/app-downloads` — list apps merged with DB metadata
+- `POST /api/app-downloads/{slug}/upload` — super admin uploads APK to R2 (`_platform/apk-downloads/` prefix), max 200MB
+- `GET /api/app-downloads/{slug}/download-url` — pre-signed download URL (5-min expiry) + increments download_count
+- `DELETE /api/app-downloads/{slug}` — removes APK from R2 + marks inactive
+- Frontend dark-themed product page with expandable descriptions, key features, technical specs
+- Super admin: Upload APK panel per app (version, changelog, drag file), Update/Delete controls
+- Sidebar entry under Management → App Downloads (visible to all users)
+
+
 - **`product_categories` collection** added to TENANT_COLLECTIONS — per-org, isolated
 - **`GET /api/products/categories`** enhanced — merges categories from active products + manually-defined ones (sorted, deduped)
 - **`POST /api/products/categories`** — create a custom category for the org (idempotent)

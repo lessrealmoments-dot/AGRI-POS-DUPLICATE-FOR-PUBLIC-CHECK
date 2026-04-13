@@ -59,6 +59,7 @@ import TransactionSearchPage from './pages/TransactionSearchPage';
 import JournalEntriesPage from './pages/JournalEntriesPage';
 import DocumentsPage from './pages/DocumentsPage';
 import MessagesPage from './pages/MessagesPage';
+import AppDownloadsPage from './pages/AppDownloadsPage';
 import BudgetChecker from './components/BudgetChecker';
 import TerminalPage from './pages/terminal/TerminalPage';
 import DocViewerPage from './pages/DocViewerPage';
@@ -199,6 +200,7 @@ function AppRoutes() {
       <Route path="/audit" element={<ProtectedRoute><FeatureGate featureKey="audit_center"><AuditCenterPage /></FeatureGate></ProtectedRoute>} />
       <Route path="/incident-tickets" element={<ProtectedRoute><IncidentTicketsPage /></ProtectedRoute>} />
       <Route path="/backups" element={<ProtectedRoute><BackupManagementPage /></ProtectedRoute>} />
+      <Route path="/downloads" element={<ProtectedRoute><AppDownloadsPage /></ProtectedRoute>} />
       <Route path="/barcode-print" element={<ProtectedRoute><BarcodePrintPage /></ProtectedRoute>} />
       <Route path="/barcode-manage" element={<ProtectedRoute><BarcodeManagePage /></ProtectedRoute>} />
       <Route path="/find-transaction" element={<ProtectedRoute><TransactionSearchPage /></ProtectedRoute>} />

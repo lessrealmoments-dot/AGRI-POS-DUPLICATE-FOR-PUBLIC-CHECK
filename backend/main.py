@@ -51,6 +51,7 @@ from routes.qr_actions import router as qr_actions_router
 from routes.documents import router as documents_router
 from routes.sms import router as sms_router
 from routes.invoice_corrections import router as invoice_corrections_router
+from routes.app_downloads import router as app_downloads_router
 
 # =============================================================================
 # APP SETUP
@@ -199,6 +200,7 @@ api_router.include_router(documents_router)
 
 # SMS Engine
 api_router.include_router(sms_router)
+api_router.include_router(app_downloads_router)
 
 # =============================================================================
 # WEBSOCKET ROUTES (must be on app directly with /api prefix)
