@@ -23,16 +23,30 @@ logger = logging.getLogger(__name__)
 
 # Collections that store per-org data (have organization_id field)
 ORG_COLLECTIONS = [
-    "audits", "branch_prices", "branch_transfer_orders", "branch_transfer_price_memory",
+    # Core business
+    "audits", "audit_log",
+    "branch_prices", "branch_transfer_orders", "branch_transfer_price_memory",
     "branch_transfer_templates", "branches", "capital_changes", "count_sheets",
     "customers", "daily_closings", "discrepancy_log", "employees", "expenses",
     "fund_transfers", "fund_wallets", "incident_tickets", "internal_invoices",
-    "inventory", "inventory_corrections", "inventory_logs", "invoice_edits",
-    "invoices", "movements", "notifications", "payables", "payment_submissions",
-    "pin_attempt_log", "price_schemes", "product_vendors", "products",
-    "purchase_orders", "returns", "safe_lots", "sales", "sales_log",
+    "inventory", "inventory_corrections", "inventory_adjustments", "inventory_logs",
+    "invoice_edits", "invoice_corrections", "invoices",
+    "movements", "notifications",
+    "payables", "receivables", "payment_submissions",
+    "pin_attempt_log", "price_schemes", "product_vendors", "product_categories",
+    "products", "purchase_orders",
+    "returns", "safe_lots", "safe_lot_usages", "sale_reservations", "sales", "sales_log",
     "security_events", "settings", "suppliers", "system_settings",
     "upload_sessions", "users", "view_tokens", "wallet_movements",
+    "accounts_payable", "employee_advance_logs",
+    # SMS
+    "sms_queue", "sms_templates", "sms_settings", "sms_inbox",
+    # Documents & uploads
+    "business_documents", "doc_upload_tokens", "doc_codes", "qr_action_logs",
+    # Accounting
+    "journal_entries", "discount_audit_log",
+    # Roles & permissions
+    "custom_roles",
 ]
 
 # Global collections (no org_id, super admin only backup)

@@ -573,8 +573,9 @@ async def fix_partial_wallets(data: dict, user=Depends(require_super_admin)):
 
 # ── Delete Organization ─────────────────────────────────────────────────────
 
-# All collections that hold per-org data
+# All collections that hold per-org data — keep in sync with ORG_COLLECTIONS in org_backup_service.py
 _ORG_DATA_COLLECTIONS = [
+    # Core business
     "users", "branches", "products", "inventory", "customers",
     "invoices", "sales", "purchase_orders", "suppliers", "employees",
     "movements", "fund_wallets", "wallet_movements", "fund_transfers",
@@ -587,12 +588,15 @@ _ORG_DATA_COLLECTIONS = [
     "inventory_corrections", "inventory_adjustments", "inventory_logs",
     "employee_advance_logs", "safe_lot_usages",
     "branch_transfer_price_memory", "branch_transfer_templates",
-    "audits", "upload_sessions", "business_documents", "doc_upload_tokens",
+    "audits", "audit_log",
+    # NOTE: upload_sessions and business_documents are handled SEPARATELY
+    # (R2 file cleanup happens first, then DB records deleted)
+    "doc_upload_tokens",
     "sms_queue", "sms_templates", "sms_settings", "sms_inbox",
     "product_categories", "invoice_corrections", "sale_reservations",
     "discount_audit_log", "custom_roles", "journal_entries",
     "incident_tickets", "doc_codes", "qr_action_logs",
-    "internal_invoices", "receivables",
+    "internal_invoices",
 ]
 
 # Global (not org_id scoped) collections that also store org-linked data by reference
@@ -644,7 +648,45 @@ async def delete_organization(org_id: str, user=Depends(require_super_admin)):
             detail=f"Backup failed — deletion aborted for safety: {exc}"
         )
 
-    # ── Step 2: Delete tenant-scoped collections ──────────────────────────────
+    # ── Step 2: R2 file cleanup (receipts + business documents) ──────────────
+    r2_deleted = 0
+    r2_errors = 0
+    try:
+        from utils.r2_storage import delete_file as r2_delete
+        # Collect all r2_keys from upload_sessions
+        upload_cursor = _raw_db.upload_sessions.find(
+            {"organization_id": org_id}, {"_id": 0, "files": 1}
+        )
+        async for session in upload_cursor:
+            for f in (session.get("files") or []):
+                key = f.get("r2_key") or f.get("stored_path", "")
+                if key and not key.startswith("/"):
+                    try:
+                        await r2_delete(key)
+                        r2_deleted += 1
+                    except Exception:
+                        r2_errors += 1
+        # Collect all r2_keys from business_documents
+        docs_cursor = _raw_db.business_documents.find(
+            {"organization_id": org_id}, {"_id": 0, "files": 1}
+        )
+        async for doc in docs_cursor:
+            for f in (doc.get("files") or []):
+                key = f.get("r2_key", "")
+                if key:
+                    try:
+                        await r2_delete(key)
+                        r2_deleted += 1
+                    except Exception:
+                        r2_errors += 1
+    except Exception:
+        pass  # R2 cleanup failure should not block deletion
+
+    # Delete the DB records for file collections
+    await _raw_db.upload_sessions.delete_many({"organization_id": org_id})
+    await _raw_db.business_documents.delete_many({"organization_id": org_id})
+
+    # ── Step 4: Delete tenant-scoped collections ──────────────────────────────
     deleted_counts = {}
     for col_name in _ORG_DATA_COLLECTIONS:
         try:
@@ -654,7 +696,7 @@ async def delete_organization(org_id: str, user=Depends(require_super_admin)):
         except Exception:
             pass
 
-    # ── Step 3: Delete global collections that reference this org ─────────────
+    # ── Step 5: Delete global collections that reference this org ─────────────
     for col_name in _ORG_GLOBAL_COLLECTIONS:
         try:
             r = await _raw_db[col_name].delete_many({"organization_id": org_id})
@@ -663,16 +705,16 @@ async def delete_organization(org_id: str, user=Depends(require_super_admin)):
         except Exception:
             pass
 
-    # ── Step 4: Delete the organization record itself ─────────────────────────
+    # ── Step 6: Delete the organization record itself ─────────────────────────
     await _raw_db.organizations.delete_one({"id": org_id})
 
-    # ── Step 5: Record audit log + store org_doc for later restore ────────────
+    # ── Step 7: Record audit log + store org_doc for later restore ────────────
     await _raw_db.org_backups.update_one(
         {"r2_key": backup_result.get("r2_key")},
         {"$set": {
             "deletion_completed_at": now_iso(),
             "deleted_by": user.get("email"),
-            "org_doc": org,          # Full org record — used to recreate org on restore
+            "org_doc": org,
             "backup_type": "pre_delete",
         }}
     )
@@ -684,6 +726,8 @@ async def delete_organization(org_id: str, user=Depends(require_super_admin)):
         "backup": backup_result,
         "total_documents_deleted": total_deleted,
         "collections_cleared": deleted_counts,
+        "r2_files_deleted": r2_deleted,
+        "r2_errors": r2_errors,
     }
 
 # ── Backups & Restore ───────────────────────────────────────────────────────
