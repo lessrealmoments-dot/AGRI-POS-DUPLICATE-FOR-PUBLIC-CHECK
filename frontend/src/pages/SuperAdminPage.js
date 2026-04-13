@@ -90,6 +90,7 @@ export default function SuperAdminPage() {
   const [expandedOrg, setExpandedOrg] = useState(null);
   const [orgBranches, setOrgBranches] = useState({});
   const [editModal, setEditModal] = useState(null); // org being edited
+  const [deleteModal, setDeleteModal] = useState(null); // org being deleted
   const [paymentSettings, setPaymentSettings] = useState({});
   const [savingPayment, setSavingPayment] = useState(false);
 
@@ -340,6 +341,7 @@ export default function SuperAdminPage() {
                     branches={orgBranches[org.id] || []}
                     onToggle={() => toggleExpand(org.id)}
                     onEdit={() => setEditModal(org)}
+                    onDelete={() => setDeleteModal(org)}
                     onRefresh={load} />
                 ))}
               </div>
@@ -555,12 +557,24 @@ export default function SuperAdminPage() {
           }}
         />
       )}
+
+      {/* Delete organization modal */}
+      {deleteModal && (
+        <DeleteOrgModal
+          org={deleteModal}
+          onClose={() => setDeleteModal(null)}
+          onDeleted={() => {
+            setOrgs(prev => prev.filter(o => o.id !== deleteModal.id));
+            toast.success(`${deleteModal.name} has been deleted and backed up.`);
+          }}
+        />
+      )}
     </div>
   );
 }
 
 /* ── Org Row ────────────────────────────────────────────────────────────── */
-function OrgRow({ org, expanded, branches, onToggle, onEdit, onRefresh }) {
+function OrgRow({ org, expanded, branches, onToggle, onEdit, onDelete, onRefresh }) {
   const effectivePlan = org.effective_plan || org.plan;
   const statusKey = org.subscription_status === 'active' && effectivePlan === 'grace_period'
     ? 'grace_period'
@@ -623,6 +637,11 @@ function OrgRow({ org, expanded, branches, onToggle, onEdit, onRefresh }) {
           <button data-testid={`edit-org-${org.id}`} onClick={onEdit}
             className="w-8 h-8 rounded-lg bg-slate-700/60 hover:bg-slate-600 text-slate-300 hover:text-white flex items-center justify-center transition-colors">
             <Edit3 size={14} />
+          </button>
+          <button data-testid={`delete-org-${org.id}`} onClick={onDelete}
+            className="w-8 h-8 rounded-lg bg-red-500/10 hover:bg-red-500/25 text-red-500/60 hover:text-red-400 flex items-center justify-center transition-colors"
+            title={`Delete ${org.name}`}>
+            <Trash2 size={14} />
           </button>
           <button data-testid={`expand-org-${org.id}`} onClick={onToggle}
             className="w-8 h-8 rounded-lg bg-slate-700/60 hover:bg-slate-600 text-slate-300 hover:text-white flex items-center justify-center transition-colors">
@@ -723,6 +742,229 @@ function OrgRow({ org, expanded, branches, onToggle, onEdit, onRefresh }) {
     </div>
   );
 }
+
+/* ── Delete Organization Modal ───────────────────────────────────────────── */
+function DeleteOrgModal({ org, onClose, onDeleted }) {
+  // step: 'confirm_name' → 'confirm_final' → 'working' → 'done' → 'error'
+  const [step, setStep] = useState('confirm_name');
+  const [nameInput, setNameInput] = useState('');
+  const [finalInput, setFinalInput] = useState('');
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+
+  const nameMatch = nameInput.trim() === org.name.trim();
+  const finalMatch = finalInput.trim() === 'PERMANENTLY DELETE';
+
+  const runDelete = async () => {
+    setStep('working');
+    setError('');
+    try {
+      const r = await api.delete(`/superadmin/organizations/${org.id}`);
+      setResult(r.data);
+      setStep('done');
+      onDeleted();
+    } catch (e) {
+      setError(e.response?.data?.detail || 'An unexpected error occurred.');
+      setStep('error');
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+      <div className="w-full max-w-md bg-[#0f172a] border border-red-500/30 rounded-2xl shadow-2xl overflow-hidden"
+        data-testid="delete-org-modal">
+
+        {/* Header */}
+        <div className="flex items-center gap-3 px-6 pt-6 pb-4 border-b border-slate-700/50">
+          <div className="w-10 h-10 rounded-xl bg-red-500/15 border border-red-500/30 flex items-center justify-center shrink-0">
+            <Trash2 size={18} className="text-red-400" />
+          </div>
+          <div>
+            <p className="text-white font-bold text-base">Delete Company</p>
+            <p className="text-slate-400 text-xs mt-0.5 font-mono truncate max-w-xs">{org.name}</p>
+          </div>
+          {step !== 'working' && (
+            <button onClick={onClose} className="ml-auto text-slate-500 hover:text-slate-300 p-1">
+              <X size={16} />
+            </button>
+          )}
+        </div>
+
+        <div className="px-6 py-5 space-y-4">
+
+          {/* ── Step 1: Type company name ───────────────────────────────── */}
+          {step === 'confirm_name' && (
+            <>
+              <div className="bg-red-500/8 border border-red-500/20 rounded-xl p-4 space-y-1.5">
+                <p className="text-red-300 text-sm font-semibold flex items-center gap-2">
+                  <AlertTriangle size={15} /> This will permanently delete:
+                </p>
+                <ul className="text-red-400/80 text-xs space-y-1 ml-5 list-disc">
+                  <li>All company data — products, inventory, sales, customers</li>
+                  <li>All users, branches, purchase orders, reports</li>
+                  <li>All documents, receipts, settings, SMS history</li>
+                </ul>
+                <p className="text-emerald-400 text-xs mt-2 flex items-center gap-1.5">
+                  <CheckCircle size={12} /> A full backup will be saved to R2 before deletion.
+                </p>
+              </div>
+
+              <div>
+                <label className="text-slate-400 text-xs block mb-2">
+                  Type the company name exactly to continue:
+                  <span className="text-white font-mono ml-1.5 select-all">{org.name}</span>
+                </label>
+                <input
+                  autoFocus
+                  value={nameInput}
+                  onChange={e => setNameInput(e.target.value)}
+                  placeholder={org.name}
+                  className="w-full h-10 bg-slate-800 border border-slate-600 rounded-lg px-3 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-red-500/50"
+                  data-testid="delete-name-input"
+                />
+                {nameInput && !nameMatch && (
+                  <p className="text-red-400 text-xs mt-1">Name doesn't match — check capitalisation and spaces.</p>
+                )}
+              </div>
+
+              <div className="flex gap-3 pt-1">
+                <Button variant="ghost" onClick={onClose}
+                  className="flex-1 h-10 text-slate-400 hover:text-white border border-slate-700 hover:bg-slate-800">
+                  Cancel
+                </Button>
+                <Button onClick={() => { setStep('confirm_final'); setFinalInput(''); }}
+                  disabled={!nameMatch}
+                  className="flex-1 h-10 bg-red-600 hover:bg-red-700 text-white disabled:opacity-40"
+                  data-testid="delete-next-btn">
+                  Continue →
+                </Button>
+              </div>
+            </>
+          )}
+
+          {/* ── Step 2: Final confirmation ──────────────────────────────── */}
+          {step === 'confirm_final' && (
+            <>
+              <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-4 text-center space-y-1">
+                <p className="text-white font-semibold text-sm">{org.name}</p>
+                <p className="text-slate-400 text-xs">{org.owner_email}</p>
+                <p className="text-slate-500 text-xs">{org.user_count || 0} users · {org.branch_count || 0} branches</p>
+              </div>
+
+              <div>
+                <p className="text-slate-300 text-sm mb-1 font-medium">Final confirmation</p>
+                <p className="text-slate-400 text-xs mb-3">
+                  A backup will be created first, then all data will be permanently removed.<br />
+                  Type <span className="font-mono text-white bg-slate-700 px-1.5 py-0.5 rounded text-xs">PERMANENTLY DELETE</span> to proceed.
+                </p>
+                <input
+                  autoFocus
+                  value={finalInput}
+                  onChange={e => setFinalInput(e.target.value)}
+                  placeholder="PERMANENTLY DELETE"
+                  className="w-full h-10 bg-slate-800 border border-slate-600 rounded-lg px-3 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-red-500/50 font-mono"
+                  data-testid="delete-final-input"
+                />
+                {finalInput && !finalMatch && (
+                  <p className="text-red-400 text-xs mt-1">Must be exactly: PERMANENTLY DELETE</p>
+                )}
+              </div>
+
+              <div className="flex gap-3 pt-1">
+                <Button variant="ghost" onClick={() => setStep('confirm_name')}
+                  className="flex-1 h-10 text-slate-400 hover:text-white border border-slate-700 hover:bg-slate-800">
+                  ← Back
+                </Button>
+                <Button onClick={runDelete} disabled={!finalMatch}
+                  className="flex-1 h-10 bg-red-600 hover:bg-red-700 text-white font-semibold disabled:opacity-40"
+                  data-testid="delete-confirm-btn">
+                  Backup & Delete
+                </Button>
+              </div>
+            </>
+          )}
+
+          {/* ── Step 3: Working ─────────────────────────────────────────── */}
+          {step === 'working' && (
+            <div className="py-8 text-center space-y-4">
+              <RefreshCw size={32} className="animate-spin text-red-400 mx-auto" />
+              <div>
+                <p className="text-white font-semibold">Processing…</p>
+                <p className="text-slate-400 text-sm mt-1">Creating backup, then deleting all data.</p>
+                <p className="text-slate-500 text-xs mt-2">This may take a few seconds. Do not close this window.</p>
+              </div>
+            </div>
+          )}
+
+          {/* ── Step 4: Done ────────────────────────────────────────────── */}
+          {step === 'done' && result && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl">
+                <CheckCircle size={20} className="text-emerald-400 shrink-0" />
+                <div>
+                  <p className="text-emerald-300 font-semibold text-sm">Deleted successfully</p>
+                  <p className="text-emerald-400/70 text-xs">{result.org_name}</p>
+                </div>
+              </div>
+              <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4 space-y-2 text-xs">
+                <p className="text-slate-300 font-semibold uppercase tracking-wider text-[10px]">Backup Details</p>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Filename</span>
+                  <span className="text-slate-300 font-mono text-[10px]">{result.backup?.filename}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Size</span>
+                  <span className="text-slate-300">{result.backup?.size_mb} MB</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Documents backed up</span>
+                  <span className="text-slate-300">{result.backup?.total_documents?.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Stored in R2</span>
+                  <span className={result.backup?.r2_uploaded ? 'text-emerald-400' : 'text-amber-400'}>
+                    {result.backup?.r2_uploaded ? '✓ Uploaded' : '⚠ Local only'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Documents deleted</span>
+                  <span className="text-red-400">{result.total_documents_deleted?.toLocaleString()}</span>
+                </div>
+              </div>
+              <Button onClick={onClose} className="w-full h-10 bg-slate-700 hover:bg-slate-600 text-white">
+                Close
+              </Button>
+            </div>
+          )}
+
+          {/* ── Step 5: Error ───────────────────────────────────────────── */}
+          {step === 'error' && (
+            <div className="space-y-4">
+              <div className="flex items-start gap-3 p-4 bg-red-500/10 border border-red-500/30 rounded-xl">
+                <XCircle size={20} className="text-red-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-red-300 font-semibold text-sm">Deletion failed</p>
+                  <p className="text-red-400/80 text-xs mt-1">{error}</p>
+                  <p className="text-slate-500 text-xs mt-2">No data was deleted — the operation was aborted before any changes.</p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <Button variant="ghost" onClick={onClose}
+                  className="flex-1 h-10 text-slate-400 border border-slate-700">Close</Button>
+                <Button onClick={() => { setStep('confirm_final'); setFinalInput(''); }}
+                  className="flex-1 h-10 bg-slate-700 hover:bg-slate-600 text-white">
+                  Try Again
+                </Button>
+              </div>
+            </div>
+          )}
+
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 /* ── Edit Subscription Modal ─────────────────────────────────────────────── */
 function EditSubscriptionModal({ org, onClose, onSaved }) {

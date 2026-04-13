@@ -569,3 +569,114 @@ async def fix_partial_wallets(data: dict, user=Depends(require_super_admin)):
         results["cashier_added"] = False
 
     return {"message": "Wallet correction complete", "results": results}
+
+
+# ── Delete Organization ─────────────────────────────────────────────────────
+
+# All collections that hold per-org data
+_ORG_DATA_COLLECTIONS = [
+    "users", "branches", "products", "inventory", "customers",
+    "invoices", "sales", "purchase_orders", "suppliers", "employees",
+    "movements", "fund_wallets", "wallet_movements", "fund_transfers",
+    "expenses", "branch_prices", "branch_transfer_orders",
+    "count_sheets", "daily_closings", "sales_log", "returns",
+    "discrepancy_log", "notifications", "view_tokens", "safe_lots",
+    "price_schemes", "settings", "system_settings", "accounts_payable",
+    "capital_changes", "security_events", "pin_attempt_log",
+    "payables", "receivables", "product_vendors", "invoice_edits",
+    "inventory_corrections", "inventory_adjustments", "inventory_logs",
+    "employee_advance_logs", "safe_lot_usages",
+    "branch_transfer_price_memory", "branch_transfer_templates",
+    "audits", "upload_sessions", "business_documents", "doc_upload_tokens",
+    "sms_queue", "sms_templates", "sms_settings", "sms_inbox",
+    "product_categories", "invoice_corrections", "sale_reservations",
+    "discount_audit_log", "custom_roles", "journal_entries",
+    "incident_tickets", "doc_codes", "qr_action_logs",
+    "internal_invoices", "receivables",
+]
+
+# Global (not org_id scoped) collections that also store org-linked data by reference
+_ORG_GLOBAL_COLLECTIONS = [
+    "terminal_sessions", "terminal_codes", "qr_pair_tokens",
+    "sms_gateway_logs", "payment_submissions",
+]
+
+
+@router.post("/organizations/{org_id}/backup")
+async def backup_organization(org_id: str, user=Depends(require_super_admin)):
+    """Trigger a manual backup of a single organization's data."""
+    org = await _raw_db.organizations.find_one({"id": org_id}, {"_id": 0})
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    from services.org_backup_service import create_org_backup
+    result = await create_org_backup(
+        org_id=org_id,
+        org_name=org.get("name", ""),
+        triggered_by=user.get("email", "super_admin"),
+    )
+    return result
+
+
+@router.delete("/organizations/{org_id}")
+async def delete_organization(org_id: str, user=Depends(require_super_admin)):
+    """
+    Backup then permanently delete an organization and ALL its data.
+    Steps: 1) verify  2) backup to R2  3) delete tenant data  4) delete org record
+    """
+    org = await _raw_db.organizations.find_one({"id": org_id}, {"_id": 0})
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    org_name = org.get("name", "")
+
+    # ── Step 1: Backup ────────────────────────────────────────────────────────
+    from services.org_backup_service import create_org_backup
+    try:
+        backup_result = await create_org_backup(
+            org_id=org_id,
+            org_name=org_name,
+            triggered_by=f"pre_delete by {user.get('email', 'super_admin')}",
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Backup failed — deletion aborted for safety: {exc}"
+        )
+
+    # ── Step 2: Delete tenant-scoped collections ──────────────────────────────
+    deleted_counts = {}
+    for col_name in _ORG_DATA_COLLECTIONS:
+        try:
+            r = await _raw_db[col_name].delete_many({"organization_id": org_id})
+            if r.deleted_count:
+                deleted_counts[col_name] = r.deleted_count
+        except Exception:
+            pass
+
+    # ── Step 3: Delete global collections that reference this org ─────────────
+    for col_name in _ORG_GLOBAL_COLLECTIONS:
+        try:
+            r = await _raw_db[col_name].delete_many({"organization_id": org_id})
+            if r.deleted_count:
+                deleted_counts[col_name] = r.deleted_count
+        except Exception:
+            pass
+
+    # ── Step 4: Delete the organization record itself ─────────────────────────
+    await _raw_db.organizations.delete_one({"id": org_id})
+
+    # ── Step 5: Record audit log ───────────────────────────────────────────────
+    await _raw_db.org_backups.update_one(
+        {"r2_key": backup_result.get("r2_key")},
+        {"$set": {"deletion_completed_at": now_iso(), "deleted_by": user.get("email")}}
+    )
+
+    total_deleted = sum(deleted_counts.values())
+    return {
+        "message": f"Organization '{org_name}' deleted successfully",
+        "org_name": org_name,
+        "backup": backup_result,
+        "total_documents_deleted": total_deleted,
+        "collections_cleared": deleted_counts,
+    }

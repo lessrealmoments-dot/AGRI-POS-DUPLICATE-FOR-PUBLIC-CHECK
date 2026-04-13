@@ -584,7 +584,18 @@ See `/app/memory/ROADMAP.md` for full implementation spec.
 ## Next Up (P0 — Immediate)
 See `/app/memory/ROADMAP.md` for full spec on each item.
 
-### App Download Center (2026-04-13) — Complete
+### Delete Company with Pre-Delete Backup (2026-04-13) — Complete
+- **Backend `DELETE /api/superadmin/organizations/{org_id}`** — runs `create_org_backup()` first (saves to R2), then purges all tenant data across 30+ collections, then removes the org record. Aborts entirely if backup fails.
+- **Backend `POST /api/superadmin/organizations/{org_id}/backup`** — standalone manual backup trigger
+- **3-step confirmation modal in SuperAdminPage.js:**
+  - Step 1: Must type the **exact company name** (case + space sensitive)
+  - Step 2: Must type `PERMANENTLY DELETE` — shows org summary (users, branches)
+  - Step 3: Live progress spinner — "Do not close this window"
+  - Step 4: Success with full backup details (filename, size, doc count, R2 status)
+  - Error state: shows reason, confirms no data was changed, offers retry
+- **Red trash icon** on every org row (distinct from the edit button)
+
+
 - Platform-wide APK distribution page at `/downloads` accessible to all authenticated users
 - `app_downloads` collection in `_raw_db` (not tenant-scoped — global platform storage)
 - Two pre-defined app slots: AgriSMS Gateway 2.0 (`com.agrism.gateway`) + AgriSmart Terminal (`com.agribooks.terminal`)
