@@ -7,7 +7,7 @@ import {
   CheckCircle, AlertTriangle, XCircle, ChevronDown, ChevronUp,
   Search, TrendingUp, Edit3, Save, X, Plus, Minus, GitBranch,
   CreditCard, Upload, Globe, Phone, Settings,
-  Clock, Layers, Trash2, Star
+  Clock, Layers, Trash2, Star, HardDrive
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -77,6 +77,187 @@ function KpiCard({ icon: Icon, label, value, sub, color = 'emerald' }) {
     </div>
   );
 }
+
+/* ── Backups & Restore Panel ─────────────────────────────────────────────── */
+function RestorePanel() {
+  const [backups, setBackups] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [restoring, setRestoring] = useState(null); // backup record being restored
+  const [restoreResult, setRestoreResult] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [filter, setFilter] = useState('pre_delete'); // 'all' | 'pre_delete'
+  const fileRef = useRef();
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await api.get('/superadmin/all-backups');
+      setBackups(r.data || []);
+    } catch { toast.error('Failed to load backups'); }
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []); // eslint-disable-line
+
+  const handleRestoreFromR2 = async (backup) => {
+    if (!window.confirm(`Restore "${backup.org_name || backup.org_id}"?\n\nThis will:\n• Recreate the company and all its data\n• Overwrite any existing data for this company\n\nContinue?`)) return;
+    setRestoring(backup);
+    setRestoreResult(null);
+    try {
+      const r = await api.post(`/superadmin/restore/${backup._id || backup.id}`);
+      setRestoreResult({ success: true, data: r.data, org_name: backup.org_name });
+      toast.success(`${backup.org_name || 'Company'} restored successfully`);
+      load();
+    } catch (e) {
+      setRestoreResult({ success: false, error: e.response?.data?.detail || 'Restore failed', org_name: backup.org_name });
+    }
+    setRestoring(null);
+  };
+
+  const handleUploadRestore = async () => {
+    const file = fileRef.current?.files?.[0];
+    if (!file) { toast.error('Select a .json.gz backup file'); return; }
+    if (!window.confirm(`Restore from "${file.name}"?\n\nThis will recreate the company and all its data from this file.\n\nContinue?`)) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const r = await api.post('/superadmin/restore-upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      setRestoreResult({ success: true, data: r.data, org_name: r.data.org_name });
+      toast.success(`${r.data.org_name || 'Company'} restored from file`);
+      if (fileRef.current) fileRef.current.value = '';
+      load();
+    } catch (e) {
+      setRestoreResult({ success: false, error: e.response?.data?.detail || 'Upload restore failed' });
+    }
+    setUploading(false);
+  };
+
+  const filtered = filter === 'pre_delete'
+    ? backups.filter(b => b.backup_type === 'pre_delete' || b.deletion_completed_at)
+    : backups;
+
+  const fmtDate = (iso) => { try { return new Date(iso).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }); } catch { return iso; } };
+  const fmtSize = (mb) => mb ? `${parseFloat(mb).toFixed(1)} MB` : '—';
+
+  const typeLabel = (b) => {
+    if (b.backup_type === 'pre_delete' || b.deletion_completed_at) return { label: 'Pre-Delete', cls: 'bg-red-500/20 text-red-300 border-red-500/30' };
+    if (b.backup_type === 'restore') return { label: 'Restore Event', cls: 'bg-blue-500/20 text-blue-300 border-blue-500/30' };
+    if (b.triggered_by?.includes('schedule')) return { label: 'Scheduled', cls: 'bg-slate-500/20 text-slate-300 border-slate-600' };
+    return { label: 'Manual', cls: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' };
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h2 className="text-white font-semibold text-lg">Backups &amp; Restore</h2>
+          <p className="text-slate-400 text-xs mt-0.5">Restore a deleted company or upload a backup file to recover data.</p>
+        </div>
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Filter toggle */}
+          <div className="flex gap-1 bg-slate-800 rounded-lg p-1 border border-slate-700">
+            {[['pre_delete', 'Deleted Companies'], ['all', 'All Backups']].map(([v, l]) => (
+              <button key={v} onClick={() => setFilter(v)}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${filter === v ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}>
+                {l}
+              </button>
+            ))}
+          </div>
+          {/* Upload restore */}
+          <div className="flex items-center gap-2">
+            <input ref={fileRef} type="file" accept=".gz,.json.gz" className="hidden" id="restore-file-input" />
+            <label htmlFor="restore-file-input"
+              className="cursor-pointer flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white text-xs font-medium transition-colors border border-slate-600"
+              data-testid="restore-file-label">
+              <Upload size={13} /> Upload Backup File
+            </label>
+            <Button size="sm" onClick={handleUploadRestore} disabled={uploading}
+              className="h-8 bg-blue-600 hover:bg-blue-700 text-white text-xs gap-1.5" data-testid="upload-restore-btn">
+              {uploading ? <><RefreshCw size={12} className="animate-spin" /> Restoring…</> : 'Restore →'}
+            </Button>
+          </div>
+          <button onClick={load} className="p-2 text-slate-400 hover:text-white">
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          </button>
+        </div>
+      </div>
+
+      {/* Restore result banner */}
+      {restoreResult && (
+        <div className={`p-4 rounded-xl border flex items-start gap-3 ${restoreResult.success ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
+          {restoreResult.success ? <CheckCircle size={18} className="text-emerald-400 mt-0.5" /> : <XCircle size={18} className="text-red-400 mt-0.5" />}
+          <div className="flex-1">
+            {restoreResult.success ? (
+              <>
+                <p className="text-emerald-300 font-semibold text-sm">"{restoreResult.org_name}" restored successfully</p>
+                <p className="text-emerald-400/70 text-xs mt-0.5">{restoreResult.data?.total_documents_restored?.toLocaleString()} documents · {restoreResult.data?.collections_restored} collections</p>
+                {restoreResult.data?.errors?.length > 0 && (
+                  <p className="text-amber-400 text-xs mt-1">⚠ {restoreResult.data.errors.length} minor errors: {restoreResult.data.errors.join(', ')}</p>
+                )}
+              </>
+            ) : (
+              <>
+                <p className="text-red-300 font-semibold text-sm">Restore failed</p>
+                <p className="text-red-400/70 text-xs mt-0.5">{restoreResult.error}</p>
+              </>
+            )}
+          </div>
+          <button onClick={() => setRestoreResult(null)} className="text-slate-500 hover:text-slate-300"><X size={14} /></button>
+        </div>
+      )}
+
+      {/* Backup list */}
+      {loading ? (
+        <div className="text-center py-16 text-slate-500"><RefreshCw size={20} className="animate-spin mx-auto mb-2" /> Loading backups…</div>
+      ) : filtered.length === 0 ? (
+        <div className="text-center py-16 text-slate-600 border border-slate-700/40 rounded-2xl">
+          <HardDrive size={28} className="mx-auto mb-2 opacity-30" />
+          <p className="text-sm">{filter === 'pre_delete' ? 'No deleted company backups yet' : 'No backups found'}</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {filtered.map((b, i) => {
+            const { label, cls } = typeLabel(b);
+            const isRestoring = restoring?._id === b._id || restoring?.id === b.id;
+            const canRestore = b.r2_key && label !== 'Restore Event';
+            return (
+              <div key={b._id || i} className="bg-slate-800/30 border border-slate-700/40 rounded-xl px-4 py-3 flex items-center gap-4 flex-wrap">
+                {/* Org info */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-white font-semibold text-sm truncate">{b.org_name || b.org_id}</span>
+                    <span className={`text-xs px-1.5 py-0.5 rounded border font-medium ${cls}`}>{label}</span>
+                    {b.org_doc && <span className="text-xs text-emerald-400/70 border border-emerald-500/20 px-1.5 py-0.5 rounded">org saved</span>}
+                  </div>
+                  <div className="flex gap-4 mt-0.5 text-[10px] text-slate-500">
+                    <span>{fmtDate(b.created_at)}</span>
+                    {b.size_mb && <span>{fmtSize(b.size_mb)}</span>}
+                    {b.total_documents != null && <span>{b.total_documents?.toLocaleString()} docs</span>}
+                    {b.triggered_by && <span title={b.triggered_by}>by {b.triggered_by.split(' ')[0]}</span>}
+                    {b.deletion_completed_at && <span className="text-red-400/70">deleted {fmtDate(b.deletion_completed_at)}</span>}
+                  </div>
+                </div>
+                {/* Restore button */}
+                {canRestore ? (
+                  <Button size="sm" onClick={() => handleRestoreFromR2(b)} disabled={isRestoring}
+                    className="h-8 bg-blue-600 hover:bg-blue-700 text-white text-xs gap-1.5 shrink-0"
+                    data-testid={`restore-btn-${i}`}>
+                    {isRestoring ? <><RefreshCw size={11} className="animate-spin" /> Restoring…</> : <><RefreshCw size={11} /> Restore</>}
+                  </Button>
+                ) : (
+                  <span className="text-xs text-slate-600 shrink-0">{label === 'Restore Event' ? 'Event log' : 'No R2 file'}</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 /* ── Main Component ─────────────────────────────────────────────────────── */
 export default function SuperAdminPage() {
@@ -239,6 +420,9 @@ export default function SuperAdminPage() {
             <TabsTrigger value="settings" className="data-[state=active]:bg-slate-700 data-[state=active]:text-white text-slate-400 rounded-lg px-5">
               Payment Settings
             </TabsTrigger>
+            <TabsTrigger value="restore" className="data-[state=active]:bg-slate-700 data-[state=active]:text-white text-slate-400 rounded-lg px-5">
+              Backups &amp; Restore
+            </TabsTrigger>
           </TabsList>
 
           {/* ── OVERVIEW ────────────────────────────────────────────────── */}
@@ -361,6 +545,11 @@ export default function SuperAdminPage() {
               saving={savingPayment}
               setSaving={setSavingPayment}
             />
+          </TabsContent>
+
+          {/* ── BACKUPS & RESTORE ───────────────────────────────────────── */}
+          <TabsContent value="restore" className="space-y-4">
+            <RestorePanel />
           </TabsContent>
 
           {/* ── PAYMENT SUBMISSIONS ─────────────────────────────────────── */}

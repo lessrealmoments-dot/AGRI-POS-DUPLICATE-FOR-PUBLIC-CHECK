@@ -2,7 +2,7 @@
 Super Admin routes: platform-level management across all organizations.
 Access: janmarkeahig@gmail.com only (is_super_admin=True).
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from config import _raw_db
 from utils import now_iso, new_id
 from utils.auth import get_current_user
@@ -666,10 +666,15 @@ async def delete_organization(org_id: str, user=Depends(require_super_admin)):
     # ── Step 4: Delete the organization record itself ─────────────────────────
     await _raw_db.organizations.delete_one({"id": org_id})
 
-    # ── Step 5: Record audit log ───────────────────────────────────────────────
+    # ── Step 5: Record audit log + store org_doc for later restore ────────────
     await _raw_db.org_backups.update_one(
         {"r2_key": backup_result.get("r2_key")},
-        {"$set": {"deletion_completed_at": now_iso(), "deleted_by": user.get("email")}}
+        {"$set": {
+            "deletion_completed_at": now_iso(),
+            "deleted_by": user.get("email"),
+            "org_doc": org,          # Full org record — used to recreate org on restore
+            "backup_type": "pre_delete",
+        }}
     )
 
     total_deleted = sum(deleted_counts.values())
@@ -680,3 +685,190 @@ async def delete_organization(org_id: str, user=Depends(require_super_admin)):
         "total_documents_deleted": total_deleted,
         "collections_cleared": deleted_counts,
     }
+
+# ── Backups & Restore ───────────────────────────────────────────────────────
+
+@router.get("/all-backups")
+async def list_all_backups(user=Depends(require_super_admin)):
+    """List all org backup records across all organisations, newest first."""
+    backups = await _raw_db.org_backups.find(
+        {}
+    ).sort("created_at", -1).to_list(500)
+    result = []
+    for b in backups:
+        b["_id"] = str(b["_id"])   # ObjectId → string
+        result.append(b)
+    return result
+
+
+async def _do_restore(org_id: str, compressed_bytes: bytes,
+                      org_doc: dict | None, restored_by: str) -> dict:
+    """
+    Core restore logic shared by both R2 and upload paths.
+    1. Decompress + validate backup
+    2. Upsert org record into organizations
+    3. Purge + re-insert every tenant collection
+    """
+    import gzip, json
+    from services.org_backup_service import ORG_COLLECTIONS
+
+    try:
+        payload = json.loads(gzip.decompress(compressed_bytes).decode("utf-8"))
+        manifest = payload["manifest"]
+        data = payload["data"]
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Backup file is corrupt or unreadable: {exc}")
+
+    backup_org_id = manifest.get("org_id")
+    if not backup_org_id:
+        raise HTTPException(status_code=400, detail="Backup file has no org_id in manifest")
+
+    # Allow cross-org_id override only when org_doc is supplied (upload path)
+    if org_id and org_id != backup_org_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"org_id mismatch: backup contains {backup_org_id}, expected {org_id}"
+        )
+    org_id = backup_org_id
+
+    # ── Re-create / update org record ────────────────────────────────────────
+    if org_doc:
+        # Full org record stored during pre-delete backup
+        restore_doc = {**org_doc, "restored_at": now_iso(), "restored_by": restored_by}
+    else:
+        # Best-effort: preserve existing if it exists, otherwise create minimal
+        existing_org = await _raw_db.organizations.find_one({"id": org_id}, {"_id": 0})
+        if existing_org:
+            restore_doc = existing_org
+        else:
+            restore_doc = {
+                "id": org_id,
+                "name": manifest.get("org_name", "Restored Company"),
+                "plan": "trial",
+                "subscription_status": "active",
+                "created_at": now_iso(),
+                "restored_at": now_iso(),
+                "restored_by": restored_by,
+            }
+
+    await _raw_db.organizations.replace_one({"id": org_id}, restore_doc, upsert=True)
+
+    # ── Restore tenant collections ────────────────────────────────────────────
+    restored_collections = {}
+    errors = []
+    for coll_name in ORG_COLLECTIONS:
+        docs = data.get(coll_name, [])
+        try:
+            await _raw_db[coll_name].delete_many({"organization_id": org_id})
+            if docs:
+                for d in docs:
+                    d["organization_id"] = org_id
+                await _raw_db[coll_name].insert_many(docs)
+            restored_collections[coll_name] = len(docs)
+        except Exception as exc:
+            errors.append(f"{coll_name}: {exc}")
+
+    total_docs = sum(restored_collections.values())
+
+    # ── Log restore event ─────────────────────────────────────────────────────
+    await _raw_db.org_backups.insert_one({
+        "org_id": org_id,
+        "org_name": restore_doc.get("name", ""),
+        "backup_type": "restore",
+        "restored_by": restored_by,
+        "total_documents": total_docs,
+        "errors": errors,
+        "created_at": now_iso(),
+    })
+
+    return {
+        "success": len(errors) == 0,
+        "org_id": org_id,
+        "org_name": restore_doc.get("name", ""),
+        "total_documents_restored": total_docs,
+        "collections_restored": len(restored_collections),
+        "errors": errors,
+    }
+
+
+@router.post("/restore/{backup_id}")
+async def restore_from_r2(backup_id: str, user=Depends(require_super_admin)):
+    """Restore a company from an existing R2 backup record."""
+    import os, boto3
+    from botocore.config import Config
+    from bson import ObjectId
+
+    # Look up backup record
+    try:
+        record = await _raw_db.org_backups.find_one({"_id": ObjectId(backup_id)}, {"_id": 0})
+    except Exception:
+        record = None
+    if not record:
+        raise HTTPException(status_code=404, detail="Backup record not found")
+    if not record.get("r2_key"):
+        raise HTTPException(status_code=400, detail="This backup record has no R2 file attached")
+
+    # Download from R2
+    r2 = boto3.client(
+        "s3",
+        endpoint_url=os.environ.get("R2_ENDPOINT_URL"),
+        aws_access_key_id=os.environ.get("R2_ACCESS_KEY_ID"),
+        aws_secret_access_key=os.environ.get("R2_SECRET_ACCESS_KEY"),
+        region_name="auto",
+        config=Config(signature_version="s3v4"),
+    )
+    bucket = os.environ.get("R2_BUCKET_NAME", "agribooks-backups")
+    try:
+        resp = r2.get_object(Bucket=bucket, Key=record["r2_key"])
+        compressed = resp["Body"].read()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to download from R2: {exc}")
+
+    org_doc = record.get("org_doc")  # May be None for scheduled/manual backups
+    return await _do_restore(
+        org_id=record["org_id"],
+        compressed_bytes=compressed,
+        org_doc=org_doc,
+        restored_by=user.get("email", "super_admin"),
+    )
+
+
+@router.post("/restore-upload")
+async def restore_from_upload(
+    file: UploadFile = File(...),
+    user=Depends(require_super_admin),
+):
+
+    if not (file.filename or "").endswith(".gz") and file.content_type not in (
+        "application/gzip", "application/x-gzip", "application/octet-stream"
+    ):
+        raise HTTPException(status_code=400, detail="File must be a .json.gz backup archive")
+
+    content = await file.read()
+    if len(content) > 500 * 1024 * 1024:  # 500 MB hard cap
+        raise HTTPException(status_code=400, detail="File too large (max 500 MB)")
+
+    # Try to find stored org_doc in DB using org_id from manifest
+    import gzip, json
+    try:
+        manifest = json.loads(gzip.decompress(content))["manifest"]
+        org_id = manifest.get("org_id", "")
+    except Exception:
+        org_id = ""
+
+    # Look for org_doc in any matching backup record (pre_delete backups have it)
+    org_doc = None
+    if org_id:
+        rec = await _raw_db.org_backups.find_one(
+            {"org_id": org_id, "org_doc": {"$exists": True}},
+            {"_id": 0, "org_doc": 1}
+        )
+        if rec:
+            org_doc = rec.get("org_doc")
+
+    return await _do_restore(
+        org_id=org_id,
+        compressed_bytes=content,
+        org_doc=org_doc,
+        restored_by=user.get("email", "super_admin"),
+    )
