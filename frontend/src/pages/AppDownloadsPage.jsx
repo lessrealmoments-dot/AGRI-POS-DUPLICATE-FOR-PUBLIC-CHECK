@@ -312,10 +312,12 @@ function AppCard({ app, isSuperAdmin, onRefresh }) {
 export default function AppDownloadsPage() {
   const { user } = useAuth();
   const isSuperAdmin = user?.is_super_admin;
+  const isCompanyAdmin = isSuperAdmin || ['admin', 'owner'].includes(user?.role);
   const [apps, setApps] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const loadApps = async () => {
+    if (!isCompanyAdmin) return;
     setLoading(true);
     try {
       const res = await api.get('/app-downloads');
@@ -326,7 +328,19 @@ export default function AppDownloadsPage() {
     setLoading(false);
   };
 
-  useEffect(() => { loadApps(); }, []);
+  useEffect(() => { loadApps(); }, []); // eslint-disable-line
+
+  if (!isCompanyAdmin) {
+    return (
+      <div className="min-h-screen bg-[#0a0f1a] flex items-center justify-center">
+        <div className="text-center">
+          <Smartphone size={40} className="mx-auto mb-4 text-slate-600" />
+          <p className="text-white font-semibold text-lg mb-1">Access Restricted</p>
+          <p className="text-slate-500 text-sm">App downloads are available to company admins only.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#0a0f1a]">

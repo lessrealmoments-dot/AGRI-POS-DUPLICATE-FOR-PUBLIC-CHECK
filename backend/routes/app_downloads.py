@@ -47,6 +47,15 @@ def require_super_admin(user=Depends(get_current_user)):
     return user
 
 
+def require_company_admin(user=Depends(get_current_user)):
+    """Allow company admin/owner roles and super admin. Block cashiers, managers, staff, etc."""
+    if user.get("is_super_admin"):
+        return user
+    if user.get("role") not in {"admin", "owner"}:
+        raise HTTPException(status_code=403, detail="Company admin access required")
+    return user
+
+
 def _get_r2_client():
     return boto3.client(
         "s3",
@@ -92,7 +101,7 @@ async def _get_presigned_url(key: str, filename: str, expires_in: int = 3600) ->
 
 
 @router.get("")
-async def list_apps(user=Depends(get_current_user)):
+async def list_apps(user=Depends(require_company_admin)):
     """List all app download entries. Returns pre-defined slots merged with DB data."""
     db_apps = await _raw_db.app_downloads.find(
         {"active": True}, {"_id": 0}
@@ -123,7 +132,7 @@ async def list_apps(user=Depends(get_current_user)):
 
 
 @router.get("/{slug}/download-url")
-async def get_download_url(slug: str, user=Depends(get_current_user)):
+async def get_download_url(slug: str, user=Depends(require_company_admin)):
     """Get a pre-signed download URL for an APK. Increments download_count."""
     app = await _raw_db.app_downloads.find_one({"slug": slug, "active": True}, {"_id": 0})
     if not app or not app.get("r2_key"):

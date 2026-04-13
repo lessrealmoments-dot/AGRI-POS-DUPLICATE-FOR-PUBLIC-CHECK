@@ -88,7 +88,7 @@ const NAV_SECTIONS = [
       { path: '/price-schemes',   label: 'Price Schemes', icon: Tags,     perm: 'price_schemes.view' },
       { path: '/team',            label: 'Team',         icon: UserCog,   perm: 'settings.manage_users' },
       { path: '/import',          label: 'Import Center', icon: Upload,   perm: 'products.create' },
-      { path: '/downloads',       label: 'App Downloads', icon: Smartphone, perm: null },
+      { path: '/downloads',       label: 'App Downloads', icon: Smartphone, perm: null, adminOnly: true },
       { path: '/backups',         label: 'Backups',      icon: HardDrive, perm: 'settings.edit' },
       { path: '/settings',        label: 'Settings',     icon: Settings },
     ],
@@ -148,7 +148,7 @@ export default function Layout({ children }) {
       _status: getItemPermStatus(item),
     })).filter(item => {
       if (item._status === 'feature_locked') return false;
-      if (item.adminOnly && user?.role !== 'admin') return false;
+      if (item.adminOnly && user?.role !== 'admin' && user?.role !== 'owner') return false;
       return true;
     }),
   })).filter(section => section.items.length > 0);
