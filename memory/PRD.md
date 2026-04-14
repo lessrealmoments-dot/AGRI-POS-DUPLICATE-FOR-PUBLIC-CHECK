@@ -584,7 +584,14 @@ See `/app/memory/ROADMAP.md` for full implementation spec.
 ## Next Up (P0 — Immediate)
 See `/app/memory/ROADMAP.md` for full spec on each item.
 
-### Delete Company with Pre-Delete Backup (2026-04-13) — Complete
+### Forgot Password / Password Reset (2026-04-14) — Complete
+- `POST /api/auth/forgot-password` — generates a secure token (1hr expiry), stores in `password_reset_tokens` collection, sends email via Resend with link to `{APP_FRONTEND_URL}/reset-password?token=...`
+- `POST /api/auth/reset-password` — validates token (not used, not expired), updates `password_hash`, marks token as used (single-use)
+- Security: always returns generic success message (no email enumeration), tokens invalidated on use
+- Frontend: "Forgot password?" link on LoginPage, `/forgot-password` page with email form + sent confirmation, `/reset-password?token=` page with password + confirm fields
+- `REACT_APP_FRONTEND_URL=https://agri-books.com` added to backend `.env` for correct reset link URLs
+
+
 - **Backend `DELETE /api/superadmin/organizations/{org_id}`** — runs `create_org_backup()` first (saves to R2), then purges all tenant data across 30+ collections, then removes the org record. Aborts entirely if backup fails.
 - **Backend `POST /api/superadmin/organizations/{org_id}/backup`** — standalone manual backup trigger
 - **3-step confirmation modal in SuperAdminPage.js:**

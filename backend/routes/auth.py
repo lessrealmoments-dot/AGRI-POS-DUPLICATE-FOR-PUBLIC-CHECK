@@ -4,6 +4,7 @@ Authentication routes: login (email or username), register, password management,
 from fastapi import APIRouter, Depends, HTTPException
 import pyotp
 import jwt
+import secrets
 from datetime import datetime, timezone
 from config import db, _raw_db, JWT_SECRET
 from utils import (
@@ -462,3 +463,103 @@ async def verify_admin_action(data: dict, user=Depends(get_current_user)):
     if mode == "totp":
         return {"valid": False, "error": "Invalid code — check your authenticator app"}
     return {"valid": False, "error": "Invalid password"}
+
+
+# ── Password Reset ─────────────────────────────────────────────────────────────
+
+RESET_TOKEN_EXPIRY_SECONDS = 3600  # 1 hour
+
+
+@router.post("/forgot-password")
+async def forgot_password(data: dict):
+    """Request a password reset link. Always returns generic success to avoid email enumeration."""
+    email = data.get("email", "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="Email is required")
+
+    user = await _raw_db.users.find_one({"email": email, "active": True}, {"_id": 0})
+
+    if user:
+        # Invalidate any existing unexpired tokens for this email
+        await _raw_db.password_reset_tokens.delete_many({"email": email, "used": False})
+
+        token = secrets.token_urlsafe(32)
+        expires_at = datetime.now(timezone.utc).timestamp() + RESET_TOKEN_EXPIRY_SECONDS
+
+        await _raw_db.password_reset_tokens.insert_one({
+            "id": new_id(),
+            "token": token,
+            "user_id": user["id"],
+            "email": email,
+            "expires_at": expires_at,
+            "used": False,
+            "created_at": now_iso(),
+        })
+
+        try:
+            from services.email_service import send_email, APP_URL, _base
+            reset_url = f"{APP_URL}/reset-password?token={token}"
+            html = _base(
+                content=f"""
+                <h1 style="color:#0f172a;font-size:22px;margin:0 0 8px;">Reset Your Password</h1>
+                <p style="color:#475569;font-size:15px;line-height:1.6;">
+                  Hi there,<br><br>
+                  We received a request to reset the password for your AgriBooks account
+                  (<strong>{email}</strong>).<br><br>
+                  Click the button below to set a new password. This link is valid for <strong>1 hour</strong>.
+                </p>
+                <div style="background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:12px 16px;margin:16px 0;">
+                  <p style="color:#854d0e;font-weight:600;margin:0;font-size:13px;">
+                    If you did not request a password reset, you can safely ignore this email.
+                    Your password will not change.
+                  </p>
+                </div>
+                """,
+                cta_url=reset_url,
+                cta_label="Reset My Password"
+            )
+            await send_email(email, "Reset your AgriBooks password", html)
+        except Exception:
+            import logging
+            logging.getLogger("auth").exception("Failed to send password reset email to %s", email)
+
+    # Always return the same message (security: don't reveal if email exists)
+    return {"message": "If that email is registered, you'll receive a password reset link shortly."}
+
+
+@router.post("/reset-password")
+async def reset_password(data: dict):
+    """Reset a user's password using a valid reset token."""
+    token = data.get("token", "").strip()
+    new_password = data.get("new_password", "")
+
+    if not token:
+        raise HTTPException(status_code=400, detail="Reset token is required")
+    if not new_password:
+        raise HTTPException(status_code=400, detail="New password is required")
+    if len(new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+
+    token_doc = await _raw_db.password_reset_tokens.find_one({"token": token, "used": False})
+
+    if not token_doc:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link. Please request a new one.")
+
+    # Check expiry
+    if datetime.now(timezone.utc).timestamp() > token_doc.get("expires_at", 0):
+        await _raw_db.password_reset_tokens.delete_one({"token": token})
+        raise HTTPException(status_code=400, detail="This reset link has expired. Please request a new one.")
+
+    # Update password
+    await _raw_db.users.update_one(
+        {"id": token_doc["user_id"]},
+        {"$set": {"password_hash": hash_password(new_password), "updated_at": now_iso()}}
+    )
+
+    # Consume token (mark as used)
+    await _raw_db.password_reset_tokens.update_one(
+        {"token": token},
+        {"$set": {"used": True, "used_at": now_iso()}}
+    )
+
+    return {"message": "Password reset successfully. You can now sign in with your new password."}

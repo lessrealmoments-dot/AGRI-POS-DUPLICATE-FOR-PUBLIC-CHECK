@@ -60,6 +60,8 @@ import JournalEntriesPage from './pages/JournalEntriesPage';
 import DocumentsPage from './pages/DocumentsPage';
 import MessagesPage from './pages/MessagesPage';
 import AppDownloadsPage from './pages/AppDownloadsPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
 import BudgetChecker from './components/BudgetChecker';
 import TerminalPage from './pages/terminal/TerminalPage';
 import DocViewerPage from './pages/DocViewerPage';
@@ -126,6 +128,8 @@ function AppRoutes() {
         <Route path="/setup" element={<SetupWizardPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/" element={<LandingPage />} />
         <Route path="/admin" element={<AdminLoginPage />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
@@ -147,6 +151,8 @@ function AppRoutes() {
       <Route path="/register" element={user ? <Navigate to="/dashboard" replace /> : <RegisterPage />} />
       <Route path="/setup" element={<Navigate to="/dashboard" replace />} />
       <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
+      <Route path="/forgot-password" element={user ? <Navigate to="/dashboard" replace /> : <ForgotPasswordPage />} />
+      <Route path="/reset-password" element={user ? <Navigate to="/dashboard" replace /> : <ResetPasswordPage />} />
 
       {/* Platform admin portal — separate entry point */}
       <Route path="/admin" element={<AdminLoginPage />} />
