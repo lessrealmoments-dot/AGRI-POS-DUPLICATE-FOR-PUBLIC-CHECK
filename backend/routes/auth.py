@@ -477,6 +477,12 @@ async def forgot_password(data: dict):
     if not email:
         raise HTTPException(status_code=400, detail="Email is required")
 
+    # Use origin sent by the browser (works for both live site and preview environments).
+    # Fall back to the env var so server-triggered resets still work.
+    request_origin = (data.get("origin") or "").strip().rstrip("/")
+    from services.email_service import APP_URL as ENV_APP_URL, send_email, _base
+    base_url = request_origin if request_origin else ENV_APP_URL
+
     user = await _raw_db.users.find_one({"email": email, "active": True}, {"_id": 0})
 
     if user:
@@ -497,8 +503,7 @@ async def forgot_password(data: dict):
         })
 
         try:
-            from services.email_service import send_email, APP_URL, _base
-            reset_url = f"{APP_URL}/reset-password?token={token}"
+            reset_url = f"{base_url}/reset-password?token={token}"
             html = _base(
                 content=f"""
                 <h1 style="color:#0f172a;font-size:22px;margin:0 0 8px;">Reset Your Password</h1>
