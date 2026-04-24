@@ -610,7 +610,7 @@ All endpoints require `Authorization: Bearer <token>` header.
 | Logging | POST | `/api/sms/gateway/logs/batch` | `{"entries":[{"level":"INFO","event_type":"sent","message":"...","phone":"...","device_id":"...","created_at":"ISO"}]}` |
 
 **Production URL:** `https://agri-books.com`
-**Preview/Test URL:** `https://agribooks-multi.preview.emergentagent.com`
+**Preview/Test URL:** `https://harvest-tracker-80.preview.emergentagent.com`
 
 ---
 
