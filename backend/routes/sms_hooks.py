@@ -80,6 +80,33 @@ async def on_credit_sale_created(invoice: dict):
                 trigger_ref=invoice.get("id", ""),
                 dedup_key=f"credit_new:{invoice.get('id', '')}:{phone}",
             )
+
+        # CC: manager — needs awareness of new credit extended on their branch
+        recipients_doc = await raw_db.system_settings.find_one(
+            {"key": "collection_notification_recipients", "organization_id": org_id}, {"_id": 0}
+        )
+        manager_phone = (recipients_doc or {}).get("manager_phone", "")
+        if manager_phone:
+            mgr_msg = (
+                f"[New Credit] {customer.get('name','')} — "
+                f"P{invoice.get('balance', 0):,.2f} on {invoice.get('order_date','')}. "
+                f"Invoice: {invoice.get('invoice_number','')}. "
+                f"Due: {invoice.get('due_date','N/A')}. "
+                f"Total balance: P{customer.get('balance', 0):,.2f}."
+            )
+            await raw_db.sms_queue.insert_one({
+                "id": new_id(), "organization_id": org_id,
+                "template_key": "credit_new_staff",
+                "customer_id": customer_id,
+                "customer_name": customer.get("name", invoice.get("customer_name", "")),
+                "phone": manager_phone, "message": mgr_msg,
+                "status": "pending", "trigger": "auto",
+                "trigger_ref": invoice.get("id", ""),
+                "dedup_key": f"credit_new_mgr:{invoice.get('id', '')}",
+                "branch_id": branch_id, "branch_name": branch_name,
+                "created_at": now_iso(),
+                "sent_at": None, "failed_at": None, "error": None, "retry_count": 0,
+            })
     except Exception as e:
         logger.error(f"SMS hook on_credit_sale_created failed: {e}")
 
@@ -160,6 +187,32 @@ async def on_charge_applied(customer_id: str, charge_type: str, charge_amount: f
                 trigger="auto",
                 trigger_ref=f"charge:{customer_id}:{charge_type}:{phone}",
             )
+
+        # CC: manager — closes the loop; confirms charge was applied and customer notified
+        recipients_doc = await raw_db.system_settings.find_one(
+            {"key": "collection_notification_recipients", "organization_id": org_id}, {"_id": 0}
+        )
+        manager_phone = (recipients_doc or {}).get("manager_phone", "")
+        if manager_phone:
+            mgr_msg = (
+                f"[{charge_type} Applied] {customer.get('name','')} — "
+                f"P{charge_amount:,.2f} charged. "
+                f"New total balance: P{total_balance:,.2f}. "
+                f"Customer has been notified via SMS."
+            )
+            await raw_db.sms_queue.insert_one({
+                "id": new_id(), "organization_id": org_id,
+                "template_key": "charge_applied_staff",
+                "customer_id": customer_id,
+                "customer_name": customer.get("name", ""),
+                "phone": manager_phone, "message": mgr_msg,
+                "status": "pending", "trigger": "auto",
+                "trigger_ref": f"charge:{customer_id}:{charge_type}",
+                "dedup_key": f"charge_mgr:{customer_id}:{charge_type}:{now_iso()[:10]}",
+                "branch_id": branch_id, "branch_name": await get_branch_name(branch_id),
+                "created_at": now_iso(),
+                "sent_at": None, "failed_at": None, "error": None, "retry_count": 0,
+            })
     except Exception as e:
         logger.error(f"SMS hook on_charge_applied failed: {e}")
 
