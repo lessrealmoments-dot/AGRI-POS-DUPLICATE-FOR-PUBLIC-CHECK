@@ -235,14 +235,13 @@ async def _compute_crop_principal(credit: dict, raw_db=None) -> float:
 async def _compute_total_customer_balance(customer_id: str, db_to_use=None) -> float:
     """
     Compute total outstanding balance for a customer across ALL non-paid/non-voided invoices,
-    EXCLUDING interest_charge and penalty_charge invoices.
+    including interest_charge and penalty_charge invoices generated via /payments.
 
-    Why exclude interest/penalty invoices:
-      - Crop credit interest is tracked via `accrued_interest` on the crop credit document.
-      - If interest_charge invoices (created via /payments Generate Interest) were included here,
-        the same interest would be counted twice: once in principal_balance and again in accrued_interest.
-      - Penalty invoices follow the same logic.
-      - Result matches exactly what /customers and /payments show for the underlying principal balance.
+    This matches exactly what /customers and /payments show so all three pages
+    are always consistent — they all read from the same invoices collection.
+
+    Note: crop credit accrued_interest is a projected/informational field only and
+    is NOT added to this total. Interest is officially tracked via INT-XXXXX invoices.
     """
     if not db_to_use:
         db_to_use = _raw_db
@@ -253,7 +252,6 @@ async def _compute_total_customer_balance(customer_id: str, db_to_use=None) -> f
             "customer_id": customer_id,
             "status": {"$nin": ["voided", "paid"]},
             "balance": {"$gt": 0},
-            "sale_type": {"$nin": ["interest_charge", "penalty_charge"]},
         }},
         {"$group": {"_id": None, "total_balance": {"$sum": "$balance"}}}
     ]
@@ -263,12 +261,16 @@ async def _compute_total_customer_balance(customer_id: str, db_to_use=None) -> f
 
 def _enrich_credit(credit: dict, total_customer_balance: float) -> dict:
     """
-    Attach the total customer balance (all invoices) and total_due to a crop credit dict.
-    principal_balance reflects the customer's FULL outstanding balance so it matches
-    /customers and /payments views.
+    Attach the total customer balance to a crop credit dict.
+
+    principal_balance  = ALL outstanding invoices (regular + INT + penalty)
+                         — identical to what /customers and /payments show.
+    total_due          = same as principal_balance (interest already lives in INT invoices).
+    accrued_interest   = kept on the document as a projected/informational figure only;
+                         it is NOT added to total_due to avoid double-counting with INT invoices.
     """
     credit["principal_balance"] = total_customer_balance
-    credit["total_due"] = round(total_customer_balance + credit.get("accrued_interest", 0), 2)
+    credit["total_due"] = total_customer_balance          # INT invoices already included above
     return credit
 
 
