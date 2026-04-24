@@ -213,33 +213,55 @@ async def _send_harvest_notification(crop_credit: dict, notification_type: str):
         logging.getLogger(__name__).error(f"Crop credit notification failed: {e}")
 
 
-async def _compute_principal_from_invoices(credit: dict, raw_db=None) -> float:
+async def _compute_crop_principal(credit: dict, raw_db=None) -> float:
     """
-    Compute the actual principal balance from linked invoices.
-    This ensures the crop credit stays in sync with the standard payment/accounting flow.
-    Falls back to stored principal_balance if no invoices are linked.
+    Compute principal balance from crop-credit-LINKED invoices only.
+    Used for interest accrual (charges interest only on crop-season purchases, not all customer debt).
     """
     db_to_use = raw_db if raw_db else _raw_db
     credits = credit.get("credits", [])
     invoice_ids = [c["invoice_id"] for c in credits if c.get("invoice_id")]
     if not invoice_ids:
-        return credit.get("principal_balance", 0)
+        return 0.0
 
     pipeline = [
         {"$match": {"id": {"$in": invoice_ids}, "status": {"$nin": ["voided"]}}},
         {"$group": {"_id": None, "total_balance": {"$sum": "$balance"}}}
     ]
     result = await db_to_use.invoices.aggregate(pipeline).to_list(1)
-    if result:
-        return round(result[0]["total_balance"], 2)
-    # If no invoice found (e.g., voided), return 0
-    return 0.0
+    return round(result[0]["total_balance"], 2) if result else 0.0
 
 
-def _enrich_credit(credit: dict, computed_principal: float) -> dict:
-    """Attach the computed principal and total_due to a crop credit dict."""
-    credit["principal_balance"] = computed_principal
-    credit["total_due"] = round(computed_principal + credit.get("accrued_interest", 0), 2)
+async def _compute_total_customer_balance(customer_id: str, db_to_use=None) -> float:
+    """
+    Compute total outstanding balance for a customer across ALL non-paid/non-voided invoices.
+    This matches exactly how /customers and /payments compute the customer balance,
+    ensuring the crop-credits monitoring page always shows a consistent figure.
+    """
+    if not db_to_use:
+        db_to_use = _raw_db
+    if not customer_id:
+        return 0.0
+    pipeline = [
+        {"$match": {
+            "customer_id": customer_id,
+            "status": {"$nin": ["voided", "paid"]},
+            "balance": {"$gt": 0}
+        }},
+        {"$group": {"_id": None, "total_balance": {"$sum": "$balance"}}}
+    ]
+    result = await db_to_use.invoices.aggregate(pipeline).to_list(1)
+    return round(result[0]["total_balance"], 2) if result else 0.0
+
+
+def _enrich_credit(credit: dict, total_customer_balance: float) -> dict:
+    """
+    Attach the total customer balance (all invoices) and total_due to a crop credit dict.
+    principal_balance reflects the customer's FULL outstanding balance so it matches
+    /customers and /payments views.
+    """
+    credit["principal_balance"] = total_customer_balance
+    credit["total_due"] = round(total_customer_balance + credit.get("accrued_interest", 0), 2)
     return credit
 
 
@@ -319,8 +341,8 @@ async def run_monthly_interest_accrual():
 
         accrued_count = 0
         for cc in credits:
-            # Compute principal from linked invoices (not stored value)
-            computed_principal = await _compute_principal_from_invoices(cc, raw_db=_raw_db)
+            # Compute principal from crop-linked invoices only (interest charged on crop principal only)
+            computed_principal = await _compute_crop_principal(cc, raw_db=_raw_db)
             monthly_rate = cc.get("monthly_interest_rate", 0)
             if monthly_rate <= 0 or computed_principal <= 0:
                 continue
@@ -487,11 +509,11 @@ async def list_crop_credits(
     total = await db.crop_credits.count_documents(query)
     items = await db.crop_credits.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
 
-    # Compute principal from linked invoices for each item (keeps in sync with /payments)
+    # Compute total customer balance for each item (matches /customers and /payments)
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     for item in items:
-        computed_principal = await _compute_principal_from_invoices(item)
-        _enrich_credit(item, computed_principal)
+        total_balance = await _compute_total_customer_balance(item.get("customer_id", ""))
+        _enrich_credit(item, total_balance)
         season_end = item.get("season_end_date", "")
         if season_end:
             try:
@@ -514,7 +536,7 @@ async def check_customer_block(customer_id: str, user=Depends(get_current_user))
         {"_id": 0}
     )
     if active:
-        computed_principal = await _compute_principal_from_invoices(active)
+        total_balance = await _compute_total_customer_balance(customer_id)
         total_interest = active.get("accrued_interest", 0)
         return {
             "blocked": True,
@@ -526,9 +548,9 @@ async def check_customer_block(customer_id: str, user=Depends(get_current_user))
                 "id": active.get("id"),
                 "status": active.get("status"),
                 "season_end_date": active.get("season_end_date"),
-                "principal_balance": computed_principal,
+                "principal_balance": total_balance,
                 "accrued_interest": total_interest,
-                "total_due": round(computed_principal + total_interest, 2),
+                "total_due": round(total_balance + total_interest, 2),
                 "extension_count": active.get("extension_count", 0),
             }
         }
@@ -539,8 +561,8 @@ async def check_customer_block(customer_id: str, user=Depends(get_current_user))
         {"_id": 0}
     )
     if overdue:
-        computed_principal = await _compute_principal_from_invoices(overdue)
-        total_due = round(computed_principal + overdue.get("accrued_interest", 0), 2)
+        total_balance = await _compute_total_customer_balance(customer_id)
+        total_due = round(total_balance + overdue.get("accrued_interest", 0), 2)
         return {
             "blocked": True,
             "reason": "expired_season_unpaid",
@@ -551,7 +573,7 @@ async def check_customer_block(customer_id: str, user=Depends(get_current_user))
                 "id": overdue.get("id"),
                 "status": "overdue",
                 "season_end_date": overdue.get("season_end_date"),
-                "principal_balance": computed_principal,
+                "principal_balance": total_balance,
                 "accrued_interest": overdue.get("accrued_interest", 0),
                 "total_due": total_due,
                 "extension_count": overdue.get("extension_count", 0),
@@ -597,8 +619,8 @@ async def get_customer_active_credit(customer_id: str, user=Depends(get_current_
     else:
         credit["days_to_harvest"] = None
 
-    # Compute principal from linked invoices (keeps in sync with /payments and /customers)
-    computed_principal = await _compute_principal_from_invoices(credit)
+    # Compute total customer balance (matches /customers and /payments)
+    computed_principal = await _compute_total_customer_balance(credit.get("customer_id", ""))
     _enrich_credit(credit, computed_principal)
     return credit
 
@@ -619,9 +641,9 @@ async def get_crop_credit(credit_id: str, user=Depends(get_current_user)):
         except Exception:
             credit["days_to_harvest"] = None
 
-    # Compute principal from linked invoices
-    computed_principal = await _compute_principal_from_invoices(credit)
-    _enrich_credit(credit, computed_principal)
+    # Compute total customer balance (matches /customers and /payments)
+    total_balance = await _compute_total_customer_balance(credit.get("customer_id", ""))
+    _enrich_credit(credit, total_balance)
     return credit
 
 
@@ -691,8 +713,8 @@ async def add_credit_to_season(credit_id: str, data: dict, user=Depends(get_curr
     )
 
     updated = await db.crop_credits.find_one({"id": credit_id}, {"_id": 0})
-    computed_principal = await _compute_principal_from_invoices(updated)
-    _enrich_credit(updated, computed_principal)
+    total_balance = await _compute_total_customer_balance(updated.get("customer_id", ""))
+    _enrich_credit(updated, total_balance)
     return updated
 
 
@@ -717,8 +739,8 @@ async def record_crop_payment(credit_id: str, data: dict, user=Depends(get_curre
         raise HTTPException(status_code=400, detail="Payment amount must be greater than zero")
 
     accrued_interest = credit.get("accrued_interest", 0)
-    # Compute principal from linked invoices for accurate allocation
-    principal_balance = await _compute_principal_from_invoices(credit)
+    # Use crop-linked principal for allocation logic (interest is charged on crop principal)
+    principal_balance = await _compute_crop_principal(credit)
 
     # Interest first, then principal
     applied_interest = min(amount, accrued_interest)
@@ -762,8 +784,8 @@ async def record_crop_payment(credit_id: str, data: dict, user=Depends(get_curre
 
     await db.crop_credits.update_one({"id": credit_id}, update)
     updated = await db.crop_credits.find_one({"id": credit_id}, {"_id": 0})
-    computed = await _compute_principal_from_invoices(updated)
-    _enrich_credit(updated, computed)
+    total_balance = await _compute_total_customer_balance(updated.get("customer_id", ""))
+    _enrich_credit(updated, total_balance)
     return {
         "message": "Interest payment recorded" + (" — Interest cleared!" if new_accrued_interest <= 0 else "") + (" — Account settled!" if new_status == "settled" else ""),
         "applied_interest": applied_interest,
@@ -908,7 +930,8 @@ async def manually_accrue_interest(credit_id: str, user=Depends(get_current_user
         raise HTTPException(status_code=400, detail="Cannot accrue interest on settled credit")
 
     monthly_rate = credit.get("monthly_interest_rate", 0)
-    principal = await _compute_principal_from_invoices(credit)
+    # Interest is charged on crop-linked principal only
+    principal = await _compute_crop_principal(credit)
 
     if monthly_rate <= 0 or principal <= 0:
         return {"message": "No interest applicable", "interest_added": 0}
@@ -934,10 +957,10 @@ async def manually_accrue_interest(credit_id: str, user=Depends(get_current_user
     )
 
     updated = await db.crop_credits.find_one({"id": credit_id}, {"_id": 0})
-    computed = await _compute_principal_from_invoices(updated)
+    total_balance = await _compute_total_customer_balance(updated.get("customer_id", ""))
     return {
         "message": f"Interest of ₱{interest_amount:,.2f} accrued",
         "interest_added": interest_amount,
         "new_accrued_interest": updated.get("accrued_interest", 0),
-        "total_due": round(computed + updated.get("accrued_interest", 0), 2),
+        "total_due": round(total_balance + updated.get("accrued_interest", 0), 2),
     }
