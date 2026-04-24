@@ -161,3 +161,89 @@ async def on_charge_applied(customer_id: str, charge_type: str, charge_amount: f
             )
     except Exception as e:
         logger.error(f"SMS hook on_charge_applied failed: {e}")
+
+
+
+async def on_crop_season_started(crop_credit: dict, total_balance: float):
+    """Called when a new Charged-to-Crop season is created."""
+    try:
+        from routes.sms import queue_sms
+        customer_id = crop_credit.get("customer_id", "")
+        customer = await raw_db.customers.find_one({"id": customer_id}, {"_id": 0})
+        if not customer:
+            return
+        phones = customer.get("phones") or ([customer["phone"]] if customer.get("phone") else [])
+        if not phones:
+            return
+
+        branch_id = crop_credit.get("branch_id", "")
+        org_id = crop_credit.get("organization_id", "") or await _resolve_org_id(branch_id)
+        company_name = await get_company_name(org_id)
+        variables = {
+            "customer_name": customer.get("name", crop_credit.get("customer_name", "")),
+            "company_name": company_name,
+            "planting_date": crop_credit.get("planting_date", ""),
+            "harvest_date": crop_credit.get("season_end_date", ""),
+            "total_balance": f"{total_balance:,.2f}",
+        }
+        for phone in phones:
+            if not phone:
+                continue
+            await queue_sms(
+                template_key="crop_season_started",
+                customer_id=customer_id,
+                customer_name=customer.get("name", ""),
+                phone=phone,
+                variables=variables,
+                organization_id=org_id,
+                branch_id=branch_id,
+                branch_name=await get_branch_name(branch_id),
+                trigger="auto",
+                trigger_ref=crop_credit.get("id", ""),
+                dedup_key=f"crop_season_started:{crop_credit.get('id', '')}:{phone}",
+            )
+    except Exception as e:
+        logger.error(f"SMS hook on_crop_season_started failed: {e}")
+
+
+async def on_crop_credit_added(crop_credit: dict, amount: float, invoice_number: str, total_balance: float):
+    """Called when a new purchase is added to an active crop season."""
+    try:
+        from routes.sms import queue_sms
+        customer_id = crop_credit.get("customer_id", "")
+        customer = await raw_db.customers.find_one({"id": customer_id}, {"_id": 0})
+        if not customer:
+            return
+        phones = customer.get("phones") or ([customer["phone"]] if customer.get("phone") else [])
+        if not phones:
+            return
+
+        branch_id = crop_credit.get("branch_id", "")
+        org_id = crop_credit.get("organization_id", "") or await _resolve_org_id(branch_id)
+        company_name = await get_company_name(org_id)
+        variables = {
+            "customer_name": customer.get("name", crop_credit.get("customer_name", "")),
+            "amount": f"{amount:,.2f}",
+            "company_name": company_name,
+            "invoice_number": invoice_number or "—",
+            "total_balance": f"{total_balance:,.2f}",
+            "harvest_date": crop_credit.get("season_end_date", ""),
+        }
+        for phone in phones:
+            if not phone:
+                continue
+            await queue_sms(
+                template_key="crop_credit_added",
+                customer_id=customer_id,
+                customer_name=customer.get("name", ""),
+                phone=phone,
+                variables=variables,
+                organization_id=org_id,
+                branch_id=branch_id,
+                branch_name=await get_branch_name(branch_id),
+                trigger="auto",
+                trigger_ref=crop_credit.get("id", ""),
+                dedup_key=f"crop_credit_added:{crop_credit.get('id', '')}:{invoice_number}:{phone}",
+            )
+    except Exception as e:
+        logger.error(f"SMS hook on_crop_credit_added failed: {e}")

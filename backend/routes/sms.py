@@ -149,6 +149,92 @@ DEFAULT_TEMPLATES = [
         "trigger": "manual",
         "active": True,
     },
+    # ── Crop Credit Notifications ────────────────────────────────────────────
+    {
+        "key": "crop_season_started",
+        "name": "Crop Season Started",
+        "body": (
+            "Hi <customer_name>, nagsimula na ang inyong Charged-to-Crop account "
+            "sa <company_name>. "
+            "Planting date: <planting_date>. "
+            "Expected harvest / due date: <harvest_date>. "
+            "Kasalukuyang balance: P<total_balance>. "
+            "Salamat po!"
+        ),
+        "placeholders": ["customer_name", "company_name", "planting_date",
+                         "harvest_date", "total_balance"],
+        "trigger": "auto",
+        "active": True,
+    },
+    {
+        "key": "crop_credit_added",
+        "name": "Crop Credit — New Purchase Added",
+        "body": (
+            "Hi <customer_name>, may bagong na-charge na P<amount> "
+            "sa inyong Charged-to-Crop account sa <company_name>. "
+            "Invoice: <invoice_number>. "
+            "Running total balance: P<total_balance>. "
+            "Due: <harvest_date>. Salamat!"
+        ),
+        "placeholders": ["customer_name", "amount", "company_name",
+                         "invoice_number", "total_balance", "harvest_date"],
+        "trigger": "auto",
+        "active": True,
+    },
+    {
+        "key": "crop_harvest_15day",
+        "name": "Crop Harvest Reminder — 15 Days",
+        "body": (
+            "Magandang araw, <customer_name>! "
+            "Paalala: ang inyong Charged-to-Crop account sa <company_name> "
+            "ay magtatapos na sa <harvest_date> (15 araw na lang). "
+            "Kasalukuyang kabuuang balance: P<total_balance>. "
+            "Pakihandaan na ang pagbabayad. Salamat po!"
+        ),
+        "placeholders": ["customer_name", "company_name", "harvest_date", "total_balance"],
+        "trigger": "scheduled",
+        "active": True,
+    },
+    {
+        "key": "crop_harvest_7day",
+        "name": "Crop Harvest Reminder — 7 Days",
+        "body": (
+            "Urgent: <customer_name>, 7 araw na lang sa inyong harvest due date "
+            "(<harvest_date>) sa <company_name>. "
+            "Kabuuang balance: P<total_balance>. "
+            "Makipag-ugnayan sa amin para sa settlement. Salamat!"
+        ),
+        "placeholders": ["customer_name", "company_name", "harvest_date", "total_balance"],
+        "trigger": "scheduled",
+        "active": True,
+    },
+    {
+        "key": "crop_harvest_due",
+        "name": "Crop Harvest Due Today",
+        "body": (
+            "Pagpapaalala: <customer_name>, ngayon na ang inyong harvest due date. "
+            "Kabuuang babayaran sa <company_name>: P<total_balance>. "
+            "Makipag-ugnayan sa amin ngayon. Maraming salamat!"
+        ),
+        "placeholders": ["customer_name", "company_name", "total_balance"],
+        "trigger": "scheduled",
+        "active": True,
+    },
+    {
+        "key": "crop_extension",
+        "name": "Crop Season Extended",
+        "body": (
+            "Abiso: <customer_name>, ang inyong Charged-to-Crop account sa "
+            "<company_name> ay na-extend ng 15 araw. "
+            "Bagong due date: <new_harvest_date>. "
+            "Kasalukuyang balance: P<total_balance>. "
+            "Pakitiyak ang payment sa bagong due date. Salamat!"
+        ),
+        "placeholders": ["customer_name", "company_name", "new_harvest_date",
+                         "total_balance"],
+        "trigger": "auto",
+        "active": True,
+    },
 ]
 
 

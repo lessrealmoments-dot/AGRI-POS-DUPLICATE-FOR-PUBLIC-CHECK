@@ -59,132 +59,102 @@ async def _send_harvest_notification(crop_credit: dict, notification_type: str):
     """
     Queue SMS to customer + all configured staff recipients.
     notification_type: '15_day' | '7_day' | 'due_today' | 'extension'
+
+    Uses the SMS template system (crop_harvest_15day / crop_harvest_7day /
+    crop_harvest_due / crop_extension) so owners can customise messages.
+    Total balance is computed LIVE from invoices — consistent with /customers and /payments.
     """
     try:
+        from routes.sms import queue_sms
         org_id = crop_credit.get("organization_id", "")
         branch_id = crop_credit.get("branch_id", "")
-
-        # Get org-level recipient settings
-        recipients_doc = await _raw_db.system_settings.find_one(
-            {"key": "collection_notification_recipients", "organization_id": org_id},
-            {"_id": 0}
-        )
-        recipients = recipients_doc or {}
-
-        # Get company name
-        biz = await _raw_db.settings.find_one(
-            {"key": "company_info", "organization_id": org_id}, {"_id": 0}
-        )
-        company_name = (biz or {}).get("value", {}).get("name", "AgriBooks")
-
+        customer_id = crop_credit.get("customer_id", "")
         customer_name = crop_credit.get("customer_name", "Farmer")
         season_end = crop_credit.get("season_end_date", "")
-        principal = crop_credit.get("principal_balance", 0)
-        interest = crop_credit.get("accrued_interest", 0)
-        total_due = round(principal + interest, 2)
         extension_count = crop_credit.get("extension_count", 0)
 
-        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        days_left = (datetime.strptime(season_end, "%Y-%m-%d") - datetime.strptime(today_str, "%Y-%m-%d")).days if season_end else 0
+        # Live total balance — matches /customers and /payments
+        total_balance = await _compute_total_customer_balance(customer_id)
 
-        # Build messages per notification type
-        if notification_type == "15_day":
-            customer_msg = (
-                f"Magandang araw, {customer_name}! "
-                f"Paalala: ang inyong Charged-to-Crop account sa {company_name} ay magtatapos na sa "
-                f"{season_end} ({days_left} araw na lang). "
-                f"Kasalukuyang principal: P{principal:,.2f} | Naipon na interest: P{interest:,.2f}. "
-                f"Pakihandaan na ang pagbabayad. Salamat po!"
-            )
-            staff_msg = (
-                f"[Harvest Alert - 15 Days] {customer_name} crop season ends {season_end}. "
-                f"Principal: P{principal:,.2f} | Interest: P{interest:,.2f} | Total Due: P{total_due:,.2f}. "
-                f"Please prepare for collection."
-            )
-        elif notification_type == "7_day":
-            monthly_rate = crop_credit.get("monthly_interest_rate", 0)
-            customer_msg = (
-                f"Urgent: {customer_name}, 7 araw na lang sa inyong harvest date ({season_end}) "
-                f"sa {company_name}. "
-                f"Principal: P{principal:,.2f} + Naipon na interest: P{interest:,.2f} = "
-                f"Kabuuang bayad: P{total_due:,.2f}. "
-                f"Makipag-ugnayan sa amin para sa settlement. Salamat!"
-            )
-            staff_msg = (
-                f"[Harvest Alert - 7 Days] {customer_name} harvest due {season_end}. "
-                f"Principal: P{principal:,.2f} | Interest: P{interest:,.2f} | "
-                f"Total Due: P{total_due:,.2f} | Rate: {monthly_rate}%/mo."
-            )
-        elif notification_type == "due_today":
-            customer_msg = (
-                f"Pagpapaalala: {customer_name}, ngayon na ang inyong harvest/due date. "
-                f"Kabuuang babayaran sa {company_name}: P{total_due:,.2f} "
-                f"(Principal: P{principal:,.2f} + Interest: P{interest:,.2f}). "
-                f"Makipag-ugnayan sa amin ngayon. Maraming salamat!"
-            )
-            staff_msg = (
-                f"[DUE TODAY] {customer_name} crop credit harvest due today ({season_end}). "
-                f"Total Due: P{total_due:,.2f} (Principal: P{principal:,.2f} + Interest: P{interest:,.2f}). "
-                f"Initiate collection."
-            )
-        elif notification_type == "extension":
-            ext_num = extension_count
-            new_end = crop_credit.get("season_end_date", "")
-            last_ext = crop_credit.get("extensions", [])
-            reason = last_ext[-1].get("reason", "") if last_ext else ""
-            approver = last_ext[-1].get("approved_by_name", "") if last_ext else ""
-            customer_msg = (
-                f"Abiso: {customer_name}, ang inyong Charged-to-Crop account sa {company_name} "
-                f"ay na-extend ng {EXTENSION_DAYS} araw. "
-                f"Bagong due date: {new_end}. "
-                f"Kasalukuyang total: P{total_due:,.2f}. "
-                f"Pakitiyak ang payment sa bagong due date. Salamat!"
-            )
-            staff_msg = (
-                f"[Extension #{ext_num}] {customer_name} crop credit extended to {new_end}. "
-                f"Reason: {reason}. Approved by: {approver}. "
-                f"Running total: P{total_due:,.2f}. "
-                + ("[FLAGGED - Owner approval required for further extensions]" if ext_num >= 3 else "")
-            )
-        else:
+        # Get company name
+        from routes.sms_hooks import get_company_name, get_branch_name
+        company_name = await get_company_name(org_id)
+
+        # Map notification_type → template key
+        TEMPLATE_MAP = {
+            "15_day":    "crop_harvest_15day",
+            "7_day":     "crop_harvest_7day",
+            "due_today": "crop_harvest_due",
+            "extension": "crop_extension",
+        }
+        template_key = TEMPLATE_MAP.get(notification_type)
+        if not template_key:
             return
 
-        # Queue to customer
+        # Build variables for customer message
+        customer_vars = {
+            "customer_name": customer_name,
+            "company_name": company_name,
+            "harvest_date": season_end,
+            "total_balance": f"{total_balance:,.2f}",
+            "new_harvest_date": season_end,  # used by crop_extension template
+        }
+
+        # Staff alert message (plain text — not template-based)
+        last_ext = crop_credit.get("extensions", [])
+        reason = last_ext[-1].get("reason", "") if last_ext else ""
+        approver = last_ext[-1].get("approved_by_name", "") if last_ext else ""
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        staff_messages = {
+            "15_day":    f"[Harvest 15d] {customer_name} — due {season_end}. Balance: P{total_balance:,.2f}.",
+            "7_day":     f"[Harvest 7d] {customer_name} — due {season_end}. Balance: P{total_balance:,.2f}.",
+            "due_today": f"[DUE TODAY] {customer_name} — collect P{total_balance:,.2f}.",
+            "extension": (
+                f"[Extension #{extension_count}] {customer_name} extended to {season_end}. "
+                f"Reason: {reason}. Approved: {approver}. Balance: P{total_balance:,.2f}."
+                + (" [FLAGGED]" if extension_count >= 3 else "")
+            ),
+        }
+        staff_msg = staff_messages.get(notification_type, "")
+
+        # Get org-level staff recipient phones
+        recipients_doc = await _raw_db.system_settings.find_one(
+            {"key": "collection_notification_recipients", "organization_id": org_id}, {"_id": 0}
+        )
+        recipients = recipients_doc or {}
+        staff_phones = {
+            "owner":   recipients.get("owner_phone", ""),
+            "manager": recipients.get("manager_phone", ""),
+            "admin":   recipients.get("admin_phone", ""),
+            "auditor": recipients.get("auditor_phone", ""),
+        }
+
+        # Queue to customer (uses customisable template)
         customer_phone = crop_credit.get("customer_phone", "")
-        customer_id = crop_credit.get("customer_id", "")
         if not customer_phone and customer_id:
             cust = await _raw_db.customers.find_one({"id": customer_id}, {"_id": 0, "phone": 1, "phones": 1})
             if cust:
                 customer_phone = (cust.get("phones") or [cust.get("phone", "")])[0] if cust.get("phones") else cust.get("phone", "")
 
         if customer_phone:
-            await _raw_db.sms_queue.insert_one({
-                "id": new_id(),
-                "organization_id": org_id,
-                "template_key": f"crop_{notification_type}",
-                "customer_id": customer_id,
-                "customer_name": customer_name,
-                "phone": customer_phone,
-                "message": customer_msg,
-                "status": "pending",
-                "trigger": "scheduled" if notification_type != "extension" else "auto",
-                "trigger_ref": f"crop_credit:{crop_credit.get('id', '')}",
-                "dedup_key": f"crop:{notification_type}:{crop_credit.get('id', '')}:{today_str}" if notification_type != "extension" else "",
-                "branch_id": branch_id,
-                "branch_name": "",
-                "created_at": now_iso(),
-                "sent_at": None, "failed_at": None, "error": None, "retry_count": 0,
-            })
+            await queue_sms(
+                template_key=template_key,
+                customer_id=customer_id,
+                customer_name=customer_name,
+                phone=customer_phone,
+                variables=customer_vars,
+                organization_id=org_id,
+                branch_id=branch_id,
+                branch_name=await get_branch_name(branch_id),
+                trigger="scheduled" if notification_type != "extension" else "auto",
+                trigger_ref=f"crop_credit:{crop_credit.get('id', '')}",
+                dedup_key=f"crop:{notification_type}:{crop_credit.get('id', '')}:{today_str}" if notification_type != "extension" else "",
+            )
 
-        # Queue to staff recipients (owner, manager, admin, auditor)
-        staff_phones = {
-            "owner": recipients.get("owner_phone", ""),
-            "manager": recipients.get("manager_phone", ""),
-            "admin": recipients.get("admin_phone", ""),
-            "auditor": recipients.get("auditor_phone", ""),
-        }
+        # Queue to staff (plain custom message)
         for role, phone in staff_phones.items():
-            if phone and phone.strip():
+            if phone and phone.strip() and staff_msg:
                 await _raw_db.sms_queue.insert_one({
                     "id": new_id(),
                     "organization_id": org_id,
@@ -494,6 +464,16 @@ async def create_crop_credit(data: dict, user=Depends(get_current_user)):
 
     await db.crop_credits.insert_one(crop_credit)
     del crop_credit["_id"]
+
+    # SMS: notify customer that a new crop season has started
+    total_balance = await _compute_total_customer_balance(crop_credit["customer_id"])
+    try:
+        from routes.sms_hooks import on_crop_season_started
+        await on_crop_season_started(crop_credit, total_balance)
+    except Exception as sms_err:
+        import logging
+        logging.getLogger(__name__).error(f"Crop season started SMS failed: {sms_err}")
+
     return crop_credit
 
 
@@ -724,6 +704,19 @@ async def add_credit_to_season(credit_id: str, data: dict, user=Depends(get_curr
     updated = await db.crop_credits.find_one({"id": credit_id}, {"_id": 0})
     total_balance = await _compute_total_customer_balance(updated.get("customer_id", ""))
     _enrich_credit(updated, total_balance)
+
+    # SMS: notify customer that a new purchase was added to their crop season
+    try:
+        from routes.sms_hooks import on_crop_credit_added
+        await on_crop_credit_added(
+            updated, amount,
+            data.get("invoice_number", ""),
+            total_balance,
+        )
+    except Exception as sms_err:
+        import logging
+        logging.getLogger(__name__).error(f"Crop credit added SMS failed: {sms_err}")
+
     return updated
 
 

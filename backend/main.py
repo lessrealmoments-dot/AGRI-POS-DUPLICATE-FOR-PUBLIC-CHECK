@@ -697,7 +697,9 @@ async def startup():
 
     # ── SMS Reminder Scheduler (daily at 8:00 AM) ────────────────────────────
     async def _daily_sms_reminders():
-        """Scan invoices per org for 15-day, 7-day, and overdue windows. Queue SMS reminders."""
+        """Scan invoices per org for 15-day, 7-day, and overdue windows. Queue SMS reminders.
+        Customers with an ACTIVE crop credit season are skipped here — they receive
+        harvest-date reminders from run_harvest_reminders instead."""
         from routes.sms import queue_sms
         from routes.sms_hooks import get_company_name, get_branch_name
         from config import set_org_context
@@ -716,6 +718,14 @@ async def startup():
                 set_org_context(org_id)
                 company_name = await get_company_name(org_id)
 
+                # Build set of customer IDs who have an active crop credit season
+                # — they get harvest reminders instead of per-invoice term reminders
+                crop_customers = await _raw_db.crop_credits.find(
+                    {"organization_id": org_id, "status": {"$in": ["active", "extended"]}},
+                    {"_id": 0, "customer_id": 1}
+                ).to_list(5000)
+                crop_customer_ids = {cc["customer_id"] for cc in crop_customers if cc.get("customer_id")}
+
                 invoices = await _raw_db.invoices.find(
                     {"organization_id": org_id,
                      "status": {"$nin": ["voided", "paid"]}, "balance": {"$gt": 0},
@@ -728,6 +738,11 @@ async def startup():
                     cust_id = inv.get("customer_id")
                     if not cust_id:
                         continue
+
+                    # Skip — crop credit customers receive harvest reminders instead
+                    if cust_id in crop_customer_ids:
+                        continue
+
                     customer = await _raw_db.customers.find_one({"id": cust_id, "organization_id": org_id}, {"_id": 0})
                     if not customer:
                         continue
@@ -892,21 +907,15 @@ async def startup():
         replace_existing=True,
     )
 
-    # ── Crop Credit — Harvest Reminders (daily) ───────────────────────────────
-    from routes.crop_credits import run_harvest_reminders, run_monthly_interest_accrual
+    # ── Crop Credit — Harvest Reminders (daily at 7 AM) ─────────────────────
+    # Interest accrual via scheduler removed — interest is now managed exclusively
+    # through /payments Generate Interest (creates INT-XXXXX invoices).
+    from routes.crop_credits import run_harvest_reminders
 
     _scheduler.add_job(
         run_harvest_reminders,
         CronTrigger(hour=7, minute=0),
         id="crop_harvest_reminders",
-        replace_existing=True,
-    )
-
-    # ── Crop Credit — Monthly Interest Accrual (1st of month) ────────────────
-    _scheduler.add_job(
-        run_monthly_interest_accrual,
-        CronTrigger(day=1, hour=6, minute=0),
-        id="crop_interest_accrual",
         replace_existing=True,
     )
 
