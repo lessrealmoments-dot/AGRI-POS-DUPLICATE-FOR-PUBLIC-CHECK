@@ -234,9 +234,15 @@ async def _compute_crop_principal(credit: dict, raw_db=None) -> float:
 
 async def _compute_total_customer_balance(customer_id: str, db_to_use=None) -> float:
     """
-    Compute total outstanding balance for a customer across ALL non-paid/non-voided invoices.
-    This matches exactly how /customers and /payments compute the customer balance,
-    ensuring the crop-credits monitoring page always shows a consistent figure.
+    Compute total outstanding balance for a customer across ALL non-paid/non-voided invoices,
+    EXCLUDING interest_charge and penalty_charge invoices.
+
+    Why exclude interest/penalty invoices:
+      - Crop credit interest is tracked via `accrued_interest` on the crop credit document.
+      - If interest_charge invoices (created via /payments Generate Interest) were included here,
+        the same interest would be counted twice: once in principal_balance and again in accrued_interest.
+      - Penalty invoices follow the same logic.
+      - Result matches exactly what /customers and /payments show for the underlying principal balance.
     """
     if not db_to_use:
         db_to_use = _raw_db
@@ -246,7 +252,8 @@ async def _compute_total_customer_balance(customer_id: str, db_to_use=None) -> f
         {"$match": {
             "customer_id": customer_id,
             "status": {"$nin": ["voided", "paid"]},
-            "balance": {"$gt": 0}
+            "balance": {"$gt": 0},
+            "sale_type": {"$nin": ["interest_charge", "penalty_charge"]},
         }},
         {"$group": {"_id": None, "total_balance": {"$sum": "$balance"}}}
     ]
