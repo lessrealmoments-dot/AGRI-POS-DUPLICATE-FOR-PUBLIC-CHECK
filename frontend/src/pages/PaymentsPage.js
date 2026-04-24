@@ -70,6 +70,11 @@ export default function PaymentsPage() {
   const [saveRateToCustomer, setSaveRateToCustomer] = useState(false);
   const interestPreviewTimer = useRef(null);
 
+  // No-rate prompt
+  const [ratePromptOpen, setRatePromptOpen] = useState(false);
+  const [ratePromptInput, setRatePromptInput] = useState('');
+  const [ratePromptSaving, setRatePromptSaving] = useState(false);
+
   // Dialogs
   const [historyOpen, setHistoryOpen] = useState(false);
   const [payHistory, setPayHistory] = useState([]);
@@ -97,7 +102,8 @@ export default function PaymentsPage() {
       setRowAmounts({});
       setRowDiscounts({});
       setDiscountModes({});
-    } catch { setInvoices([]); }
+      return res.data || [];
+    } catch { setInvoices([]); return []; }
   }, []);
 
   const loadChargesPreview = useCallback(async (custId, rateOverride) => {
@@ -118,9 +124,46 @@ export default function PaymentsPage() {
     setPayMemo('');
     setInterestRateInput(c.interest_rate > 0 ? String(c.interest_rate) : '');
     setSaveRateToCustomer(false);
-    loadInvoices(c.id);
+    setRatePromptOpen(false);
+    setRatePromptInput('');
+    // Auto-generate interest on overdue invoices, then load
+    autoGenerateAndLoad(c);
     loadChargesPreview(c.id);
   };
+
+  // Auto-generate interest for overdue invoices then reload the invoice list.
+  // If customer has no interest rate but has overdue invoices, show the rate prompt instead.
+  const autoGenerateAndLoad = useCallback(async (customer) => {
+    const rate = parseFloat(customer.interest_rate) || 0;
+    if (rate > 0) {
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const res = await api.post(`/customers/${customer.id}/generate-interest`, {
+          as_of_date: today,
+          rate_override: rate,
+        });
+        if (res.data.total_interest > 0) {
+          toast.success(
+            `Interest auto-computed: ${res.data.invoice_number} — ${formatPHP(res.data.total_interest)}`,
+            { description: 'Applied to overdue invoices. Payment will cover this first.' }
+          );
+        }
+      } catch {
+        // Silently skip — no overdue or already generated
+      }
+    }
+    const invRes = await loadInvoices(customer.id);
+    // If no rate set, check if any loaded invoices are overdue → show prompt
+    if (rate <= 0) {
+      const today = new Date().toISOString().split('T')[0];
+      const loaded = invRes || [];
+      const hasOverdue = loaded.some(inv =>
+        inv.due_date && inv.due_date < today &&
+        inv.sale_type !== 'interest_charge' && inv.sale_type !== 'penalty_charge'
+      );
+      if (hasOverdue) setRatePromptOpen(true);
+    }
+  }, [loadInvoices]);
 
   const clearCustomer = () => {
     setSelectedCustomer(null);
@@ -182,6 +225,38 @@ export default function PaymentsPage() {
       if (apply > 0) { newAmounts[inv.id] = apply.toFixed(2); remaining = round2(remaining - apply); }
     }
     setRowAmounts(newAmounts);
+  };
+
+  // ── Set rate from prompt + auto-generate ──
+  const handleSetRateFromPrompt = async () => {
+    const rate = parseFloat(ratePromptInput) || 0;
+    if (rate <= 0) { toast.error('Enter a valid interest rate'); return; }
+    setRatePromptSaving(true);
+    try {
+      // Save rate to customer profile
+      await api.put(`/customers/${selectedCustomer.id}`, { interest_rate: rate });
+      setSelectedCustomer(prev => ({ ...prev, interest_rate: rate }));
+      setInterestRateInput(String(rate));
+      // Generate interest with the new rate
+      const today = new Date().toISOString().split('T')[0];
+      const res = await api.post(`/customers/${selectedCustomer.id}/generate-interest`, {
+        as_of_date: today, rate_override: rate,
+      });
+      if (res.data.total_interest > 0) {
+        toast.success(`Rate set to ${rate}%/mo — Interest ${res.data.invoice_number} created: ${formatPHP(res.data.total_interest)}`,
+          { description: 'Payment will cover interest first, then oldest invoices.' });
+      } else {
+        toast.success(`Rate ${rate}%/mo saved. No overdue interest to generate yet.`);
+      }
+      setRatePromptOpen(false);
+      setRatePromptInput('');
+      await loadInvoices(selectedCustomer.id);
+      await loadChargesPreview(selectedCustomer.id, rate);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to set rate');
+    } finally {
+      setRatePromptSaving(false);
+    }
   };
 
   // ── Generate Interest ──
@@ -489,6 +564,43 @@ export default function PaymentsPage() {
           </div>
         ) : (
           <div className="flex-1 flex flex-col gap-3 mt-3 overflow-hidden min-h-0 px-4">
+
+            {/* ── No interest rate prompt ── */}
+            {ratePromptOpen && (
+              <div className="shrink-0 flex items-start gap-3 p-3 bg-amber-50 border border-amber-300 rounded-xl" data-testid="no-rate-prompt">
+                <AlertTriangle size={16} className="text-amber-500 mt-0.5 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-amber-800">No interest rate on file for {selectedCustomer?.name}</p>
+                  <p className="text-[11px] text-amber-700 mt-0.5">This account has overdue invoices. Set a monthly rate to auto-compute charges now.</p>
+                  <div className="flex items-center gap-2 mt-2 flex-wrap">
+                    <div className="flex items-center gap-1 bg-white border border-amber-300 rounded-md px-2 py-1">
+                      <input
+                        type="number" min="0" step="0.5"
+                        value={ratePromptInput}
+                        onChange={e => setRatePromptInput(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && handleSetRateFromPrompt()}
+                        placeholder="e.g. 3"
+                        className="w-14 text-sm text-center border-0 outline-none font-bold text-amber-700 bg-transparent"
+                        data-testid="rate-prompt-input"
+                        autoFocus
+                      />
+                      <span className="text-xs text-amber-600 font-medium">%/mo</span>
+                    </div>
+                    <Button size="sm" onClick={handleSetRateFromPrompt}
+                      disabled={ratePromptSaving || !(parseFloat(ratePromptInput) > 0)}
+                      className="bg-amber-500 hover:bg-amber-600 text-white h-7 text-xs gap-1"
+                      data-testid="rate-prompt-apply-btn">
+                      <Zap size={11} /> {ratePromptSaving ? 'Saving...' : 'Set & Apply'}
+                    </Button>
+                    <button onClick={() => setRatePromptOpen(false)}
+                      className="text-amber-500 hover:text-amber-700 ml-auto"
+                      data-testid="rate-prompt-dismiss">
+                      <X size={14} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* ── Interest/Penalty Charges Generation ── */}
             <Card className="border-slate-200 shrink-0">
