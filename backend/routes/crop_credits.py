@@ -86,10 +86,16 @@ async def _send_harvest_notification(crop_credit: dict, notification_type: str):
             "7_day":     "crop_harvest_7day",
             "due_today": "crop_harvest_due",
             "extension": "crop_extension",
+            "overdue":   "crop_overdue_notice",
         }
         template_key = TEMPLATE_MAP.get(notification_type)
         if not template_key:
             return
+
+        # Days overdue (for post-harvest overdue cycle)
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today_dt = datetime.strptime(today_str, "%Y-%m-%d")
+        days_overdue = (today_dt - datetime.strptime(season_end, "%Y-%m-%d")).days if season_end else 0
 
         # Build variables for customer message
         customer_vars = {
@@ -97,26 +103,47 @@ async def _send_harvest_notification(crop_credit: dict, notification_type: str):
             "company_name": company_name,
             "harvest_date": season_end,
             "total_balance": f"{total_balance:,.2f}",
-            "new_harvest_date": season_end,  # used by crop_extension template
+            "new_harvest_date": season_end,   # crop_extension template
+            "days_overdue": str(max(0, days_overdue)),  # crop_overdue_notice template
         }
 
-        # Staff alert message (plain text — not template-based)
+        # Staff alert message (plain text — concise for CC)
         last_ext = crop_credit.get("extensions", [])
         reason = last_ext[-1].get("reason", "") if last_ext else ""
         approver = last_ext[-1].get("approved_by_name", "") if last_ext else ""
-        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
         staff_messages = {
-            "15_day":    f"[Harvest 15d] {customer_name} — due {season_end}. Balance: P{total_balance:,.2f}.",
-            "7_day":     f"[Harvest 7d] {customer_name} — due {season_end}. Balance: P{total_balance:,.2f}.",
-            "due_today": f"[DUE TODAY] {customer_name} — collect P{total_balance:,.2f}.",
+            "15_day":    f"[Crop 15d] {customer_name} — due {season_end}. Balance: P{total_balance:,.2f}.",
+            "7_day":     f"[Crop 7d] {customer_name} — due {season_end}. Balance: P{total_balance:,.2f}.",
+            "due_today": f"[Crop DUE TODAY] {customer_name} — collect P{total_balance:,.2f} today.",
             "extension": (
-                f"[Extension #{extension_count}] {customer_name} extended to {season_end}. "
-                f"Reason: {reason}. Approved: {approver}. Balance: P{total_balance:,.2f}."
+                f"[Crop Ext #{extension_count}] {customer_name} extended to {season_end}. "
+                f"Reason: {reason}. Approver: {approver}. Balance: P{total_balance:,.2f}."
                 + (" [FLAGGED]" if extension_count >= 3 else "")
+            ),
+            "overdue":   (
+                f"[Crop OVERDUE {days_overdue}d] {customer_name} — "
+                f"P{total_balance:,.2f} unpaid since {season_end}. Needs collection."
             ),
         }
         staff_msg = staff_messages.get(notification_type, "")
+
+        # CC rules — who receives staff alerts per notification type:
+        #   15_day  → ALL (owner/admin/manager/auditor) — prepare for collection
+        #   7_day   → ALL — imminent
+        #   due_today → ALL — collection day
+        #   extension → ALL — significant change
+        #   overdue → ALL on 1st occurrence (day 7), then owner+manager every 30 days
+        CC_ALL = {"owner", "admin", "manager", "auditor"}
+        if notification_type == "overdue":
+            if days_overdue <= 7:
+                cc_roles = CC_ALL   # first hit — alert everyone
+            elif days_overdue % 30 == 0:
+                cc_roles = {"owner", "manager"}   # monthly escalation
+            else:
+                cc_roles = set()    # customer-only weekly ping
+        else:
+            cc_roles = CC_ALL
 
         # Get org-level staff recipient phones
         recipients_doc = await _raw_db.system_settings.find_one(
@@ -152,9 +179,9 @@ async def _send_harvest_notification(crop_credit: dict, notification_type: str):
                 dedup_key=f"crop:{notification_type}:{crop_credit.get('id', '')}:{today_str}" if notification_type != "extension" else "",
             )
 
-        # Queue to staff (plain custom message)
+        # Queue to staff based on CC rules
         for role, phone in staff_phones.items():
-            if phone and phone.strip() and staff_msg:
+            if phone and phone.strip() and staff_msg and role in cc_roles:
                 await _raw_db.sms_queue.insert_one({
                     "id": new_id(),
                     "organization_id": org_id,
@@ -271,7 +298,7 @@ async def run_harvest_reminders():
             end_dt = datetime.strptime(season_end, "%Y-%m-%d")
             days_left = (end_dt - today_dt).days
 
-            # Determine which notification to send (avoid duplicates via dedup_key)
+            # ── Pre-harvest countdown notifications ──────────────────────────
             notif_type = None
             if days_left == 15:
                 notif_type = "15_day"
@@ -281,7 +308,6 @@ async def run_harvest_reminders():
                 notif_type = "due_today"
 
             if notif_type:
-                # Check if already sent today
                 already_sent = any(
                     n.get("type") == notif_type and n.get("sent_at", "")[:10] == today
                     for n in cc.get("notifications_sent", [])
@@ -290,14 +316,39 @@ async def run_harvest_reminders():
                     await _send_harvest_notification(cc, notif_type)
                     sent_count += 1
 
-            # Update status to overdue if season has ended and balance > 0
-            if days_left < 0 and cc.get("status") != "overdue":
-                total_remaining = cc.get("principal_balance", 0) + cc.get("accrued_interest", 0)
-                if total_remaining > 0:
-                    await _raw_db.crop_credits.update_one(
-                        {"id": cc["id"]},
-                        {"$set": {"status": "overdue", "updated_at": now_iso()}}
+            # ── Post-harvest: mark overdue + 7-day repeat cycle ─────────────
+            if days_left < 0:
+                days_overdue = abs(days_left)
+
+                # Mark as overdue on first day past harvest (if balance > 0)
+                if cc.get("status") != "overdue":
+                    total_balance = await _compute_total_customer_balance(cc.get("customer_id", ""))
+                    if total_balance > 0:
+                        await _raw_db.crop_credits.update_one(
+                            {"id": cc["id"]},
+                            {"$set": {"status": "overdue", "updated_at": now_iso()}}
+                        )
+                        cc["status"] = "overdue"
+
+                # Send overdue reminder every 7 days after harvest date
+                # Stops when: balance reaches 0 (settled) or an extension is granted
+                if cc.get("status") == "overdue" and days_overdue % 7 == 0:
+                    already_sent_today = any(
+                        n.get("type") == "overdue" and n.get("sent_at", "")[:10] == today
+                        for n in cc.get("notifications_sent", [])
                     )
+                    if not already_sent_today:
+                        # Only send if balance > 0
+                        total_balance = await _compute_total_customer_balance(cc.get("customer_id", ""))
+                        if total_balance > 0:
+                            await _send_harvest_notification(cc, "overdue")
+                            sent_count += 1
+                        else:
+                            # Balance cleared — auto-settle
+                            await _raw_db.crop_credits.update_one(
+                                {"id": cc["id"]},
+                                {"$set": {"status": "settled", "settled_at": now_iso(), "updated_at": now_iso()}}
+                            )
 
         logger.info(f"Harvest reminders: {sent_count} notifications sent")
     except Exception as e:

@@ -726,6 +726,12 @@ async def startup():
                 ).to_list(5000)
                 crop_customer_ids = {cc["customer_id"] for cc in crop_customers if cc.get("customer_id")}
 
+                # Load collection staff phones once per org (used for CC on 7-day + overdue)
+                recipients_doc_all = await _raw_db.system_settings.find_one(
+                    {"key": "collection_notification_recipients", "organization_id": org_id}, {"_id": 0}
+                )
+                recipients_all = recipients_doc_all or {}
+
                 invoices = await _raw_db.invoices.find(
                     {"organization_id": org_id,
                      "status": {"$nin": ["voided", "paid"]}, "balance": {"$gt": 0},
@@ -759,6 +765,7 @@ async def startup():
                     est_interest = round(balance * (interest_rate / 100), 2) if interest_rate > 0 else 0
 
                     if due_date == day_15:
+                        # 15-day reminder — customer only (too early for staff action)
                         await queue_sms(
                             template_key="reminder_15day",
                             customer_id=cust_id,
@@ -781,20 +788,22 @@ async def startup():
                         queued += 1
 
                     elif due_date == day_7:
+                        # 7-day reminder — customer + manager CC
+                        sms_vars_7d = {
+                            "customer_name": customer.get("name", ""),
+                            "amount_due_soon": f"{balance:,.2f}",
+                            "company_name": company_name,
+                            "due_date": due_date,
+                            "est_interest": f"{est_interest:,.2f}",
+                            "interest_rate": str(interest_rate),
+                            "total_balance": f"{total_bal:,.2f}",
+                        }
                         await queue_sms(
                             template_key="reminder_7day",
                             customer_id=cust_id,
                             customer_name=customer.get("name", ""),
                             phone=phone,
-                            variables={
-                                "customer_name": customer.get("name", ""),
-                                "amount_due_soon": f"{balance:,.2f}",
-                                "company_name": company_name,
-                                "due_date": due_date,
-                                "est_interest": f"{est_interest:,.2f}",
-                                "interest_rate": str(interest_rate),
-                                "total_balance": f"{total_bal:,.2f}",
-                            },
+                            variables=sms_vars_7d,
                             organization_id=org_id,
                             branch_id=branch_id,
                             branch_name=branch_name,
@@ -802,11 +811,33 @@ async def startup():
                             trigger_ref=inv.get("id", ""),
                             dedup_key=f"reminder_7day:{inv.get('id', '')}:{today}",
                         )
+                        # CC to manager
+                        manager_phone = recipients_all.get("manager_phone", "")
+                        if manager_phone:
+                            staff_msg_7d = (
+                                f"[7-Day Due] {customer.get('name','')} — "
+                                f"P{balance:,.2f} due {due_date}. "
+                                f"Total balance: P{total_bal:,.2f}. "
+                                f"Prepare for collection."
+                            )
+                            await _raw_db.sms_queue.insert_one({
+                                "id": new_id(), "organization_id": org_id,
+                                "template_key": "reminder_7day_staff",
+                                "customer_id": cust_id, "customer_name": customer.get("name", ""),
+                                "phone": manager_phone, "message": staff_msg_7d,
+                                "status": "pending", "trigger": "scheduled",
+                                "trigger_ref": inv.get("id", ""),
+                                "dedup_key": f"reminder_7day_mgr:{inv.get('id', '')}:{today}",
+                                "branch_id": branch_id, "branch_name": branch_name,
+                                "created_at": now_iso(),
+                                "sent_at": None, "failed_at": None, "error": None, "retry_count": 0,
+                            })
                         queued += 1
 
                     elif due_date < today:
                         days_overdue = (today_dt - datetime.strptime(due_date, "%Y-%m-%d")).days
                         if days_overdue > 0 and days_overdue % 7 == 0:
+                            # Every 7 days for customer
                             await queue_sms(
                                 template_key="overdue_notice",
                                 customer_id=cust_id,
@@ -827,6 +858,31 @@ async def startup():
                                 trigger_ref=inv.get("id", ""),
                                 dedup_key=f"overdue:{inv.get('id', '')}:{today}",
                             )
+                            # Staff CC: first occurrence (day 7) + every 30 days
+                            is_first = days_overdue == 7
+                            is_monthly_escalation = days_overdue % 30 == 0
+                            if is_first or is_monthly_escalation:
+                                staff_overdue_msg = (
+                                    f"[{'1st ' if is_first else ''}Overdue {days_overdue}d] "
+                                    f"{customer.get('name','')} — "
+                                    f"P{balance:,.2f} overdue since {due_date}. "
+                                    f"Total balance: P{total_bal:,.2f}."
+                                )
+                                for role_key, role_phone_key in [("owner", "owner_phone"), ("manager", "manager_phone")]:
+                                    rphone = recipients_all.get(role_phone_key, "")
+                                    if rphone:
+                                        await _raw_db.sms_queue.insert_one({
+                                            "id": new_id(), "organization_id": org_id,
+                                            "template_key": "overdue_notice_staff",
+                                            "customer_id": cust_id, "customer_name": customer.get("name", ""),
+                                            "phone": rphone, "message": staff_overdue_msg,
+                                            "status": "pending", "trigger": "scheduled",
+                                            "trigger_ref": inv.get("id", ""),
+                                            "dedup_key": f"overdue_staff:{role_key}:{inv.get('id', '')}:{today}",
+                                            "branch_id": branch_id, "branch_name": branch_name,
+                                            "created_at": now_iso(),
+                                            "sent_at": None, "failed_at": None, "error": None, "retry_count": 0,
+                                        })
                             queued += 1
 
                 total_queued += queued

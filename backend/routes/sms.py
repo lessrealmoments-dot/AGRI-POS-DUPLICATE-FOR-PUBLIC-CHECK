@@ -235,6 +235,22 @@ DEFAULT_TEMPLATES = [
         "trigger": "auto",
         "active": True,
     },
+    {
+        "key": "crop_overdue_notice",
+        "name": "Crop Season Overdue Reminder (Post-Harvest)",
+        "body": (
+            "Paalala: <customer_name>, ang inyong Charged-to-Crop account sa "
+            "<company_name> ay <days_overdue> araw nang overdue mula sa "
+            "harvest date na <harvest_date>. "
+            "Kabuuang dapat bayaran: P<total_balance>. "
+            "Makipag-ugnayan sa amin agad para maiwasan ang dagdag charges. "
+            "Salamat po!"
+        ),
+        "placeholders": ["customer_name", "company_name", "days_overdue",
+                         "harvest_date", "total_balance"],
+        "trigger": "scheduled",
+        "active": True,
+    },
 ]
 
 

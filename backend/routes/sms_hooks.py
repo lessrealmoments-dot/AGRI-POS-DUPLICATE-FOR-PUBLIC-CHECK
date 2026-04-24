@@ -5,6 +5,7 @@ Uses _raw_db (unscoped) for lookups to bypass tenant ContextVar mutations.
 organization_id is resolved explicitly and passed to queue_sms for proper isolation.
 """
 from config import _raw_db as raw_db, logger
+from utils import now_iso, new_id
 
 
 async def _resolve_org_id(branch_id: str) -> str:
@@ -202,6 +203,31 @@ async def on_crop_season_started(crop_credit: dict, total_balance: float):
                 trigger_ref=crop_credit.get("id", ""),
                 dedup_key=f"crop_season_started:{crop_credit.get('id', '')}:{phone}",
             )
+
+        # CC: notify owner — new season is a significant financial commitment
+        recipients_doc = await raw_db.system_settings.find_one(
+            {"key": "collection_notification_recipients", "organization_id": org_id}, {"_id": 0}
+        )
+        owner_phone = (recipients_doc or {}).get("owner_phone", "")
+        if owner_phone:
+            owner_msg = (
+                f"[New Crop Season] {customer.get('name','')} — "
+                f"planting {crop_credit.get('planting_date','')} | "
+                f"due {crop_credit.get('season_end_date','')}. "
+                f"Balance: P{total_balance:,.2f}."
+            )
+            await raw_db.sms_queue.insert_one({
+                "id": new_id(), "organization_id": org_id,
+                "template_key": "crop_season_started_owner",
+                "customer_id": customer_id, "customer_name": customer.get("name", ""),
+                "phone": owner_phone, "message": owner_msg,
+                "status": "pending", "trigger": "auto",
+                "trigger_ref": crop_credit.get("id", ""),
+                "dedup_key": f"crop_season_started_owner:{crop_credit.get('id', '')}",
+                "branch_id": branch_id, "branch_name": await get_branch_name(branch_id),
+                "created_at": now_iso(),
+                "sent_at": None, "failed_at": None, "error": None, "retry_count": 0,
+            })
     except Exception as e:
         logger.error(f"SMS hook on_crop_season_started failed: {e}")
 
