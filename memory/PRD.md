@@ -22,7 +22,28 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
-### SMS Inbox + Conversations (2026-04-02) — Complete
+### Charged-to-Crop Credit System (2026-04-24) — Complete
+- New `crop_credits` collection with full seasonal credit lifecycle tracking
+- Backend routes: `POST /api/crop-credits`, `GET /api/crop-credits`, `GET /api/crop-credits/customer/{id}`, `GET /api/crop-credits/check-block/{id}`, `POST /api/crop-credits/{id}/add-credit`, `POST /api/crop-credits/{id}/payment`, `POST /api/crop-credits/{id}/extend`, `POST /api/crop-credits/{id}/accrue-interest`
+- 127-day crop cycle (120 days + 7 grace), simple interest on principal only, interest-first payment allocation
+- Extension governance: Manager PIN (ext 1-2), Owner TOTP via Google Auth (ext 3+, flagged)
+- Harvest reminder SMS to customer + owner/manager/admin/auditor at 15d, 7d, due date
+- APScheduler: daily harvest reminders (7AM) + monthly interest accrual (1st of month, 6AM)
+- Collection notification recipients settings: `GET/PUT /api/settings/collection-recipients`
+- New `CropCreditsPage` at `/crop-credits` with list/detail/create/payment/extension UI
+- Digital signature system: `POST /api/signatures/session`, `GET/POST /api/signatures/view|submit/{token}`, `POST /api/signatures/bypass/{id}`
+- Public signing page at `/sign/:token` — any phone can scan QR and submit signature
+- QR code (5-min expiry, auto-poll 2s), Manager PIN bypass, R2 storage (non-deletable)
+- `signature_sessions` and `crop_credits` added to TENANT_COLLECTIONS
+- SMS Messages > Settings tab: new "Collection Notification Recipients" section
+- `qrcode.react@4.2.0` and `signature_pad@5.1.3` installed
+
+### Forgot Password Flow (2026-04-24) — Complete (User Verification Pending)
+- `POST /api/auth/forgot-password` + `POST /api/auth/reset-password` via Resend
+- ForgotPasswordPage + ResetPasswordPage frontend UI
+- REACT_APP_FRONTEND_URL env var for reset link routing
+
+
 - Added `sms_inbox` to TENANT_COLLECTIONS — per-company inbox isolation
 - `POST /api/sms/inbox` — gateway app posts incoming customer replies
 - `GET /api/sms/conversations` — merged sent+received list grouped by phone, sorted by latest
