@@ -55,6 +55,8 @@ TENANT_COLLECTIONS = {
     'sms_settings',                  # Per-trigger enable/disable settings per company
     'sms_inbox',                     # Incoming SMS replies from customers per company
     'product_categories',            # Org-defined product category list
+    'crop_credits',                  # Charged-to-crop credit accounts
+    'signature_sessions',            # Digital signature capture sessions
 }
 
 

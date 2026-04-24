@@ -223,3 +223,44 @@ async def update_sales_config(data: dict, user=Depends(get_current_user)):
         upsert=True
     )
     return {"message": "Sales config updated", **config}
+
+
+# ── Collection Notification Recipients ───────────────────────────────────────
+
+@router.get("/collection-recipients")
+async def get_collection_recipients(user=Depends(get_current_user)):
+    """Get phone numbers for crop credit collection notifications (owner, manager, admin, auditor)."""
+    doc = await db.system_settings.find_one(
+        {"key": "collection_notification_recipients"}, {"_id": 0}
+    )
+    if not doc:
+        return {"owner_phone": "", "manager_phone": "", "admin_phone": "", "auditor_phone": ""}
+    return {
+        "owner_phone": doc.get("owner_phone", ""),
+        "manager_phone": doc.get("manager_phone", ""),
+        "admin_phone": doc.get("admin_phone", ""),
+        "auditor_phone": doc.get("auditor_phone", ""),
+    }
+
+
+@router.put("/collection-recipients")
+async def update_collection_recipients(data: dict, user=Depends(get_current_user)):
+    """Update collection notification phone numbers. Admin only."""
+    check_perm(user, "settings", "edit")
+    recipients = {
+        "owner_phone": data.get("owner_phone", "").strip(),
+        "manager_phone": data.get("manager_phone", "").strip(),
+        "admin_phone": data.get("admin_phone", "").strip(),
+        "auditor_phone": data.get("auditor_phone", "").strip(),
+    }
+    await db.system_settings.update_one(
+        {"key": "collection_notification_recipients"},
+        {"$set": {
+            "key": "collection_notification_recipients",
+            **recipients,
+            "updated_at": now_iso(),
+            "updated_by": user["id"],
+        }},
+        upsert=True
+    )
+    return {"message": "Collection recipients updated", **recipients}

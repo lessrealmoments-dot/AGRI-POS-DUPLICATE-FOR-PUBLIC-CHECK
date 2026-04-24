@@ -65,6 +65,8 @@ import ResetPasswordPage from './pages/ResetPasswordPage';
 import BudgetChecker from './components/BudgetChecker';
 import TerminalPage from './pages/terminal/TerminalPage';
 import DocViewerPage from './pages/DocViewerPage';
+import CropCreditsPage from './pages/CropCreditsPage';
+import SignaturePage from './pages/SignaturePage';
 
 // Legacy pages (keep files but not in primary nav)
 // POSPage → replaced by UnifiedSalesPage (/sales-new)
@@ -210,10 +212,13 @@ function AppRoutes() {
       <Route path="/barcode-print" element={<ProtectedRoute><BarcodePrintPage /></ProtectedRoute>} />
       <Route path="/barcode-manage" element={<ProtectedRoute><BarcodeManagePage /></ProtectedRoute>} />
       <Route path="/find-transaction" element={<ProtectedRoute><TransactionSearchPage /></ProtectedRoute>} />
+      <Route path="/crop-credits" element={<ProtectedRoute><CropCreditsPage /></ProtectedRoute>} />
       <Route path="/scanner/:sessionId" element={<MobileScannerPage />} />
       {/* Public upload page — no auth, token-based */}
       <Route path="/upload/:token" element={<UploadPage />} />
       <Route path="/doc-upload/:token" element={<DocUploadPage />} />
+      {/* Public signature page — no auth, token-based */}
+      <Route path="/sign/:token" element={<SignaturePage />} />
       {/* Public view-receipts page — no auth, token-based */}
       <Route path="/view-receipts/:token" element={<ViewReceiptsPage />} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

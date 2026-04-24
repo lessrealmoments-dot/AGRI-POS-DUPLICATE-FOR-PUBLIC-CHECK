@@ -52,6 +52,8 @@ from routes.documents import router as documents_router
 from routes.sms import router as sms_router
 from routes.invoice_corrections import router as invoice_corrections_router
 from routes.app_downloads import router as app_downloads_router
+from routes.crop_credits import router as crop_credits_router
+from routes.signatures import router as signatures_router
 
 # =============================================================================
 # APP SETUP
@@ -201,6 +203,12 @@ api_router.include_router(documents_router)
 # SMS Engine
 api_router.include_router(sms_router)
 api_router.include_router(app_downloads_router)
+
+# Crop Credits (Charged-to-Crop)
+api_router.include_router(crop_credits_router)
+
+# Digital Signatures
+api_router.include_router(signatures_router)
 
 # =============================================================================
 # WEBSOCKET ROUTES (must be on app directly with /api prefix)
@@ -879,6 +887,24 @@ async def startup():
         _monthly_sms_summary,
         CronTrigger(day=1, hour=9, minute=0),
         id="monthly_sms_summary",
+        replace_existing=True,
+    )
+
+    # ── Crop Credit — Harvest Reminders (daily) ───────────────────────────────
+    from routes.crop_credits import run_harvest_reminders, run_monthly_interest_accrual
+
+    _scheduler.add_job(
+        run_harvest_reminders,
+        CronTrigger(hour=7, minute=0),
+        id="crop_harvest_reminders",
+        replace_existing=True,
+    )
+
+    # ── Crop Credit — Monthly Interest Accrual (1st of month) ────────────────
+    _scheduler.add_job(
+        run_monthly_interest_accrual,
+        CronTrigger(day=1, hour=6, minute=0),
+        id="crop_interest_accrual",
         replace_existing=True,
     )
 

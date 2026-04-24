@@ -143,6 +143,8 @@ export default function MessagesPage() {
 
   // Settings state
   const [smsSettings, setSmsSettings] = useState([]);
+  const [collectionRecipients, setCollectionRecipients] = useState({ owner_phone: '', manager_phone: '', admin_phone: '', auditor_phone: '' });
+  const [savingRecipients, setSavingRecipients] = useState(false);
 
   // Gateway log state
   const [gatewayLogs, setGatewayLogs] = useState([]);
@@ -187,6 +189,8 @@ export default function MessagesPage() {
     try {
       const res = await api.get('/sms/settings');
       setSmsSettings(res.data || []);
+      const rec = await api.get('/settings/collection-recipients');
+      setCollectionRecipients(rec.data || {});
     } catch { /* ignore */ }
   }, []);
 
@@ -1353,27 +1357,79 @@ export default function MessagesPage() {
 
       {/* ═══ SETTINGS TAB ═══ */}
       {activeTab === 'settings' && (
-        <Card className="border-slate-200 max-w-2xl">
-          <CardContent className="p-5 space-y-4">
-            <h2 className="text-sm font-bold text-slate-700">SMS Trigger Settings</h2>
-            <p className="text-xs text-slate-400">Enable or disable automatic SMS triggers. Disabled triggers will not generate new messages.</p>
-            <div className="divide-y divide-slate-100">
-              {smsSettings.map(s => (
-                <div key={s.trigger_key} className="flex items-center justify-between py-3" data-testid={`setting-${s.trigger_key}`}>
-                  <div>
-                    <p className="text-sm font-medium text-slate-700">{s.template_name}</p>
-                    <p className="text-[10px] text-slate-400">{s.trigger_key.replace(/_/g, ' ')}</p>
+        <div className="space-y-4 max-w-2xl">
+          {/* Collection Notification Recipients */}
+          <Card className="border-amber-200">
+            <CardContent className="p-5 space-y-4">
+              <div>
+                <h2 className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-amber-500" />
+                  Crop Credit Collection Notification Recipients
+                </h2>
+                <p className="text-xs text-slate-400 mt-1">
+                  These phone numbers receive SMS when a crop season harvest is approaching (15d, 7d, due date) and when extensions are granted.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { key: 'owner_phone', label: 'Owner Phone' },
+                  { key: 'manager_phone', label: 'Manager Phone' },
+                  { key: 'admin_phone', label: 'Admin Phone' },
+                  { key: 'auditor_phone', label: 'Auditor Phone' },
+                ].map(({ key, label }) => (
+                  <div key={key}>
+                    <label className="text-xs text-slate-600 font-medium">{label}</label>
+                    <input
+                      data-testid={`recipient-${key}`}
+                      type="tel"
+                      placeholder="09XX XXX XXXX"
+                      value={collectionRecipients[key] || ''}
+                      onChange={e => setCollectionRecipients(r => ({ ...r, [key]: e.target.value }))}
+                      className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300"
+                    />
                   </div>
-                  <button onClick={() => toggleSetting(s.trigger_key)}
-                    className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${s.enabled ? 'bg-[#1A4D2E]' : 'bg-slate-300'}`}
-                    data-testid={`toggle-setting-${s.trigger_key}`}>
-                    <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${s.enabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+                ))}
+              </div>
+              <button
+                data-testid="save-recipients-btn"
+                disabled={savingRecipients}
+                onClick={async () => {
+                  setSavingRecipients(true);
+                  try {
+                    await api.put('/settings/collection-recipients', collectionRecipients);
+                    toast.success('Collection recipients saved');
+                  } catch { toast.error('Failed to save'); }
+                  setSavingRecipients(false);
+                }}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs rounded-lg font-medium transition-colors disabled:opacity-50">
+                {savingRecipients ? 'Saving...' : 'Save Recipients'}
+              </button>
+            </CardContent>
+          </Card>
+
+          {/* Existing SMS Trigger Settings */}
+          <Card className="border-slate-200">
+            <CardContent className="p-5 space-y-4">
+              <h2 className="text-sm font-bold text-slate-700">SMS Trigger Settings</h2>
+              <p className="text-xs text-slate-400">Enable or disable automatic SMS triggers. Disabled triggers will not generate new messages.</p>
+              <div className="divide-y divide-slate-100">
+                {smsSettings.map(s => (
+                  <div key={s.trigger_key} className="flex items-center justify-between py-3" data-testid={`setting-${s.trigger_key}`}>
+                    <div>
+                      <p className="text-sm font-medium text-slate-700">{s.template_name}</p>
+                      <p className="text-[10px] text-slate-400">{s.trigger_key.replace(/_/g, ' ')}</p>
+                    </div>
+                    <button onClick={() => toggleSetting(s.trigger_key)}
+                      className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${s.enabled ? 'bg-[#1A4D2E]' : 'bg-slate-300'}`}
+                      data-testid={`toggle-setting-${s.trigger_key}`}>
+                      <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${s.enabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       {/* ═══ GATEWAY LOG TAB ═══ */}
