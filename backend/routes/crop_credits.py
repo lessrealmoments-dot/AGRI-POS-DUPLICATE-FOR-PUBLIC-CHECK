@@ -138,8 +138,8 @@ async def _send_harvest_notification(crop_credit: dict, notification_type: str):
         if notification_type == "overdue":
             if days_overdue <= 7:
                 cc_roles = CC_ALL   # first hit — alert everyone
-            elif days_overdue % 30 == 0:
-                cc_roles = {"owner", "manager"}   # monthly escalation
+            elif days_overdue % 14 == 0:
+                cc_roles = {"owner", "manager", "admin", "auditor"}   # bi-weekly escalation
             else:
                 cc_roles = set()    # customer-only weekly ping
         else:

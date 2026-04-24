@@ -858,10 +858,10 @@ async def startup():
                                 trigger_ref=inv.get("id", ""),
                                 dedup_key=f"overdue:{inv.get('id', '')}:{today}",
                             )
-                            # Staff CC: first occurrence (day 7) + every 30 days
+                            # Staff CC: first occurrence (day 7) + every 14 days
                             is_first = days_overdue == 7
-                            is_monthly_escalation = days_overdue % 30 == 0
-                            if is_first or is_monthly_escalation:
+                            is_biweekly_escalation = days_overdue % 14 == 0
+                            if is_first or is_biweekly_escalation:
                                 staff_overdue_msg = (
                                     f"[{'1st ' if is_first else ''}Overdue {days_overdue}d] "
                                     f"{customer.get('name','')} — "
