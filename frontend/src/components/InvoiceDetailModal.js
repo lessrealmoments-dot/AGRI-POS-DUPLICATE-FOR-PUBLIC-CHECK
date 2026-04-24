@@ -67,7 +67,11 @@ export default function InvoiceDetailModal({
   const [viewQROpen, setViewQROpen] = useState(false);
 
   // Active section
-  const [section, setSection] = useState('detail'); // detail | receipts | payments | history
+  const [section, setSection] = useState('detail'); // detail | receipts | payments | history | signature
+
+  // Signature state
+  const [signatures, setSignatures] = useState([]);
+  const [sigLoading, setSigLoading] = useState(false);
 
   // Load business info for printing (compact mode)
   useEffect(() => {
@@ -105,6 +109,16 @@ export default function InvoiceDetailModal({
         overall_discount: res.data.overall_discount || 0,
       });
       setEditHistory(res.data.edit_history || []);
+
+      // Load signatures for this invoice
+      const invId = res.data.id;
+      if (invId) {
+        setSigLoading(true);
+        api.get(`/signatures/record/invoice/${invId}`)
+          .then(r => setSignatures(r.data || []))
+          .catch(() => setSignatures([]))
+          .finally(() => setSigLoading(false));
+      }
     } catch (e) {
       toast.error('Failed to load details');
       onOpenChange(false);
@@ -676,6 +690,9 @@ export default function InvoiceDetailModal({
                     ...(payments.length > 0 ? [{ key: 'payments', label: `Payments (${payments.length})`, icon: DollarSign }] : []),
                     ...(invoice.release_mode === 'partial' ? [{ key: 'releases', label: `Releases (${(invoice.stock_releases || []).length})`, icon: Package }] : []),
                     ...(editHistory.length > 0 || invoice.edit_count > 0 ? [{ key: 'history', label: 'History', icon: History }] : []),
+                    ...(signatures.length > 0 ? [{ key: 'signature', label: `Signature (${signatures.length})`, icon: ShieldCheck }] : [
+                      { key: 'signature', label: 'Signature', icon: ShieldCheck }
+                    ]),
                   ].map(t => (
                     <button key={t.key} data-testid={`section-${t.key}`}
                       onClick={() => { setSection(t.key); if (t.key === 'history') loadEditHistory(); }}
@@ -1068,6 +1085,82 @@ export default function InvoiceDetailModal({
                                   {edit.changes.map((c, j) => <li key={j} className="flex items-start gap-1"><span className="text-slate-400">•</span> {c}</li>)}
                                 </ul>
                               )}
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* SIGNATURE section */}
+                {section === 'signature' && (
+                  <div className="space-y-3" data-testid="signature-section">
+                    <h3 className="font-semibold text-sm flex items-center gap-2">
+                      <ShieldCheck size={16} className="text-emerald-600" /> Credit Authorization Signature
+                    </h3>
+                    {sigLoading ? (
+                      <p className="text-slate-400 text-sm text-center py-6">Loading signatures...</p>
+                    ) : signatures.length === 0 ? (
+                      <div className="text-center py-8 text-slate-400 space-y-2">
+                        <ShieldCheck size={32} className="mx-auto text-slate-200" />
+                        <p className="text-sm">No signature captured for this invoice.</p>
+                        <p className="text-xs">Signatures are collected when using the Charged-to-Crop credit flow.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {signatures.map((sig, i) => (
+                          <Card key={sig.id || i} className={`border-2 ${sig.status === 'signed' ? 'border-emerald-200' : sig.status === 'bypassed' ? 'border-amber-200' : 'border-slate-200'}`}>
+                            <CardContent className="p-4">
+                              <div className="flex items-center justify-between mb-3">
+                                <div className="flex items-center gap-2">
+                                  <Badge className={`text-[10px] ${sig.status === 'signed' ? 'bg-emerald-100 text-emerald-700' : sig.status === 'bypassed' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
+                                    {sig.status === 'signed' ? '✓ Signed' : sig.status === 'bypassed' ? 'PIN Override' : sig.status}
+                                  </Badge>
+                                  <span className="text-xs text-slate-400">
+                                    {sig.signed_at ? new Date(sig.signed_at).toLocaleString('en-PH') : sig.bypassed_at ? new Date(sig.bypassed_at).toLocaleString('en-PH') : ''}
+                                  </span>
+                                </div>
+                                {sig.status === 'bypassed' && (
+                                  <span className="text-xs text-amber-600">By: {sig.bypass_by_name}</span>
+                                )}
+                              </div>
+
+                              {/* Credit summary */}
+                              {sig.credit_context && (
+                                <div className="bg-slate-50 rounded-lg p-2.5 text-xs mb-3 grid grid-cols-2 gap-1">
+                                  <div><span className="text-slate-400">Customer:</span> <span className="font-medium">{sig.credit_context.customer_name}</span></div>
+                                  <div><span className="text-slate-400">Amount:</span> <span className="font-bold">{sig.credit_context.amount ? `₱${parseFloat(sig.credit_context.amount).toLocaleString('en-PH', {minimumFractionDigits: 2})}` : '—'}</span></div>
+                                  <div><span className="text-slate-400">Type:</span> <span className="capitalize">{(sig.credit_context.credit_type || '').replace(/_/g, ' ')}</span></div>
+                                  <div><span className="text-slate-400">Date:</span> <span>{sig.credit_context.date}</span></div>
+                                </div>
+                              )}
+
+                              {/* Signature image */}
+                              {sig.status === 'signed' && sig.signature_url ? (
+                                <div className="border border-dashed border-slate-300 rounded-xl p-3 bg-white">
+                                  <p className="text-[10px] text-slate-400 mb-2 text-center uppercase tracking-wider">Customer Signature</p>
+                                  <img
+                                    src={sig.signature_url}
+                                    alt="Customer signature"
+                                    className="max-h-32 mx-auto object-contain"
+                                    onError={e => { e.target.style.display = 'none'; }}
+                                  />
+                                  <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-100">
+                                    <div className="h-px bg-slate-300 flex-1" />
+                                    <p className="text-[10px] text-slate-400 mx-2">SIGNATURE</p>
+                                    <div className="h-px bg-slate-300 flex-1" />
+                                  </div>
+                                </div>
+                              ) : sig.status === 'signed' && !sig.signature_url ? (
+                                <p className="text-xs text-slate-400 text-center py-3">Signature captured but image unavailable (R2 link may have expired).</p>
+                              ) : sig.status === 'bypassed' ? (
+                                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-700">
+                                  <p className="font-medium">Manager PIN Override</p>
+                                  <p>Reason: {sig.bypass_reason || 'Not specified'}</p>
+                                  <p>Authorized by: {sig.bypass_by_name}</p>
+                                </div>
+                              ) : null}
                             </CardContent>
                           </Card>
                         ))}

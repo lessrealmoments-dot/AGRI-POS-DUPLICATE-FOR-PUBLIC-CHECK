@@ -22,7 +22,17 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
-### Charged-to-Crop POS + Terminal Integration + Monitoring Cleanup (2026-04-24) — Complete
+### Crop Credits Architecture Fix + Signature Viewing (2026-04-24) — Complete
+- Principal balance now computed DYNAMICALLY from linked invoices (not stored separately) — ensures /crop-credits, /payments, /customers all show consistent totals
+- `_compute_principal_from_invoices()` helper aggregates all linked invoice balances in real-time
+- `add-credit` endpoint now tags the invoice with `crop_credit_id` (links invoice ↔ crop credit)
+- `create_crop_credit` starts with `principal_balance=0` (computed from invoices)
+- All GET endpoints (list, get, check-block, customer) now use computed principal
+- Interest accrual and payment allocation use computed principal
+- Signature tab added to InvoiceDetailModal — shows captured signature image, credit summary, PIN bypass info
+- Signature section appears on every invoice, shows "No signature" gracefully if none captured
+
+
 - Phase 1: CropCreditsPage is now view-only monitoring dashboard. Removed standalone payment button. Added "Use Receive Payments page" info banner. Receipts tab shows invoice numbers as clickable entries opening InvoiceDetailModal popup. Payments tab removed. Tabs: Receipts / Extensions / Interest Log.
 - Phase 2: Web Sales (UnifiedSalesPage): CropCreditTypeDialog appears before manager PIN when payment=credit and customer is selected. Shows By Term vs Charged to Crop options, active season detection, blocked state, planting date input, link existing term invoices option. After sale, invoice is linked to crop credit.
 - Phase 3: Terminal Sales (TerminalSales.jsx): Same CropCreditTypeDialog appears on "Confirm Credit Sale" with customer selected.
