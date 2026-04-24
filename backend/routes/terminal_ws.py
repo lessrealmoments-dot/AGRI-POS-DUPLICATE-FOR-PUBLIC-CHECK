@@ -50,9 +50,12 @@ class TerminalConnectionManager:
                 self.disconnect_terminal(terminal_id)
 
     async def notify_branch_terminals(self, branch_id: str, event_type: str, data: dict):
-        """Notify all terminals connected to a specific branch."""
-        # We need to find terminals for this branch — done via DB lookup in the caller
-        pass
+        """
+        Notify all terminals connected to a specific branch.
+        Reserved for future real-time branch-wide push events (e.g. price updates, alerts).
+        Not yet called from any live flow — implement alongside the first consumer.
+        """
+        pass  # intentional stub — no consumers yet
 
     def get_connected_terminal_ids(self):
         return list(self.terminal_connections.keys())

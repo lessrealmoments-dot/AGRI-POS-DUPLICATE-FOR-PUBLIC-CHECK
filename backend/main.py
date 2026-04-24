@@ -271,10 +271,12 @@ async def startup():
             logger.info("Multi-tenancy migration: %d documents tagged with default org", migrated)
 
     # ── Super Admin creation ──────────────────────────────────────────────────
-    SUPER_ADMIN_EMAIL = "janmarkeahig@gmail.com"
-    SUPER_ADMIN_PASS = "Aa@58798546521325"
+    SUPER_ADMIN_EMAIL = os.environ.get("SUPER_ADMIN_EMAIL", "")
+    SUPER_ADMIN_PASS = os.environ.get("SUPER_ADMIN_PASS", "")
+    if not SUPER_ADMIN_EMAIL or not SUPER_ADMIN_PASS:
+        logger.warning("SUPER_ADMIN_EMAIL / SUPER_ADMIN_PASS not set in env — skipping super admin seed")
     existing_super = await _raw_db.users.find_one({"is_super_admin": True}, {"_id": 0})
-    if not existing_super:
+    if not existing_super and SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASS:
         await _raw_db.users.insert_one({
             "id": new_id(),
             "username": "superadmin",

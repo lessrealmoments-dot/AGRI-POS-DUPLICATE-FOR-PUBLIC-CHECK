@@ -119,11 +119,27 @@ async def lookup_document(data: dict):
     if not pin:
         raise HTTPException(status_code=400, detail="PIN required")
 
+    # Brute-force lockout (same policy as QR actions)
+    from utils.security import check_qr_lockout, log_failed_qr_pin_attempt, log_successful_qr_pin_attempt
+    lockout = await check_qr_lockout(code)
+    if lockout["locked"]:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many failed attempts. Try again in {lockout['retry_after']} seconds.",
+        )
+
     # Verify PIN
     from routes.verify import _resolve_pin
     verifier = await _resolve_pin(pin)
     if not verifier:
-        raise HTTPException(status_code=403, detail="Invalid PIN")
+        await log_failed_qr_pin_attempt(code, "doc_lookup", "lookup")
+        lockout_after = await check_qr_lockout(code)
+        detail = "Invalid PIN"
+        if lockout_after.get("warn"):
+            detail += f" — {lockout_after['attempts_remaining']} attempt(s) remaining before lockout"
+        raise HTTPException(status_code=403, detail=detail)
+
+    await log_successful_qr_pin_attempt(code, "doc_lookup", "lookup", verifier.get("verifier_name", ""))
 
     # Find document code
     doc_ref = await db.doc_codes.find_one({"code": code}, {"_id": 0})
