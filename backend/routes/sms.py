@@ -255,12 +255,19 @@ DEFAULT_TEMPLATES = [
 
 
 async def _ensure_templates():
-    """Seed default templates for the current org if none exist yet."""
-    count = await db.sms_templates.count_documents({})
-    if count == 0:
-        docs = []
-        for t in DEFAULT_TEMPLATES:
-            docs.append({**t, "id": new_id(), "created_at": now_iso(), "updated_at": now_iso()})
+    """
+    Upsert default templates — inserts any keys that don't yet exist in the current org.
+    Safe to call repeatedly: never overwrites customized templates, only fills gaps.
+    This handles both fresh installs (count=0) and orgs that existed before new templates were added.
+    """
+    existing_keys = set()
+    async for doc in db.sms_templates.find({}, {"_id": 0, "key": 1}):
+        existing_keys.add(doc["key"])
+
+    missing = [t for t in DEFAULT_TEMPLATES if t["key"] not in existing_keys]
+    if missing:
+        docs = [{**t, "id": new_id(), "created_at": now_iso(), "updated_at": now_iso()}
+                for t in missing]
         await db.sms_templates.insert_many(docs)
 
 
