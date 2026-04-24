@@ -22,7 +22,14 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
-### Charged-to-Crop Credit System (2026-04-24) — Complete
+### Charged-to-Crop POS + Terminal Integration + Monitoring Cleanup (2026-04-24) — Complete
+- Phase 1: CropCreditsPage is now view-only monitoring dashboard. Removed standalone payment button. Added "Use Receive Payments page" info banner. Receipts tab shows invoice numbers as clickable entries opening InvoiceDetailModal popup. Payments tab removed. Tabs: Receipts / Extensions / Interest Log.
+- Phase 2: Web Sales (UnifiedSalesPage): CropCreditTypeDialog appears before manager PIN when payment=credit and customer is selected. Shows By Term vs Charged to Crop options, active season detection, blocked state, planting date input, link existing term invoices option. After sale, invoice is linked to crop credit.
+- Phase 3: Terminal Sales (TerminalSales.jsx): Same CropCreditTypeDialog appears on "Confirm Credit Sale" with customer selected.
+- New CropCreditTypeDialog component at /app/frontend/src/components/CropCreditTypeDialog.js
+- Backend: crop credit entries now store invoice_number for receipt linking
+
+
 - New `crop_credits` collection with full seasonal credit lifecycle tracking
 - Backend routes: `POST /api/crop-credits`, `GET /api/crop-credits`, `GET /api/crop-credits/customer/{id}`, `GET /api/crop-credits/check-block/{id}`, `POST /api/crop-credits/{id}/add-credit`, `POST /api/crop-credits/{id}/payment`, `POST /api/crop-credits/{id}/extend`, `POST /api/crop-credits/{id}/accrue-interest`
 - 127-day crop cycle (120 days + 7 grace), simple interest on principal only, interest-first payment allocation
