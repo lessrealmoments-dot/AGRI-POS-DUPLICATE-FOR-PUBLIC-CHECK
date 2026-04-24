@@ -57,11 +57,13 @@ async def login(data: dict):
             )
 
     token = create_token(user["id"], user["role"], org_id=org_id, is_super_admin=is_super)
-    safe_user = {k: v for k, v in user.items() if k not in ("password_hash", "staff_pin", "manager_pin", "auditor_pin")}
-    # Expose PIN status flags only (not raw PIN values)
+    _SENSITIVE = ("password_hash", "staff_pin", "manager_pin", "auditor_pin", "totp_secret")
+    safe_user = {k: v for k, v in user.items() if k not in _SENSITIVE}
+    # Expose PIN/TOTP status flags only (never the raw values)
     safe_user["has_manager_pin"] = bool(user.get("manager_pin"))
     safe_user["has_staff_pin"] = bool(user.get("staff_pin"))
     safe_user["has_auditor_pin"] = bool(user.get("auditor_pin"))
+    safe_user["has_totp"] = bool(user.get("totp_secret"))
 
     # Attach subscription info for the frontend
     subscription = None
@@ -122,11 +124,13 @@ async def register(data: dict, user=Depends(get_current_user)):
 
 @router.get("/me")
 async def get_me(user=Depends(get_current_user)):
-    result = {k: v for k, v in user.items() if k not in ("password_hash", "staff_pin", "manager_pin", "auditor_pin")}
-    # Expose PIN status flags (not the actual PIN values)
+    _SENSITIVE = ("password_hash", "staff_pin", "manager_pin", "auditor_pin", "totp_secret")
+    result = {k: v for k, v in user.items() if k not in _SENSITIVE}
+    # Expose PIN/TOTP status flags (never the raw values)
     result["has_manager_pin"] = bool(user.get("manager_pin"))
     result["has_staff_pin"] = bool(user.get("staff_pin"))
     result["has_auditor_pin"] = bool(user.get("auditor_pin"))
+    result["has_totp"] = bool(user.get("totp_secret"))
     org_id = user.get("organization_id")
     if org_id:
         from routes.organizations import get_effective_plan, PLAN_LIMITS, get_grace_info, get_live_feature_flags
