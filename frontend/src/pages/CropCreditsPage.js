@@ -1,14 +1,14 @@
 /**
- * CropCreditsPage — Charged-to-Crop credit management.
- * Shows all crop credit accounts, allows creating, viewing, paying, and extending.
+ * CropCreditsPage — Charged-to-Crop credit monitoring & management.
+ * View-only for payments (use /payments page). Manages extensions, adds credits, views invoices.
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { api, useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 import {
-  Sprout, Plus, Search, ChevronRight, Calendar, Coins, TrendingUp,
-  AlertTriangle, CheckCircle2, Clock, RotateCcw, XCircle,
-  ArrowDownCircle, Expand, FileText, Shield, QrCode, X
+  Sprout, Plus, Search, Calendar, TrendingUp,
+  AlertTriangle, CheckCircle2, Clock, RotateCcw,
+  FileText, Shield, QrCode, ExternalLink, Receipt
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -21,6 +21,7 @@ import { ScrollArea } from '../components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import AuthDialog from '../components/AuthDialog';
 import { QRCodeSVG } from 'qrcode.react';
+import InvoiceDetailModal from '../components/InvoiceDetailModal';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -636,119 +637,12 @@ function AddCreditModal({ open, onClose, credit, onAdded }) {
   );
 }
 
-// ── Record Payment Modal ────────────────────────────────────────────────────
-function PaymentModal({ open, onClose, credit, onPaid }) {
-  const [amount, setAmount] = useState('');
-  const [method, setMethod] = useState('Cash');
-  const [loading, setLoading] = useState(false);
-
-  const principal = credit?.principal_balance || 0;
-  const interest = credit?.accrued_interest || 0;
-  const total = principal + interest;
-
-  // Preview allocation
-  const amt = parseFloat(amount) || 0;
-  const toInterest = Math.min(amt, interest);
-  const toPrincipal = Math.min(amt - toInterest, principal);
-
-  const handlePay = async () => {
-    if (!amount || amt <= 0) { toast.error('Enter a valid amount'); return; }
-    setLoading(true);
-    try {
-      const res = await api.post(`/crop-credits/${credit.id}/payment`, {
-        amount: amt,
-        method,
-        date: new Date().toISOString().split('T')[0],
-      });
-      toast.success(res.data.message);
-      onPaid(res.data.credit);
-      onClose();
-    } catch (err) {
-      toast.error(err.response?.data?.detail || 'Payment failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-sm">
-            <Coins size={14} /> Record Payment
-          </DialogTitle>
-        </DialogHeader>
-        <div className="space-y-3">
-          <div className="bg-slate-50 rounded-lg p-3 text-xs space-y-1">
-            <div className="flex justify-between">
-              <span className="text-slate-500">Customer</span>
-              <span className="font-medium">{credit?.customer_name}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-500">Accrued Interest</span>
-              <span className="text-amber-600 font-medium">{formatPHP(interest)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-500">Principal Balance</span>
-              <span className="text-red-600 font-medium">{formatPHP(principal)}</span>
-            </div>
-            <Separator className="my-1" />
-            <div className="flex justify-between font-semibold">
-              <span>Total Due</span>
-              <span className="text-red-700">{formatPHP(total)}</span>
-            </div>
-          </div>
-
-          <div>
-            <Label className="text-xs">Payment Amount (₱) *</Label>
-            <Input data-testid="payment-amount-input" type="number" placeholder="0.00" value={amount}
-              onChange={e => setAmount(e.target.value)} className="mt-1" />
-          </div>
-
-          {/* Allocation preview */}
-          {amt > 0 && (
-            <div className="bg-blue-50 border border-blue-100 rounded-lg p-2.5 text-xs space-y-1">
-              <p className="font-medium text-blue-700 mb-1">Payment Allocation (Interest First)</p>
-              <div className="flex justify-between">
-                <span className="text-slate-600">→ Applied to Interest</span>
-                <span className="text-amber-600 font-medium">{formatPHP(toInterest)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-600">→ Applied to Principal</span>
-                <span className="text-slate-700 font-medium">{formatPHP(toPrincipal)}</span>
-              </div>
-              {amt > total && (
-                <p className="text-green-600 font-medium">Account will be fully settled!</p>
-              )}
-            </div>
-          )}
-
-          <div>
-            <Label className="text-xs">Payment Method</Label>
-            <select value={method} onChange={e => setMethod(e.target.value)}
-              className="w-full mt-1 border border-slate-200 rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300">
-              {['Cash', 'GCash', 'Bank Transfer', 'Check'].map(m => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
-          </div>
-
-          <Button data-testid="record-payment-btn"
-            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white" onClick={handlePay} disabled={loading}>
-            {loading ? 'Recording...' : `Record Payment of ${formatPHP(amt)}`}
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 // ── Credit Detail Panel ─────────────────────────────────────────────────────
 function CreditDetailPanel({ credit, onUpdated }) {
-  const [showPayment, setShowPayment] = useState(false);
   const [showAddCredit, setShowAddCredit] = useState(false);
   const [showExtension, setShowExtension] = useState(false);
   const [accruing, setAccruing] = useState(false);
+  const [invoiceModal, setInvoiceModal] = useState({ open: false, number: null });
 
   const today = new Date().toISOString().split('T')[0];
   const seasonEnd = credit.season_end_date || '';
@@ -789,17 +683,25 @@ function CreditDetailPanel({ credit, onUpdated }) {
         </Card>
         <Card className="border-slate-200">
           <CardContent className="p-3 space-y-0.5">
-            <p className="text-[10px] text-slate-400 uppercase tracking-wider">Total Due</p>
+            <p className="text-[10px] text-slate-400 uppercase tracking-wider">Total Due at Harvest</p>
             <p className="text-xl font-bold text-slate-800">{formatPHP(totalDue)}</p>
           </CardContent>
         </Card>
         <Card className="border-slate-200">
           <CardContent className="p-3 space-y-0.5">
-            <p className="text-[10px] text-slate-400 uppercase tracking-wider">Total Paid</p>
-            <p className="text-xl font-bold text-emerald-600">{formatPHP((credit.paid_principal || 0) + (credit.paid_interest || 0))}</p>
+            <p className="text-[10px] text-slate-400 uppercase tracking-wider">Total Credited</p>
+            <p className="text-xl font-bold text-emerald-600">{formatPHP(credit.total_principal_credited || 0)}</p>
           </CardContent>
         </Card>
       </div>
+
+      {/* Receive Payment info banner */}
+      {credit.status !== 'settled' && (
+        <div className="flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700">
+          <Receipt size={14} className="mt-0.5 shrink-0" />
+          <p>To record a payment for this customer, use the <strong>Receive Payments</strong> page. Payments against any linked invoice will automatically reflect here.</p>
+        </div>
+      )}
 
       {/* Season timeline */}
       <Card className="border-slate-200">
@@ -839,14 +741,10 @@ function CreditDetailPanel({ credit, onUpdated }) {
       {/* Actions */}
       {credit.status !== 'settled' && (
         <div className="flex gap-2 flex-wrap">
-          <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
-            onClick={() => setShowPayment(true)}
-            data-testid="record-payment-open-btn">
-            <Coins size={12} className="mr-1" /> Record Payment
-          </Button>
           {['active', 'extended'].includes(credit.status) && (
             <Button size="sm" variant="outline" className="text-xs"
-              onClick={() => setShowAddCredit(true)}>
+              onClick={() => setShowAddCredit(true)}
+              data-testid="add-credit-btn">
               <Plus size={12} className="mr-1" /> Add Credit
             </Button>
           )}
@@ -863,11 +761,10 @@ function CreditDetailPanel({ credit, onUpdated }) {
         </div>
       )}
 
-      {/* Tabs: Credits / Payments / Extensions / Interest */}
+      {/* Tabs: Credits / Extensions / Interest */}
       <Tabs defaultValue="credits">
         <TabsList className="text-xs">
-          <TabsTrigger value="credits">Credits ({(credit.credits || []).length})</TabsTrigger>
-          <TabsTrigger value="payments">Payments ({(credit.payments || []).length})</TabsTrigger>
+          <TabsTrigger value="credits">Receipts ({(credit.credits || []).length})</TabsTrigger>
           <TabsTrigger value="extensions">Extensions ({(credit.extensions || []).length})</TabsTrigger>
           <TabsTrigger value="interest">Interest Log ({(credit.interest_log || []).length})</TabsTrigger>
         </TabsList>
@@ -876,37 +773,24 @@ function CreditDetailPanel({ credit, onUpdated }) {
           <ScrollArea className="h-52">
             <div className="space-y-1.5 p-1">
               {(credit.credits || []).length === 0 && (
-                <p className="text-xs text-slate-400 text-center py-4">No credits recorded</p>
+                <p className="text-xs text-slate-400 text-center py-4">No receipts recorded yet</p>
               )}
-              {[...( credit.credits || [])].reverse().map(c => (
-                <div key={c.id} className="flex justify-between items-center p-2.5 bg-slate-50 rounded-lg text-xs">
-                  <div>
-                    <p className="font-medium text-slate-700">{c.description || 'Credit'}</p>
-                    <p className="text-slate-400">{c.date} · by {c.recorded_by}</p>
+              {[...(credit.credits || [])].reverse().map(c => (
+                <div key={c.id}
+                  onClick={() => c.invoice_number && setInvoiceModal({ open: true, number: c.invoice_number })}
+                  className={`flex justify-between items-center p-2.5 rounded-lg text-xs transition-colors ${c.invoice_number ? 'bg-slate-50 hover:bg-blue-50 cursor-pointer border border-transparent hover:border-blue-200' : 'bg-slate-50'}`}>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      {c.invoice_number ? (
+                        <span className="font-mono text-blue-600 font-semibold text-[11px]">{c.invoice_number}</span>
+                      ) : (
+                        <span className="font-medium text-slate-700">{c.description || 'Credit'}</span>
+                      )}
+                      {c.invoice_number && <ExternalLink size={10} className="text-blue-400 shrink-0" />}
+                    </div>
+                    <p className="text-slate-400 mt-0.5">{c.date} · {c.description || ''}</p>
                   </div>
-                  <span className="font-bold text-slate-800">{formatPHP(c.amount)}</span>
-                </div>
-              ))}
-            </div>
-          </ScrollArea>
-        </TabsContent>
-
-        <TabsContent value="payments">
-          <ScrollArea className="h-52">
-            <div className="space-y-1.5 p-1">
-              {(credit.payments || []).length === 0 && (
-                <p className="text-xs text-slate-400 text-center py-4">No payments recorded</p>
-              )}
-              {[...(credit.payments || [])].reverse().map(p => (
-                <div key={p.id} className="p-2.5 bg-slate-50 rounded-lg text-xs">
-                  <div className="flex justify-between">
-                    <span className="font-medium">{p.method}</span>
-                    <span className="font-bold text-emerald-600">{formatPHP(p.amount)}</span>
-                  </div>
-                  <div className="flex justify-between text-slate-400 mt-0.5">
-                    <span>{p.date} · {p.recorded_by}</span>
-                    <span>Int: {formatPHP(p.interest_portion)} | Principal: {formatPHP(p.principal_portion)}</span>
-                  </div>
+                  <span className="font-bold text-slate-800 shrink-0 ml-2">{formatPHP(c.amount)}</span>
                 </div>
               ))}
             </div>
@@ -956,9 +840,16 @@ function CreditDetailPanel({ credit, onUpdated }) {
         </TabsContent>
       </Tabs>
 
-      <PaymentModal open={showPayment} onClose={() => setShowPayment(false)} credit={credit} onPaid={onUpdated} />
       <AddCreditModal open={showAddCredit} onClose={() => setShowAddCredit(false)} credit={credit} onAdded={onUpdated} />
       <ExtensionDialog open={showExtension} onClose={() => setShowExtension(false)} credit={credit} onExtended={onUpdated} />
+
+      {/* Invoice Detail Modal — same popup as Sales History */}
+      <InvoiceDetailModal
+        compact
+        open={invoiceModal.open}
+        onOpenChange={(v) => setInvoiceModal({ open: v, number: null })}
+        invoiceNumber={invoiceModal.number}
+      />
     </div>
   );
 }

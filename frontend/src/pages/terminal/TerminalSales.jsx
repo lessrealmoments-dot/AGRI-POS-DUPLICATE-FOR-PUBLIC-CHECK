@@ -13,6 +13,7 @@ import {
   addPendingSale, getPendingSaleCount, getInventoryItem, getBranchPrice,
 } from '../../lib/offlineDB';
 import { newEnvelopeId } from '../../lib/syncManager';
+import CropCreditTypeDialog from '../../components/CropCreditTypeDialog';
 
 export default function TerminalSales({ api, session, isOnline, pendingCount, setPendingCount, syncVersion }) {
   const [products, setProducts] = useState([]);
@@ -62,6 +63,10 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   const [schemePin, setSchemePin] = useState('');
   const [schemePinError, setSchemePinError] = useState('');
   const [schemePinLoading, setSchemePinLoading] = useState(false);
+
+  // Crop Credit type selection
+  const [cropTypeDialog, setCropTypeDialog] = useState(false);
+  const [cropCreditConfig, setCropCreditConfig] = useState(null);
 
   // Total discount
   const [discountInput, setDiscountInput] = useState('');
@@ -517,6 +522,48 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
         const res = await api.post('/unified-sale', saleData);
         const invoiceNum = res.data.invoice_number || res.data.sale_number;
         toast.success(`Sale ${invoiceNum} completed!`);
+
+        // ── Crop Credit linking ──────────────────────────────────────────
+        if (cropCreditConfig?.type === 'charged_to_crop' && selectedCustomer?.id && saleData.balance > 0) {
+          try {
+            const cropPayload = {
+              amount: saleData.balance,
+              invoice_id: res.data.id || '',
+              invoice_number: invoiceNum || '',
+              description: `Terminal credit sale ${invoiceNum}`,
+              date: saleData.order_date,
+            };
+            if (cropCreditConfig.activeCreditId) {
+              await api.post(`/crop-credits/${cropCreditConfig.activeCreditId}/add-credit`, cropPayload);
+            } else {
+              await api.post('/crop-credits', {
+                customer_id: selectedCustomer.id,
+                planting_date: cropCreditConfig.plantingDate,
+                initial_amount: saleData.balance,
+                invoice_id: res.data.id || '',
+                invoice_number: invoiceNum || '',
+                description: `Terminal credit sale ${invoiceNum}`,
+                branch_id: session.branchId,
+              });
+            }
+            if (cropCreditConfig.linkExistingTerms && cropCreditConfig.termInvoices?.length > 0) {
+              const blockCheck = await api.get(`/crop-credits/check-block/${selectedCustomer.id}`);
+              const creditId = blockCheck.data.active_credit_id;
+              if (creditId) {
+                for (const inv of cropCreditConfig.termInvoices) {
+                  await api.post(`/crop-credits/${creditId}/add-credit`, {
+                    amount: inv.balance, invoice_id: inv.id,
+                    invoice_number: inv.invoice_number,
+                    description: `Linked term: ${inv.invoice_number}`,
+                    date: inv.order_date || saleData.order_date,
+                  }).catch(() => {});
+                }
+              }
+            }
+          } catch { /* non-blocking */ }
+          setCropCreditConfig(null);
+        }
+
         // Store sale data for print prompt
         setLastSaleData({ ...saleData, invoice_number: invoiceNum, ...res.data });
         setShowPrintPrompt(true);
@@ -1089,7 +1136,15 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
                 </div>
                 <div className="flex gap-2">
                   <Button variant="outline" onClick={resetCheckout} className="flex-1">Back</Button>
-                  <Button onClick={processSale} disabled={saving}
+                  <Button
+                    onClick={() => {
+                      if (paymentType === 'credit' && selectedCustomer?.id) {
+                        setCropTypeDialog(true);
+                      } else {
+                        processSale();
+                      }
+                    }}
+                    disabled={saving}
                     className="flex-1 bg-[#1A4D2E] hover:bg-[#15412a] text-white h-12"
                     data-testid="confirm-payment-btn">
                     {saving ? <Loader2 size={16} className="animate-spin mr-2" /> : <Check size={16} className="mr-2" />}
@@ -1108,6 +1163,21 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
 
       {/* Insufficient Stock Override Modal */}
       <Dialog open={stockModal} onOpenChange={(o) => { if (!o) { setStockModal(false); setPendingSaleData(null); setInsufficientItems([]); setOverridePin(''); setOverrideError(''); } }}>
+
+      {/* Crop Credit Type Dialog */}
+      <CropCreditTypeDialog
+        open={cropTypeDialog}
+        onClose={() => { setCropTypeDialog(false); setCropCreditConfig(null); }}
+        onConfirm={(config) => {
+          setCropCreditConfig(config);
+          setCropTypeDialog(false);
+          processSale();
+        }}
+        customerId={selectedCustomer?.id}
+        customerName={selectedCustomer?.name || 'Customer'}
+        saleAmount={grandTotal}
+        branchId={session?.branchId}
+      />
         <DialogContent className="max-w-sm mx-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-amber-700" style={{ fontFamily: 'Manrope' }}>

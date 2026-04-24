@@ -26,6 +26,7 @@ import {
 } from '../lib/offlineDB';
 import { syncPendingSales, startAutoSync, stopAutoSync, newEnvelopeId } from '../lib/syncManager';
 import ReferenceNumberPrompt from '../components/ReferenceNumberPrompt';
+import CropCreditTypeDialog from '../components/CropCreditTypeDialog';
 
 // ── Insufficient Stock Override Modal ────────────────────────────────────────
 function InsufficientStockModal({ open, insufficientItems, onOverride, onCancel, onGoPO }) {
@@ -331,6 +332,9 @@ export default function UnifiedSalesPage() {
   const [managerPin, setManagerPin] = useState('');
   const [creditCheckResult, setCreditCheckResult] = useState(null);
   const [pendingCreditSale, setPendingCreditSale] = useState(null);
+  // Crop credit type selection
+  const [cropTypeDialog, setCropTypeDialog] = useState(false);
+  const [cropCreditConfig, setCropCreditConfig] = useState(null);
   
   // Offline
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -1141,10 +1145,24 @@ export default function UnifiedSalesPage() {
       return;
     }
 
-    // Credit or Partial — ALWAYS requires manager PIN (even for admin/manager)
-    // because extending credit needs documented authorization
+    // Credit or Partial — ask if By Term or Charged to Crop (only when customer is selected)
+    if ((paymentType === 'credit' || paymentType === 'partial') && selectedCustomer?.id) {
+      setPendingCreditSale({ paymentType, partialPayment, amountTendered });
+      setCheckoutDialog(false);
+      setCropTypeDialog(true);
+      return;
+    }
+
+    // Credit without a customer — proceed to PIN directly
     setPendingCreditSale({ paymentType, partialPayment, amountTendered });
     setCheckoutDialog(false);
+    setCreditApprovalDialog(true);
+  };
+
+  // Handle crop type confirmed — proceed to PIN approval
+  const handleCropTypeConfirmed = (config) => {
+    setCropCreditConfig(config);
+    setCropTypeDialog(false);
     setCreditApprovalDialog(true);
   };
 
@@ -1285,6 +1303,59 @@ export default function UnifiedSalesPage() {
         clearCart();
         setCheckoutDialog(false);
         setPendingCreditSale(null);
+
+        // ── Crop Credit linking (after invoice created) ──────────────────
+        if (cropCreditConfig?.type === 'charged_to_crop' && selectedCustomer?.id && balance > 0) {
+          try {
+            const cropPayload = {
+              amount: balance,
+              invoice_id: res.data.id || '',
+              invoice_number: invoiceNum || '',
+              description: `Credit sale ${invoiceNum}`,
+              date: saleData.order_date,
+            };
+
+            if (cropCreditConfig.activeCreditId) {
+              // Add to existing season
+              await api.post(`/crop-credits/${cropCreditConfig.activeCreditId}/add-credit`, cropPayload);
+            } else {
+              // Create new season
+              await api.post('/crop-credits', {
+                customer_id: selectedCustomer.id,
+                planting_date: cropCreditConfig.plantingDate,
+                initial_amount: balance,
+                invoice_id: res.data.id || '',
+                invoice_number: invoiceNum || '',
+                description: `Credit sale ${invoiceNum}`,
+                branch_id: currentBranch?.id || '',
+              });
+            }
+
+            // Link existing term invoices if requested
+            if (cropCreditConfig.linkExistingTerms && cropCreditConfig.termInvoices?.length > 0) {
+              // Fetch the newly created/updated crop credit
+              const blockCheck = await api.get(`/crop-credits/check-block/${selectedCustomer.id}`);
+              const creditId = blockCheck.data.active_credit_id;
+              if (creditId) {
+                for (const inv of cropCreditConfig.termInvoices) {
+                  await api.post(`/crop-credits/${creditId}/add-credit`, {
+                    amount: inv.balance,
+                    invoice_id: inv.id,
+                    invoice_number: inv.invoice_number,
+                    description: `Linked term credit: ${inv.invoice_number}`,
+                    date: inv.order_date || saleData.order_date,
+                  }).catch(() => {});
+                }
+              }
+            }
+
+            toast.success('Linked to Crop Credit season');
+          } catch (cropErr) {
+            console.error('Crop credit link failed:', cropErr);
+            // Non-blocking — sale was already created successfully
+          }
+          setCropCreditConfig(null);
+        }
         // For digital/split payments: MANDATORY receipt upload
         if ((actualPaymentType === 'digital' || actualPaymentType === 'split') && res.data.id) {
           try {
@@ -2509,6 +2580,17 @@ export default function UnifiedSalesPage() {
       </Dialog>
 
       {/* Credit Approval Dialog — Respects PIN Policies */}
+      {/* Crop Credit Type Dialog — shown before PIN approval for credit sales */}
+      <CropCreditTypeDialog
+        open={cropTypeDialog}
+        onClose={() => { setCropTypeDialog(false); setCropCreditConfig(null); setPendingCreditSale(null); }}
+        onConfirm={handleCropTypeConfirmed}
+        customerId={selectedCustomer?.id}
+        customerName={selectedCustomer?.name || 'Customer'}
+        saleAmount={balanceDue}
+        branchId={currentBranch?.id}
+      />
+
       <Dialog open={creditApprovalDialog} onOpenChange={setCreditApprovalDialog}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>

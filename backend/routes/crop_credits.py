@@ -416,6 +416,7 @@ async def create_crop_credit(data: dict, user=Depends(get_current_user)):
             "date": now_iso()[:10],
             "description": description,
             "invoice_id": data.get("invoice_id", ""),
+            "invoice_number": data.get("invoice_number", ""),
             "recorded_by": user.get("full_name", user.get("username", "")),
             "recorded_at": now_iso(),
         })
@@ -612,6 +613,7 @@ async def add_credit_to_season(credit_id: str, data: dict, user=Depends(get_curr
         "date": data.get("date", now_iso()[:10]),
         "description": data.get("description", "Credit added to season"),
         "invoice_id": data.get("invoice_id", ""),
+        "invoice_number": data.get("invoice_number", ""),
         "recorded_by": user.get("full_name", user.get("username", "")),
         "recorded_at": now_iso(),
     }
