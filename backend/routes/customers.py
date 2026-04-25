@@ -171,6 +171,9 @@ async def customer_receivables_summary(
                 "overdue_count": {
                     "$sum": {"$cond": ["$is_overdue", 1, 0]}
                 },
+                "oldest_overdue_due_date": {
+                    "$min": {"$cond": ["$is_overdue", "$due_date", None]}
+                },
             }
         },
         {"$sort": {"total_balance": -1}},
@@ -202,6 +205,7 @@ async def customer_receivables_summary(
             "overdue_balance": round(agg.get("overdue_balance", 0), 2),
             "invoice_count": agg.get("invoice_count", 0),
             "overdue_count": agg.get("overdue_count", 0),
+            "oldest_overdue_due_date": agg.get("oldest_overdue_due_date"),
             "interest_rate": c.get("interest_rate", 0),
             "grace_period": c.get("grace_period", 7),
             "credit_limit": c.get("credit_limit", 0),

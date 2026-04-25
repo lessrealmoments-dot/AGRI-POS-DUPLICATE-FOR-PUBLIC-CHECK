@@ -16,6 +16,7 @@ import {
 import { toast } from 'sonner';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
 import CustomerStatementModal from '../components/CustomerStatementModal';
+import CustomerBalanceBadge, { useCustomerBalances } from '../components/CustomerBalanceBadge';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -58,6 +59,7 @@ function ArAgingReport({ branches, selectedBranchId, canExport }) {
   const [selectedInvoiceNumber, setSelectedInvoiceNumber] = useState(null);
   const [stmtOpen, setStmtOpen] = useState(false);
   const [stmtCustomer, setStmtCustomer] = useState(null);
+  const { byId: balanceById } = useCustomerBalances();
   const { canViewAllBranches } = useAuth();
 
   const load = useCallback(async () => {
@@ -203,9 +205,12 @@ function ArAgingReport({ branches, selectedBranchId, canExport }) {
                       {expandedRows[row.customer_id] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                     </TableCell>
                     <TableCell className="font-medium">
-                      <button onClick={(e) => { e.stopPropagation(); setStmtCustomer({ id: row.customer_id, name: row.customer_name }); setStmtOpen(true); }} className="hover:text-[#1A4D2E] hover:underline text-left">
-                        {row.customer_name}
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button onClick={(e) => { e.stopPropagation(); setStmtCustomer({ id: row.customer_id, name: row.customer_name }); setStmtOpen(true); }} className="hover:text-[#1A4D2E] hover:underline text-left">
+                          {row.customer_name}
+                        </button>
+                        <CustomerBalanceBadge customerId={row.customer_id} byId={balanceById} />
+                      </div>
                     </TableCell>
                     <TableCell className="text-right font-mono text-sm">
                       {row.current > 0 ? <span className="text-emerald-600">{formatPHP(row.current)}</span> : <span className="text-slate-300">—</span>}

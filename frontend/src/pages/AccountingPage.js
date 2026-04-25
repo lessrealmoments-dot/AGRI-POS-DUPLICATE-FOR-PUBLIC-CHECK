@@ -20,6 +20,7 @@ import ViewQRDialog from '../components/ViewQRDialog';
 import ExpenseDetailModal from '../components/ExpenseDetailModal';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
 import CustomerStatementModal from '../components/CustomerStatementModal';
+import CustomerBalanceBadge, { useCustomerBalances } from '../components/CustomerBalanceBadge';
 
 const EXPENSE_CATEGORIES = [
   "Utilities", "Rent", "Supplies", "Transportation", "Fuel/Gas",
@@ -59,6 +60,7 @@ export default function AccountingPage() {
   const [stmtOpen, setStmtOpen] = useState(false);
   const [stmtCustomer, setStmtCustomer] = useState(null);
   const openCustStmt = (id, name) => { if (!id) return; setStmtCustomer({ id, name }); setStmtOpen(true); };
+  const { byId: balanceById } = useCustomerBalances();
   
   // Dialog states
   const [expenseDialog, setExpenseDialog] = useState(false);
@@ -579,7 +581,16 @@ export default function AccountingPage() {
                     return (
                       <TableRow key={r.id} className="table-row-hover">
                         <TableCell><button className="font-mono text-xs text-blue-600 hover:underline" onClick={() => openDetailModal(r.invoice_number)}>{r.invoice_number || '—'}</button></TableCell>
-                        <TableCell className="font-medium">{r.customer_id ? <button onClick={() => openCustStmt(r.customer_id, r.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{r.customer_name}</button> : r.customer_name}</TableCell>
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-1.5">
+                            {r.customer_id ? (
+                              <button onClick={() => openCustStmt(r.customer_id, r.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{r.customer_name}</button>
+                            ) : (
+                              <span>{r.customer_name}</span>
+                            )}
+                            <CustomerBalanceBadge customerId={r.customer_id} byId={balanceById} />
+                          </div>
+                        </TableCell>
                         <TableCell><Badge className={`text-[9px] ${typeConfig.cls}`}>{typeConfig.label}</Badge></TableCell>
                         <TableCell className="text-sm text-slate-600">{r.description || '-'}</TableCell>
                         <TableCell className="text-right">{formatPHP(r.amount)}</TableCell>

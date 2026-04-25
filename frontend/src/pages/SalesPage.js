@@ -12,6 +12,7 @@ import { Edit3, Search, ArrowUpDown, ArrowUp, ArrowDown, RefreshCw, ChevronLeft,
 import { toast } from 'sonner';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
 import CustomerStatementModal from '../components/CustomerStatementModal';
+import CustomerBalanceBadge, { useCustomerBalances } from '../components/CustomerBalanceBadge';
 
 const STATUS_FILTERS = [
   { key: 'all', label: 'All' },
@@ -46,6 +47,7 @@ export default function SalesPage() {
   const [businessInfo, setBusinessInfo] = useState({});
   const [stmtOpen, setStmtOpen] = useState(false);
   const [stmtCustomer, setStmtCustomer] = useState(null);
+  const { byId: balanceById } = useCustomerBalances();
 
   // Load business info for printing
   useEffect(() => {
@@ -238,16 +240,19 @@ export default function SalesPage() {
                         {s.edited && <Edit3 size={10} className="text-orange-500" />}
                       </span>
                     </TableCell>
-                    <TableCell className="font-medium text-sm max-w-[160px] truncate">
+                    <TableCell className="font-medium text-sm max-w-[220px] truncate">
                       {s.customer_id ? (
-                        <button
-                          className="text-left hover:text-[#1A4D2E] hover:underline truncate w-full"
-                          onClick={(e) => { e.stopPropagation(); setStmtCustomer({ id: s.customer_id, name: s.customer_name, phone: s.customer_phone, address: s.customer_address }); setStmtOpen(true); }}
-                          data-testid={`customer-link-${s.id}`}
-                          title={`View statement of account — ${s.customer_name}`}
-                        >
-                          {s.customer_name || 'Walk-in'}
-                        </button>
+                        <div className="flex items-center gap-1.5 truncate">
+                          <button
+                            className="text-left hover:text-[#1A4D2E] hover:underline truncate"
+                            onClick={(e) => { e.stopPropagation(); setStmtCustomer({ id: s.customer_id, name: s.customer_name, phone: s.customer_phone, address: s.customer_address }); setStmtOpen(true); }}
+                            data-testid={`customer-link-${s.id}`}
+                            title={`View statement of account — ${s.customer_name}`}
+                          >
+                            {s.customer_name || 'Walk-in'}
+                          </button>
+                          <CustomerBalanceBadge customerId={s.customer_id} byId={balanceById} />
+                        </div>
                       ) : (
                         <span className="text-slate-500">{s.customer_name || 'Walk-in'}</span>
                       )}

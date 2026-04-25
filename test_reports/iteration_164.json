@@ -1,0 +1,77 @@
+{
+  "summary": "Iteration 164: end-to-end regression for the new inline 'open balance' badge + receivables-summary backend extension. Backend pytest (8 tests) confirms oldest_overdue_due_date field is returned as ISO YYYY-MM-DD or null, all existing fields preserved, value is null when overdue_balance==0, non-null when overdue_balance>0, and always strictly < today. Frontend: 26 balance badges on Sales History (walk-in rows have 0 badges as required), 39 on Reports AR Aging tab, 89 on Accounting Receivables tab. Color tones verified (amber=17 / red=9 on Sales). Cache de-dup verified: across SPA navigation Sales -> Reports -> Accounting -> Sales the /api/customers/receivables-summary endpoint is hit exactly ONCE. Click-through regression: customer name still opens 'Statement of Account — <Name>' Dialog on all three pages. Zero console errors related to badge component.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_results": {
+    "backend_pytest": {
+      "file": "/app/backend/tests/test_balance_badge_164.py",
+      "summary": "7 passed, 1 skipped (test_null_when_no_overdue skipped because all 39 test customers have overdue balances)",
+      "junit_xml": "/app/test_reports/pytest/iteration_164_results.xml",
+      "checks": {
+        "endpoint_status_200": "PASS",
+        "existing_fields_preserved": "PASS (id, name, balance, overdue_balance, invoice_count, overdue_count, interest_rate, grace_period, credit_limit)",
+        "new_field_oldest_overdue_due_date_present": "PASS (all 39 rows)",
+        "iso_yyyy_mm_dd_format_or_null": "PASS",
+        "non_null_when_overdue": "PASS",
+        "always_in_past_when_present": "PASS"
+      }
+    },
+    "frontend_sales_page": {
+      "badges_count": 26,
+      "walk_in_rows": 16,
+      "walk_in_rows_with_badge": 0,
+      "color_tones": {"emerald": 0, "amber": 17, "red": 9},
+      "sample_badge_titles": [
+        "Open ₱109,149.00 · ₱107,349.00 overdue (25d past due, oldest due 2026-03-31)",
+        "Open ₱18,423.00 · ₱18,000.00 overdue (38d past due, oldest due 2026-03-18)",
+        "Open ₱4,047.35 · ₱4,043.47 overdue (58d past due, oldest due 2026-02-26)"
+      ],
+      "click_through_to_statement_modal": "PASS (Statement of Account — ELLINE MACAY)"
+    },
+    "frontend_reports_ar_aging": {
+      "badges_count": 39,
+      "tab_used": "AR Aging"
+    },
+    "frontend_accounting_receivables": {
+      "badges_count": 89,
+      "tab_used": "Receivables (role=tab)",
+      "click_through_to_statement_modal": "PASS (Statement of Account — ELLINE MACAY)",
+      "table_headers_verified": ["INVOICE #", "CUSTOMER", "TYPE", "DESCRIPTION", "AMOUNT", "PAID", "BALANCE", "STATUS"]
+    },
+    "cache_dedup": {
+      "spa_navigation_path": "Sales -> Reports/AR Aging -> Accounting/Receivables -> Sales (back)",
+      "receivables_summary_calls": 1,
+      "verdict": "PASS — single fetch shared across all three pages within 30s window via module-level _cache + _inFlight de-dup"
+    },
+    "console_errors": "0 errors related to balance badge or receivables-summary"
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_balance_badge_164.py",
+    "/app/test_reports/pytest/iteration_164_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "CustomerBalanceBadge.js correctly hides itself when row not found, balance ≤ 0.005, or customerId is falsy (covers walk-in case implicitly). Verified at runtime: 16 walk-in rows on Sales rendered 0 badges.",
+    "Cache implementation in useCustomerBalances() correctly de-duplicates concurrent fetches via _inFlight promise; module-level _cache survives SPA route changes. Single network call confirmed across 3 distinct pages.",
+    "Three pages wire byId via { byId: balanceById } = useCustomerBalances() and pass <CustomerBalanceBadge customerId={...} byId={balanceById} /> consistently. No prop-drilling duplication.",
+    "Backend $min aggregation with $cond: ['$is_overdue', '$due_date', None] correctly returns null when no overdue invoices and the earliest due_date when present. Verified 7 pytest assertions.",
+    "Note (pre-existing, unrelated to this change): Statement of Account modal uses native browser date inputs (mm/dd/yyyy + 04/25/2026) instead of shadcn Calendar. Not a regression — flagging only because system prompt asks design reviewers to mention it. Not in scope of current task."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_balance_badge_164.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": {"super_admin": "janmarkeahig@gmail.com / Aa@58798546521325"},
+  "seed_data_creation": "None — read-only verification against existing 39 customers with non-zero balances.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "When testing the Accounting Receivables tab, use page.get_by_role('tab', name='Receivables', exact=True) NOT text=Receivables — the latter may match a heading/card label instead of the tab and leave the Expenses tab active (false negative on badge count). Same caveat applies to Reports AR Aging — though in practice text=AR Aging works there because the only match is the tab. The cache test needs SPA navigation (history.pushState + popstate dispatch) — page.goto() does a hard reload and resets _cache/_cacheTime module state, which would falsely show 3 calls.",
+  "rca of the issue": "No issues found. Feature implementation is correct end-to-end."
+}
