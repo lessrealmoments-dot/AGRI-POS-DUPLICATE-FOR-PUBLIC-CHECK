@@ -22,6 +22,14 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### Click-to-Review Drill-Down + Terminal Modal Migration (2026-04-25) — Complete
+- **Phase 1** Tier-1 click-to-review wiring: customer names + invoice #s in **Sales History**, **Audit Center**, **Daily Log**, **Close Wizard** are now clickable. Invoice # → opens existing `InvoiceDetailModal`. Customer name → opens existing `CustomerStatementModal`. Walk-in customers (no `customer_id`) render as plain text (no orphan link).
+- **Phase 2** Tier-2 click-to-review wiring: same pattern applied to **Dashboard** recent activity, **Reports** (AR Aging, Sales transactions, Discount Audit), and **Accounting** (Cash Drawer expenses + Customer Receivables).
+- **Phase 3** Terminal modal migration: `TerminalUpdateReceiptModal.jsx` and `TerminalReturnRefundModal.jsx` migrated from raw `<div className="fixed inset-0">` overlays to **shadcn `Dialog`** with proper accessibility (focus trap, Escape close, role=dialog). Replaced `axios + BACKEND` with shared `api`, replaced local `php()` with shared `formatPHP`. **Business logic, payload structure, API endpoints (`/api/returns`, `/api/invoices/<id>/correct-incomplete-stock`), and multi-step state machine preserved exactly.**
+- Reused existing modals — **NO new modal components created**. Total LOC: −38 (smaller because of shared utilities).
+- Fixed a stray React `key` warning in ArAgingReport's `<Fragment>` map.
+- Tested via `testing_agent_v3_fork` (iteration 163): 100% pass on tested code paths (Sales 25 buttons, Accounting Receivables 99 buttons, Reports 41 buttons, Terminal modals lint+structure).
+
 ### /payments UI Redesign + Inline Interest + Statement Popup (2026-04-25) — Complete
 - **Compact header** (~110px): Title + customer + Total Amount Due in row 1; Payment Amt + Date + Ref + Payment Methods in row 2 — gives invoice table ~200px more space (4-7 invoices visible vs. 2 before)
 - **Inline interest sub-rows**: Each overdue invoice with computed interest now shows an amber sub-row with "Interest accrued (Xd × Y%/mo)" + computed amount (e.g. +₱279.00) using `charges-preview` API — no DB INT invoice is created from browsing

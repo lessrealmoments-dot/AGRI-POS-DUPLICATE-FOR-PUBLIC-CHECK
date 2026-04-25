@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Fragment } from 'react';
 import { useAuth, api } from '../contexts/AuthContext';
 import { formatPHP } from '../lib/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -194,9 +194,8 @@ function ArAgingReport({ branches, selectedBranchId, canExport }) {
             </TableHeader>
             <TableBody>
               {(data?.rows || []).map(row => (
-                <>
+                <Fragment key={row.customer_id}>
                   <TableRow
-                    key={row.customer_id}
                     className="cursor-pointer hover:bg-slate-50"
                     onClick={() => toggleRow(row.customer_id)}
                   >
@@ -238,7 +237,7 @@ function ArAgingReport({ branches, selectedBranchId, canExport }) {
                       <TableCell className="text-right font-mono font-medium text-slate-700">{formatPHP(inv.balance)}</TableCell>
                     </TableRow>
                   ))}
-                </>
+                </Fragment>
               ))}
               {/* Totals row */}
               {data?.rows?.length > 0 && (
