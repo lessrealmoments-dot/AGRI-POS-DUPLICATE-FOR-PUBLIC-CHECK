@@ -13,7 +13,7 @@ import requests
 import os
 import io
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://harvest-tracker-80.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://crop-credit-pos.preview.emergentagent.com').rstrip('/')
 
 # Test credentials - use super admin since company admin password may have changed
 SUPER_ADMIN_EMAIL = "janmarkeahig@gmail.com"

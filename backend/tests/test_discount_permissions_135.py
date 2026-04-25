@@ -14,7 +14,7 @@ import time
 import random
 import string
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://harvest-tracker-80.preview.emergentagent.com')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://crop-credit-pos.preview.emergentagent.com')
 
 # Test credentials
 ADMIN_EMAIL = "janmarkeahig@gmail.com"
