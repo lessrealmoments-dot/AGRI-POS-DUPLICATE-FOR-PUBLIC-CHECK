@@ -145,17 +145,10 @@ async def _send_harvest_notification(crop_credit: dict, notification_type: str):
         else:
             cc_roles = CC_ALL
 
-        # Get org-level staff recipient phones
-        recipients_doc = await _raw_db.system_settings.find_one(
-            {"key": "collection_notification_recipients", "organization_id": org_id}, {"_id": 0}
-        )
-        recipients = recipients_doc or {}
-        staff_phones = {
-            "owner":   recipients.get("owner_phone", ""),
-            "manager": recipients.get("manager_phone", ""),
-            "admin":   recipients.get("admin_phone", ""),
-            "auditor": recipients.get("auditor_phone", ""),
-        }
+        # Get CC phones respecting branch scope (manager/auditor are branch-specific)
+        from routes.sms_hooks import _get_cc_phones
+        cc_phones = await _get_cc_phones(org_id, branch_id, {"owner", "admin", "manager", "auditor"})
+        staff_phones = {role: phone for role, phone in cc_phones.items() if phone}
 
         # Queue to customer (uses customisable template)
         customer_phone = crop_credit.get("customer_phone", "")

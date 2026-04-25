@@ -229,29 +229,42 @@ async def update_sales_config(data: dict, user=Depends(get_current_user)):
 
 @router.get("/collection-recipients")
 async def get_collection_recipients(user=Depends(get_current_user)):
-    """Get phone numbers for crop credit collection notifications (owner, manager, admin, auditor)."""
+    """Get phone numbers for collection notifications.
+    owner/admin are global (all branches).
+    manager/auditor support per-branch overrides via branch_phones dict."""
     doc = await db.system_settings.find_one(
         {"key": "collection_notification_recipients"}, {"_id": 0}
     )
     if not doc:
-        return {"owner_phone": "", "manager_phone": "", "admin_phone": "", "auditor_phone": ""}
+        return {"owner_phone": "", "admin_phone": "", "manager_phone": "",
+                "auditor_phone": "", "branch_phones": {}}
     return {
-        "owner_phone": doc.get("owner_phone", ""),
+        "owner_phone":   doc.get("owner_phone", ""),
+        "admin_phone":   doc.get("admin_phone", ""),
         "manager_phone": doc.get("manager_phone", ""),
-        "admin_phone": doc.get("admin_phone", ""),
         "auditor_phone": doc.get("auditor_phone", ""),
+        "branch_phones": doc.get("branch_phones", {}),
     }
 
 
 @router.put("/collection-recipients")
 async def update_collection_recipients(data: dict, user=Depends(get_current_user)):
-    """Update collection notification phone numbers. Admin only."""
+    """Update collection notification phone numbers. Admin only.
+    branch_phones format: {branch_id: {manager_phone, auditor_phone}}"""
     check_perm(user, "settings", "edit")
     recipients = {
-        "owner_phone": data.get("owner_phone", "").strip(),
+        "owner_phone":   data.get("owner_phone", "").strip(),
+        "admin_phone":   data.get("admin_phone", "").strip(),
         "manager_phone": data.get("manager_phone", "").strip(),
-        "admin_phone": data.get("admin_phone", "").strip(),
         "auditor_phone": data.get("auditor_phone", "").strip(),
+        "branch_phones": {
+            bid: {
+                "manager_phone": (v.get("manager_phone") or "").strip(),
+                "auditor_phone": (v.get("auditor_phone") or "").strip(),
+            }
+            for bid, v in (data.get("branch_phones") or {}).items()
+            if isinstance(v, dict)
+        },
     }
     await db.system_settings.update_one(
         {"key": "collection_notification_recipients"},

@@ -143,7 +143,9 @@ export default function MessagesPage() {
 
   // Settings state
   const [smsSettings, setSmsSettings] = useState([]);
-  const [collectionRecipients, setCollectionRecipients] = useState({ owner_phone: '', manager_phone: '', admin_phone: '', auditor_phone: '' });
+  const [collectionRecipients, setCollectionRecipients] = useState({
+    owner_phone: '', manager_phone: '', admin_phone: '', auditor_phone: '', branch_phones: {}
+  });
   const [savingRecipients, setSavingRecipients] = useState(false);
 
   // Gateway log state
@@ -190,7 +192,7 @@ export default function MessagesPage() {
       const res = await api.get('/sms/settings');
       setSmsSettings(res.data || []);
       const rec = await api.get('/settings/collection-recipients');
-      setCollectionRecipients(rec.data || {});
+      setCollectionRecipients(rec.data || { owner_phone: '', manager_phone: '', admin_phone: '', auditor_phone: '', branch_phones: {} });
     } catch { /* ignore */ }
   }, []);
 
@@ -1360,39 +1362,91 @@ export default function MessagesPage() {
         <div className="space-y-4 max-w-2xl">
           {/* Collection Notification Recipients */}
           <Card className="border-amber-200">
-            <CardContent className="p-5 space-y-4">
+            <CardContent className="p-5 space-y-5">
               <div>
                 <h2 className="text-sm font-bold text-slate-700 flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-amber-500" />
-                  Crop Credit Collection Notification Recipients
+                  Collection Notification Recipients
                 </h2>
                 <p className="text-xs text-slate-400 mt-1">
-                  These phone numbers receive SMS when a crop season harvest is approaching (15d, 7d, due date) and when extensions are granted.
+                  Owner &amp; Admin receive SMS for <strong>all branches</strong>.
+                  Manager &amp; Auditor are <strong>branch-specific</strong> — configure per branch below.
                 </p>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { key: 'owner_phone', label: 'Owner Phone' },
-                  { key: 'manager_phone', label: 'Manager Phone' },
-                  { key: 'admin_phone', label: 'Admin Phone' },
-                  { key: 'auditor_phone', label: 'Auditor Phone' },
-                ].map(({ key, label }) => (
-                  <div key={key}>
-                    <label className="text-xs text-slate-600 font-medium">{label}</label>
-                    <input
-                      data-testid={`recipient-${key}`}
-                      type="tel"
-                      placeholder="09XX XXX XXXX"
-                      value={collectionRecipients[key] || ''}
-                      onChange={e => setCollectionRecipients(r => ({ ...r, [key]: e.target.value }))}
-                      className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300"
-                    />
-                  </div>
-                ))}
+
+              {/* Global: Owner + Admin */}
+              <div>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Global — All Branches</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {[{ key: 'owner_phone', label: 'Owner Phone' }, { key: 'admin_phone', label: 'Admin Phone' }].map(({ key, label }) => (
+                    <div key={key}>
+                      <label className="text-xs text-slate-600 font-medium">{label}</label>
+                      <input data-testid={`recipient-${key}`} type="tel" placeholder="09XX XXX XXXX"
+                        value={collectionRecipients[key] || ''}
+                        onChange={e => setCollectionRecipients(r => ({ ...r, [key]: e.target.value }))}
+                        className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                    </div>
+                  ))}
+                </div>
               </div>
-              <button
-                data-testid="save-recipients-btn"
-                disabled={savingRecipients}
+
+              {/* Global fallback: Manager + Auditor */}
+              <div>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Global Fallback</p>
+                <p className="text-[10px] text-slate-400 mb-2">Used when no branch-specific phone is set below.</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {[{ key: 'manager_phone', label: 'Manager Phone (fallback)' }, { key: 'auditor_phone', label: 'Auditor Phone (fallback)' }].map(({ key, label }) => (
+                    <div key={key}>
+                      <label className="text-xs text-slate-600 font-medium">{label}</label>
+                      <input data-testid={`recipient-${key}`} type="tel" placeholder="09XX XXX XXXX"
+                        value={collectionRecipients[key] || ''}
+                        onChange={e => setCollectionRecipients(r => ({ ...r, [key]: e.target.value }))}
+                        className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Per-branch: Manager + Auditor */}
+              {branches.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Branch-Specific — Manager &amp; Auditor</p>
+                  <div className="space-y-3">
+                    {branches.map(br => {
+                      const bp = collectionRecipients.branch_phones?.[br.id] || {};
+                      const set = (field, val) => setCollectionRecipients(r => ({
+                        ...r,
+                        branch_phones: { ...r.branch_phones, [br.id]: { ...bp, [field]: val } }
+                      }));
+                      return (
+                        <div key={br.id} className="border border-slate-200 rounded-lg p-3">
+                          <p className="text-xs font-semibold text-slate-700 mb-2">{br.name}</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="text-[10px] text-slate-500">Manager Phone</label>
+                              <input type="tel" placeholder="09XX XXX XXXX"
+                                data-testid={`recipient-mgr-${br.id}`}
+                                value={bp.manager_phone || ''}
+                                onChange={e => set('manager_phone', e.target.value)}
+                                className="mt-0.5 w-full border border-slate-200 rounded-md px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                            </div>
+                            <div>
+                              <label className="text-[10px] text-slate-500">Auditor Phone</label>
+                              <input type="tel" placeholder="09XX XXX XXXX"
+                                data-testid={`recipient-aud-${br.id}`}
+                                value={bp.auditor_phone || ''}
+                                onChange={e => set('auditor_phone', e.target.value)}
+                                className="mt-0.5 w-full border border-slate-200 rounded-md px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <button data-testid="save-recipients-btn" disabled={savingRecipients}
                 onClick={async () => {
                   setSavingRecipients(true);
                   try {

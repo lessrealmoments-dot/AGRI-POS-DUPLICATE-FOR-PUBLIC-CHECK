@@ -8,6 +8,44 @@ from config import _raw_db as raw_db, logger
 from utils import now_iso, new_id
 
 
+async def _get_cc_phones(org_id: str, branch_id: str, roles: set) -> dict:
+    """
+    Return phone numbers for each requested role, respecting branch scope.
+
+    Scoping rules:
+      owner / admin  → global (one phone configured per org, notified on ALL branches)
+      manager        → branch-specific first, falls back to global manager_phone
+      auditor        → branch-specific first, falls back to global auditor_phone
+                       (an auditor may cover only certain branches, not all)
+
+    Configure via Settings → Messages → Collection Recipients.
+
+    Returns dict of {role: phone} — roles with no phone configured are omitted.
+    """
+    setting = await raw_db.system_settings.find_one(
+        {"key": "collection_notification_recipients", "organization_id": org_id},
+        {"_id": 0}
+    )
+    s = setting or {}
+    # Per-branch overrides for manager/auditor
+    branch_config = s.get("branch_phones", {}).get(branch_id, {})
+
+    result = {}
+    if "owner" in roles and s.get("owner_phone"):
+        result["owner"] = s["owner_phone"].strip()
+    if "admin" in roles and s.get("admin_phone"):
+        result["admin"] = s["admin_phone"].strip()
+    if "manager" in roles:
+        phone = (branch_config.get("manager_phone") or s.get("manager_phone", "")).strip()
+        if phone:
+            result["manager"] = phone
+    if "auditor" in roles:
+        phone = (branch_config.get("auditor_phone") or s.get("auditor_phone", "")).strip()
+        if phone:
+            result["auditor"] = phone
+    return result
+
+
 async def _resolve_org_id(branch_id: str) -> str:
     """Resolve organization_id from a branch_id. Returns empty string if not found."""
     if not branch_id:
@@ -81,11 +119,9 @@ async def on_credit_sale_created(invoice: dict):
                 dedup_key=f"credit_new:{invoice.get('id', '')}:{phone}",
             )
 
-        # CC: manager — needs awareness of new credit extended on their branch
-        recipients_doc = await raw_db.system_settings.find_one(
-            {"key": "collection_notification_recipients", "organization_id": org_id}, {"_id": 0}
-        )
-        manager_phone = (recipients_doc or {}).get("manager_phone", "")
+        # CC: manager — branch-specific; needs awareness of new credit extended on their branch
+        cc = await _get_cc_phones(org_id, branch_id, {"manager"})
+        manager_phone = cc.get("manager", "")
         if manager_phone:
             mgr_msg = (
                 f"[New Credit] {customer.get('name','')} — "
@@ -188,11 +224,9 @@ async def on_charge_applied(customer_id: str, charge_type: str, charge_amount: f
                 trigger_ref=f"charge:{customer_id}:{charge_type}:{phone}",
             )
 
-        # CC: manager — closes the loop; confirms charge was applied and customer notified
-        recipients_doc = await raw_db.system_settings.find_one(
-            {"key": "collection_notification_recipients", "organization_id": org_id}, {"_id": 0}
-        )
-        manager_phone = (recipients_doc or {}).get("manager_phone", "")
+        # CC: manager — branch-specific; closes the loop; confirms charge was applied and customer notified
+        cc = await _get_cc_phones(org_id, branch_id, {"manager"})
+        manager_phone = cc.get("manager", "")
         if manager_phone:
             mgr_msg = (
                 f"[{charge_type} Applied] {customer.get('name','')} — "
@@ -257,11 +291,9 @@ async def on_crop_season_started(crop_credit: dict, total_balance: float):
                 dedup_key=f"crop_season_started:{crop_credit.get('id', '')}:{phone}",
             )
 
-        # CC: notify owner — new season is a significant financial commitment
-        recipients_doc = await raw_db.system_settings.find_one(
-            {"key": "collection_notification_recipients", "organization_id": org_id}, {"_id": 0}
-        )
-        owner_phone = (recipients_doc or {}).get("owner_phone", "")
+        # CC: notify owner — new season is a significant financial commitment (global — all branches)
+        cc = await _get_cc_phones(org_id, branch_id, {"owner"})
+        owner_phone = cc.get("owner", "")
         if owner_phone:
             owner_msg = (
                 f"[New Crop Season] {customer.get('name','')} — "

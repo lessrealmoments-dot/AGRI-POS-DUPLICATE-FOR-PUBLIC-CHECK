@@ -727,10 +727,8 @@ async def startup():
                 crop_customer_ids = {cc["customer_id"] for cc in crop_customers if cc.get("customer_id")}
 
                 # Load collection staff phones once per org (used for CC on 7-day + overdue)
-                recipients_doc_all = await _raw_db.system_settings.find_one(
-                    {"key": "collection_notification_recipients", "organization_id": org_id}, {"_id": 0}
-                )
-                recipients_all = recipients_doc_all or {}
+                # branch-specific lookup happens per-invoice using _get_cc_phones
+                from routes.sms_hooks import _get_cc_phones as _sms_get_cc
 
                 invoices = await _raw_db.invoices.find(
                     {"organization_id": org_id,
@@ -811,8 +809,9 @@ async def startup():
                             trigger_ref=inv.get("id", ""),
                             dedup_key=f"reminder_7day:{inv.get('id', '')}:{today}",
                         )
-                        # CC to manager
-                        manager_phone = recipients_all.get("manager_phone", "")
+                        # CC to manager — branch-specific
+                        cc = await _sms_get_cc(org_id, branch_id, {"manager"})
+                        manager_phone = cc.get("manager", "")
                         if manager_phone:
                             staff_msg_7d = (
                                 f"[7-Day Due] {customer.get('name','')} — "
@@ -868,8 +867,9 @@ async def startup():
                                     f"P{balance:,.2f} overdue since {due_date}. "
                                     f"Total balance: P{total_bal:,.2f}."
                                 )
-                                for role_key, role_phone_key in [("owner", "owner_phone"), ("manager", "manager_phone")]:
-                                    rphone = recipients_all.get(role_phone_key, "")
+                                # owner = global all-branch; manager = branch-specific
+                                cc = await _sms_get_cc(org_id, branch_id, {"owner", "manager"})
+                                for role_key, rphone in cc.items():
                                     if rphone:
                                         await _raw_db.sms_queue.insert_one({
                                             "id": new_id(), "organization_id": org_id,
