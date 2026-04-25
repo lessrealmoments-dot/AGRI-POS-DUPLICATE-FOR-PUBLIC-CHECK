@@ -22,6 +22,13 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### Inline Open-Balance Badges + Hook Cache (2026-04-25) — Complete
+- New shared **`CustomerBalanceBadge`** component + **`useCustomerBalances`** hook (in-memory 30s cache, single fetch shared across pages, concurrent-fetch de-dup via `_inFlight` promise).
+- Wired into **Sales History**, **Reports → AR Aging**, **Accounting → Receivables**.
+- Badge shows: `₱<balance> · <days>d` next to customer name, color-coded (green=current, amber=1-30d overdue, red=>30d overdue). Hidden when balance≤0 or customer is walk-in.
+- Backend: extended `/api/customers/receivables-summary` with new `oldest_overdue_due_date` field (ISO date string) computed via `$min` aggregation on overdue due dates.
+- Tested via iteration 164: 8 backend pytest checks + 26/39/89 badges across 3 pages, single-fetch cache verified, click-through to Statement still works. 100% pass.
+
 ### Click-to-Review Drill-Down + Terminal Modal Migration (2026-04-25) — Complete
 - **Phase 1** Tier-1 click-to-review wiring: customer names + invoice #s in **Sales History**, **Audit Center**, **Daily Log**, **Close Wizard** are now clickable. Invoice # → opens existing `InvoiceDetailModal`. Customer name → opens existing `CustomerStatementModal`. Walk-in customers (no `customer_id`) render as plain text (no orphan link).
 - **Phase 2** Tier-2 click-to-review wiring: same pattern applied to **Dashboard** recent activity, **Reports** (AR Aging, Sales transactions, Discount Audit), and **Accounting** (Cash Drawer expenses + Customer Receivables).
