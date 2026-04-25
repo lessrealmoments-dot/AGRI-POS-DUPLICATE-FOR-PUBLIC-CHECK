@@ -1,0 +1,90 @@
+{
+  "summary": "Tested /payments redesign (compact header, inline interest preview, Account Summary card, Statement popup, no auto-INT creation on customer select). All 11 backend tests pass. UI smoke test confirms numbers match across Account Summary, top-right Total Amount Due, and Statement popup subtotals (all show \u20b118,423.00 for John Gil Ahig). ELLINE MACAY shows the amber 'No interest rate on file' prompt. Backend confirms charges-preview is read-only and does not create INT invoices on browse.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "console_warnings": [
+      {
+        "component": "PaymentsPage.js (around line 717 invoices tbody)",
+        "issue": "React hydration warning: '<span> cannot contain a <tr>' / '<span> cannot be a child of <tbody>'. Caused by a wrapper element (data-ve-dynamic / x-source-var=invoices) injected around <tr> rows, likely from a dev-tooling instrumentation. Tables still render correctly but this is a noisy console warning and a real HTML semantic violation. If this wrapper comes from app code (Fragment/conditional rendering returning a span around <tr>s), it should be replaced with React.Fragment.",
+        "priority": "LOW"
+      }
+    ]
+  },
+  "test_results": {
+    "backend_endpoint_invoices": {
+      "returns_list": "PASS",
+      "no_underscore_id_leakage": "PASS",
+      "fields_grand_total_balance_present": "PASS"
+    },
+    "backend_endpoint_charges_preview": {
+      "required_fields_present": "PASS (interest_preview, total_interest, total_principal)",
+      "row_shape_invoice_id_principal_rate_days_interest_amount": "PASS",
+      "total_interest_equals_sum_of_rows": "PASS",
+      "no_rate_customer_returns_empty": "PASS"
+    },
+    "backend_no_int_creation_on_select": {
+      "charges_preview_does_not_create_int": "PASS (count unchanged after 3 browse cycles)",
+      "charges_preview_with_rate_override_does_not_create": "PASS"
+    },
+    "backend_generate_interest": {
+      "without_force_30day_guard_works": "PASS",
+      "with_force_returns_total_interest": "PASS"
+    },
+    "ui_payments_page": {
+      "page_loads_no_blank": "PASS (body length 2956 chars)",
+      "39_customers_visible": "PASS",
+      "with_balance_filter_present": "PASS",
+      "select_john_gil_account_summary_card": "PASS (data-testid=account-summary)",
+      "summary_principal_18000": "PASS (\u20b118,000.00)",
+      "summary_interest_423": "PASS (\u20b1423.00)",
+      "summary_total_18423": "PASS (\u20b118,423.00)",
+      "topright_total_amount_due_matches_summary": "PASS (\u20b118,423.00)",
+      "statement_popup_opens": "PASS",
+      "statement_columns_original_payments_interest_amountdue": "PASS (all 4 present)",
+      "statement_subtotal_matches_summary": "PASS (\u20b118,423.00)",
+      "statement_close_button_works": "PASS",
+      "elline_no_interest_rate_prompt": "PASS"
+    }
+  },
+  "verification_notes": {
+    "inline_interest_subrows_currently_zero_for_john_gil": "John Gil already has INT-B1-001004 (\u20b1423) created. Backend charges-preview correctly returns 0 interest_preview rows because last_interest_date is set on the underlying invoices for the current 30-day window. The previous screenshot showing +\u20b1279 + \u20b1144 = \u20b1423 inline rows was BEFORE the INT invoice was generated. Sum still adds correctly to \u20b118,423 (principal \u20b118,000 + existing INT \u20b1423). Behavior is consistent with spec: inline preview is display-only and the existing INT invoice already represents the prior accrued interest.",
+    "save_apply_int_creation_not_executed": "Did not actually click Save & Apply with a payment amount in this run (would mutate live DB). Backend contract verified: POST /generate-interest with force=true accepts the request and returns total_interest. Recommend main agent or next iteration verify end-to-end Save & Apply -> INT creation manually."
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_payments_redesign_162.py",
+    "/app/test_reports/pytest/pytest_payments_162.xml"
+  ],
+  "action_items": [
+    "(LOW) Investigate React hydration warning '<span> cannot contain <tr>' on PaymentsPage invoice table. Likely a wrapper around invoice rows (tr) needs to be a React.Fragment instead of a <span>."
+  ],
+  "critical_code_review_comments": [
+    "PaymentsPage.js renders some wrapper (span) around <tr> elements inside <tbody>, producing React hydration warnings. Should use <React.Fragment> for any conditional/dynamic group of <tr>s.",
+    "/api/customers/{id}/charges-preview correctly excludes interest_charge/penalty_charge from the principal/interest computation (line 1738) and does not write to DB \u2014 proper read-only design.",
+    "/api/customers/{id}/generate-interest 30-day guard (line 1404) is sound; force=true override is the documented path used by Save & Apply. Code matches spec.",
+    "/api/customers/{id}/invoices uses {_id: 0} projection (line 1367) \u2014 no ObjectId leakage. Verified."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_payments_redesign_162.py"
+  ],
+  "success_rate": {
+    "backend": "100% (11/11 pytest)",
+    "frontend": "95% (all UX flows pass; one console hydration warning)"
+  },
+  "test_credentials": {
+    "super_admin": "janmarkeahig@gmail.com / Aa@58798546521325",
+    "test_customers": {
+      "john_gil_ahig_3pct": "0ff5cf41-93b6-4df1-a014-4c674263b8cf",
+      "elline_macay_no_rate": "7890edd8-e59a-4fb2-8c51-2a4beeaaf665"
+    }
+  },
+  "seed_data_creation": "None. Tests read-only on customer/invoice endpoints and use force=true generate-interest only with idempotent contract assertions.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend test file /app/backend/tests/test_payments_redesign_162.py covers invoices endpoint, charges-preview endpoint (no _id leakage, correct shape, no DB writes), and generate-interest endpoint (30-day guard + force override). For full end-to-end Save & Apply -> INT invoice creation, manually click Save & Apply on John Gil Ahig with a payment amount > 0 and verify mongo db.invoices.count_documents({customer_id: '0ff5cf41-93b6-4df1-a014-4c674263b8cf', sale_type: 'interest_charge'}) increases. The current setup already has INT-B1-001004 created within 30 days, so without force, generate-interest will be skipped \u2014 force=true (used by Save & Apply path in PaymentsPage) is required."
+}

@@ -22,6 +22,16 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### /payments UI Redesign + Inline Interest + Statement Popup (2026-04-25) — Complete
+- **Compact header** (~110px): Title + customer + Total Amount Due in row 1; Payment Amt + Date + Ref + Payment Methods in row 2 — gives invoice table ~200px more space (4-7 invoices visible vs. 2 before)
+- **Inline interest sub-rows**: Each overdue invoice with computed interest now shows an amber sub-row with "Interest accrued (Xd × Y%/mo)" + computed amount (e.g. +₱279.00) using `charges-preview` API — no DB INT invoice is created from browsing
+- **Account Summary card** (QuickBooks-style): Outstanding Principal / Accrued Interest Charges / Total Amount Due with optional Applied / Discount lines
+- **Statement popup** (QuickBooks-style): "Statement" button opens dialog showing Original Amount / Payments-Adj / Accrued Interest / Amount Due per invoice with subtotals — exactly what user asked for ("10,000 original, 5,000 paid, 5,000 due" pattern)
+- **INT invoice now only created at Pay time**: `handleApplyPayment` calls `generate-interest` with `force=true` ONLY when the user clicks Pay AND there's accrued interest > 0 — INT invoice is then auto-allocated first via autoApply
+- **Removed**: bulky "Generate Interest / Penalty Charges" collapsible card; replaced with slim toolbar buttons (Statement / Force INT / Penalty / History) + inline interest rate input
+- **Removed**: `autoGenerateAndLoad` auto-generation on customer select — customer selection now only loads invoices and shows preview (no DB writes)
+- Files: `/app/frontend/src/pages/PaymentsPage.js`
+
 ### Crop Credits Architecture Fix + Signature Viewing (2026-04-24) — Complete
 - Principal balance now computed DYNAMICALLY from linked invoices (not stored separately) — ensures /crop-credits, /payments, /customers all show consistent totals
 - `_compute_principal_from_invoices()` helper aggregates all linked invoice balances in real-time

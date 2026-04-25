@@ -1,19 +1,19 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import { useAuth, api } from '../contexts/AuthContext';
 import { formatPHP } from '../lib/utils';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Badge } from '../components/ui/badge';
-import { Card, CardContent } from '../components/ui/card';
+import { Card } from '../components/ui/card';
 import { Separator } from '../components/ui/separator';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { ScrollArea } from '../components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import {
-  Search, AlertTriangle, Percent, Receipt, Clock, Calculator,
-  Info, ChevronDown, ChevronUp, Zap, Edit3, Banknote, CreditCard,
-  Building2, Smartphone, X, Tag, Users, ArrowDownAZ, ArrowDown01, Filter
+  Search, AlertTriangle, Percent, Receipt, Clock,
+  Info, Zap, Edit3, Banknote, CreditCard, FileText, RefreshCw,
+  Building2, Smartphone, X, Tag, Users, ArrowDownAZ, ArrowDown01
 } from 'lucide-react';
 import { toast } from 'sonner';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
@@ -62,12 +62,10 @@ export default function PaymentsPage() {
   const [payMemo, setPayMemo] = useState('');
 
   // Interest/penalty
-  const [chargesOpen, setChargesOpen] = useState(false);
   const [penaltyRate, setPenaltyRate] = useState(5);
   const [chargesPreview, setChargesPreview] = useState(null);
   const [generatingCharge, setGeneratingCharge] = useState(null);
   const [interestRateInput, setInterestRateInput] = useState('');
-  const [saveRateToCustomer, setSaveRateToCustomer] = useState(false);
   const interestPreviewTimer = useRef(null);
 
   // No-rate prompt
@@ -77,6 +75,7 @@ export default function PaymentsPage() {
 
   // Dialogs
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [statementOpen, setStatementOpen] = useState(false);
   const [payHistory, setPayHistory] = useState([]);
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState(null);
@@ -123,43 +122,18 @@ export default function PaymentsPage() {
     setPayRef('');
     setPayMemo('');
     setInterestRateInput(c.interest_rate > 0 ? String(c.interest_rate) : '');
-    setSaveRateToCustomer(false);
     setRatePromptOpen(false);
     setRatePromptInput('');
-    // Auto-generate interest on overdue invoices, then load
-    autoGenerateAndLoad(c);
-    loadChargesPreview(c.id);
+    // Just load invoices + preview interest inline (no DB INT invoice creation)
+    loadAndPromptIfNoRate(c);
+    loadChargesPreview(c.id, c.interest_rate > 0 ? c.interest_rate : undefined);
   };
 
-  // Auto-generate interest for overdue invoices then reload the invoice list.
-  // force=false → respects 30-day interval (no accumulation).
-  // If customer has no interest rate but has overdue invoices, show the rate prompt instead.
-  const autoGenerateAndLoad = useCallback(async (customer) => {
+  // Load invoices and prompt for rate if customer has overdue but no rate set.
+  // No INT invoice is created here — interest is computed inline only.
+  const loadAndPromptIfNoRate = useCallback(async (customer) => {
     const rate = parseFloat(customer.interest_rate) || 0;
-    if (rate > 0) {
-      try {
-        const today = new Date().toISOString().split('T')[0];
-        const res = await api.post(`/customers/${customer.id}/generate-interest`, {
-          as_of_date: today,
-          rate_override: rate,
-          force: false,   // never force on auto — respects 30-day guard
-        });
-        if (res.data.total_interest > 0) {
-          toast.success(
-            `Interest auto-computed: ${res.data.invoice_number} — ${formatPHP(res.data.total_interest)}`,
-            { description: 'Applied to overdue invoices. Payment will cover this first.' }
-          );
-        } else if (res.data.skipped) {
-          // 30-day guard hit — inform staff without alarming them
-          toast(`Interest up to date — next generation in ${res.data.days_until_next} day(s).`,
-            { duration: 3000 });
-        }
-      } catch {
-        // Silently skip — no overdue or no internet
-      }
-    }
     const invRes = await loadInvoices(customer.id);
-    // If no rate set, check if any loaded invoices are overdue → show prompt
     if (rate <= 0) {
       const today = new Date().toISOString().split('T')[0];
       const loaded = invRes || [];
@@ -217,6 +191,24 @@ export default function PaymentsPage() {
   const totalOpen = invoices.reduce((s, i) => s + (i.balance || 0), 0);
   const hasUnsavedAmounts = Object.values(rowAmounts).some(v => parseFloat(v) > 0) || totalDiscount > 0;
 
+  // ── Inline interest map: invoice_id → preview row ──
+  const interestByInvoice = (chargesPreview?.interest_preview || []).reduce((acc, p) => {
+    acc[p.invoice_id] = p; return acc;
+  }, {});
+
+  // ── Account Summary (live) ──
+  // Outstanding Principal = open balances of regular invoices (excludes already-issued INT/penalty)
+  // Accrued Interest Charges = open INT/penalty invoice balances + computed (but not-yet-issued) interest
+  const principalOpen = invoices
+    .filter(i => i.sale_type !== 'interest_charge' && i.sale_type !== 'penalty_charge')
+    .reduce((s, i) => s + (i.balance || 0), 0);
+  const interestOpenInvoiced = invoices
+    .filter(i => i.sale_type === 'interest_charge' || i.sale_type === 'penalty_charge')
+    .reduce((s, i) => s + (i.balance || 0), 0);
+  const interestComputedInline = chargesPreview?.total_interest || 0;
+  const accruedInterestTotal = round2(interestOpenInvoiced + interestComputedInline);
+  const totalAmountDue = round2(principalOpen + accruedInterestTotal);
+
   // ── Auto-apply ──
   const autoApply = (totalAmt) => {
     const amt = parseFloat(totalAmt) || 0;
@@ -233,30 +225,18 @@ export default function PaymentsPage() {
     setRowAmounts(newAmounts);
   };
 
-  // ── Set rate from prompt + auto-generate ──
+  // ── Set rate from prompt (saves rate + refreshes inline preview only) ──
   const handleSetRateFromPrompt = async () => {
     const rate = parseFloat(ratePromptInput) || 0;
     if (rate <= 0) { toast.error('Enter a valid interest rate'); return; }
     setRatePromptSaving(true);
     try {
-      // Save rate to customer profile
       await api.put(`/customers/${selectedCustomer.id}`, { interest_rate: rate });
       setSelectedCustomer(prev => ({ ...prev, interest_rate: rate }));
       setInterestRateInput(String(rate));
-      // Generate interest with the new rate
-      const today = new Date().toISOString().split('T')[0];
-      const res = await api.post(`/customers/${selectedCustomer.id}/generate-interest`, {
-        as_of_date: today, rate_override: rate,
-      });
-      if (res.data.total_interest > 0) {
-        toast.success(`Rate set to ${rate}%/mo — Interest ${res.data.invoice_number} created: ${formatPHP(res.data.total_interest)}`,
-          { description: 'Payment will cover interest first, then oldest invoices.' });
-      } else {
-        toast.success(`Rate ${rate}%/mo saved. No overdue interest to generate yet.`);
-      }
+      toast.success(`Rate ${rate}%/mo saved. Interest will be computed inline.`);
       setRatePromptOpen(false);
       setRatePromptInput('');
-      await loadInvoices(selectedCustomer.id);
       await loadChargesPreview(selectedCustomer.id, rate);
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Failed to set rate');
@@ -265,22 +245,17 @@ export default function PaymentsPage() {
     }
   };
 
-  // ── Generate Interest (manual — force=true bypasses the 30-day interval) ──
+  // ── Generate Interest manually (force=true, bypasses 30-day guard) ──
   const handleGenerateInterest = async () => {
     const rate = parseFloat(interestRateInput) || 0;
     if (rate <= 0) { toast.error('Enter an interest rate (% per month) first'); return; }
     setGeneratingCharge('interest');
     try {
-      const payload = { as_of_date: payDate, rate_override: rate, force: true };
-      if (saveRateToCustomer) payload.save_rate = true;
-      const res = await api.post(`/customers/${selectedCustomer.id}/generate-interest`, payload);
+      const res = await api.post(`/customers/${selectedCustomer.id}/generate-interest`, {
+        as_of_date: payDate, rate_override: rate, force: true,
+      });
       if (res.data.total_interest > 0) {
         toast.success(`Interest invoice ${res.data.invoice_number} created — ${formatPHP(res.data.total_interest)}`);
-        if (saveRateToCustomer) {
-          setSelectedCustomer(prev => ({ ...prev, interest_rate: rate }));
-          toast(`Interest rate ${rate}%/mo saved to ${selectedCustomer.name}'s profile`);
-          setSaveRateToCustomer(false);
-        }
         await loadInvoices(selectedCustomer.id);
         await loadChargesPreview(selectedCustomer.id, rate);
       } else {
@@ -307,19 +282,84 @@ export default function PaymentsPage() {
   };
 
   // ── Apply Payment ──
+  // Before applying: if customer has overdue invoices and a rate, generate the INT invoice
+  // (force=true) so that interest is collected at this payment. autoApply ordering puts
+  // interest first so the staff still sees the same applied total.
   const handleApplyPayment = async () => {
-    const allocations = invoices
-      .map(inv => ({
-        invoice_id: inv.id,
-        amount: parseFloat(rowAmounts[inv.id] || 0),
-        discount: getDiscountAmount(inv),
-      }))
-      .filter(a => a.amount > 0 || a.discount > 0);
-
-    if (allocations.length === 0) { toast.error('Enter payment amounts for at least one invoice'); return; }
+    const totalEntered = invoices.reduce((s, inv) => s + (parseFloat(rowAmounts[inv.id] || 0)), 0);
+    const totalDisc = invoices.reduce((s, inv) => s + getDiscountAmount(inv), 0);
+    if (totalEntered <= 0 && totalDisc <= 0) { toast.error('Enter payment amounts for at least one invoice'); return; }
 
     setProcessing(true);
     try {
+      // Auto-generate INT invoice at pay-time (only if rate set + computed interest > 0)
+      const rate = parseFloat(interestRateInput) || parseFloat(selectedCustomer.interest_rate) || 0;
+      const computedInt = chargesPreview?.total_interest || 0;
+      let intInvoiceCreated = null;
+      if (rate > 0 && computedInt > 0.005) {
+        try {
+          const intRes = await api.post(`/customers/${selectedCustomer.id}/generate-interest`, {
+            as_of_date: payDate, rate_override: rate, force: true,
+          });
+          if (intRes.data.total_interest > 0 && intRes.data.invoice_number) {
+            intInvoiceCreated = intRes.data;
+            // Reload invoices so the new INT invoice appears for allocation
+            const fresh = await loadInvoices(selectedCustomer.id);
+            // Auto-apply: route entered amount through the now-updated invoice list
+            // (interest invoice will be paid first because of sort order)
+            const totalToApply = totalEntered + (intInvoiceCreated ? intInvoiceCreated.total_interest : 0);
+            let remaining = totalToApply;
+            const newAmounts = {};
+            for (const inv of fresh) {
+              if (remaining <= 0) break;
+              const apply = Math.min(remaining, inv.balance);
+              if (apply > 0) { newAmounts[inv.id] = apply.toFixed(2); remaining = round2(remaining - apply); }
+            }
+            setRowAmounts(newAmounts);
+            // Build allocations from the freshly loaded invoices
+            const allocations = fresh
+              .map(inv => ({ invoice_id: inv.id, amount: parseFloat(newAmounts[inv.id] || 0), discount: 0 }))
+              .filter(a => a.amount > 0);
+            const res = await api.post(`/customers/${selectedCustomer.id}/receive-payment`, {
+              allocations, method: payMethod, reference: payRef, date: payDate,
+              branch_id: currentBranch?.id, memo: payMemo,
+            });
+            toast.success(
+              `${formatPHP(res.data.total_applied)} applied to ${res.data.applied_invoices.length} invoice(s) — incl. ${formatPHP(intInvoiceCreated.total_interest)} interest (${intInvoiceCreated.invoice_number})`,
+              { description: `Deposited to ${res.data.deposited_to}` }
+            );
+            setRowAmounts({});
+            setRowDiscounts({});
+            setDiscountModes({});
+            setPayRef('');
+            setPayMemo('');
+            await loadInvoices(selectedCustomer.id);
+            await loadChargesPreview(selectedCustomer.id, rate);
+            await loadCustList();
+            const refreshed = (await api.get('/customers/receivables-summary', {
+              params: { include_zero: showAll, ...(currentBranch?.id ? { branch_id: currentBranch.id } : {}) }
+            }).then(r => r.data || []).catch(() => [])).find(c => c.id === selectedCustomer.id);
+            if (refreshed) setSelectedCustomer(refreshed);
+            setProcessing(false);
+            return;
+          }
+        } catch (e) {
+          // If INT generation fails (e.g., 30-day guard hit), proceed with normal payment
+          console.warn('INT generation skipped:', e.response?.data?.detail);
+        }
+      }
+
+      // Standard path — no INT invoice was created (or none needed)
+      const allocations = invoices
+        .map(inv => ({
+          invoice_id: inv.id,
+          amount: parseFloat(rowAmounts[inv.id] || 0),
+          discount: getDiscountAmount(inv),
+        }))
+        .filter(a => a.amount > 0 || a.discount > 0);
+
+      if (allocations.length === 0) { toast.error('Enter payment amounts for at least one invoice'); setProcessing(false); return; }
+
       const res = await api.post(`/customers/${selectedCustomer.id}/receive-payment`, {
         allocations, method: payMethod, reference: payRef, date: payDate,
         branch_id: currentBranch?.id, memo: payMemo,
@@ -335,7 +375,6 @@ export default function PaymentsPage() {
       setPayMemo('');
       await loadInvoices(selectedCustomer.id);
       await loadChargesPreview(selectedCustomer.id);
-      // Refresh customer list + selected customer
       await loadCustList();
       const refreshed = (await api.get('/customers/receivables-summary', {
         params: { include_zero: showAll, ...(currentBranch?.id ? { branch_id: currentBranch.id } : {}) }
@@ -480,82 +519,68 @@ export default function PaymentsPage() {
       {/* ══════════ RIGHT: Payment Form ══════════ */}
       <div className="flex-1 flex flex-col overflow-hidden">
 
-        {/* ── Header ── */}
-        <div className="border-b border-slate-200 px-5 py-4 shrink-0 bg-white">
-          <div className="flex items-start justify-between mb-4">
-            <h1 className="text-xl font-bold tracking-tight" style={{ fontFamily: 'Manrope' }} data-testid="payments-title">
+        {/* ── Compact Header (~110px) ── */}
+        <div className="border-b border-slate-200 px-5 py-3 shrink-0 bg-white">
+          {/* Row 1: Title + Received From + Total Amount Due */}
+          <div className="flex items-center gap-4 mb-2.5">
+            <h1 className="text-base font-bold tracking-tight shrink-0" style={{ fontFamily: 'Manrope' }} data-testid="payments-title">
               Customer Payment
             </h1>
+            <div className="flex-1 relative max-w-md">
+              <Users size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Input
+                value={selectedCustomer ? selectedCustomer.name : ''}
+                readOnly
+                placeholder="Select a customer from the left panel"
+                className="pl-8 pr-8 h-9 font-medium bg-white cursor-default"
+                data-testid="payment-customer-display"
+              />
+              {selectedCustomer && (
+                <button onClick={clearCustomer} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                  <X size={14} />
+                </button>
+              )}
+            </div>
             {selectedCustomer && (
-              <div className="text-right" data-testid="customer-balance-display">
-                <p className="text-[10px] text-slate-400 uppercase tracking-wide">Customer Balance</p>
-                <p className="text-2xl font-bold text-red-600 font-mono" style={{ fontFamily: 'Manrope' }}>
-                  {formatPHP(totalOpen)}
+              <div className="text-right ml-auto" data-testid="customer-balance-display">
+                <p className="text-[9px] text-slate-400 uppercase tracking-wide leading-tight">Total Amount Due</p>
+                <p className="text-xl font-bold text-red-600 font-mono leading-tight" style={{ fontFamily: 'Manrope' }}>
+                  {formatPHP(totalAmountDue)}
                 </p>
               </div>
             )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-x-6 gap-y-3">
-            {/* Left: customer display + payment fields */}
-            <div className="space-y-2.5">
-              {/* RECEIVED FROM */}
-              <div className="flex items-center gap-3">
-                <Label className="text-xs text-slate-500 w-24 shrink-0 uppercase tracking-wide">Received From</Label>
-                <div className="flex-1 relative">
-                  <div className="relative">
-                    <Users size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <Input
-                      value={selectedCustomer ? selectedCustomer.name : ''}
-                      readOnly
-                      placeholder="Select a customer from the left panel"
-                      className="pl-8 h-9 font-medium bg-white cursor-default"
-                      data-testid="payment-customer-display"
-                    />
-                    {selectedCustomer && (
-                      <button onClick={clearCustomer} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                        <X size={14} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* PAYMENT AMT + DATE + REF */}
-              <div className="flex items-center gap-3 flex-wrap">
-                <Label className="text-xs text-slate-500 w-24 shrink-0 uppercase tracking-wide">Payment Amt</Label>
-                <Input type="number" placeholder="0.00" className="h-9 w-36 text-lg font-bold font-mono" data-testid="receive-amount"
-                  onChange={e => autoApply(e.target.value)} />
-                <Separator orientation="vertical" className="h-7 hidden sm:block" />
-                <div className="flex items-center gap-1.5">
-                  <Label className="text-[10px] text-slate-400 uppercase">Date</Label>
-                  <Input type="date" value={payDate} onChange={e => setPayDate(e.target.value)} className="h-9 w-36" data-testid="payment-date" />
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <Label className="text-[10px] text-slate-400 uppercase">Ref #</Label>
-                  <Input value={payRef} onChange={e => setPayRef(e.target.value)} placeholder="Check #, OR#..." className="h-9 w-32" data-testid="payment-ref" />
-                </div>
-              </div>
+          {/* Row 2: Payment Amt + Date + Ref + Payment Methods */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-1.5">
+              <Label className="text-[10px] text-slate-400 uppercase">Payment Amt</Label>
+              <Input type="number" placeholder="0.00" className="h-9 w-32 text-base font-bold font-mono" data-testid="receive-amount"
+                onChange={e => autoApply(e.target.value)} />
             </div>
-
-            {/* Right: payment method icons */}
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-[10px] text-slate-400 uppercase tracking-wide text-center">Payment Method</Label>
-              <div className="flex gap-1" data-testid="payment-methods">
-                {METHODS.map(m => {
-                  const Icon = m.icon;
-                  const active = payMethod === m.value;
-                  return (
-                    <button key={m.value} onClick={() => setPayMethod(m.value)} data-testid={`pay-method-${m.value}`}
-                      className={`flex flex-col items-center gap-0.5 px-3 py-2 rounded-lg border text-xs transition-all ${
-                        active ? 'bg-[#1A4D2E] text-white border-[#1A4D2E] shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                      }`}>
-                      <Icon size={16} />
-                      <span className="text-[10px] font-medium">{m.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
+            <div className="flex items-center gap-1.5">
+              <Label className="text-[10px] text-slate-400 uppercase">Date</Label>
+              <Input type="date" value={payDate} onChange={e => setPayDate(e.target.value)} className="h-9 w-36" data-testid="payment-date" />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Label className="text-[10px] text-slate-400 uppercase">Ref #</Label>
+              <Input value={payRef} onChange={e => setPayRef(e.target.value)} placeholder="Check #, OR#..." className="h-9 w-32" data-testid="payment-ref" />
+            </div>
+            <Separator orientation="vertical" className="h-7 hidden sm:block" />
+            <div className="flex gap-1 ml-auto" data-testid="payment-methods">
+              {METHODS.map(m => {
+                const Icon = m.icon;
+                const active = payMethod === m.value;
+                return (
+                  <button key={m.value} onClick={() => setPayMethod(m.value)} data-testid={`pay-method-${m.value}`}
+                    className={`flex items-center gap-1 px-2.5 py-1.5 rounded-md border text-xs transition-all ${
+                      active ? 'bg-[#1A4D2E] text-white border-[#1A4D2E] shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                    }`}>
+                    <Icon size={13} />
+                    <span className="text-[11px] font-medium">{m.label}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -608,111 +633,54 @@ export default function PaymentsPage() {
               </div>
             )}
 
-            {/* ── Interest/Penalty Charges Generation ── */}
-            <Card className="border-slate-200 shrink-0">
-              <button className="w-full" onClick={() => setChargesOpen(o => !o)}>
-                <CardContent className="p-2.5 flex items-center justify-between hover:bg-slate-50 transition-colors">
-                  <div className="flex items-center gap-2">
-                    <Calculator size={14} className="text-amber-500" />
-                    <span className="text-xs font-medium">Generate Interest / Penalty Charges</span>
-                    {chargesPreview?.total_interest > 0 && (
-                      <Badge className="text-[9px] bg-amber-100 text-amber-700">
-                        ~{formatPHP(chargesPreview.total_interest)} accrued
-                      </Badge>
-                    )}
-                  </div>
-                  {chargesOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                </CardContent>
-              </button>
-              {chargesOpen && (
-                <div className="px-4 pb-3 space-y-3 border-t border-slate-100">
-                  {chargesPreview && chargesPreview.total_interest > 0 && (
-                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mt-3">
-                      <p className="text-xs font-semibold text-amber-700 mb-2 flex items-center gap-1">
-                        <Info size={11} /> Accrued Interest Preview (as of {payDate})
-                      </p>
-                      <div className="grid grid-cols-3 gap-3 text-sm mb-2">
-                        <div><p className="text-[10px] text-amber-600">Principal Due</p><p className="font-bold">{formatPHP(chargesPreview.total_principal)}</p></div>
-                        <div><p className="text-[10px] text-amber-600">Computed Interest</p><p className="font-bold text-amber-700">{formatPHP(chargesPreview.total_interest)}</p></div>
-                        <div><p className="text-[10px] text-amber-600">Combined Total</p><p className="font-bold text-red-600">{formatPHP(chargesPreview.total_principal + chargesPreview.total_interest)}</p></div>
-                      </div>
-                      {chargesPreview.interest_preview?.map((item, i) => (
-                        <div key={i} className="flex items-center justify-between text-xs text-amber-700 py-0.5 border-b border-amber-100 last:border-0">
-                          <span className="font-mono">{item.invoice_number}</span>
-                          <span>{item.days_for_interest}d × {item.rate}%/mo</span>
-                          <span className="font-medium">{formatPHP(item.interest_amount)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div className="flex flex-wrap gap-3 items-end">
-                    <div className="flex-1 min-w-[220px] space-y-2">
-                      <p className="text-xs text-slate-500">Grace period: <strong>{selectedCustomer.grace_period || 7} days</strong></p>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Label className="text-xs text-slate-600 shrink-0">Interest Rate:</Label>
-                        <div className="flex items-center gap-0.5 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">
-                          <Input type="number" min="0" step="0.5" value={interestRateInput}
-                            onChange={e => setInterestRateInput(e.target.value)}
-                            placeholder="e.g. 3"
-                            className="w-14 h-6 text-xs text-center border-0 bg-transparent p-0 font-bold text-amber-700"
-                            data-testid="interest-rate-input" />
-                          <span className="text-xs text-amber-600 font-medium">%/mo</span>
-                        </div>
-                        {selectedCustomer.interest_rate > 0 && (
-                          <span className="text-[10px] text-slate-400">(saved: {selectedCustomer.interest_rate}%)</span>
-                        )}
-                      </div>
-                      {interestRateInput && parseFloat(interestRateInput) > 0 && parseFloat(interestRateInput) !== selectedCustomer.interest_rate && (
-                        <label className="flex items-center gap-1.5 cursor-pointer" data-testid="save-rate-checkbox">
-                          <input type="checkbox" checked={saveRateToCustomer} onChange={e => setSaveRateToCustomer(e.target.checked)}
-                            className="rounded border-amber-300 text-amber-600 focus:ring-amber-500 h-3.5 w-3.5" />
-                          <span className="text-[11px] text-amber-700">Save {interestRateInput}%/mo to this customer's profile</span>
-                        </label>
-                      )}
-                      <p className="text-[10px] text-slate-400 leading-relaxed">
-                        Formula: principal × (rate ÷ 30) × days since last computation.
-                        {' '}Computed from last interest date (not due date) to prevent double-charging.
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <Button size="sm" variant="outline" onClick={handleGenerateInterest}
-                        disabled={!!generatingCharge || !(parseFloat(interestRateInput) > 0)}
-                        className="text-amber-600 border-amber-200 hover:bg-amber-50 gap-1 disabled:opacity-40" data-testid="generate-interest-btn">
-                        <Percent size={12} /> {generatingCharge === 'interest' ? 'Generating...' : 'Generate Interest'}
-                      </Button>
-                      <Separator orientation="vertical" className="h-7" />
-                      <div className="flex items-center gap-1">
-                        <span className="text-xs text-slate-500">Penalty:</span>
-                        <div className="flex items-center gap-0.5 bg-slate-100 rounded-md px-2 py-1.5">
-                          <Input type="number" value={penaltyRate} onChange={e => setPenaltyRate(parseFloat(e.target.value) || 0)}
-                            className="w-12 h-6 text-xs text-center border-0 bg-transparent p-0" />
-                          <span className="text-xs text-slate-500">%</span>
-                        </div>
-                      </div>
-                      <Button size="sm" variant="outline" onClick={handleGeneratePenalty} disabled={!!generatingCharge}
-                        className="text-red-600 border-red-200 hover:bg-red-50 gap-1" data-testid="generate-penalty-btn">
-                        <AlertTriangle size={12} /> {generatingCharge === 'penalty' ? 'Generating...' : 'Apply Penalty'}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </Card>
-
             {/* ── Outstanding Transactions Table ── */}
             <Card className="border-slate-200 flex-1 min-h-0 flex flex-col">
-              <div className="flex items-center justify-between px-4 py-2 border-b border-slate-100">
-                <div className="flex items-center gap-3">
+              <div className="flex items-center justify-between px-4 py-2 border-b border-slate-100 gap-3 flex-wrap">
+                <div className="flex items-center gap-3 flex-wrap">
                   <span className="text-sm font-semibold" style={{ fontFamily: 'Manrope' }}>Outstanding Transactions</span>
                   {invoices.length > 0 && (
-                    <button onClick={() => autoApply(totalOpen)} className="text-xs text-[#1A4D2E] hover:underline flex items-center gap-1 font-medium" data-testid="auto-apply-all-btn">
+                    <button onClick={() => autoApply(totalAmountDue)} className="text-xs text-[#1A4D2E] hover:underline flex items-center gap-1 font-medium" data-testid="auto-apply-all-btn">
                       <Zap size={11} /> Auto-apply all
                     </button>
                   )}
+                  {/* Inline interest rate field — saved to customer if not already set */}
+                  <div className="flex items-center gap-1 bg-amber-50 border border-amber-200 rounded-md px-2 py-0.5">
+                    <Percent size={10} className="text-amber-600" />
+                    <Input type="number" min="0" step="0.5" value={interestRateInput}
+                      onChange={e => setInterestRateInput(e.target.value)}
+                      placeholder="Rate"
+                      className="w-12 h-6 text-xs text-center border-0 bg-transparent p-0 font-bold text-amber-700"
+                      data-testid="interest-rate-input" />
+                    <span className="text-[10px] text-amber-600 font-medium">%/mo</span>
+                  </div>
+                  {chargesPreview?.total_interest > 0 && (
+                    <Badge className="text-[9px] bg-amber-100 text-amber-700 gap-1">
+                      <Info size={9} /> {formatPHP(chargesPreview.total_interest)} accrued (preview)
+                    </Badge>
+                  )}
                 </div>
-                <Button variant="ghost" size="sm" className="text-xs gap-1" onClick={loadHistory} data-testid="payment-history-btn">
-                  <Clock size={12} /> History
-                </Button>
+                <div className="flex items-center gap-1">
+                  <Button variant="ghost" size="sm" className="text-xs gap-1" onClick={() => setStatementOpen(true)}
+                    disabled={invoices.length === 0} data-testid="view-statement-btn">
+                    <FileText size={12} /> Statement
+                  </Button>
+                  <Button variant="ghost" size="sm" className="text-xs gap-1 text-amber-600 hover:text-amber-700"
+                    onClick={handleGenerateInterest}
+                    disabled={!!generatingCharge || !(parseFloat(interestRateInput) > 0)}
+                    title="Force-generate interest invoice now (bypass 30-day guard)"
+                    data-testid="generate-interest-btn">
+                    <RefreshCw size={12} /> {generatingCharge === 'interest' ? 'Generating...' : 'Force INT'}
+                  </Button>
+                  <Button variant="ghost" size="sm" className="text-xs gap-1 text-red-600 hover:text-red-700"
+                    onClick={handleGeneratePenalty} disabled={!!generatingCharge}
+                    title={`Apply ${penaltyRate}% penalty on overdue invoices`}
+                    data-testid="generate-penalty-btn">
+                    <AlertTriangle size={12} /> {generatingCharge === 'penalty' ? 'Applying...' : `Penalty ${penaltyRate}%`}
+                  </Button>
+                  <Button variant="ghost" size="sm" className="text-xs gap-1" onClick={loadHistory} data-testid="payment-history-btn">
+                    <Clock size={12} /> History
+                  </Button>
+                </div>
               </div>
               {invoices.length === 0 ? (
                 <div className="flex-1 flex items-center justify-center">
@@ -745,7 +713,8 @@ export default function PaymentsPage() {
                         const mode = discountModes[inv.id] || 'amount';
 
                         return (
-                          <tr key={inv.id} className={`border-b border-slate-100 ${isApplied ? 'bg-emerald-50/40' : discAmt > 0 ? 'bg-blue-50/30' : 'hover:bg-slate-50/50'} transition-colors`}>
+                          <Fragment key={inv.id}>
+                          <tr className={`border-b border-slate-100 ${isApplied ? 'bg-emerald-50/40' : discAmt > 0 ? 'bg-blue-50/30' : 'hover:bg-slate-50/50'} transition-colors`}>
                             <td className="px-3 py-2 text-xs text-slate-500">{inv.order_date}</td>
                             <td className="px-3 py-2">
                               <button className="font-mono text-xs text-blue-600 hover:underline flex items-center gap-1"
@@ -783,6 +752,23 @@ export default function PaymentsPage() {
                                 data-testid={`payment-row-${inv.id}`} />
                             </td>
                           </tr>
+                          {/* Inline interest sub-row — shown when this invoice has accrued interest (no DB invoice yet) */}
+                          {interestByInvoice[inv.id] && (
+                            <tr className="bg-amber-50/40 border-b border-amber-100" data-testid={`inline-interest-${inv.id}`}>
+                              <td className="px-3 py-1" />
+                              <td colSpan={2} className="px-3 py-1 text-[10px] text-amber-700 italic">
+                                ↳ Interest accrued ({interestByInvoice[inv.id].days_for_interest}d × {interestByInvoice[inv.id].rate}%/mo)
+                              </td>
+                              <td className="px-3 py-1 text-right text-[10px] text-amber-600 font-mono">
+                                ₱{interestByInvoice[inv.id].principal.toFixed(2)} × {interestByInvoice[inv.id].rate}%
+                              </td>
+                              <td className="px-3 py-1 text-right text-[11px] text-amber-700 font-mono font-semibold">
+                                +{formatPHP(interestByInvoice[inv.id].interest_amount)}
+                              </td>
+                              <td colSpan={2} className="px-3 py-1 text-right text-[9px] text-amber-500 italic">computed live</td>
+                            </tr>
+                          )}
+                          </Fragment>
                         );
                       })}
                       {/* Totals row */}
@@ -799,52 +785,65 @@ export default function PaymentsPage() {
               )}
             </Card>
 
-            {/* ═══════════ FOOTER ═══════════ */}
-            <div className="pb-4 pt-2 shrink-0">
-              <div className="flex items-end justify-between gap-6 flex-wrap">
+            {/* ═══════════ FOOTER: Account Summary + Actions ═══════════ */}
+            <div className="pb-3 pt-1 shrink-0">
+              <div className="flex items-end justify-between gap-4 flex-wrap">
                 {/* Left: Memo */}
-                <div className="flex-1 min-w-[200px] max-w-md">
+                <div className="flex-1 min-w-[200px] max-w-sm">
                   <Label className="text-[10px] text-slate-400 uppercase tracking-wide">Memo</Label>
                   <Input value={payMemo} onChange={e => setPayMemo(e.target.value)}
                     placeholder="Optional note for this payment" className="h-9 mt-1" data-testid="payment-memo" />
                 </div>
 
-                {/* Right: Summary + Actions */}
-                <div className="flex items-end gap-4">
-                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 min-w-[220px]" data-testid="payment-summary">
-                    <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-2">Amounts for Selected Invoices</p>
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-xs">
-                        <span className="text-slate-500">Amount Due</span>
-                        <span className="font-mono font-medium">{formatPHP(totalOpen)}</span>
-                      </div>
-                      <div className="flex justify-between text-xs">
-                        <span className="text-slate-500">Applied</span>
-                        <span className="font-mono font-bold text-[#1A4D2E]">{formatPHP(totalApplied)}</span>
-                      </div>
-                      {totalDiscount > 0 && (
-                        <div className="flex justify-between text-xs">
-                          <span className="text-blue-600 flex items-center gap-1"><Tag size={10} /> Discount</span>
-                          <span className="font-mono font-bold text-blue-600">{formatPHP(totalDiscount)}</span>
-                        </div>
-                      )}
-                      <Separator className="my-1" />
-                      <div className="flex justify-between text-xs">
-                        <span className="text-slate-500">Remaining</span>
-                        <span className="font-mono font-medium text-red-600">{formatPHP(Math.max(0, totalOpen - totalApplied - totalDiscount))}</span>
-                      </div>
+                {/* Center: Account Summary card */}
+                <div className="bg-white border border-slate-300 rounded-lg p-3 min-w-[280px]" data-testid="account-summary">
+                  <p className="text-[10px] font-bold text-slate-700 uppercase tracking-wide mb-1.5" style={{ fontFamily: 'Manrope' }}>
+                    Account Summary
+                  </p>
+                  <div className="space-y-0.5">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-slate-600">Outstanding Principal</span>
+                      <span className="font-mono font-medium" data-testid="summary-principal">{formatPHP(principalOpen)}</span>
                     </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-amber-700">Accrued Interest Charges</span>
+                      <span className="font-mono font-medium text-amber-700" data-testid="summary-interest">{formatPHP(accruedInterestTotal)}</span>
+                    </div>
+                    <Separator className="my-1" />
+                    <div className="flex justify-between items-baseline">
+                      <span className="text-xs font-bold text-slate-800">Total Amount Due</span>
+                      <span className="font-mono font-bold text-base text-red-600" data-testid="summary-total">{formatPHP(totalAmountDue)}</span>
+                    </div>
+                    {(totalApplied > 0 || totalDiscount > 0) && (
+                      <>
+                        <Separator className="my-1" />
+                        <div className="flex justify-between text-[11px]">
+                          <span className="text-emerald-700">Applied Payment</span>
+                          <span className="font-mono font-semibold text-emerald-700">{formatPHP(totalApplied)}</span>
+                        </div>
+                        {totalDiscount > 0 && (
+                          <div className="flex justify-between text-[11px]">
+                            <span className="text-blue-600 flex items-center gap-1"><Tag size={9} /> Discount</span>
+                            <span className="font-mono font-semibold text-blue-600">{formatPHP(totalDiscount)}</span>
+                          </div>
+                        )}
+                      </>
+                    )}
                   </div>
+                  <p className="text-[9px] text-slate-400 italic mt-1 leading-tight">
+                    <Info size={8} className="inline mr-0.5" /> Interest is applied first. Payment covers oldest invoices.
+                  </p>
+                </div>
 
-                  <div className="flex flex-col gap-2">
-                    <Button onClick={handleApplyPayment} disabled={processing || !hasUnsavedAmounts}
-                      className="h-10 px-6 bg-[#1A4D2E] hover:bg-[#14532d] text-white" data-testid="apply-payment-btn">
-                      {processing ? 'Processing...' : 'Save & Apply'}
-                    </Button>
-                    <Button variant="outline" size="sm" className="text-xs" onClick={() => { setRowAmounts({}); setRowDiscounts({}); setDiscountModes({}); }}>
-                      Clear
-                    </Button>
-                  </div>
+                {/* Right: Actions */}
+                <div className="flex flex-col gap-2">
+                  <Button onClick={handleApplyPayment} disabled={processing || !hasUnsavedAmounts}
+                    className="h-10 px-6 bg-[#1A4D2E] hover:bg-[#14532d] text-white" data-testid="apply-payment-btn">
+                    {processing ? 'Processing...' : 'Save & Apply'}
+                  </Button>
+                  <Button variant="outline" size="sm" className="text-xs" onClick={() => { setRowAmounts({}); setRowDiscounts({}); setDiscountModes({}); }}>
+                    Clear
+                  </Button>
                 </div>
               </div>
             </div>
@@ -897,6 +896,100 @@ export default function PaymentsPage() {
               </TableBody>
             </Table>
           </ScrollArea>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Statement / All Open Invoices Dialog (QuickBooks-style) ── */}
+      <Dialog open={statementOpen} onOpenChange={setStatementOpen}>
+        <DialogContent className="sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle style={{ fontFamily: 'Manrope' }}>
+              Open Invoices Statement — {selectedCustomer?.name}
+            </DialogTitle>
+            <DialogDescription>
+              Original receipt amount, partial payments, computed interest, and current balance for each open invoice.
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-[520px]">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-slate-50">
+                  <TableHead className="text-xs">Date</TableHead>
+                  <TableHead className="text-xs">Invoice #</TableHead>
+                  <TableHead className="text-xs">Type</TableHead>
+                  <TableHead className="text-xs">Due</TableHead>
+                  <TableHead className="text-xs text-right">Original Amount</TableHead>
+                  <TableHead className="text-xs text-right">Payments / Adj.</TableHead>
+                  <TableHead className="text-xs text-right">Accrued Interest</TableHead>
+                  <TableHead className="text-xs text-right">Amount Due</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {invoices.length === 0 && (
+                  <TableRow><TableCell colSpan={8} className="text-center py-6 text-slate-400">No open invoices</TableCell></TableRow>
+                )}
+                {invoices.map((inv) => {
+                  const tc = getTypeConfig(inv.sale_type);
+                  const paid = round2((inv.grand_total || 0) - (inv.balance || 0));
+                  const intRow = interestByInvoice[inv.id];
+                  const daysOver = getDaysOverdue(inv.due_date);
+                  return (
+                    <TableRow key={inv.id} data-testid={`stmt-row-${inv.id}`}>
+                      <TableCell className="text-xs">{inv.order_date}</TableCell>
+                      <TableCell className="font-mono text-xs">{inv.invoice_number}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className={`text-[9px] ${tc.cls}`}>{tc.label}</Badge>
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        {inv.due_date || '—'}
+                        {daysOver > 0 && (
+                          <span className="text-[9px] text-red-500 ml-1">({daysOver}d over)</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right text-xs font-mono">{formatPHP(inv.grand_total || 0)}</TableCell>
+                      <TableCell className="text-right text-xs font-mono text-emerald-600">
+                        {paid > 0 ? `−${formatPHP(paid)}` : '—'}
+                      </TableCell>
+                      <TableCell className="text-right text-xs font-mono text-amber-700">
+                        {intRow ? `+${formatPHP(intRow.interest_amount)}` : '—'}
+                      </TableCell>
+                      <TableCell className="text-right font-mono font-semibold text-sm">
+                        {formatPHP(round2((inv.balance || 0) + (intRow ? intRow.interest_amount : 0)))}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {invoices.length > 0 && (
+                  <>
+                    <TableRow className="bg-slate-50 border-t-2 border-slate-300">
+                      <TableCell colSpan={4} className="text-right text-xs font-semibold text-slate-700 uppercase">Subtotals</TableCell>
+                      <TableCell className="text-right font-mono text-xs font-semibold">
+                        {formatPHP(invoices.reduce((s, i) => s + (i.grand_total || 0), 0))}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs font-semibold text-emerald-600">
+                        −{formatPHP(invoices.reduce((s, i) => s + ((i.grand_total || 0) - (i.balance || 0)), 0))}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs font-semibold text-amber-700">
+                        +{formatPHP(interestComputedInline)}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-sm font-bold text-red-600" data-testid="stmt-total-due">
+                        {formatPHP(totalAmountDue)}
+                      </TableCell>
+                    </TableRow>
+                  </>
+                )}
+              </TableBody>
+            </Table>
+          </ScrollArea>
+          <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-[11px] text-slate-500">
+            <span>
+              <Info size={11} className="inline mr-1" />
+              Accrued interest is computed live and is only billed when payment is recorded.
+            </span>
+            <Button size="sm" variant="outline" onClick={() => setStatementOpen(false)} data-testid="stmt-close-btn">
+              Close
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 
