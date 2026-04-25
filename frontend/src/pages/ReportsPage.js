@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
+import CustomerStatementModal from '../components/CustomerStatementModal';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -55,6 +56,8 @@ function ArAgingReport({ branches, selectedBranchId, canExport }) {
   const [expandedRows, setExpandedRows] = useState({});
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [selectedInvoiceNumber, setSelectedInvoiceNumber] = useState(null);
+  const [stmtOpen, setStmtOpen] = useState(false);
+  const [stmtCustomer, setStmtCustomer] = useState(null);
   const { canViewAllBranches } = useAuth();
 
   const load = useCallback(async () => {
@@ -200,7 +203,11 @@ function ArAgingReport({ branches, selectedBranchId, canExport }) {
                     <TableCell className="w-8 text-slate-400">
                       {expandedRows[row.customer_id] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                     </TableCell>
-                    <TableCell className="font-medium">{row.customer_name}</TableCell>
+                    <TableCell className="font-medium">
+                      <button onClick={(e) => { e.stopPropagation(); setStmtCustomer({ id: row.customer_id, name: row.customer_name }); setStmtOpen(true); }} className="hover:text-[#1A4D2E] hover:underline text-left">
+                        {row.customer_name}
+                      </button>
+                    </TableCell>
                     <TableCell className="text-right font-mono text-sm">
                       {row.current > 0 ? <span className="text-emerald-600">{formatPHP(row.current)}</span> : <span className="text-slate-300">—</span>}
                     </TableCell>
@@ -253,6 +260,7 @@ function ArAgingReport({ branches, selectedBranchId, canExport }) {
         </CardContent>
       </Card>
       <InvoiceDetailModal compact open={invoiceModalOpen} onOpenChange={setInvoiceModalOpen} invoiceNumber={selectedInvoiceNumber} />
+      <CustomerStatementModal open={stmtOpen} onOpenChange={setStmtOpen} customer={stmtCustomer} />
     </div>
   );
 }
@@ -273,6 +281,8 @@ function SalesReport({ branches, selectedBranchId, canExport }) {
   const [view, setView] = useState('summary'); // summary | transactions
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [selectedInvoiceNumber, setSelectedInvoiceNumber] = useState(null);
+  const [stmtOpen, setStmtOpen] = useState(false);
+  const [stmtCustomer, setStmtCustomer] = useState(null);
   const { canViewAllBranches } = useAuth();
 
   const load = useCallback(async () => {
@@ -495,7 +505,7 @@ function SalesReport({ branches, selectedBranchId, canExport }) {
                   <TableRow key={t.invoice_number}>
                     <TableCell><button className="font-mono text-xs text-blue-600 hover:underline" onClick={() => { setSelectedInvoiceNumber(t.invoice_number); setInvoiceModalOpen(true); }}>{t.invoice_number}</button></TableCell>
                     <TableCell className="text-sm">{t.date}</TableCell>
-                    <TableCell className="text-sm">{t.customer_name}</TableCell>
+                    <TableCell className="text-sm">{t.customer_id ? <button onClick={() => { setStmtCustomer({ id: t.customer_id, name: t.customer_name }); setStmtOpen(true); }} className="hover:text-[#1A4D2E] hover:underline">{t.customer_name}</button> : t.customer_name}</TableCell>
                     <TableCell className="text-sm text-slate-500">{t.cashier_name}</TableCell>
                     <TableCell>
                       <Badge variant="outline" className={t.payment_type === 'cash' ? 'border-emerald-200 text-emerald-700' : 'border-amber-200 text-amber-700'}>
@@ -523,6 +533,7 @@ function SalesReport({ branches, selectedBranchId, canExport }) {
         </Card>
       )}
       <InvoiceDetailModal compact open={invoiceModalOpen} onOpenChange={setInvoiceModalOpen} invoiceNumber={selectedInvoiceNumber} />
+      <CustomerStatementModal open={stmtOpen} onOpenChange={setStmtOpen} customer={stmtCustomer} />
     </div>
   );
 }
@@ -956,6 +967,10 @@ function DiscountAuditReport({ branches, selectedBranchId }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [expandedIdx, setExpandedIdx] = useState(null);
+  const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
+  const [selectedInvoiceNumber, setSelectedInvoiceNumber] = useState(null);
+  const [stmtOpen, setStmtOpen] = useState(false);
+  const [stmtCustomer, setStmtCustomer] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1071,7 +1086,7 @@ function DiscountAuditReport({ branches, selectedBranchId }) {
                             <div className="space-y-1">
                               {(g.invoices || []).map((inv, j) => (
                                 <div key={j} className="flex items-center justify-between text-xs">
-                                  <span className="font-mono text-blue-700">{inv.invoice_number}</span>
+                                  <button onClick={() => { setSelectedInvoiceNumber(inv.invoice_number); setInvoiceModalOpen(true); }} className="font-mono text-blue-700 hover:underline">{inv.invoice_number}</button>
                                   <span className="text-slate-400">{inv.date}</span>
                                   <span className="text-red-600 font-mono">-{formatPHP(inv.total_discount)}</span>
                                   <span className="text-slate-600 font-mono">{formatPHP(inv.grand_total)}</span>
@@ -1116,8 +1131,8 @@ function DiscountAuditReport({ branches, selectedBranchId }) {
                   {data.rows.map((r, i) => (
                     <TableRow key={i}>
                       <TableCell className="text-xs">{r.date}</TableCell>
-                      <TableCell className="font-mono text-xs text-blue-700">{r.invoice_number}</TableCell>
-                      <TableCell className="text-xs">{r.customer_name}</TableCell>
+                      <TableCell className="font-mono text-xs text-blue-700"><button onClick={() => { setSelectedInvoiceNumber(r.invoice_number); setInvoiceModalOpen(true); }} className="hover:underline">{r.invoice_number}</button></TableCell>
+                      <TableCell className="text-xs">{r.customer_id ? <button onClick={() => { setStmtCustomer({ id: r.customer_id, name: r.customer_name }); setStmtOpen(true); }} className="hover:text-[#1A4D2E] hover:underline">{r.customer_name}</button> : r.customer_name}</TableCell>
                       <TableCell className="text-xs">{r.cashier_name}</TableCell>
                       <TableCell className="text-xs font-medium">{r.product_name}</TableCell>
                       <TableCell className="text-right text-xs font-mono">{formatPHP(r.original_price)}</TableCell>
@@ -1141,6 +1156,8 @@ function DiscountAuditReport({ branches, selectedBranchId }) {
           </CardContent>
         </Card>
       )}
+      <InvoiceDetailModal compact open={invoiceModalOpen} onOpenChange={setInvoiceModalOpen} invoiceNumber={selectedInvoiceNumber} />
+      <CustomerStatementModal open={stmtOpen} onOpenChange={setStmtOpen} customer={stmtCustomer} />
     </div>
   );
 }

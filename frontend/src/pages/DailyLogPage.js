@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
+import CustomerStatementModal from '../components/CustomerStatementModal';
 
 // ── Small helper components ───────────────────────────────────────────────────
 function SectionCard({ title, children, accent = 'slate', note }) {
@@ -108,7 +109,7 @@ function ZReport({ data, branchName, onPrint }) {
               <tbody>
                 {(data.credit_sales_today || []).map((c, i) => (
                   <tr key={i} className="border-b border-slate-100 last:border-0">
-                    <td className="px-3 py-1.5 font-medium">{c.customer_name}</td>
+                    <td className="px-3 py-1.5 font-medium">{c.customer_id ? <button onClick={() => openCustStmt(c.customer_id, c.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{c.customer_name}</button> : c.customer_name}</td>
                     <td className="px-3 py-1.5 font-mono text-xs text-blue-600"><button className="hover:underline hover:text-blue-800" onClick={() => { setSelectedInvoiceNumber(c.invoice_number); setInvoiceModalOpen(true); }} data-testid={`inv-link-credit-${i}`}>{c.invoice_number}</button></td>
                     <td className="px-3 py-1.5 text-right font-mono font-semibold text-amber-700">{formatPHP(c.grand_total)}</td>
                     <td className="px-3 py-1.5 text-right font-mono text-slate-500">{formatPHP(c.balance)}</td>
@@ -118,7 +119,7 @@ function ZReport({ data, branchName, onPrint }) {
                 {(data.ar_credits_today || []).map((c, i) => (
                   <tr key={`arc-${i}`} className="border-b border-slate-100 last:border-0">
                     <td className="px-3 py-1.5">
-                      <div className="font-medium">{c.customer_name}</div>
+                      <div className="font-medium">{c.customer_id ? <button onClick={() => openCustStmt(c.customer_id, c.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{c.customer_name}</button> : c.customer_name}</div>
                       {(c.description || c.items?.[0]?.product_name) && (
                         <div className="text-xs text-slate-400">{c.description || c.items?.[0]?.product_name}</div>
                       )}
@@ -226,6 +227,9 @@ export default function DailyLogPage() {
   const [empForm, setEmpForm] = useState({ name: '', position: '', phone: '' });
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [selectedInvoiceNumber, setSelectedInvoiceNumber] = useState(null);
+  const [stmtOpen, setStmtOpen] = useState(false);
+  const [stmtCustomer, setStmtCustomer] = useState(null);
+  const openCustStmt = (id, name) => { if (!id) return; setStmtCustomer({ id, name }); setStmtOpen(true); };
 
   // Close form state
   const [actualCash, setActualCash] = useState('');
@@ -502,7 +506,7 @@ export default function DailyLogPage() {
                       <td className="px-3 py-2 text-center font-mono text-xs text-slate-400 font-medium">{e.sequence}</td>
                       <td className="px-3 py-2 font-mono text-xs text-slate-500">{e.time}</td>
                       <td className="px-3 py-2 font-medium text-slate-800">{e.product_name}</td>
-                      <td className="px-3 py-2 text-slate-500 text-xs">{e.customer_name || 'Walk-in'}</td>
+                      <td className="px-3 py-2 text-slate-500 text-xs">{e.customer_id ? <button onClick={() => openCustStmt(e.customer_id, e.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{e.customer_name || 'Walk-in'}</button> : (e.customer_name || 'Walk-in')}</td>
                       <td className="px-3 py-2 font-mono text-xs"><button className="text-blue-600 hover:underline hover:text-blue-800" onClick={() => { setSelectedInvoiceNumber(e.invoice_number); setInvoiceModalOpen(true); }}>{e.invoice_number}</button></td>
                       <td className="px-3 py-2 text-center">
                         <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase ${pmColor}`}>{pmLabel}</span>
@@ -598,7 +602,7 @@ export default function DailyLogPage() {
                       {/* Customer header */}
                       <div className="flex items-start justify-between mb-2">
                         <div>
-                          <span className="font-bold text-slate-800 text-base">{inv.customer_name || 'Unknown Customer'}</span>
+                          <span className="font-bold text-slate-800 text-base">{inv.customer_id ? <button onClick={() => openCustStmt(inv.customer_id, inv.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{inv.customer_name || 'Unknown Customer'}</button> : (inv.customer_name || 'Unknown Customer')}</span>
                           <div className="flex items-center gap-2 mt-0.5">
                             <button className="font-mono text-xs text-blue-600 hover:underline hover:text-blue-800" onClick={() => { setSelectedInvoiceNumber(inv.invoice_number); setInvoiceModalOpen(true); }}>{inv.invoice_number}</button>
                             <Badge className={`text-[9px] border-0 ${inv.payment_type === 'partial' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
@@ -968,7 +972,7 @@ export default function DailyLogPage() {
                         {preview.credit_sales_today.map((c, i) => (
                           <div key={i} className="flex items-center justify-between text-sm py-1 border-b border-slate-100 last:border-0">
                             <div>
-                              <span className="font-medium">{c.customer_name}</span>
+                              <span className="font-medium">{c.customer_id ? <button onClick={() => openCustStmt(c.customer_id, c.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{c.customer_name}</button> : c.customer_name}</span>
                               <button className="text-blue-600 text-xs ml-2 hover:underline" onClick={() => { setSelectedInvoiceNumber(c.invoice_number); setInvoiceModalOpen(true); }}>{c.invoice_number}</button>
                             </div>
                             <div className="text-right">
@@ -1000,7 +1004,7 @@ export default function DailyLogPage() {
                             {preview.ar_payments.map((p, i) => (
                               <tr key={i} className="border-b border-slate-100 last:border-0">
                                 <td className="px-3 py-2">
-                                  <div className="font-medium">{p.customer_name}</div>
+                                  <div className="font-medium">{p.customer_id ? <button onClick={() => openCustStmt(p.customer_id, p.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{p.customer_name}</button> : p.customer_name}</div>
                                   <button className="text-xs text-blue-600 font-mono hover:underline" onClick={() => { setSelectedInvoiceNumber(p.invoice_number); setInvoiceModalOpen(true); }}>{p.invoice_number}</button>
                                 </td>
                                 <td className="px-3 py-2 text-right font-mono">{formatPHP(p.balance_before)}</td>
@@ -1519,6 +1523,11 @@ export default function DailyLogPage() {
         open={invoiceModalOpen}
         onOpenChange={setInvoiceModalOpen}
         invoiceNumber={selectedInvoiceNumber}
+      />
+      <CustomerStatementModal
+        open={stmtOpen}
+        onOpenChange={setStmtOpen}
+        customer={stmtCustomer}
       />
     </div>
   );

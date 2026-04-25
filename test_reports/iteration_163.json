@@ -1,0 +1,86 @@
+{
+  "summary": "Frontend regression for invoice/customer click-to-drill-down across 7 pages plus shadcn Dialog migration of TerminalUpdateReceiptModal/TerminalReturnRefundModal. Sales page click-flow verified end-to-end (25 customer-link buttons with data-testid; click opens shadcn Dialog role='dialog' with title 'Statement of Account \u2014 John Gil Ahig'; Escape key closes). Accounting > Receivables tab: 99 clickable customer buttons; click opens Statement modal correctly. Reports default + AR Aging tabs: 41 customer buttons rendered and styled. Dashboard, DailyLog, AuditCenter buttons are coded in source (verified via grep) but row counts at runtime are data-dependent (no recent credit sales / open AR rows on test day). Close Wizard renders 'Please select a branch first' gate before listing data \u2014 code is wired (6 sites) but not exercised in this run. Both terminal modals lint clean and use shadcn <Dialog> with role='dialog', data-testid hooks, multi-step wizard preserved, same /api/returns and /api/invoices/<id>/correct-incomplete-stock payloads. No backend testing performed (request was frontend only).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "console_warnings": [
+      {
+        "component": "ReportsPage \u2192 ArAgingReport (tbody render)",
+        "issue": "React warning: 'Each child in a list should have a unique key prop. Check the render method of `tbody`. It was passed a child from ArAgingReport.' Indicates a mapped row in the AR Aging table is missing a key={...} prop. Functional impact: none (rows render). Code-quality impact: noisy console + potential reconciliation issues on row updates.",
+        "selector": "ReportsPage.js \u2192 ArAgingReport tbody",
+        "priority": "LOW"
+      }
+    ]
+  },
+  "test_results": {
+    "sales_page": {
+      "customer_link_buttons_with_data_testid": "PASS (25 buttons matching data-testid^='customer-link-')",
+      "click_opens_customer_statement_modal": "PASS",
+      "modal_uses_shadcn_dialog_role": "PASS (role='dialog' present)",
+      "modal_title_format_correct": "PASS ('Statement of Account \u2014 John Gil Ahig')",
+      "escape_key_closes_modal": "PASS"
+    },
+    "dashboard_page": {
+      "customer_buttons_present_at_runtime": "PARTIAL (1 hover-underline button found; data-dependent on recent activity)",
+      "code_wiring": "PASS (DashboardPage.js:223-225 stmt state + buttons at 537/557/610)"
+    },
+    "daily_log_page": {
+      "customer_buttons_at_runtime": "PARTIAL (no credit sales / cash drawer rows today)",
+      "code_wiring": "PASS (7 buttons wired: lines 112, 122, 509, 605, 975, 1007, 1376 + openCustStmt helper at 232)"
+    },
+    "audit_center_page": {
+      "customer_buttons_at_runtime": "PARTIAL (test heuristic captured 'View all \u2192' link which also uses hover:underline)",
+      "code_wiring": "PASS (stmt state at 503-504, 4 customer button sites at ~1146/1198/1215/1503/1726)"
+    },
+    "close_wizard_page": {
+      "renders_branch_gate": "Page shows 'Please select a branch first to run the Close Wizard.' \u2014 customer rows not rendered without branch context",
+      "code_wiring": "PASS (stmt state at 89-91, 6 button sites at 1052/1112/1140/1668/1782/1812)"
+    },
+    "reports_page": {
+      "ar_aging_tab_customer_buttons": "PASS (41 clickable customer buttons)",
+      "default_sales_tab_customer_buttons": "PASS (41 buttons)",
+      "code_wiring": "PASS (3 separate stmt state pairs in ArAgingReport, SalesReport, DiscountAuditReport)"
+    },
+    "accounting_page": {
+      "expenses_tab_default": "0 customer-name buttons (expected \u2014 expenses table uses different styling for 'Billed to: Customer Name' which is text not button)",
+      "receivables_tab": "PASS (99 clickable customer-name buttons; 'John Gil Ahig' click opened Statement modal successfully)",
+      "code_wiring": "PASS (stmt state at 59-61, buttons at 492/580)"
+    },
+    "terminal_modals_migration": {
+      "TerminalUpdateReceiptModal_uses_shadcn_dialog": "PASS (Dialog/DialogContent/DialogHeader/DialogTitle/DialogDescription imports from ./ui/dialog; data-testid='terminal-update-receipt-modal' on DialogContent)",
+      "TerminalReturnRefundModal_uses_shadcn_dialog": "PASS (Dialog/DialogContent imports correct; data-testid='terminal-return-refund-modal' on DialogContent)",
+      "business_logic_preserved": "PASS (payload to /api/invoices/<id>/correct-incomplete-stock unchanged; payload to /api/returns unchanged; multi-step state machine 1\u21922\u21923\u21924 preserved)",
+      "lint_clean": "PASS (no ESLint issues on either file)",
+      "runtime_render_verification": "SKIPPED (DocViewerPage requires QR scan/token to load \u2014 lint + code review confirms shadcn migration is correct; main agent's Sales smoke-test already proves the dialog primitive works in this app)"
+    }
+  },
+  "test_report_links": [],
+  "action_items": [
+    "(LOW) Fix missing key prop in ArAgingReport row map \u2014 React warning: 'Each child in a list should have a unique key prop. Check render of tbody. It was passed a child from ArAgingReport.' Add key={row.customer_id || idx} to the .map() inside the AR Aging tbody.",
+    "(INFO) Close Wizard customer-button wiring is data-gated by branch selection. Recommend manual smoke-test with a branch selected + a daily session having released invoices to confirm 6 wired sites render clickable customer names.",
+    "(INFO) Daily Log customer-button wiring is data-gated by today's credit sales / cash drawer entries. Recommend manual smoke-test on a day with credit sales activity to confirm 7 wired sites all render."
+  ],
+  "critical_code_review_comments": [
+    "All 7 pages correctly reuse the shared CustomerStatementModal component \u2014 no duplicate modal definitions created. Spec compliant.",
+    "Click handlers consistently use stopPropagation()/separate button (e.g. SalesPage.js:245) so customer-name click does not also fire the row-level invoice click \u2014 dual-click safety verified.",
+    "Walk-in customer rendering: SalesPage.js correctly renders plain text when !s.customer_id (verified in code: ternary `s.customer_id ? <button...> : s.customer_name`). Same pattern used across DailyLogPage and AccountingPage.",
+    "TerminalUpdateReceiptModal & TerminalReturnRefundModal: payload shape and endpoints unchanged from previous raw-overlay version. Only presentation wrapper changed (raw <div fixed inset-0> \u2192 <Dialog>). Lint clean.",
+    "ArAgingReport tbody map is missing key prop \u2014 single console error caught during reports page test."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "frontend": "100% on tested code paths (Sales end-to-end, Accounting Receivables end-to-end, Reports tab counts, Terminal modal lint+structure). Data-gated paths (DailyLog/CloseWizard/AuditCenter/Dashboard) verified via source-grep wiring."
+  },
+  "test_credentials": {
+    "super_admin": "janmarkeahig@gmail.com / Aa@58798546521325"
+  },
+  "seed_data_creation": "None. Read-only UI navigation test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Sales /sales page is the canonical end-to-end happy path: 25 customer-link buttons with data-testid='customer-link-<id>'. Accounting Receivables tab is the second canonical end-to-end with 99 buttons. For pages where buttons are data-gated (DailyLog, CloseWizard, AuditCenter, Dashboard), select Branch 1 (c435277f-9fc7-4d83-83e7-38be5b4423ac) and run on a day with credit sales/cash-drawer transactions. ArAgingReport has a missing-key React warning; main agent should add key={row.customer_id} or key={idx} to the row map. Terminal modals were verified by source review + lint only (DocViewerPage requires QR token); no functional regressions found."
+}

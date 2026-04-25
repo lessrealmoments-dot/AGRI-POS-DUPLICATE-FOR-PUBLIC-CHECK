@@ -11,6 +11,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Edit3, Search, ArrowUpDown, ArrowUp, ArrowDown, RefreshCw, ChevronLeft, ChevronRight, MoreHorizontal, Printer, FileText, Ban, DollarSign } from 'lucide-react';
 import { toast } from 'sonner';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
+import CustomerStatementModal from '../components/CustomerStatementModal';
 
 const STATUS_FILTERS = [
   { key: 'all', label: 'All' },
@@ -43,6 +44,8 @@ export default function SalesPage() {
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState(null);
   const [businessInfo, setBusinessInfo] = useState({});
+  const [stmtOpen, setStmtOpen] = useState(false);
+  const [stmtCustomer, setStmtCustomer] = useState(null);
 
   // Load business info for printing
   useEffect(() => {
@@ -235,7 +238,20 @@ export default function SalesPage() {
                         {s.edited && <Edit3 size={10} className="text-orange-500" />}
                       </span>
                     </TableCell>
-                    <TableCell className="font-medium text-sm max-w-[160px] truncate cursor-pointer" onClick={() => openInvoiceDetail(s)}>{s.customer_name || 'Walk-in'}</TableCell>
+                    <TableCell className="font-medium text-sm max-w-[160px] truncate">
+                      {s.customer_id ? (
+                        <button
+                          className="text-left hover:text-[#1A4D2E] hover:underline truncate w-full"
+                          onClick={(e) => { e.stopPropagation(); setStmtCustomer({ id: s.customer_id, name: s.customer_name, phone: s.customer_phone, address: s.customer_address }); setStmtOpen(true); }}
+                          data-testid={`customer-link-${s.id}`}
+                          title={`View statement of account — ${s.customer_name}`}
+                        >
+                          {s.customer_name || 'Walk-in'}
+                        </button>
+                      ) : (
+                        <span className="text-slate-500">{s.customer_name || 'Walk-in'}</span>
+                      )}
+                    </TableCell>
                     <TableCell className="text-slate-500 text-xs cursor-pointer" onClick={() => openInvoiceDetail(s)}>{s.items?.length || 0}</TableCell>
                     <TableCell className="text-right font-semibold font-mono text-sm cursor-pointer" onClick={() => openInvoiceDetail(s)}>{formatPHP(s.grand_total)}</TableCell>
                     <TableCell>
@@ -347,6 +363,12 @@ export default function SalesPage() {
         onOpenChange={setInvoiceModalOpen}
         saleId={selectedInvoiceId}
         onUpdated={fetchSales}
+      />
+
+      <CustomerStatementModal
+        open={stmtOpen}
+        onOpenChange={setStmtOpen}
+        customer={stmtCustomer}
       />
     </div>
   );

@@ -21,6 +21,7 @@ import { toast } from 'sonner';
 import UploadQRDialog from '../components/UploadQRDialog';
 import ReviewDetailDialog from '../components/ReviewDetailDialog';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
+import CustomerStatementModal from '../components/CustomerStatementModal';
 import ExpenseDetailModal from '../components/ExpenseDetailModal';
 
 const STEPS = [
@@ -85,6 +86,9 @@ export default function CloseWizardPage() {
     if (expId) { setSelectedExpenseId(expId); setExpenseModalOpen(true); }
     else { setSelectedInvoiceNumber(num); setDetailType(type); setInvoiceModalOpen(true); }
   };
+  const [stmtOpen, setStmtOpen] = useState(false);
+  const [stmtCustomer, setStmtCustomer] = useState(null);
+  const openCustStmt = (id, name) => { if (!id) return; setStmtCustomer({ id, name }); setStmtOpen(true); };
   const [wizUploadQROpen, setWizUploadQROpen] = useState(false);
   const [wizUploadExpenseId, setWizUploadExpenseId] = useState(null);
   const [pmtDialog, setPmtDialog]     = useState({ open: false, invoice: null });
@@ -1047,7 +1051,7 @@ export default function CloseWizardPage() {
                     <div key={idx} className="rounded-lg border border-amber-200 overflow-hidden" data-testid={`credit-invoice-${idx}`}>
                       <div className="flex items-center justify-between px-4 py-2.5 bg-amber-50">
                         <div>
-                          <p className="font-semibold text-sm">{inv.customer_name}</p>
+                          <p className="font-semibold text-sm">{inv.customer_id ? <button onClick={() => openCustStmt(inv.customer_id, inv.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{inv.customer_name}</button> : inv.customer_name}</p>
                           <p className="text-xs text-slate-400">
                             <button className="text-blue-600 hover:underline font-mono" onClick={() => openDetailModal(inv.invoice_number)}>{inv.invoice_number}</button> · {inv.payment_type}
                             {inv.sale_type && !['credit','walk_in'].includes(inv.sale_type) && ` · ${inv.sale_type.replace(/_/g, ' ')}`}
@@ -1086,7 +1090,7 @@ export default function CloseWizardPage() {
                       {(report.ar_credits_today).map((inv, i) => (
                         <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-blue-50 border border-blue-100 mb-1.5 text-sm">
                           <div>
-                            <p className="font-semibold">{inv.customer_name}</p>
+                            <p className="font-semibold">{inv.customer_id ? <button onClick={() => openCustStmt(inv.customer_id, inv.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{inv.customer_name}</button> : inv.customer_name}</p>
                             <p className="text-xs text-slate-400"><button className="text-blue-600 hover:underline font-mono" onClick={() => openDetailModal(inv.invoice_number)}>{inv.invoice_number}</button> · {inv.sale_type === 'cash_advance' ? 'Cash-out' : 'Farm Service'}</p>
                             {inv.items?.[0]?.product_name && (
                               <p className="text-xs text-slate-500 mt-0.5">{inv.items[0].product_name}{inv.items[0].description ? ` — ${inv.items[0].description}` : ''}</p>
@@ -1137,7 +1141,7 @@ export default function CloseWizardPage() {
                       : (preview?.ar_payments || []).map((p, i) => (
                       <tr key={i} className="border-b border-slate-50 hover:bg-slate-50/50">
                         <td className="px-3 py-2">
-                          <p className="font-medium">{p.customer_name}</p>
+                          <p className="font-medium">{p.customer_id ? <button onClick={() => openCustStmt(p.customer_id, p.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{p.customer_name}</button> : p.customer_name}</p>
                           <p className="text-xs text-slate-400 font-mono"><button className="text-blue-600 hover:underline" onClick={() => openDetailModal(p.invoice_number)}>{p.invoice_number}</button></p>
                         </td>
                         <td className="px-3 py-2 text-right font-mono text-xs">{formatPHP(p.balance_before)}</td>
@@ -1664,7 +1668,7 @@ export default function CloseWizardPage() {
                     {preview.ar_payments.map((p, i) => (
                       <div key={i} className="px-4 py-2 flex items-center justify-between text-sm">
                         <div>
-                          <span className="font-medium text-slate-800">{p.customer_name}</span>
+                          <span className="font-medium text-slate-800">{p.customer_id ? <button onClick={() => openCustStmt(p.customer_id, p.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{p.customer_name}</button> : p.customer_name}</span>
                           <button className="text-xs text-blue-600 hover:underline font-mono ml-2" onClick={() => openDetailModal(p.invoice_number)}>{p.invoice_number}</button>
                           <span className={`ml-2 text-[10px] px-1.5 py-0.5 rounded font-medium ${p.fund_source === 'cashier' ? 'bg-emerald-100 text-emerald-700' : 'bg-violet-100 text-violet-700'}`}>
                             {p.method || (p.fund_source === 'cashier' ? 'Cash' : 'Digital')}
@@ -1778,7 +1782,7 @@ export default function CloseWizardPage() {
                     {preview.credit_sales_today.map((inv, i) => (
                       <div key={i} className="px-4 py-2 flex items-center justify-between text-sm">
                         <div>
-                          <span className="font-medium text-slate-800">{inv.customer_name}</span>
+                          <span className="font-medium text-slate-800">{inv.customer_id ? <button onClick={() => openCustStmt(inv.customer_id, inv.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{inv.customer_name}</button> : inv.customer_name}</span>
                           <button className="text-xs text-blue-600 hover:underline font-mono ml-2" onClick={() => openDetailModal(inv.invoice_number)}>{inv.invoice_number}</button>
                           <span className={`ml-2 text-[10px] px-1.5 py-0.5 rounded font-medium ${inv.payment_type === 'credit' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-600'}`}>
                             {inv.payment_type === 'credit' ? 'Full Credit' : 'Partial'}
@@ -1806,7 +1810,7 @@ export default function CloseWizardPage() {
                     {preview.digital_sales_today.map((d, i) => (
                       <div key={i} className="px-4 py-2 flex items-center justify-between text-sm">
                         <div>
-                          <span className="font-medium text-slate-800">{d.customer_name || 'Walk-in'}</span>
+                          <span className="font-medium text-slate-800">{d.customer_id ? <button onClick={() => openCustStmt(d.customer_id, d.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{d.customer_name || 'Walk-in'}</button> : (d.customer_name || 'Walk-in')}</span>
                           <button className="text-xs text-blue-600 hover:underline font-mono ml-2" onClick={() => openDetailModal(d.invoice_number)}>{d.invoice_number}</button>
                           <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-violet-100 text-violet-600 font-medium">{d.platform}</span>
                           {d.ref_number && <span className="text-[10px] text-slate-400 ml-1">Ref: {d.ref_number}</span>}
@@ -2391,6 +2395,11 @@ export default function CloseWizardPage() {
         open={expenseModalOpen}
         onOpenChange={(open) => { setExpenseModalOpen(open); if (!open) setSelectedExpenseId(null); }}
         expenseId={selectedExpenseId}
+      />
+      <CustomerStatementModal
+        open={stmtOpen}
+        onOpenChange={setStmtOpen}
+        customer={stmtCustomer}
       />
     </div>
   );

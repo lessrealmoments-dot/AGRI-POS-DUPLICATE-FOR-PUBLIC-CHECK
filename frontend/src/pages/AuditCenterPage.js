@@ -21,6 +21,7 @@ import { toast } from 'sonner';
 import ReviewDetailDialog from '../components/ReviewDetailDialog';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
 import ExpenseDetailModal from '../components/ExpenseDetailModal';
+import CustomerStatementModal from '../components/CustomerStatementModal';
 import ReceiptGallery from '../components/ReceiptGallery';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -499,11 +500,19 @@ export default function AuditCenterPage() {
   const [selectedExpenseId, setSelectedExpenseId] = useState(null);
   const [detailType, setDetailType] = useState('sale');
   const [expenseModalOpen, setExpenseModalOpen] = useState(false);
+  const [stmtOpen, setStmtOpen] = useState(false);
+  const [stmtCustomer, setStmtCustomer] = useState(null);
 
   // Helper: open detail modal for any transaction type
   const openDetailModal = (invoiceNumber = null, expenseId = null, type = 'sale') => {
     if (expenseId) { setSelectedExpenseId(expenseId); setExpenseModalOpen(true); }
     else { setSelectedInvoiceNumber(invoiceNumber); setDetailType(type); setInvoiceModalOpen(true); }
+  };
+  // Helper: open customer statement
+  const openCustomerStmt = (customerId, customerName) => {
+    if (!customerId) return;
+    setStmtCustomer({ id: customerId, name: customerName });
+    setStmtOpen(true);
   };
   // Receipt gallery state
   const [receiptView, setReceiptView] = useState(null); // { recordType, recordId, label }
@@ -1143,7 +1152,7 @@ export default function AuditCenterPage() {
                               <button className="font-mono text-blue-600 hover:underline" onClick={() => openDetailModal(ar.invoice_number)}>
                                 {ar.invoice_number}
                               </button>
-                              <span className="text-slate-500 ml-2">{ar.customer_name}</span>
+                              <button onClick={() => openCustomerStmt(ar.customer_id, ar.customer_name)} className="text-slate-500 ml-2 hover:text-[#1A4D2E] hover:underline disabled:cursor-default" disabled={!ar.customer_id}>{ar.customer_name}</button>
                               <div className="flex items-center gap-2 mt-0.5">
                                 <Badge className={`text-[9px] ${ar.fund_source === 'cashier' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
                                   {ar.fund_source === 'cashier' ? 'Cash' : ar.method || 'Digital'}
@@ -1194,7 +1203,7 @@ export default function AuditCenterPage() {
                           <div key={i} className="text-xs p-2 bg-slate-50 rounded flex justify-between">
                             <span>
                               <button className="font-mono text-blue-600 hover:underline" onClick={() => openDetailModal(inv.invoice_number)}>{inv.invoice_number}</button>
-                              <span className="text-slate-400 ml-2">{inv.customer_name}</span>
+                              <button onClick={() => openCustomerStmt(inv.customer_id, inv.customer_name)} className="text-slate-400 ml-2 hover:text-[#1A4D2E] hover:underline disabled:cursor-default" disabled={!inv.customer_id}>{inv.customer_name}</button>
                             </span>
                             <span className="font-mono">{formatPHP(inv.amount_paid)} / {formatPHP(inv.grand_total)}</span>
                           </div>
@@ -1212,7 +1221,7 @@ export default function AuditCenterPage() {
                           <div key={i} className="text-xs p-2 bg-slate-50 rounded flex justify-between">
                             <span>
                               <button className="font-mono text-blue-600 hover:underline" onClick={() => openDetailModal(inv.invoice_number)}>{inv.invoice_number}</button>
-                              <span className="text-slate-400 ml-2">{inv.customer_name}</span>
+                              <button onClick={() => openCustomerStmt(inv.customer_id, inv.customer_name)} className="text-slate-400 ml-2 hover:text-[#1A4D2E] hover:underline disabled:cursor-default" disabled={!inv.customer_id}>{inv.customer_name}</button>
                             </span>
                             <span className="font-mono">Cash: {formatPHP(inv.cash_amount)} · Digital: {formatPHP(inv.digital_amount)}</span>
                           </div>
@@ -1500,7 +1509,7 @@ export default function AuditCenterPage() {
                             <div key={i} className={`text-xs p-2 rounded flex items-center justify-between gap-2 ${t.has_ref ? 'bg-blue-50' : 'bg-red-50 border border-red-200'}`}>
                               <div className="min-w-0">
                                 <button className="font-mono text-blue-700 mr-1 hover:underline" onClick={() => openDetailModal(t.invoice_number)}>{t.invoice_number}</button>
-                                <span className="text-slate-500 truncate">{t.customer_name}</span>
+                                <button onClick={() => openCustomerStmt(t.customer_id, t.customer_name)} className="text-slate-500 truncate hover:text-[#1A4D2E] hover:underline disabled:cursor-default" disabled={!t.customer_id}>{t.customer_name}</button>
                                 <div className="flex items-center gap-2 mt-0.5">
                                   <span className="text-[10px] text-blue-500">{t.platform}</span>
                                   {t.ref_number ? (
@@ -1723,7 +1732,11 @@ export default function AuditCenterPage() {
                                   )}
                                 </div>
                                 <p className="text-slate-500 mt-0.5 truncate">
-                                  {dp.customer_name || 'Walk-in'}
+                                  {dp.customer_id ? (
+                                    <button onClick={() => openCustomerStmt(dp.customer_id, dp.customer_name)} className="hover:text-[#1A4D2E] hover:underline">
+                                      {dp.customer_name || 'Walk-in'}
+                                    </button>
+                                  ) : (dp.customer_name || 'Walk-in')}
                                   {dp.ref_number && <span className="font-mono text-slate-400"> · #{dp.ref_number}</span>}
                                   {dp.sender && <span className="text-slate-400"> · from {dp.sender}</span>}
                                 </p>
@@ -2148,6 +2161,11 @@ export default function AuditCenterPage() {
         onOpenChange={(open) => { setExpenseModalOpen(open); if (!open) setSelectedExpenseId(null); }}
         expenseId={selectedExpenseId}
         onUpdated={() => { if (auditData) runAudit(); }}
+      />
+      <CustomerStatementModal
+        open={stmtOpen}
+        onOpenChange={setStmtOpen}
+        customer={stmtCustomer}
       />
 
       {/* Receipt Gallery Dialog */}

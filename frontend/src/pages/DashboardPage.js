@@ -19,6 +19,7 @@ import {
 import { formatPHP } from '../lib/utils';
 import ReviewDetailDialog from '../components/ReviewDetailDialog';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
+import CustomerStatementModal from '../components/CustomerStatementModal';
 import PendingReviewsWidget from '../components/PendingReviewsWidget';
 import SalesTrendsWidget from '../components/dashboard/SalesTrendsWidget';
 import BranchComparisonWidget from '../components/dashboard/BranchComparisonWidget';
@@ -219,6 +220,9 @@ export default function DashboardPage() {
   const [selectedInvoiceNumber, setSelectedInvoiceNumber] = useState(null);
   const [detailType, setDetailType] = useState('sale');
   const openDetailModal = (num, type = 'sale') => { setSelectedInvoiceNumber(num); setDetailType(type); setInvoiceModalOpen(true); };
+  const [stmtOpen, setStmtOpen] = useState(false);
+  const [stmtCustomer, setStmtCustomer] = useState(null);
+  const openCustStmt = (id, name) => { if (!id) return; setStmtCustomer({ id, name }); setStmtOpen(true); };
   const [analyticsPeriod, setAnalyticsPeriod] = useState('this_month');
   const [unclosedDays, setUnclosedDays] = useState(null);
   const { width: gridWidth, containerRef: gridRef, mounted: gridMounted } = useContainerWidth();
@@ -533,7 +537,7 @@ export default function DashboardPage() {
           {(stats?.credit_customers_today || []).length === 0 ? <p className="text-xs text-slate-400">No new credit today</p>
             : <div className="space-y-1.5">{(stats?.credit_customers_today || []).map((c, i) => (
               <div key={i} className="flex items-center justify-between text-xs bg-amber-50 rounded px-3 py-2">
-                <div><p className="font-semibold">{c.customer_name}</p><button className="text-blue-600 font-mono hover:underline" onClick={() => openDetailModal(c.invoice_number)}>{c.invoice_number}</button></div>
+                <div><p className="font-semibold">{c.customer_id ? <button onClick={() => openCustStmt(c.customer_id, c.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{c.customer_name}</button> : c.customer_name}</p><button className="text-blue-600 font-mono hover:underline" onClick={() => openDetailModal(c.invoice_number)}>{c.invoice_number}</button></div>
                 <div className="text-right"><p className="font-bold text-amber-700">{formatPHP(c.amount)}</p><p className="text-slate-400">bal {formatPHP(c.balance)}</p></div>
               </div>
             ))}</div>
@@ -553,7 +557,7 @@ export default function DashboardPage() {
           {(stats?.recent_ar_payments || []).length === 0 ? <p className="text-xs text-slate-400">No AR payments today</p>
             : <div className="space-y-1.5">{(stats?.recent_ar_payments || []).map((p, i) => (
               <div key={i} className="flex items-center justify-between text-xs bg-blue-50 rounded px-3 py-2">
-                <div><p className="font-semibold">{p.customer_name}</p><button className="text-blue-600 font-mono hover:underline" onClick={() => openDetailModal(p.invoice_number)}>{p.invoice_number}</button></div>
+                <div><p className="font-semibold">{p.customer_id ? <button onClick={() => openCustStmt(p.customer_id, p.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{p.customer_name}</button> : p.customer_name}</p><button className="text-blue-600 font-mono hover:underline" onClick={() => openDetailModal(p.invoice_number)}>{p.invoice_number}</button></div>
                 <p className="font-bold text-blue-700">{formatPHP(p.amount)}</p>
               </div>
             ))}</div>
@@ -606,7 +610,7 @@ export default function DashboardPage() {
             : (stats?.recent_sales || []).slice(0, 5).map(sale => (
               <div key={sale.id} className="py-1.5 border-b border-slate-50 last:border-0">
                 <div className="flex justify-between items-start text-xs">
-                  <div><p className="font-semibold font-mono"><button className="text-blue-600 hover:underline" onClick={() => openDetailModal(sale.invoice_number || sale.sale_number)}>{sale.invoice_number || sale.sale_number}</button></p><p className="text-slate-500">{sale.customer_name || 'Walk-in'}</p></div>
+                  <div><p className="font-semibold font-mono"><button className="text-blue-600 hover:underline" onClick={() => openDetailModal(sale.invoice_number || sale.sale_number)}>{sale.invoice_number || sale.sale_number}</button></p><p className="text-slate-500">{sale.customer_id ? <button onClick={() => openCustStmt(sale.customer_id, sale.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{sale.customer_name || 'Walk-in'}</button> : (sale.customer_name || 'Walk-in')}</p></div>
                   <div className="text-right">
                     <p className="font-bold">{formatPHP(sale.grand_total || sale.total)}</p>
                     <Badge className={`text-[9px] ${sale.payment_type === 'cash' ? 'bg-emerald-100 text-emerald-700' : sale.payment_type === 'digital' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
@@ -698,6 +702,11 @@ export default function DashboardPage() {
         open={invoiceModalOpen && detailType === 'sale'}
         onOpenChange={(open) => { if (!open) setInvoiceModalOpen(false); }}
         invoiceNumber={selectedInvoiceNumber}
+      />
+      <CustomerStatementModal
+        open={stmtOpen}
+        onOpenChange={setStmtOpen}
+        customer={stmtCustomer}
       />
     </div>
   );

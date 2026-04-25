@@ -19,6 +19,7 @@ import VerifyPinDialog from '../components/VerifyPinDialog';
 import ViewQRDialog from '../components/ViewQRDialog';
 import ExpenseDetailModal from '../components/ExpenseDetailModal';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
+import CustomerStatementModal from '../components/CustomerStatementModal';
 
 const EXPENSE_CATEGORIES = [
   "Utilities", "Rent", "Supplies", "Transportation", "Fuel/Gas",
@@ -55,6 +56,9 @@ export default function AccountingPage() {
     if (expId) { setSelectedExpenseId(expId); setExpenseModalOpen(true); }
     else if (num) { setSelectedInvoiceNumber(num); setInvoiceModalOpen(true); }
   };
+  const [stmtOpen, setStmtOpen] = useState(false);
+  const [stmtCustomer, setStmtCustomer] = useState(null);
+  const openCustStmt = (id, name) => { if (!id) return; setStmtCustomer({ id, name }); setStmtOpen(true); };
   
   // Dialog states
   const [expenseDialog, setExpenseDialog] = useState(false);
@@ -491,7 +495,8 @@ export default function AccountingPage() {
                         )}
                         {e.customer_name && (
                           <div className={`text-xs ${e.category === 'Customer Cash Out' ? 'text-blue-600' : 'text-amber-600'}`}>
-                            {e.category === 'Customer Cash Out' ? 'Loaned to: ' : 'Billed to: '}{e.customer_name}
+                            {e.category === 'Customer Cash Out' ? 'Loaned to: ' : 'Billed to: '}
+                            {e.customer_id ? <button onClick={() => openCustStmt(e.customer_id, e.customer_name)} className="hover:underline font-medium">{e.customer_name}</button> : e.customer_name}
                           </div>
                         )}
                         {e.linked_invoice_number && (
@@ -574,7 +579,7 @@ export default function AccountingPage() {
                     return (
                       <TableRow key={r.id} className="table-row-hover">
                         <TableCell><button className="font-mono text-xs text-blue-600 hover:underline" onClick={() => openDetailModal(r.invoice_number)}>{r.invoice_number || '—'}</button></TableCell>
-                        <TableCell className="font-medium">{r.customer_name}</TableCell>
+                        <TableCell className="font-medium">{r.customer_id ? <button onClick={() => openCustStmt(r.customer_id, r.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{r.customer_name}</button> : r.customer_name}</TableCell>
                         <TableCell><Badge className={`text-[9px] ${typeConfig.cls}`}>{typeConfig.label}</Badge></TableCell>
                         <TableCell className="text-sm text-slate-600">{r.description || '-'}</TableCell>
                         <TableCell className="text-right">{formatPHP(r.amount)}</TableCell>
@@ -1161,6 +1166,11 @@ export default function AccountingPage() {
         onOpenChange={(open) => { setInvoiceModalOpen(open); if (!open) setSelectedInvoiceNumber(null); }}
         invoiceNumber={selectedInvoiceNumber}
         onUpdated={() => fetchAll()}
+      />
+      <CustomerStatementModal
+        open={stmtOpen}
+        onOpenChange={setStmtOpen}
+        customer={stmtCustomer}
       />
     </div>
   );
