@@ -27,6 +27,9 @@ import {
 import { syncPendingSales, startAutoSync, stopAutoSync, newEnvelopeId } from '../lib/syncManager';
 import ReferenceNumberPrompt from '../components/ReferenceNumberPrompt';
 import CropCreditTypeDialog from '../components/CropCreditTypeDialog';
+import RequestSignatureDialog from '../components/RequestSignatureDialog';
+import { invalidateBalanceCache } from '../components/CustomerBalanceBadge';
+import PrintEngine from '../lib/PrintEngine';
 
 // ── Insufficient Stock Override Modal ────────────────────────────────────────
 function InsufficientStockModal({ open, insufficientItems, onOverride, onCancel, onGoPO }) {
@@ -335,6 +338,8 @@ export default function UnifiedSalesPage() {
   // Crop credit type selection
   const [cropTypeDialog, setCropTypeDialog] = useState(false);
   const [cropCreditConfig, setCropCreditConfig] = useState(null);
+  // Customer signature flow (after credit sale)
+  const [sigDialog, setSigDialog] = useState({ open: false, invoice: null });
   
   // Offline
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -1295,6 +1300,7 @@ export default function UnifiedSalesPage() {
       try {
         const res = await api.post('/unified-sale', saleData);
         const invoiceNum = res.data.invoice_number || res.data.sale_number;
+        invalidateBalanceCache();
         toast.success(balance > 0
           ? `Invoice ${invoiceNum} created! Balance: ${formatPHP(balance)}`
           : `Sale ${invoiceNum} completed!`
@@ -1303,6 +1309,29 @@ export default function UnifiedSalesPage() {
         clearCart();
         setCheckoutDialog(false);
         setPendingCreditSale(null);
+
+        // ── Customer signature flow (credit / partial only) ──────────────
+        if (balance > 0 && selectedCustomer?.id) {
+          setSigDialog({
+            open: true,
+            invoice: {
+              id: res.data.id,
+              invoice_number: invoiceNum,
+              customer_name: saleData.customer_name,
+              customer_id: selectedCustomer.id,
+              branch_id: currentBranch?.id || '',
+              branch_name: currentBranch?.name || '',
+              items: saleData.items,
+              subtotal: saleData.subtotal,
+              discount: saleData.overall_discount || 0,
+              partial_paid: saleData.partial_payment || 0,
+              balance,
+              payment_type: saleData.payment_type,
+              order_date: saleData.order_date,
+              credit_type: cropCreditConfig?.type === 'charged_to_crop' ? 'charged_to_crop' : 'by_term',
+            },
+          });
+        }
 
         // ── Crop Credit linking (after invoice created) ──────────────────
         if (cropCreditConfig?.type === 'charged_to_crop' && selectedCustomer?.id && balance > 0) {
@@ -1436,6 +1465,7 @@ export default function UnifiedSalesPage() {
     const saleWithOverride = { ...pendingSaleData, manager_override_pin: overridePin };
     const res = await api.post('/unified-sale', saleWithOverride);
     const invoiceNum = res.data.invoice_number || res.data.sale_number;
+    invalidateBalanceCache();
     toast.success(`Sale ${invoiceNum} completed with manager override. Discrepancy ticket created.`, { duration: 5000 });
     setStockOverrideModal(false);
     setPendingSaleData(null);
@@ -2589,6 +2619,42 @@ export default function UnifiedSalesPage() {
         customerName={selectedCustomer?.name || 'Customer'}
         saleAmount={balanceDue}
         branchId={currentBranch?.id}
+      />
+
+      <RequestSignatureDialog
+        open={sigDialog.open}
+        onOpenChange={(open) => setSigDialog(prev => ({ ...prev, open }))}
+        invoice={sigDialog.invoice}
+        onPrintReceipt={async ({ signature_url, bypass_method }) => {
+          try {
+            const inv = sigDialog.invoice || {};
+            // Fetch fresh QR code for the receipt (best-effort)
+            let docCode = '';
+            try {
+              const r = await api.post('/doc/generate-code', { doc_type: 'sale', doc_id: inv.id });
+              docCode = r.data?.code || '';
+            } catch { /* print without QR */ }
+            const printData = {
+              ...inv,
+              cashier_name: user?.full_name || user?.username || '',
+              signature_url: signature_url || null,
+              bypass_method: bypass_method || null,
+              // Translate field names PrintEngine expects
+              overall_discount: inv.discount || 0,
+              amount_paid: inv.partial_paid || 0,
+              grand_total: (inv.subtotal || 0) - (inv.discount || 0),
+            };
+            PrintEngine.print({
+              type: PrintEngine.getDocType(printData) || 'trust_receipt',
+              data: printData,
+              format: 'full_page',
+              businessInfo: businessInfo || {},
+              docCode,
+            });
+          } catch (e) {
+            toast.error('Print failed: ' + (e?.message || ''));
+          }
+        }}
       />
 
       <Dialog open={creditApprovalDialog} onOpenChange={setCreditApprovalDialog}>

@@ -78,6 +78,11 @@ async def create_signing_session(data: dict, user=Depends(get_current_user)):
             "date": credit_context.get("date", now_iso()[:10]),
             "branch_name": credit_context.get("branch_name", ""),
             "description": credit_context.get("description", ""),
+            "invoice_number": credit_context.get("invoice_number", ""),
+            "items": credit_context.get("items", []),
+            "subtotal": float(credit_context.get("subtotal", 0)) if credit_context.get("subtotal") is not None else None,
+            "discount": float(credit_context.get("discount", 0)) if credit_context.get("discount") is not None else None,
+            "partial_paid": float(credit_context.get("partial_paid", 0)) if credit_context.get("partial_paid") is not None else None,
         },
         "linked_record_type": linked_record_type,
         "linked_record_id": linked_record_id,
@@ -115,12 +120,22 @@ async def get_session_status(token: str, user=Depends(get_current_user)):
 
     expired = _is_session_expired(session)
 
+    # If signed, surface a fresh presigned signature URL so the cashier UI can preview it.
+    signature_url = None
+    if session.get("status") == "signed" and session.get("signature_r2_key"):
+        try:
+            from utils.r2_storage import get_presigned_url
+            signature_url = await get_presigned_url(session["signature_r2_key"], expires_in=3600)
+        except Exception:
+            signature_url = None
+
     return {
         "id": session.get("id"),
         "token": token,
         "status": session.get("status"),
         "signed_at": session.get("signed_at"),
         "bypass_method": session.get("bypass_method"),
+        "signature_url": signature_url,
         "expired": expired,
         "expires_at": session.get("expires_at"),
         "credit_context": session.get("credit_context"),

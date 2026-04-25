@@ -14,6 +14,8 @@ import {
 } from '../../lib/offlineDB';
 import { newEnvelopeId } from '../../lib/syncManager';
 import CropCreditTypeDialog from '../../components/CropCreditTypeDialog';
+import { invalidateBalanceCache } from '../../components/CustomerBalanceBadge';
+import RequestSignatureDialog from '../../components/RequestSignatureDialog';
 
 export default function TerminalSales({ api, session, isOnline, pendingCount, setPendingCount, syncVersion }) {
   const [products, setProducts] = useState([]);
@@ -37,6 +39,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   const CAMERA_SCAN_COOLDOWN = 2000;
   const [lastSaleData, setLastSaleData] = useState(null); // for print prompt
   const [showPrintPrompt, setShowPrintPrompt] = useState(false);
+  const [terminalSig, setTerminalSig] = useState({ open: false, invoice: null }); // mandatory inline sig for credit/partial
   const [businessInfo, setBusinessInfo] = useState({});
   // Insufficient stock override
   const [stockModal, setStockModal] = useState(false);
@@ -521,6 +524,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
       try {
         const res = await api.post('/unified-sale', saleData);
         const invoiceNum = res.data.invoice_number || res.data.sale_number;
+        invalidateBalanceCache();
         toast.success(`Sale ${invoiceNum} completed!`);
 
         // ── Crop Credit linking ──────────────────────────────────────────
@@ -566,7 +570,30 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
 
         // Store sale data for print prompt
         setLastSaleData({ ...saleData, invoice_number: invoiceNum, ...res.data });
-        setShowPrintPrompt(true);
+        // Mandatory signature for credit / partial sales
+        if (saleData.balance > 0 && selectedCustomer?.id) {
+          setTerminalSig({
+            open: true,
+            invoice: {
+              id: res.data.id,
+              invoice_number: invoiceNum,
+              customer_name: saleData.customer_name,
+              customer_id: selectedCustomer.id,
+              branch_id: session.branchId,
+              branch_name: session.branchName || '',
+              items: saleData.items,
+              subtotal: saleData.subtotal,
+              discount: saleData.overall_discount || 0,
+              partial_paid: saleData.partial_payment || 0,
+              balance: saleData.balance,
+              payment_type: saleData.payment_type,
+              order_date: saleData.order_date,
+              credit_type: cropCreditConfig?.type === 'charged_to_crop' ? 'charged_to_crop' : 'by_term',
+            },
+          });
+        } else {
+          setShowPrintPrompt(true);
+        }
         clearCart(); setCheckoutOpen(false); resetCheckout();
       } catch (e) {
         const detail = e.response?.data?.detail;
@@ -604,9 +631,33 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
     try {
       const res = await api.post('/unified-sale', { ...pendingSaleData, manager_override_pin: overridePin.trim() });
       const invoiceNum = res.data.invoice_number || res.data.sale_number;
+      invalidateBalanceCache();
       toast.success(`Sale ${invoiceNum} completed (manager override). Ticket created.`, { duration: 4000 });
       setLastSaleData({ ...pendingSaleData, invoice_number: invoiceNum, ...res.data });
-      setShowPrintPrompt(true);
+      // Mandatory signature for credit/partial sales (after override)
+      if (pendingSaleData.balance > 0 && selectedCustomer?.id) {
+        setTerminalSig({
+          open: true,
+          invoice: {
+            id: res.data.id,
+            invoice_number: invoiceNum,
+            customer_name: pendingSaleData.customer_name,
+            customer_id: selectedCustomer.id,
+            branch_id: session.branchId,
+            branch_name: session.branchName || '',
+            items: pendingSaleData.items,
+            subtotal: pendingSaleData.subtotal,
+            discount: pendingSaleData.overall_discount || 0,
+            partial_paid: pendingSaleData.partial_payment || 0,
+            balance: pendingSaleData.balance,
+            payment_type: pendingSaleData.payment_type,
+            order_date: pendingSaleData.order_date,
+            credit_type: cropCreditConfig?.type === 'charged_to_crop' ? 'charged_to_crop' : 'by_term',
+          },
+        });
+      } else {
+        setShowPrintPrompt(true);
+      }
       setStockModal(false);
       setPendingSaleData(null);
       setInsufficientItems([]);
@@ -1430,6 +1481,29 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Mandatory inline signature for credit/partial sales (terminal mode) */}
+      <RequestSignatureDialog
+        open={terminalSig.open}
+        onOpenChange={(open) => {
+          // If user closes without signing/bypass, still proceed to print prompt
+          setTerminalSig(prev => ({ ...prev, open }));
+          if (!open && lastSaleData) setShowPrintPrompt(true);
+        }}
+        invoice={terminalSig.invoice}
+        mode="inline"
+        onSigned={(sess) => {
+          // Stash signature info on lastSaleData so the print step can use it
+          setLastSaleData(prev => prev ? {
+            ...prev,
+            signature_url: sess.signature_url || null,
+            bypass_method: sess.bypass_method || null,
+          } : prev);
+          // Auto-close + go to print prompt
+          setTerminalSig({ open: false, invoice: null });
+          setShowPrintPrompt(true);
+        }}
+      />
     </div>
   );
 }

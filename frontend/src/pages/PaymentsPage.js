@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
+import { invalidateBalanceCache } from '../components/CustomerBalanceBadge';
 
 const METHODS = [
   { value: 'Cash', label: 'Cash', icon: Banknote },
@@ -335,6 +336,7 @@ export default function PaymentsPage() {
             setPayMemo('');
             await loadInvoices(selectedCustomer.id);
             await loadChargesPreview(selectedCustomer.id, rate);
+            invalidateBalanceCache();
             await loadCustList();
             const refreshed = (await api.get('/customers/receivables-summary', {
               params: { include_zero: showAll, ...(currentBranch?.id ? { branch_id: currentBranch.id } : {}) }
@@ -375,6 +377,7 @@ export default function PaymentsPage() {
       setPayMemo('');
       await loadInvoices(selectedCustomer.id);
       await loadChargesPreview(selectedCustomer.id);
+      invalidateBalanceCache();
       await loadCustList();
       const refreshed = (await api.get('/customers/receivables-summary', {
         params: { include_zero: showAll, ...(currentBranch?.id ? { branch_id: currentBranch.id } : {}) }

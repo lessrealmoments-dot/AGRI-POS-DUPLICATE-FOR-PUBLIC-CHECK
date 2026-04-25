@@ -344,8 +344,14 @@ function trustReceiptFullPage(data, biz, docCode) {
   html += `<p style="font-size:8px;font-style:italic;color:#888;line-height:1.4">${TAX_DISCLAIMER}</p>`;
   html += `</div>`;
 
-  // Signatures
-  html += '<div class="sig-row"><div class="sig-block"><div class="sig-line"></div><div class="sig-label">Authorized Representative</div></div><div class="sig-block"><div class="sig-line"></div><div class="sig-label">Customer Signature &amp; Printed Name</div></div></div>';
+  // Signatures — embed customer signature image if present, or "Manager Bypass" badge
+  if (data.signature_url) {
+    html += `<div class="sig-row"><div class="sig-block"><div class="sig-line"></div><div class="sig-label">Authorized Representative</div></div><div class="sig-block"><img src="${data.signature_url}" alt="signature" style="max-width:80%;max-height:60px;display:block;margin:0 auto 2px;object-fit:contain"/><div class="sig-line"></div><div class="sig-label">Customer Signature</div></div></div>`;
+  } else if (data.bypass_method) {
+    html += `<div class="sig-row"><div class="sig-block"><div class="sig-line"></div><div class="sig-label">Authorized Representative</div></div><div class="sig-block"><div style="margin:8px auto;font-size:10px;border:1px solid #555;padding:4px 8px;display:inline-block;color:#555">AUTHORIZED VIA MANAGER PIN</div><div class="sig-label">Customer (bypassed)</div></div></div>`;
+  } else {
+    html += '<div class="sig-row"><div class="sig-block"><div class="sig-line"></div><div class="sig-label">Authorized Representative</div></div><div class="sig-block"><div class="sig-line"></div><div class="sig-label">Customer Signature &amp; Printed Name</div></div></div>';
+  }
   return html;
 }
 
@@ -599,7 +605,14 @@ function trustReceiptThermal(data, biz, docCode) {
   html += '</div>';
   const terms = (biz.trust_receipt_terms || '').replace('{business_name}', biz.business_name || '');
   if (terms) html += `<div class="trust-terms"><div class="terms-title">TERMS</div>${terms}</div>`;
-  html += '<div class="signature-line"><div style="margin-top:8px"></div><div class="line"></div><div class="sig-label">Customer Signature &amp; Printed Name</div></div>';
+  // Signature block — render embedded signature image if present
+  if (inv.signature_url) {
+    html += `<div class="signature-line"><img src="${inv.signature_url}" alt="signature" style="max-width:60%;max-height:50px;margin:6px auto 0;display:block;object-fit:contain"/><div class="line"></div><div class="sig-label">Customer Signature</div></div>`;
+  } else if (inv.bypass_method) {
+    html += `<div class="signature-line"><div style="margin-top:6px;font-size:9px;color:#000;border:1px solid #000;padding:3px 6px;display:inline-block">AUTHORIZED VIA MANAGER PIN</div></div>`;
+  } else {
+    html += '<div class="signature-line"><div style="margin-top:8px"></div><div class="line"></div><div class="sig-label">Customer Signature &amp; Printed Name</div></div>';
+  }
   if (docCode) html += qrImgTag(docCode, 152);
   html += `<div class="footer">${TAX_DISCLAIMER}</div>`;
   return html;

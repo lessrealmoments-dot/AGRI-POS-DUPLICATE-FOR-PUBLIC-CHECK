@@ -1,0 +1,105 @@
+{
+  "summary": "Iteration 165 — signature flow + cache invalidation + By-Term blocking regression. Backend pytest 8/8 PASSED (session creation persists items/subtotal/discount/partial_paid/invoice_number, status returns signature_url field, public submit -> signed, manager-PIN bypass works, 403 on bad PIN, public /view returns context, receivables-summary regression OK). SignaturePage UI verified: items list, Subtotal, Total Credit Amount, 'Approve & Submit' button label, canvas all render correctly. CRITICAL FRONTEND BUG FOUND in RequestSignatureDialog terminal/inline mode: submitInlineSignature posts {signature_data: dataUrl} but backend /api/signatures/submit/{token} expects key 'signature'. Reproduced via curl: POST returns 400 'Signature data is required'. This breaks the entire terminal flow (TerminalSales). CropCreditTypeDialog By-Term blocking verified by code review: handleConfirmByTerm() toasts 'Cannot create a By Term credit while a Charged-to-Crop credit is active' with description and the button is also disabled+opacity-50+cursor-not-allowed when blockInfo.reason==='active_crop_credit'. Cache invalidation export verified in CustomerBalanceBadge.js (invalidateBalanceCache used by PaymentsPage on success).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "RequestSignatureDialog (mode='inline' / terminal)",
+        "issue": "submitInlineSignature() POST body uses key 'signature_data' but backend POST /api/signatures/submit/{token} requires key 'signature'. Result: 400 'Signature data is required' on every terminal submit. Confirmed via curl. Web POS QR mode is unaffected (SignaturePage uses correct key 'signature').",
+        "selector": "[data-testid='terminal-sig-submit-btn']",
+        "priority": "CRITICAL",
+        "file": "/app/frontend/src/components/RequestSignatureDialog.js",
+        "line": 174,
+        "fix": "Change body: JSON.stringify({ signature_data: dataUrl, signer_name: ... }) to body: JSON.stringify({ signature: dataUrl, signed_at: new Date().toISOString(), user_agent: navigator.userAgent })"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_results": {
+    "backend_pytest": {
+      "file": "/app/backend/tests/test_signatures_165.py",
+      "summary": "8 passed in 5.51s",
+      "junit_xml": "/app/test_reports/pytest/iteration_165_results.xml",
+      "checks": {
+        "session_create_persists_items_totals_invoice": "PASS",
+        "status_includes_signature_url_key": "PASS (null while pending)",
+        "submit_then_status_returns_status_signed": "PASS",
+        "submit_empty_signature_400": "PASS",
+        "bypass_with_manager_pin_521325": "PASS (status->bypassed, bypass_method=pin)",
+        "bypass_wrong_pin_403": "PASS",
+        "receivables_summary_oldest_overdue_regression": "PASS",
+        "public_view_endpoint_returns_context": "PASS"
+      }
+    },
+    "frontend_signature_page": {
+      "url": "/sign/{token}",
+      "items_purchased_section_present": true,
+      "item_rows_rendered": 2,
+      "subtotal_present": true,
+      "total_credit_amount_present": true,
+      "submit_button_text": "Approve & Submit",
+      "canvas_rendered": true,
+      "console_errors": 0
+    },
+    "frontend_request_signature_dialog_qr_mode": {
+      "verified_via": "code review",
+      "qr_code_data_testid": "signature-qr-code (line 245)",
+      "show_bypass_btn": "show-bypass-btn (line 260, 314)",
+      "bypass_pin_input": "bypass-pin-input (line 414)",
+      "bypass_reason_input": "bypass-reason-input (line 421)",
+      "confirm_bypass_btn": "confirm-bypass-btn (line 426)"
+    },
+    "frontend_request_signature_dialog_inline_mode": {
+      "verified_via": "code review",
+      "terminal_sig_pad_canvas": "terminal-sig-pad (line 306)",
+      "terminal_sig_submit_btn": "terminal-sig-submit-btn (line 322)",
+      "items_list_above_pad": "lines 283-298",
+      "BUG": "Wrong payload key 'signature_data' instead of 'signature' on line 174 → 400 every time"
+    },
+    "frontend_crop_credit_type_dialog_by_term_block": {
+      "verified_via": "code review (UI flow blocked by branch-selection prerequisite)",
+      "toast_message_line_114": "Cannot create a By Term credit while a Charged-to-Crop credit is active.",
+      "toast_description_line_116": "Active season ends {seasonEnd} ... Settle the crop credit first, or add this sale to the active season instead.",
+      "button_disabled_line_201": "disabled={blockInfo?.reason === 'active_crop_credit'} → TRUE",
+      "button_styling_line_204": "opacity-50 cursor-not-allowed applied",
+      "label_line_212": "'Locked — crop credit active' replaces standard description"
+    },
+    "frontend_cache_invalidation_export": {
+      "verified_via": "grep export",
+      "exported_function": "invalidateBalanceCache",
+      "from": "/app/frontend/src/components/CustomerBalanceBadge.js",
+      "consumed_by": "/app/frontend/src/pages/PaymentsPage.js (after Save & Apply payment success)"
+    }
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_signatures_165.py",
+    "/app/test_reports/pytest/iteration_165_results.xml"
+  ],
+  "action_items": [
+    "[CRITICAL] Fix /app/frontend/src/components/RequestSignatureDialog.js line 174: change `JSON.stringify({ signature_data: dataUrl, signer_name: invoice?.customer_name || '' })` to `JSON.stringify({ signature: dataUrl, signed_at: new Date().toISOString(), user_agent: navigator.userAgent })`. Without this fix, terminal inline signature submission ALWAYS returns 400 and the entire TerminalSales mandatory-signature flow is broken.",
+    "[Optional] Consider adding `signer_name` field support to backend POST /api/signatures/submit/{token} if desired — currently the public endpoint stores user_agent/signed_at_client/ip in signer_info but ignores signer_name."
+  ],
+  "critical_code_review_comments": [
+    "RequestSignatureDialog.js inline mode payload mismatch is the only blocking bug — easy 1-line fix.",
+    "RequestSignatureDialog.js line 116 polling effect correctly skips when mode='inline' (inline submits directly), matches spec.",
+    "SignaturePage.js correctly handles ctx.subtotal, ctx.discount, ctx.partial_paid as conditional rows; uses != null for subtotal so '0' value still shows. Discount and partial_paid use > 0 — intentional, hides zero-rows. Good.",
+    "Backend /api/signatures/status correctly generates a fresh presigned URL per poll (3600s TTL) — keeps cashier preview valid.",
+    "Backend POST /api/signatures/session correctly coerces subtotal/discount/partial_paid to float OR None — handles missing keys cleanly.",
+    "CropCreditTypeDialog.js handleConfirmByTerm logic is sound: toast.error + early return prevents onConfirm from being called, plus button is disabled at the DOM level → defense-in-depth.",
+    "Note (pre-existing, not new): SignaturePage uses native browser date display via toLocaleDateString — not a regression, design consistent with the rest of public mobile pages."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_signatures_165.py (new)"
+  ],
+  "success_rate": {"backend": "100% (8/8)", "frontend": "75% (3/4 verified, 1 critical bug found)"},
+  "test_credentials": {"super_admin": "janmarkeahig@gmail.com / Aa@58798546521325", "manager_pin": "521325"},
+  "seed_data_creation": "Created several signature_sessions with TEST_ prefixed customer_name during pytest. Auto-expire after 5 minutes; not removed by tests but harmless.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "After main agent fixes line 174 of RequestSignatureDialog.js, you can verify by simulating the terminal submit via curl: POST /api/signatures/submit/{token} with {\"signature\":\"data:image/png;base64,<bytes>\"} should return 200. The full UI e2e for terminal mode needs touch/mouse drawing on the canvas which is unreliable in headless playwright — code-review verification + curl-level smoke is the pragmatic approach. For CropCreditTypeDialog By-Term test, you must (1) select a branch via the branch selector first or sales checkout will toast 'Select a branch', (2) the dialog only opens when payment_type=credit is selected in the checkout modal — selector for that varies by route /sales-new vs /sales.",
+  "rca of the issue": "Bug in RequestSignatureDialog.submitInlineSignature: developer used the older payload shape {signature_data, signer_name} while backend POST /api/signatures/submit/{token} (routes/signatures.py line 272) reads `data.get('signature', '')`. Mismatched key → empty string → backend raises HTTPException(400, 'Signature data is required'). Reproduction: curl -X POST $BASE/api/signatures/submit/$TOKEN -d '{\"signature_data\":\"data:image/png;base64,iVBORw0KGgo=\"}' returns 400. Mitigation: rename the key on the frontend (1-line change). Identical SignaturePage.js (line 76) uses the correct key 'signature' and works — that's why QR mode is fine but inline/terminal mode is broken."
+}

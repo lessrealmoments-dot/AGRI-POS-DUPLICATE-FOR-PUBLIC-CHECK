@@ -106,6 +106,19 @@ export default function CropCreditTypeDialog({ open, onClose, onConfirm, custome
   };
 
   const handleConfirmByTerm = () => {
+    // Block when an active charged-to-crop credit exists — must settle first.
+    if (blockInfo?.reason === 'active_crop_credit') {
+      const seasonEnd = blockInfo.active_credit?.season_end_date;
+      const dueAmt = blockInfo.active_credit?.total_due;
+      toast.error(
+        'Cannot create a By Term credit while a Charged-to-Crop credit is active.',
+        {
+          description: `Active season ends ${seasonEnd}${dueAmt ? ` · running total ${formatPHP(dueAmt)}` : ''}. Settle the crop credit first, or add this sale to the active season instead.`,
+          duration: 6000,
+        }
+      );
+      return;
+    }
     onConfirm({ type: 'by_term' });
   };
 
@@ -185,12 +198,19 @@ export default function CropCreditTypeDialog({ open, onClose, onConfirm, custome
                   <button
                     data-testid="credit-type-by-term"
                     onClick={handleConfirmByTerm}
-                    className="p-4 border-2 border-slate-200 rounded-xl hover:border-slate-400 hover:bg-slate-50 text-left transition-all group">
+                    disabled={blockInfo?.reason === 'active_crop_credit'}
+                    className={`p-4 border-2 rounded-xl text-left transition-all group ${
+                      blockInfo?.reason === 'active_crop_credit'
+                        ? 'border-slate-200 bg-slate-50 opacity-50 cursor-not-allowed'
+                        : 'border-slate-200 hover:border-slate-400 hover:bg-slate-50'
+                    }`}>
                     <div className="text-slate-600 mb-2">
                       <Calendar size={20} />
                     </div>
                     <p className="font-semibold text-sm text-slate-800">By Term</p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">Standard payment terms with due date</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      {blockInfo?.reason === 'active_crop_credit' ? 'Locked — crop credit active' : 'Standard payment terms with due date'}
+                    </p>
                   </button>
 
                   {/* Charged to Crop */}

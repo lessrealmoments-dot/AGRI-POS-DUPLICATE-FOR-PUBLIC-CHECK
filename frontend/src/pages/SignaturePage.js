@@ -164,26 +164,73 @@ export default function SignaturePage() {
           <span className="text-slate-500">Customer</span>
           <span className="font-semibold text-slate-800">{ctx.customer_name || '—'}</span>
         </div>
-        <div className="flex justify-between text-sm">
-          <span className="text-slate-500">Amount</span>
-          <span className="font-bold text-slate-800 text-base">{formatPHP(ctx.amount)}</span>
-        </div>
+        {ctx.invoice_number && (
+          <div className="flex justify-between text-sm">
+            <span className="text-slate-500">Invoice</span>
+            <span className="font-mono text-xs text-slate-700">{ctx.invoice_number}</span>
+          </div>
+        )}
         <div className="flex justify-between text-sm">
           <span className="text-slate-500">Type</span>
           <span className="font-medium text-slate-700 capitalize">
             {(ctx.credit_type || '').replace(/_/g, ' ') || 'Credit'}
           </span>
         </div>
-        {ctx.description && (
-          <div className="flex justify-between text-sm">
-            <span className="text-slate-500">Note</span>
-            <span className="text-slate-700 text-right max-w-[60%]">{ctx.description}</span>
-          </div>
-        )}
         <div className="flex justify-between text-sm">
           <span className="text-slate-500">Date</span>
           <span className="text-slate-700">{ctx.date || new Date().toLocaleDateString()}</span>
         </div>
+      </div>
+
+      {/* Items Purchased */}
+      {Array.isArray(ctx.items) && ctx.items.length > 0 && (
+        <div className="px-5 py-3 bg-white border-b border-slate-200">
+          <p className="text-[10px] text-slate-400 uppercase tracking-wide mb-2 font-semibold">Items Purchased</p>
+          <div className="divide-y divide-slate-100">
+            {ctx.items.map((it, i) => (
+              <div key={i} className="py-1.5 flex items-baseline justify-between gap-2 text-xs">
+                <div className="flex-1 min-w-0">
+                  <p className="text-slate-800 truncate">{it.product_name || it.name}</p>
+                  <p className="text-[10px] text-slate-400">
+                    {it.quantity} {it.unit || ''} × {formatPHP(it.rate || it.price || 0)}
+                  </p>
+                </div>
+                <span className="font-mono text-slate-700 shrink-0">
+                  {formatPHP((it.total != null) ? it.total : (parseFloat(it.quantity || 0) * parseFloat(it.rate || it.price || 0)))}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Totals */}
+      <div className="px-5 py-3 bg-slate-100 border-b border-slate-200 space-y-1">
+        {ctx.subtotal != null && (
+          <div className="flex justify-between text-xs">
+            <span className="text-slate-500">Subtotal</span>
+            <span className="font-mono text-slate-700">{formatPHP(ctx.subtotal)}</span>
+          </div>
+        )}
+        {ctx.discount > 0 && (
+          <div className="flex justify-between text-xs">
+            <span className="text-slate-500">Discount</span>
+            <span className="font-mono text-blue-600">-{formatPHP(ctx.discount)}</span>
+          </div>
+        )}
+        {ctx.partial_paid > 0 && (
+          <div className="flex justify-between text-xs">
+            <span className="text-slate-500">Paid Now</span>
+            <span className="font-mono text-emerald-600">-{formatPHP(ctx.partial_paid)}</span>
+          </div>
+        )}
+        <div className="flex justify-between items-baseline pt-1 border-t border-slate-200">
+          <span className="text-sm font-bold text-slate-700">Total Credit Amount</span>
+          <span className="font-bold text-lg text-slate-900">{formatPHP(ctx.amount)}</span>
+        </div>
+        {ctx.description && (
+          <p className="text-[10px] text-slate-500 italic mt-1">{ctx.description}</p>
+        )}
       </div>
 
       {/* Instructions */}
@@ -240,7 +287,7 @@ export default function SignaturePage() {
           onClick={handleSubmit}
           disabled={submitting}
         >
-          {submitting ? 'Submitting...' : 'Submit Signature'}
+          {submitting ? 'Submitting...' : 'Approve & Submit'}
         </Button>
         <p className="text-[10px] text-slate-400 text-center mt-2">
           This signature is legally binding and will be stored securely.
