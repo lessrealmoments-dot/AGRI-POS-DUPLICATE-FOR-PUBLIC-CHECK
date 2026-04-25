@@ -758,9 +758,51 @@ async def startup():
                     balance = inv.get("balance", 0)
                     branch_id = inv.get("branch_id", "")
                     branch_name = await get_branch_name(branch_id)
-                    total_bal = customer.get("balance", 0)
                     interest_rate = customer.get("interest_rate", 0)
-                    est_interest = round(balance * (interest_rate / 100), 2) if interest_rate > 0 else 0
+
+                    # Auto-generate interest before overdue SMS so /payments is always the truth.
+                    # Uses 30-day guard (force=False) — prevents INT invoice accumulation.
+                    if due_date < today and interest_rate > 0:
+                        try:
+                            from routes.accounting import generate_interest_invoice as _gen_int
+                            # Build a minimal mock user for the call
+                            _mock_user = {
+                                "id": "scheduler", "role": "admin",
+                                "organization_id": org_id,
+                                "permissions": {"accounting": {"generate_interest": True}},
+                                "username": "scheduler",
+                            }
+                            await _gen_int(cust_id, {
+                                "as_of_date": today,
+                                "rate_override": interest_rate,
+                                "force": False,
+                            }, user=_mock_user)
+                        except Exception:
+                            pass  # guard failed silently — SMS still sends with live balance
+
+                    # Compute live balance from invoices — avoids stale customer.balance field
+                    live_bal_pipeline = [
+                        {"$match": {"customer_id": cust_id,
+                                    "status": {"$nin": ["voided", "paid"]},
+                                    "balance": {"$gt": 0},
+                                    "organization_id": org_id}},
+                        {"$group": {"_id": None, "total": {"$sum": "$balance"}}}
+                    ]
+                    live_res = await _raw_db.invoices.aggregate(live_bal_pipeline).to_list(1)
+                    total_bal = round(live_res[0]["total"], 2) if live_res else 0
+
+                    # Actual interest owed = sum of open INT invoices for this customer
+                    int_bal_res = await _raw_db.invoices.aggregate([
+                        {"$match": {"customer_id": cust_id, "sale_type": "interest_charge",
+                                    "status": {"$nin": ["voided", "paid"]},
+                                    "balance": {"$gt": 0}}},
+                        {"$group": {"_id": None, "total": {"$sum": "$balance"}}}
+                    ]).to_list(1)
+                    actual_interest = round(int_bal_res[0]["total"], 2) if int_bal_res else 0
+                    # est_interest: only used in 7-day template; use actual if available, else estimate
+                    est_interest = actual_interest if actual_interest > 0 else (
+                        round(balance * (interest_rate / 100), 2) if interest_rate > 0 else 0
+                    )
 
                     if due_date == day_15:
                         # 15-day reminder — customer only (too early for staff action)
@@ -917,13 +959,17 @@ async def startup():
                     phone = c.get("phone", "")
                     if not phone:
                         continue
-                    overdue_invs = await _raw_db.invoices.find(
-                        {"organization_id": org_id, "customer_id": c["id"],
-                         "status": {"$nin": ["voided", "paid"]},
-                         "balance": {"$gt": 0}, "due_date": {"$lt": today}},
-                        {"_id": 0, "balance": 1}
-                    ).to_list(500)
-                    overdue_total = sum(i.get("balance", 0) for i in overdue_invs)
+                    # Use live invoice sum — avoids stale customer.balance
+                    live_res = await _raw_db.invoices.aggregate([
+                        {"$match": {"customer_id": c["id"], "organization_id": org_id,
+                                    "status": {"$nin": ["voided", "paid"]}, "balance": {"$gt": 0}}},
+                        {"$group": {"_id": None, "total": {"$sum": "$balance"},
+                                    "overdue": {"$sum": {"$cond": [{"$lt": ["$due_date", today]}, "$balance", 0]}}}}
+                    ]).to_list(1)
+                    live_total = round(live_res[0]["total"], 2) if live_res else 0
+                    overdue_total = round(live_res[0]["overdue"], 2) if live_res else 0
+                    if live_total <= 0:
+                        continue  # balance cleared since last customer.balance check
 
                     await queue_sms(
                         template_key="monthly_summary",
@@ -933,7 +979,7 @@ async def startup():
                         variables={
                             "customer_name": c.get("name", ""),
                             "company_name": company_name,
-                            "total_balance": f"{c.get('balance', 0):,.2f}",
+                            "total_balance": f"{live_total:,.2f}",
                             "overdue_amount": f"{overdue_total:,.2f}",
                         },
                         organization_id=org_id,

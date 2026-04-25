@@ -1382,7 +1382,11 @@ async def get_customer_open_invoices(customer_id: str, user=Depends(get_current_
 @router.post("/customers/{customer_id}/generate-interest")
 async def generate_interest_invoice(customer_id: str, data: dict, user=Depends(get_current_user)):
     """Calculate accrued interest for all overdue invoices and create one consolidated interest invoice.
-    Accepts optional rate_override to use instead of customer default, and save_rate to persist it."""
+    Accepts optional rate_override to use instead of customer default, and save_rate to persist it.
+
+    Minimum interval: interest can only be generated once every 30 days (auto-mode).
+    Pass force=True to override the interval — manual button only, not auto-select.
+    """
     check_perm(user, "accounting", "generate_interest")
     customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
     if not customer:
@@ -1393,6 +1397,30 @@ async def generate_interest_invoice(customer_id: str, data: dict, user=Depends(g
     grace_period = int(customer.get("grace_period", 7))
     rate_override = data.get("rate_override")
     save_rate = data.get("save_rate", False)
+    force = data.get("force", False)          # True = manual override button
+    MIN_INTERVAL_DAYS = 30
+
+    # ── Minimum interval guard (prevents accumulation of many tiny INT invoices) ──
+    if not force:
+        last_int_inv = await db.invoices.find_one(
+            {"customer_id": customer_id, "sale_type": "interest_charge",
+             "status": {"$nin": ["voided"]}},
+            {"_id": 0, "order_date": 1},
+            sort=[("order_date", -1)]
+        )
+        if last_int_inv:
+            last_date = datetime.strptime(last_int_inv["order_date"], "%Y-%m-%d")
+            days_since = (comp_date - last_date).days
+            if days_since < MIN_INTERVAL_DAYS:
+                days_until = MIN_INTERVAL_DAYS - days_since
+                return {
+                    "total_interest": 0,
+                    "grace_period": grace_period,
+                    "skipped": True,
+                    "days_since_last": days_since,
+                    "days_until_next": days_until,
+                    "message": f"Interest already generated {days_since} day(s) ago. Next generation available in {days_until} day(s). Use Force Generate to override.",
+                }
 
     # Use override if provided, else customer default
     default_rate = float(rate_override) if rate_override is not None else float(customer.get("interest_rate", 0))
@@ -1461,11 +1489,14 @@ async def generate_interest_invoice(customer_id: str, data: dict, user=Depends(g
     del interest_invoice["_id"]
     await db.customers.update_one({"id": customer_id}, {"$inc": {"balance": round(total_interest, 2)}})
 
-    # SMS hook: notify customer of interest charge
+    # SMS hook: notify customer of interest charge — use live invoice sum
     from routes.sms_hooks import on_charge_applied
-    updated_cust = await db.customers.find_one({"id": customer_id}, {"_id": 0})
-    await on_charge_applied(customer_id, "Interest", round(total_interest, 2),
-                            updated_cust.get("balance", 0) if updated_cust else 0, branch_id)
+    live_res = await db.invoices.aggregate([
+        {"$match": {"customer_id": customer_id, "status": {"$nin": ["voided","paid"]}, "balance": {"$gt": 0}}},
+        {"$group": {"_id": None, "total": {"$sum": "$balance"}}}
+    ]).to_list(1)
+    live_total = round(live_res[0]["total"], 2) if live_res else 0
+    await on_charge_applied(customer_id, "Interest", round(total_interest, 2), live_total, branch_id)
 
     return {"message": "Interest invoice created", "invoice_number": inv_number,
             "total_interest": round(total_interest, 2), "invoice": interest_invoice}
@@ -1535,11 +1566,14 @@ async def generate_penalty_invoice(customer_id: str, data: dict, user=Depends(ge
     del penalty_invoice["_id"]
     await db.customers.update_one({"id": customer_id}, {"$inc": {"balance": round(total_penalty, 2)}})
 
-    # SMS hook: notify customer of penalty charge
+    # SMS hook: notify customer of penalty charge — use live invoice sum
     from routes.sms_hooks import on_charge_applied
-    updated_cust = await db.customers.find_one({"id": customer_id}, {"_id": 0})
-    await on_charge_applied(customer_id, "Penalty", round(total_penalty, 2),
-                            updated_cust.get("balance", 0) if updated_cust else 0, branch_id)
+    live_res = await db.invoices.aggregate([
+        {"$match": {"customer_id": customer_id, "status": {"$nin": ["voided","paid"]}, "balance": {"$gt": 0}}},
+        {"$group": {"_id": None, "total": {"$sum": "$balance"}}}
+    ]).to_list(1)
+    live_total = round(live_res[0]["total"], 2) if live_res else 0
+    await on_charge_applied(customer_id, "Penalty", round(total_penalty, 2), live_total, branch_id)
 
     return {"message": "Penalty invoice created", "invoice_number": inv_number,
             "total_penalty": round(total_penalty, 2), "invoice": penalty_invoice}

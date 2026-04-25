@@ -93,6 +93,15 @@ async def on_credit_sale_created(invoice: dict):
         org_id = await _resolve_org_id(branch_id)
         company_name = await get_company_name(org_id)
         branch_name = await get_branch_name(branch_id)
+
+        # Compute live total balance from invoices — avoids stale customer.balance
+        live_res = await raw_db.invoices.aggregate([
+            {"$match": {"customer_id": customer_id,
+                        "status": {"$nin": ["voided", "paid"]}, "balance": {"$gt": 0}}},
+            {"$group": {"_id": None, "total": {"$sum": "$balance"}}}
+        ]).to_list(1)
+        live_total = round(live_res[0]["total"], 2) if live_res else 0
+
         variables = {
             "customer_name": customer.get("name", invoice.get("customer_name", "")),
             "amount": f"{invoice.get('balance', 0):,.2f}",
@@ -100,7 +109,7 @@ async def on_credit_sale_created(invoice: dict):
             "branch_name": branch_name,
             "date": invoice.get("order_date", ""),
             "due_date": invoice.get("due_date", ""),
-            "total_balance": f"{customer.get('balance', 0):,.2f}",
+            "total_balance": f"{live_total:,.2f}",
         }
         for phone in phones:
             if not phone:

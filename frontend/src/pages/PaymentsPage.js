@@ -132,6 +132,7 @@ export default function PaymentsPage() {
   };
 
   // Auto-generate interest for overdue invoices then reload the invoice list.
+  // force=false → respects 30-day interval (no accumulation).
   // If customer has no interest rate but has overdue invoices, show the rate prompt instead.
   const autoGenerateAndLoad = useCallback(async (customer) => {
     const rate = parseFloat(customer.interest_rate) || 0;
@@ -141,15 +142,20 @@ export default function PaymentsPage() {
         const res = await api.post(`/customers/${customer.id}/generate-interest`, {
           as_of_date: today,
           rate_override: rate,
+          force: false,   // never force on auto — respects 30-day guard
         });
         if (res.data.total_interest > 0) {
           toast.success(
             `Interest auto-computed: ${res.data.invoice_number} — ${formatPHP(res.data.total_interest)}`,
             { description: 'Applied to overdue invoices. Payment will cover this first.' }
           );
+        } else if (res.data.skipped) {
+          // 30-day guard hit — inform staff without alarming them
+          toast(`Interest up to date — next generation in ${res.data.days_until_next} day(s).`,
+            { duration: 3000 });
         }
       } catch {
-        // Silently skip — no overdue or already generated
+        // Silently skip — no overdue or no internet
       }
     }
     const invRes = await loadInvoices(customer.id);
@@ -259,13 +265,13 @@ export default function PaymentsPage() {
     }
   };
 
-  // ── Generate Interest ──
+  // ── Generate Interest (manual — force=true bypasses the 30-day interval) ──
   const handleGenerateInterest = async () => {
     const rate = parseFloat(interestRateInput) || 0;
     if (rate <= 0) { toast.error('Enter an interest rate (% per month) first'); return; }
     setGeneratingCharge('interest');
     try {
-      const payload = { as_of_date: payDate, rate_override: rate };
+      const payload = { as_of_date: payDate, rate_override: rate, force: true };
       if (saveRateToCustomer) payload.save_rate = true;
       const res = await api.post(`/customers/${selectedCustomer.id}/generate-interest`, payload);
       if (res.data.total_interest > 0) {
