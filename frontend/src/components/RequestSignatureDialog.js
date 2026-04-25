@@ -171,7 +171,11 @@ export default function RequestSignatureDialog({
       await fetch(`${BACKEND}/api/signatures/submit/${sessionToken}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ signature_data: dataUrl, signer_name: invoice?.customer_name || '' }),
+        body: JSON.stringify({
+          signature: dataUrl,
+          signed_at: new Date().toISOString(),
+          user_agent: navigator.userAgent,
+        }),
       }).then(r => { if (!r.ok) throw new Error('submit failed'); return r.json(); });
       // Now fetch status to get presigned signature URL
       const status_r = await api.get(`/signatures/status/${sessionToken}`);

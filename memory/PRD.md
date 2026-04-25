@@ -22,6 +22,17 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### Customer Signature Flow (Web POS QR + Terminal Inline) + Real-Time Cache + By-Term Block (2026-04-25) — Complete
+- **Real-time cache invalidation**: PaymentsPage, UnifiedSalesPage, TerminalSales now call `invalidateBalanceCache()` after every successful sale/payment so balance badges across the app reflect the new totals immediately (no 30s stale window).
+- **By-Term blocked when active charged-to-crop exists**: `CropCreditTypeDialog.handleConfirmByTerm` now checks `blockInfo.reason === 'active_crop_credit'` and (1) shows toast.error with description, (2) disables the button visually (opacity 50, cursor not-allowed). Defense-in-depth: button disabled + handler early-return.
+- **Customer signature flow** — fully integrated with the existing `/api/signatures/*` infrastructure:
+  - **Web POS** (`UnifiedSalesPage`, `/sales-new`): after credit/partial sale → `RequestSignatureDialog mode='qr'` shows QR code → customer scans → SignaturePage opens on phone → cashier polls `/status` → when signed, dialog shows captured signature image + Print Receipt button.
+  - **Terminal** (`TerminalSales`): after credit/partial sale → `RequestSignatureDialog mode='inline'` opens with items review + signature_pad canvas on the same terminal device → mandatory before print prompt → submit → status updates → `lastSaleData` includes `signature_url`+`bypass_method` → receipt embeds the small signature image.
+  - **Manager-PIN bypass**: Both modes share `BypassPanel` — when customer can't sign, manager enters PIN + reason → audit-logged via `/api/signatures/bypass/{id}`.
+  - **SignaturePage**: extended to show Items Purchased section (qty × rate × total), Subtotal/Discount/Paid Now/Total Credit Amount block, and "Approve & Submit" button label.
+- **Receipt template (PrintEngine)**: `trustReceiptThermal` + `trustReceiptFullPage` now embed the signature image (max 60% width, 50-60px tall) when `data.signature_url` is present, or render an "AUTHORIZED VIA MANAGER PIN" badge when `data.bypass_method` is set.
+- **Tested**: iteration 165 — backend pytest 8/8 PASS (session persistence, status returns signature_url, public submit, manager bypass, regression on receivables-summary). One critical bug found+fixed (wrong payload key in submitInlineSignature). All lint clean.
+
 ### Inline Open-Balance Badges + Hook Cache (2026-04-25) — Complete
 - New shared **`CustomerBalanceBadge`** component + **`useCustomerBalances`** hook (in-memory 30s cache, single fetch shared across pages, concurrent-fetch de-dup via `_inFlight` promise).
 - Wired into **Sales History**, **Reports → AR Aging**, **Accounting → Receivables**.
