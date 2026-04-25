@@ -621,6 +621,16 @@ See `/app/memory/ROADMAP.md` for full implementation spec.
 
 ## Next Up (P0 — Immediate)
 See `/app/memory/ROADMAP.md` for full spec on each item.
+See `/app/memory/NEXT_FORK_HANDOFF.md` for the IMMEDIATE next task with full design spec.
+
+### /payments UI Redesign + Inline Interest + Account Summary (NEXT — NOT YET CODED)
+Full design spec in `/app/memory/NEXT_FORK_HANDOFF.md`. Summary:
+- Compact header (2 rows instead of 4) — fixes "only 2 invoices visible" space problem
+- Remove "Generate Interest" collapsible card — replaced by inline interest sub-rows per overdue invoice
+- Inline interest row per overdue invoice: `45d × 2%/mo = ₱26.75 | subtotal ₱918.27`
+- Account Summary footer card with professional labels: Outstanding Principal / Accrued Interest Charges / Total Amount Due
+- INT invoice only created at PAY time (force=True), not on customer select
+- Customer select: just loads invoices + shows inline computed interest (no INT invoice creation)
 
 ### Forgot Password / Password Reset (2026-04-14) — Complete
 - `POST /api/auth/forgot-password` — generates a secure token (1hr expiry), stores in `password_reset_tokens` collection, sends email via Resend with link to `{APP_FRONTEND_URL}/reset-password?token=...`
