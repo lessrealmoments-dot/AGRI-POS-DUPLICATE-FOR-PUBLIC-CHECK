@@ -292,8 +292,8 @@ async def submit_signature(token: str, data: dict):
     if len(image_bytes) < 100:
         raise HTTPException(status_code=400, detail="Signature appears to be empty")
 
-    # Upload to R2
-    org_id = session.get("organization_id", "unknown")
+    # Upload to R2 — fall back to "global" when org_id is null (e.g. super-admin sessions)
+    org_id = session.get("organization_id") or "global"
     session_id = session.get("id", new_id())
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     filename = f"signature_{timestamp}.png"

@@ -24,7 +24,10 @@ def _get_client():
         aws_access_key_id=_access_key,
         aws_secret_access_key=_secret_key,
         region_name="auto",
-        config=Config(signature_version="s3v4"),
+        config=Config(
+            signature_version="s3v4",
+            s3={"addressing_style": "virtual"},  # R2 requires virtual-host-style for presigned URLs
+        ),
     )
 
 

@@ -22,6 +22,12 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### Signature Display Bug Fix in Compact InvoiceDetailModal + R2 Virtual Hosting (2026-04-25) — Complete
+- **Bug 1**: `compact` mode of `InvoiceDetailModal` (used by SalesPage and most pages) renders a different DOM that did NOT include the signature section. The header chip's `setSection('signature')` had no effect. **Fix**: Added an inline "Credit Authorization Signature" card inside compact mode (right above Void button) that always renders when `signatures.length > 0`. The header chip now also `scrollIntoView`s.
+- **Bug 2**: R2 presigned URLs returned 403 (path-style addressing). **Fix**: `utils/r2_storage.py:_get_client` now sets `addressing_style='virtual'` — required by Cloudflare R2. Confirmed: existing `None/signatures/...` keys (from super-admin sessions) now serve correctly.
+- **Bug 3**: Super-admin sessions were uploaded under literal `None/signatures/...` because `session.get('organization_id', 'unknown')` returned `None` (mongo null) instead of the default. **Fix**: changed to `session.get('organization_id') or 'global'` so future signatures use a clean `global/...` prefix.
+- Verified: SI-B1-001059 modal now shows the captured signature image at 1308px native width, properly displayed.
+
 ### Sale Signature Visibility — Bug Fix + "Signed ✓" Chip (2026-04-25) — Complete
 - **Bug fix**: Signatures created via `RequestSignatureDialog` were stored with `linked_record_type='sale'` but `InvoiceDetailModal` queries `record/invoice/{id}`. Result: signed sales (e.g., SI-B1-001059) showed no signature in the modal.
   - Frontend fix: `RequestSignatureDialog.linked_record_type` changed from `'sale'` → `'invoice'` to match query side.

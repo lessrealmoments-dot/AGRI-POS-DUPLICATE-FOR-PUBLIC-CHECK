@@ -352,7 +352,14 @@ export default function InvoiceDetailModal({
                 {(invoice?.has_signature || signatures.length > 0) && (
                   <button
                     type="button"
-                    onClick={() => setSection('signature')}
+                    onClick={() => {
+                      setSection('signature');
+                      // In compact mode the section is inline — scroll into view
+                      setTimeout(() => {
+                        const el = document.getElementById('compact-signature-section');
+                        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      }, 80);
+                    }}
                     className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded border transition-colors ${
                       (invoice?.signature_status === 'bypassed' || signatures[0]?.status === 'bypassed')
                         ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
@@ -563,6 +570,44 @@ export default function InvoiceDetailModal({
                               </div>
                               <p className="text-slate-600 italic">"{edit.reason}"</p>
                               {edit.change_summary && <p className="text-slate-500 mt-0.5">{edit.change_summary}</p>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Customer signature(s) — inline in compact mode */}
+                      {signatures.length > 0 && (
+                        <div id="compact-signature-section" data-testid="signature-section" className="border-2 border-emerald-200 rounded-lg p-3 bg-emerald-50/30 space-y-2">
+                          <h4 className="text-xs font-semibold flex items-center gap-1.5 text-emerald-700">
+                            <ShieldCheck size={13} /> Credit Authorization Signature
+                          </h4>
+                          {signatures.map((sig, i) => (
+                            <div key={sig.id || i} className="bg-white border border-slate-200 rounded-lg p-2.5">
+                              <div className="flex items-center justify-between mb-2">
+                                <Badge className={`text-[10px] ${sig.status === 'signed' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                  {sig.status === 'signed' ? '✓ Signed' : 'PIN Override'}
+                                </Badge>
+                                <span className="text-[10px] text-slate-400">
+                                  {sig.signed_at ? new Date(sig.signed_at).toLocaleString('en-PH', { dateStyle: 'short', timeStyle: 'short' }) : sig.bypassed_at ? new Date(sig.bypassed_at).toLocaleString('en-PH', { dateStyle: 'short', timeStyle: 'short' }) : ''}
+                                </span>
+                              </div>
+                              {sig.status === 'signed' && sig.signature_url ? (
+                                <div className="border border-dashed border-slate-300 rounded p-2 bg-white">
+                                  <img src={sig.signature_url} alt="Customer signature" className="max-h-24 mx-auto object-contain"
+                                    onError={e => { e.target.style.display = 'none'; e.target.nextSibling && (e.target.nextSibling.style.display = 'block'); }} />
+                                  <p className="text-[10px] text-slate-400 hidden text-center py-2">Image unavailable.</p>
+                                  <div className="flex justify-center mt-1.5">
+                                    <p className="text-[9px] text-slate-400 uppercase tracking-wider">Customer signature · {sig.signer_name || sig.credit_context?.customer_name || ''}</p>
+                                  </div>
+                                </div>
+                              ) : sig.status === 'bypassed' ? (
+                                <div className="bg-amber-50 border border-amber-200 rounded p-2 text-[11px] text-amber-700">
+                                  <p className="font-medium">Manager PIN Override · By {sig.bypass_by_name}</p>
+                                  {sig.bypass_reason && <p className="italic">"{sig.bypass_reason}"</p>}
+                                </div>
+                              ) : (
+                                <p className="text-[11px] text-slate-400 text-center py-2">Status: {sig.status}</p>
+                              )}
                             </div>
                           ))}
                         </div>
