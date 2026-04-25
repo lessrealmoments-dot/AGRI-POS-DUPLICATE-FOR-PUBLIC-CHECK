@@ -238,6 +238,19 @@ export default function SalesPage() {
                       <span className="font-mono text-xs text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1">
                         {s.invoice_number}
                         {s.edited && <Edit3 size={10} className="text-orange-500" />}
+                        {s.has_signature && (
+                          <span
+                            className={`inline-flex items-center gap-0.5 text-[9px] font-medium px-1 py-px rounded ${
+                              s.signature_status === 'bypassed'
+                                ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            }`}
+                            title={s.signature_status === 'bypassed' ? 'Manager-PIN bypass' : 'Customer signed'}
+                            data-testid={`sig-chip-${s.id}`}
+                          >
+                            {s.signature_status === 'bypassed' ? '⚠ PIN' : '✓ Signed'}
+                          </span>
+                        )}
                       </span>
                     </TableCell>
                     <TableCell className="font-medium text-sm max-w-[220px] truncate">

@@ -22,6 +22,16 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### Sale Signature Visibility — Bug Fix + "Signed ✓" Chip (2026-04-25) — Complete
+- **Bug fix**: Signatures created via `RequestSignatureDialog` were stored with `linked_record_type='sale'` but `InvoiceDetailModal` queries `record/invoice/{id}`. Result: signed sales (e.g., SI-B1-001059) showed no signature in the modal.
+  - Frontend fix: `RequestSignatureDialog.linked_record_type` changed from `'sale'` → `'invoice'` to match query side.
+  - Backend fix: `GET /api/signatures/record/{type}/{id}` now matches BOTH `sale` and `invoice` types when either is requested → existing legacy sessions surface correctly.
+- **"Signed by customer ✓" chip improvement**:
+  - Backend: `/api/invoices` list and `/api/invoices/{id}` detail endpoints now return `has_signature: bool` and `signature_status: 'signed' | 'bypassed' | null` (computed via $in lookup on signature_sessions, supports both legacy 'sale' + 'invoice' linkage).
+  - SalesPage: each row's invoice number now shows a small green "✓ Signed" pill (or amber "⚠ PIN" if manager-bypassed) next to the number when applicable. Tooltip explains. testid `sig-chip-{saleId}`.
+  - InvoiceDetailModal: header shows a clickable "Signed by customer" chip beside the verification badge that, when clicked, jumps to the Signature section showing the captured image. testid `header-signature-chip`.
+- Verified: SI-B1-001059 now displays both chips and the signature image correctly. All lint clean. Backend confirmed via curl: `has_signature=True, signature_status=signed`.
+
 ### Customer Signature Flow (Web POS QR + Terminal Inline) + Real-Time Cache + By-Term Block (2026-04-25) — Complete
 - **Real-time cache invalidation**: PaymentsPage, UnifiedSalesPage, TerminalSales now call `invalidateBalanceCache()` after every successful sale/payment so balance badges across the app reflect the new totals immediately (no 30s stale window).
 - **By-Term blocked when active charged-to-crop exists**: `CropCreditTypeDialog.handleConfirmByTerm` now checks `blockInfo.reason === 'active_crop_credit'` and (1) shows toast.error with description, (2) disables the button visually (opacity 50, cursor not-allowed). Defense-in-depth: button disabled + handler early-return.

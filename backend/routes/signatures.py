@@ -198,9 +198,17 @@ async def get_signatures_for_record(
     record_id: str,
     user=Depends(get_current_user),
 ):
-    """Get all signature sessions linked to a specific record (for receipt viewing)."""
+    """Get all signature sessions linked to a specific record (for receipt viewing).
+
+    Matches both `sale` and `invoice` linked_record_type for the same id, since
+    sales and invoices share an ID space and historically both names have been used.
+    """
+    types_to_match = [record_type]
+    if record_type in ("sale", "invoice"):
+        types_to_match = ["sale", "invoice"]
+
     sessions = await db.signature_sessions.find(
-        {"linked_record_type": record_type, "linked_record_id": record_id},
+        {"linked_record_type": {"$in": types_to_match}, "linked_record_id": record_id},
         {"_id": 0}
     ).sort("created_at", -1).to_list(20)
 

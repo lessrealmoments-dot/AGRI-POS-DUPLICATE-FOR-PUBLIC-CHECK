@@ -70,7 +70,7 @@ export default function RequestSignatureDialog({
     const description = invoice.description || `${credit_type === 'charged_to_crop' ? 'Charged-to-Crop credit' : 'Term credit'}${invoice.partial_paid > 0 ? ' (partial payment)' : ''}`;
 
     const payload = {
-      linked_record_type: 'sale',
+      linked_record_type: 'invoice',
       linked_record_id: invoice.id || '',
       branch_id: invoice.branch_id || '',
       credit_context: {

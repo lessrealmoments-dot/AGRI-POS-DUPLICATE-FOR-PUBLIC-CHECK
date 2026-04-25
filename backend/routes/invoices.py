@@ -70,6 +70,32 @@ async def list_invoices(
     
     total = await db.invoices.count_documents(query)
     items = await db.invoices.find(query, {"_id": 0}).sort(sort_field, sort_direction).skip(skip).limit(limit).to_list(limit)
+
+    # Annotate each invoice with whether a customer signature exists (signed or bypassed)
+    if items:
+        ids = [it.get("id") for it in items if it.get("id")]
+        if ids:
+            sig_rows = await db.signature_sessions.find(
+                {
+                    "linked_record_id": {"$in": ids},
+                    "linked_record_type": {"$in": ["sale", "invoice"]},
+                    "status": {"$in": ["signed", "bypassed"]},
+                },
+                {"_id": 0, "linked_record_id": 1, "status": 1},
+            ).to_list(length=len(ids) * 2)
+            sig_status_by_id = {}
+            for sr in sig_rows:
+                rid = sr.get("linked_record_id")
+                if not rid:
+                    continue
+                # Prefer 'signed' over 'bypassed' if both exist for the same id
+                if sig_status_by_id.get(rid) != "signed":
+                    sig_status_by_id[rid] = sr.get("status")
+            for it in items:
+                st = sig_status_by_id.get(it.get("id"))
+                it["signature_status"] = st  # 'signed' | 'bypassed' | None
+                it["has_signature"] = bool(st)
+
     return {"invoices": items, "total": total}
 
 
@@ -393,7 +419,20 @@ async def get_invoice(inv_id: str, user=Depends(get_current_user)):
     ).sort("edited_at", -1).to_list(100)
     inv["edit_history"] = edit_history
     inv["edit_count"] = len(edit_history)
-    
+
+    # Annotate signature status (matches both legacy 'sale' and current 'invoice' types)
+    sig = await db.signature_sessions.find_one(
+        {
+            "linked_record_id": inv_id,
+            "linked_record_type": {"$in": ["sale", "invoice"]},
+            "status": {"$in": ["signed", "bypassed"]},
+        },
+        {"_id": 0, "status": 1},
+        sort=[("status", -1)],  # 'signed' sorts after 'bypassed' alphabetically — prefer signed
+    )
+    inv["signature_status"] = sig.get("status") if sig else None
+    inv["has_signature"] = bool(sig)
+
     return inv
 
 

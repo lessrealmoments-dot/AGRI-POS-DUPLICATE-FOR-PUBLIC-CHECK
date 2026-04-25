@@ -342,12 +342,30 @@ export default function InvoiceDetailModal({
               <DialogTitle style={{ fontFamily: 'Manrope' }} data-testid="invoice-number">
                 {editMode ? `Edit Sale — ${saleNumber}` : `Sale Detail — ${saleNumber}`}
               </DialogTitle>
-              {invoice?.verified && (
-                <div className="mt-1 flex items-center gap-2">
-                  <VerificationBadge doc={invoice} />
-                  {invoice.verified_at && <span className="text-[10px] text-slate-400">{invoice.verified_at?.slice(0, 16)?.replace('T', ' ')}</span>}
-                </div>
-              )}
+              <div className="mt-1 flex items-center gap-2 flex-wrap">
+                {invoice?.verified && (
+                  <>
+                    <VerificationBadge doc={invoice} />
+                    {invoice.verified_at && <span className="text-[10px] text-slate-400">{invoice.verified_at?.slice(0, 16)?.replace('T', ' ')}</span>}
+                  </>
+                )}
+                {(invoice?.has_signature || signatures.length > 0) && (
+                  <button
+                    type="button"
+                    onClick={() => setSection('signature')}
+                    className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded border transition-colors ${
+                      (invoice?.signature_status === 'bypassed' || signatures[0]?.status === 'bypassed')
+                        ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
+                        : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                    }`}
+                    title={(invoice?.signature_status === 'bypassed' || signatures[0]?.status === 'bypassed') ? 'Authorized via Manager PIN — click to view' : 'Customer signed — click to view'}
+                    data-testid="header-signature-chip"
+                  >
+                    <ShieldCheck size={11} />
+                    {(invoice?.signature_status === 'bypassed' || signatures[0]?.status === 'bypassed') ? 'PIN bypass' : 'Signed by customer'}
+                  </button>
+                )}
+              </div>
             </DialogHeader>
 
             {loading ? (
