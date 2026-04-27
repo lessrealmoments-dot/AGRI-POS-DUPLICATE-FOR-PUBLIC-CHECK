@@ -1498,6 +1498,8 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
             ...prev,
             signature_url: sess.signature_url || null,
             bypass_method: sess.bypass_method || null,
+            signature_signed_at: sess.signed_at || sess.bypassed_at || null,
+            signature_verification_token: sess.verification_token || null,
           } : prev);
           // Auto-close + go to print prompt
           setTerminalSig({ open: false, invoice: null });

@@ -23,6 +23,9 @@ Storage:
   - Permanently linked to session_id and linked_record_id
 """
 import base64
+import hmac
+import hashlib
+import os
 import secrets
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -33,6 +36,18 @@ from utils import get_current_user, check_perm, now_iso, new_id
 router = APIRouter(prefix="/signatures", tags=["Signatures"])
 
 SESSION_EXPIRY_MINUTES = 5
+
+# Verification tokens are short HMAC-SHA256 prefixes derived from the session id.
+# Stable across re-fetches; changes only if the session id changes.
+_VERIFY_SECRET = (os.environ.get("SIGNATURE_VERIFY_SECRET") or os.environ.get("JWT_SECRET") or "agribooks-sig").encode()
+
+
+def _verify_token(session_id: str | None) -> str:
+    """Return an 8-char uppercase token uniquely derived from the session id."""
+    if not session_id:
+        return ""
+    h = hmac.new(_VERIFY_SECRET, session_id.encode(), hashlib.sha256).hexdigest()
+    return h[:8].upper()
 
 
 def _is_session_expired(session: dict) -> bool:
@@ -139,6 +154,7 @@ async def get_session_status(token: str, user=Depends(get_current_user)):
         "expired": expired,
         "expires_at": session.get("expires_at"),
         "credit_context": session.get("credit_context"),
+        "verification_token": _verify_token(session.get("id")),
     }
 
 
@@ -212,8 +228,9 @@ async def get_signatures_for_record(
         {"_id": 0}
     ).sort("created_at", -1).to_list(20)
 
-    # Generate pre-signed URLs for signed sessions
+    # Generate pre-signed URLs for signed sessions + verification token
     for s in sessions:
+        s["verification_token"] = _verify_token(s.get("id"))
         if s.get("signature_r2_key"):
             try:
                 from utils.r2_storage import get_presigned_url
@@ -222,6 +239,50 @@ async def get_signatures_for_record(
                 s["signature_url"] = None
 
     return sessions
+
+
+# ── Manager lookup: resolve a printed verification token back to the session ──
+@router.get("/verify/{token}")
+async def verify_token_lookup(token: str, user=Depends(get_current_user)):
+    """Look up a signature session by its 8-char verification token (printed on receipts).
+    Returns enough metadata for managers to confirm authenticity in disputes.
+    """
+    token_clean = (token or "").strip().upper()
+    if len(token_clean) != 8:
+        raise HTTPException(status_code=400, detail="Token must be 8 characters")
+
+    # Linear scan over signed/bypassed sessions — collection is small + indexed
+    sessions = await db.signature_sessions.find(
+        {"status": {"$in": ["signed", "bypassed"]}},
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(2000)
+
+    match = next((s for s in sessions if _verify_token(s.get("id")) == token_clean), None)
+    if not match:
+        raise HTTPException(status_code=404, detail="No matching signature found")
+
+    sig_url = None
+    if match.get("signature_r2_key"):
+        try:
+            from utils.r2_storage import get_presigned_url
+            sig_url = await get_presigned_url(match["signature_r2_key"], expires_in=3600)
+        except Exception:
+            sig_url = None
+
+    return {
+        "verification_token": token_clean,
+        "session_id": match.get("id"),
+        "linked_record_type": match.get("linked_record_type"),
+        "linked_record_id": match.get("linked_record_id"),
+        "status": match.get("status"),
+        "signed_at": match.get("signed_at"),
+        "bypassed_at": match.get("bypassed_at"),
+        "bypass_method": match.get("bypass_method"),
+        "bypass_by_name": match.get("bypass_by_name"),
+        "signer_name": match.get("signer_name"),
+        "credit_context": match.get("credit_context"),
+        "signature_url": sig_url,
+    }
 
 
 # ==================== PUBLIC ENDPOINTS (no auth — for mobile signing) ====================

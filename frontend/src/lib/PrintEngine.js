@@ -345,10 +345,19 @@ function trustReceiptFullPage(data, biz, docCode) {
   html += `</div>`;
 
   // Signatures — embed customer signature image if present, or "Manager Bypass" badge
+  // Tamper-evident stamp below: signed-at + verification token (8-char HMAC)
+  const sigStampFull = (() => {
+    const t = data.signature_verification_token || '';
+    const sa = data.signature_signed_at || '';
+    if (!t && !sa) return '';
+    const dt = sa ? new Date(sa) : null;
+    const dtStr = dt ? dt.toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : '';
+    return `<div style="text-align:center;font-size:8.5px;color:#666;margin-top:4px;letter-spacing:0.3px">Signed ${dtStr}${t ? ` &middot; v.${t}` : ''}</div>`;
+  })();
   if (data.signature_url) {
-    html += `<div class="sig-row"><div class="sig-block"><div class="sig-line"></div><div class="sig-label">Authorized Representative</div></div><div class="sig-block"><img src="${data.signature_url}" alt="signature" style="max-width:80%;max-height:60px;display:block;margin:0 auto 2px;object-fit:contain"/><div class="sig-line"></div><div class="sig-label">Customer Signature</div></div></div>`;
+    html += `<div class="sig-row"><div class="sig-block"><div class="sig-line"></div><div class="sig-label">Authorized Representative</div></div><div class="sig-block"><img src="${data.signature_url}" alt="signature" style="max-width:80%;max-height:60px;display:block;margin:0 auto 2px;object-fit:contain"/><div class="sig-line"></div><div class="sig-label">Customer Signature</div>${sigStampFull}</div></div>`;
   } else if (data.bypass_method) {
-    html += `<div class="sig-row"><div class="sig-block"><div class="sig-line"></div><div class="sig-label">Authorized Representative</div></div><div class="sig-block"><div style="margin:8px auto;font-size:10px;border:1px solid #555;padding:4px 8px;display:inline-block;color:#555">AUTHORIZED VIA MANAGER PIN</div><div class="sig-label">Customer (bypassed)</div></div></div>`;
+    html += `<div class="sig-row"><div class="sig-block"><div class="sig-line"></div><div class="sig-label">Authorized Representative</div></div><div class="sig-block"><div style="margin:8px auto;font-size:10px;border:1px solid #555;padding:4px 8px;display:inline-block;color:#555">AUTHORIZED VIA MANAGER PIN</div><div class="sig-label">Customer (bypassed)</div>${sigStampFull}</div></div>`;
   } else {
     html += '<div class="sig-row"><div class="sig-block"><div class="sig-line"></div><div class="sig-label">Authorized Representative</div></div><div class="sig-block"><div class="sig-line"></div><div class="sig-label">Customer Signature &amp; Printed Name</div></div></div>';
   }
@@ -606,10 +615,19 @@ function trustReceiptThermal(data, biz, docCode) {
   const terms = (biz.trust_receipt_terms || '').replace('{business_name}', biz.business_name || '');
   if (terms) html += `<div class="trust-terms"><div class="terms-title">TERMS</div>${terms}</div>`;
   // Signature block — render embedded signature image if present
+  // Tamper-evident stamp below: signed-at + verification token
+  const sigStampThermal = (() => {
+    const t = inv.signature_verification_token || '';
+    const sa = inv.signature_signed_at || '';
+    if (!t && !sa) return '';
+    const dt = sa ? new Date(sa) : null;
+    const dtStr = dt ? dt.toISOString().slice(0, 16).replace('T', ' ') + 'Z' : '';
+    return `<div style="text-align:center;font-size:8px;color:#000;margin-top:2px">Signed ${dtStr}${t ? ` &middot; v.${t}` : ''}</div>`;
+  })();
   if (inv.signature_url) {
-    html += `<div class="signature-line"><img src="${inv.signature_url}" alt="signature" style="max-width:60%;max-height:50px;margin:6px auto 0;display:block;object-fit:contain"/><div class="line"></div><div class="sig-label">Customer Signature</div></div>`;
+    html += `<div class="signature-line"><img src="${inv.signature_url}" alt="signature" style="max-width:60%;max-height:50px;margin:6px auto 0;display:block;object-fit:contain"/><div class="line"></div><div class="sig-label">Customer Signature</div>${sigStampThermal}</div>`;
   } else if (inv.bypass_method) {
-    html += `<div class="signature-line"><div style="margin-top:6px;font-size:9px;color:#000;border:1px solid #000;padding:3px 6px;display:inline-block">AUTHORIZED VIA MANAGER PIN</div></div>`;
+    html += `<div class="signature-line"><div style="margin-top:6px;font-size:9px;color:#000;border:1px solid #000;padding:3px 6px;display:inline-block">AUTHORIZED VIA MANAGER PIN</div>${sigStampThermal}</div>`;
   } else {
     html += '<div class="signature-line"><div style="margin-top:8px"></div><div class="line"></div><div class="sig-label">Customer Signature &amp; Printed Name</div></div>';
   }

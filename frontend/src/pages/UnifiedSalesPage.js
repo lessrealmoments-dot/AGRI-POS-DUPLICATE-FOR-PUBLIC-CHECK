@@ -2625,7 +2625,7 @@ export default function UnifiedSalesPage() {
         open={sigDialog.open}
         onOpenChange={(open) => setSigDialog(prev => ({ ...prev, open }))}
         invoice={sigDialog.invoice}
-        onPrintReceipt={async ({ signature_url, bypass_method }) => {
+        onPrintReceipt={async ({ signature_url, bypass_method, signed_at, verification_token }) => {
           try {
             const inv = sigDialog.invoice || {};
             // Fetch fresh QR code for the receipt (best-effort)
@@ -2639,6 +2639,8 @@ export default function UnifiedSalesPage() {
               cashier_name: user?.full_name || user?.username || '',
               signature_url: signature_url || null,
               bypass_method: bypass_method || null,
+              signature_signed_at: signed_at || null,
+              signature_verification_token: verification_token || null,
               // Translate field names PrintEngine expects
               overall_discount: inv.discount || 0,
               amount_paid: inv.partial_paid || 0,

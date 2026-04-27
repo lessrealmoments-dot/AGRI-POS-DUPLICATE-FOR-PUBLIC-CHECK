@@ -249,10 +249,13 @@ export default function InvoiceDetailModal({
     // Pick the most recent signed signature (or bypass) to embed in the receipt
     const signedSig = signatures.find(s => s.status === 'signed' && s.signature_url);
     const bypassedSig = signatures.find(s => s.status === 'bypassed');
+    const activeSig = signedSig || bypassedSig;
     const printData = {
       ...invoice,
       signature_url: signedSig?.signature_url || null,
       bypass_method: !signedSig && bypassedSig ? (bypassedSig.bypass_method || 'pin') : null,
+      signature_signed_at: activeSig?.signed_at || activeSig?.bypassed_at || null,
+      signature_verification_token: activeSig?.verification_token || null,
     };
     PrintEngine.print({ type: docType, data: printData, format, businessInfo, docCode });
   };

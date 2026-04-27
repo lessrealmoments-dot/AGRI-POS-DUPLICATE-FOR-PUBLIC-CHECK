@@ -44,6 +44,7 @@ export default function RequestSignatureDialog({
   const [bypassErr, setBypassErr] = useState('');
   const [bypassing, setBypassing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [lastStatus, setLastStatus] = useState(null);
   const pollRef = useRef(null);
   const canvasRef = useRef(null);
   const padRef = useRef(null);
@@ -119,6 +120,7 @@ export default function RequestSignatureDialog({
       try {
         const r = await api.get(`/signatures/status/${sessionToken}`);
         if (stopped) return;
+        setLastStatus(r.data);
         if (r.data.expired && r.data.status === 'pending') {
           setStatus('expired');
           return;
@@ -179,6 +181,7 @@ export default function RequestSignatureDialog({
       }).then(r => { if (!r.ok) throw new Error('submit failed'); return r.json(); });
       // Now fetch status to get presigned signature URL
       const status_r = await api.get(`/signatures/status/${sessionToken}`);
+      setLastStatus(status_r.data);
       setSignatureUrl(status_r.data.signature_url || dataUrl);
       setStatus('signed');
       onSigned?.(status_r.data);
@@ -203,7 +206,14 @@ export default function RequestSignatureDialog({
       // Status poll will catch it; force-set for snappy UX
       setBypassMethod('pin');
       setStatus('bypassed');
-      onSigned?.({ status: 'bypassed', bypass_method: 'pin' });
+      // Fetch status to get verification_token
+      try {
+        const status_r = await api.get(`/signatures/status/${sessionToken}`);
+        setLastStatus(status_r.data);
+        onSigned?.(status_r.data);
+      } catch {
+        onSigned?.({ status: 'bypassed', bypass_method: 'pin' });
+      }
     } catch (e) {
       setBypassErr(e.response?.data?.detail || 'Bypass failed');
     } finally {
@@ -213,7 +223,12 @@ export default function RequestSignatureDialog({
 
   // ── Print + close ──
   const handlePrintAndClose = () => {
-    onPrintReceipt?.({ signature_url: signatureUrl, bypass_method: bypassMethod });
+    onPrintReceipt?.({
+      signature_url: signatureUrl,
+      bypass_method: bypassMethod,
+      signed_at: lastStatus?.signed_at || lastStatus?.bypassed_at || new Date().toISOString(),
+      verification_token: lastStatus?.verification_token || '',
+    });
     onOpenChange(false);
   };
 

@@ -22,6 +22,14 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### Tamper-Evident Signature Stamp on Receipts (2026-04-25) — Complete
+- **Backend**: `signatures.py` adds `_verify_token()` — 8-char uppercase HMAC-SHA256 prefix derived from session id (signed with `SIGNATURE_VERIFY_SECRET` or `JWT_SECRET`). Token is stable across re-fetches.
+- **API responses**: `/status/{token}`, `/record/{type}/{id}`, and the new `/verify/{token}` endpoint all include `verification_token`.
+- **New manager-lookup endpoint**: `GET /api/signatures/verify/{token}` resolves a printed token back to the full session metadata (signer name, signed-at, credit context, signature image URL) — auditable dispute-resolution path.
+- **PrintEngine**: both `trustReceiptThermal` and `trustReceiptFullPage` render a small `Signed YYYY-MM-DD HH:MM Z · v.XXXXXXXX` line below the signature image (or below the PIN-bypass badge). 8.5px font, gray, centered.
+- **Plumbing**: `signature_signed_at` + `signature_verification_token` flow from `signatures` array in `InvoiceDetailModal.handlePrint`, from `RequestSignatureDialog.onPrintReceipt`, and from `TerminalSales.onSigned` → into `lastSaleData` for terminal print.
+- **Verified**: SI-B1-001059 returns `verification_token: 34F788C2`, and `GET /api/signatures/verify/34F788C2` resolves to the same session. Lint clean across all 6 changed files.
+
 ### Signature Display Bug Fix in Compact InvoiceDetailModal + R2 Virtual Hosting (2026-04-25) — Complete
 - **Bug 1**: `compact` mode of `InvoiceDetailModal` (used by SalesPage and most pages) renders a different DOM that did NOT include the signature section. The header chip's `setSection('signature')` had no effect. **Fix**: Added an inline "Credit Authorization Signature" card inside compact mode (right above Void button) that always renders when `signatures.length > 0`. The header chip now also `scrollIntoView`s.
 - **Bug 2**: R2 presigned URLs returned 403 (path-style addressing). **Fix**: `utils/r2_storage.py:_get_client` now sets `addressing_style='virtual'` — required by Cloudflare R2. Confirmed: existing `None/signatures/...` keys (from super-admin sessions) now serve correctly.
