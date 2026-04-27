@@ -17,7 +17,7 @@ from datetime import datetime
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 if not BASE_URL:
-    BASE_URL = "https://crop-credit-pos.preview.emergentagent.com"
+    BASE_URL = "https://farmer-ledger-system.preview.emergentagent.com"
 
 # Module-level constants for test data
 BRANCH_ID = "9599a32f-722d-4824-9af8-b0217ca78523"  # Main Branch

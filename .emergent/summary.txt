@@ -2,79 +2,70 @@
 Build a robust multi-tenant POS (AgriBooks) handling native hardware seamlessly. 
 **PRODUCT REQUIREMENTS**:
 - Charged to Crops credit system: specialized credit term for farmers based on planting date + 120 days + 7 days grace.
-- Interest accrues monthly but is collected as a lump sum at harvest.
-- Automated SMS notifications sent to the customer, owner, manager, and auditor 15 days before, 7 days before, and on the harvest date.
-- Extensions: 15-day increments. The 1st and 2nd extensions require a Manager PIN, while the 3rd requires an Owner TOTP.
-- Blocks normal credits if an active crop credit exists. Soft blocks new crop credits if the season ends with an unpaid balance.
-- Digital Signatures for credit receipts: Generate QR or sign directly on the terminal, save to R2, and link to the receipt permanently.
+- Automated SMS notifications sent to the customer, owner, manager, and auditor based on specific events and timelines.
+- Prevent Interest (INT) invoice accumulation by computing and displaying interest inline within the UI.
+- Secure, audit-grade record-keeping with digital signature captures for credit authorizations and tamper-evident receipt printing.
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
 **what currently exists?** 
-A full-stack multi-tenant POS and SMS CRM. Features include an offline-capable Terminal Shell, App Download portal, and Super Admin dashboard. Newly integrated: Charged-to-Crop credit system that ties into Web POS and Terminal Sales, automated interest and notification schedulers (APScheduler), and digital signature capture for credit receipts viewable from the invoice modal.
+A full-stack multi-tenant POS and SMS CRM. Features include an offline-capable Terminal Shell, App Download portal, Super Admin dashboard, and a Crop Credit system. The UI now features a fully interactive click-to-review architecture across all tables (invoices and customers open detailed modals). Outstanding balances are displayed as global, real-time color-coded badges next to customer names. A robust digital signature flow captures customer authorization (via QR on Web POS, or inline pad on Terminal POS), securely stores them in Cloudflare R2, and automatically embeds them onto thermal/full-page receipts alongside a tamper-evident cryptographic verification token.
 
 **Last working item**: 
-    - Last item agent was working: Phase 4 of Crop Credits implementation. The agent fixed an architectural discrepancy where crop credit totals mismatched standard customer payments. Crop credit principal balances are now computed LIVE from linked invoice balances instead of dual-tracking. Signature viewing was also added as a tab inside .
-    - Status: COMPLETED
+    - Last item agent was working: Implementing the Tamper-Evident Signature Stamp on printed receipts. The agent added a cryptographic token () and timestamp to  templates, and built the backend  endpoint to allow managers to look up the original digital signature if a physical receipt is disputed.
+    - Status: USER VERIFICATION PENDING
     - Agent Testing Done: Y
-    - Which testing method agent to use? NA
+    - Which testing method agent to use? Python script / curl for backend logic verification.
     - User Testing Done: N
 
 **All Pending/In progress Issue list**: 
-  Issue 1: Forgot Password reset link redirects to live website instead of local environment (P0)
-     - Attempted fixes: None yet. User noted: I did receive an email for changing to new password but the email redirects me to our livewebsite then input my current credentials not the create new password page. Keep this note for now I will handle this later.
-     - Next debug checklist: Check  and  to ensure the correct frontend URL ( / ) is being used for the reset link generation.
-     - Why fix this issue and what will be achieved with the fix? Ensures users can successfully reset their passwords in the preview environment during testing.
-     - Status: NOT STARTED
-     - Is recurring issue? N
-     - Should Test frontend/backend/both after fix? Backend (curl/link verification)
-     - Blocked on other issue: None
-
-  Issue 2: Thermal Printing Bleeding on receipts (P1)
-     - Attempted fixes: Agent formulated 5 CSS fixes in  previously but deferred them per user request.
+  Issue 1: Thermal Printing Bleeding on 58mm receipts (P1)
+     - Attempted fixes: Deferred from earlier sessions.
      - Next debug checklist: Apply to  thermalCSS and inline styles: 1) Reduce QR image size to 100–112px, 2) Set QR margin: 3 in PrintBridge, 3) Change Grand total border-top to 1px solid #000, 4) Remove background and use solid #000 text/border for partial release rows, 5) Reduce .biz-detail font to 10px.
-     - Why fix this issue and what will be achieved with the fix? Prevents thermal spread (bleeding) of dense black areas on physical 58mm receipts.
+     - Why fix this issue and what will be achieved with the fix? Prevents thermal spread of dense black areas on physical receipts.
      - Status: NOT STARTED
      - Is recurring issue? N
-     - Should Test frontend/backend/both after fix? frontend (screenshot)
+     - Should Test frontend/backend/both after fix? Frontend (screenshot)
      - Blocked on other issue: None
 
-  Issue 3: React-hooks/exhaustive-deps ESLint warnings (P2)
-     - Attempted fixes: Agent identified 5 real warnings to fix safely without rewriting core logic, but it was deferred.
-     - Next debug checklist: 1.  - add  to deps. 2.  - add eslint-disable. 3.  - add eslint-disable. 4.  &  - verify comment placement.
+  Issue 2: React-hooks/exhaustive-deps ESLint warnings (P2)
+     - Attempted fixes: Identified but deferred.
+     - Next debug checklist: Fix in , , .
      - Why fix this issue and what will be achieved with the fix? Silences valid build warnings.
      - Status: NOT STARTED
      - Is recurring issue? Y
-     - Should Test frontend/backend/both after fix? frontend
+     - Should Test frontend/backend/both after fix? Frontend
      - Blocked on other issue: None
 
 **In progress Task List**: 
-  None
+  (None currently active)
 
 **Upcoming and Future Tasks**
-  Upcoming Tasks:
-  - **P1 - Crop Credit Status Badge**: Add a Crop Credit Status badge/mini-card directly on the Customers page/list to show harvest status and days-to-harvest at a glance.
-  - **P1 - Compliance Calendar Widget**: Build the dashboard widget showing upcoming business document deadlines (expired docs in red, expiring within 30d in amber).
-  - **P1 - Finance Reports**: Add Discount cashier drill-down and AP payment history per supplier views.
-  - **P1 - Terminal Features**: Implement Quick Stock Check, Price Check, and Quick Count.
-  
-  Future Tasks:
-  - **P2 - Codebase Refactoring**: Refactor  and  startup function.
-  - **P2 - Global Modal Context**: Add a global modal registry/context.
-  - **P2 - SMS Auto-reply templates**: Automatically queue actions if a customer replies PAID or BAYAD.
-  - **P2 - Terminal Session Cleanup**: Optional  endpoint.
-  - **P3 - Android Native APK Finalization**: Weight-embedded EAN-13 support.
-  - **P3 - Code Cleanup**: Clean up 6 orphaned users without .
+    Upcoming Tasks:
+    - **P1 - Signature Verification Toolbar (Audit Center)**: Add a simple text input in the Audit Center toolbar where staff can paste a printed token () from a physical receipt and instantly pop open the original digital signature image side-by-side with the invoice.
+    - **P1 - Crop Credit Status Badge**: Add a Crop Credit Status badge/mini-card directly on the Customers page/list to show harvest status and days-to-harvest at a glance.
+    - **P1 - Compliance Calendar Widget**: Build the dashboard widget showing upcoming business document deadlines (expired docs in red, expiring within 30d in amber).
+    - **P1 - Finance Reports**: Add Discount cashier drill-down and AP payment history per supplier views.
+    
+    Future Tasks:
+    - **P2 - Codebase Refactoring**: Refactor  (currently 1600+ lines).
+    - **P2 - Global Modal Context**: Add a global modal registry/context.
+    - **P2 - CORS Hardening**: Change  to explicit origins before production go-live.
+    - **P3 - Code Cleanup**: Clean up 6 orphaned users without .
 
 **Completed work in this session**
-- Crop Credits backend architecture & live principal computation from linked invoices (DONE)
-- Crop Credits APScheduler integration for interest accrual and multi-party SMS notifications (DONE)
-- Crop Credits POS Web Sales & Terminal Sales integration via  (DONE)
-- Digital Signature backend endpoints and frontend viewing inside  (DONE)
--  cleanup to act solely as a monitoring view rather than a transactional entry point (DONE)
+-  UI Redesign: Compact header, inline interest computation, and QuickBooks-style interactive Statement popup. (DONE)
+- Global Interactive Click-to-Review: Wrapped invoice numbers and customer names across 7+ pages (Sales, Audit Center, Daily Log, Close Wizard, Reports, Dashboard, Accounting) to trigger  and . (DONE)
+- Terminal Modal Migration: Rewrote legacy  and  to use modern Shadcn  components. (DONE)
+- Global Inline Open-Balance Badges: Deployed  next to customer names across the app, highlighting overdue age (color-coded) and amounts, backed by a real-time  hook. (DONE)
+- Fix: By Term credit button is now properly blocked in  if an active Charged to Crop credit exists. (DONE)
+- Digital Signature Capture Flow: Deployed QR-based signature gathering () for Web POS, and an inline  flow for Terminal POS. (DONE)
+- Signature Rendering Fixes: Resolved  mismatch in backend, updated 's  mode to properly render signature images, and added Signed ✓ chips to UI tables. (DONE)
+- Cloudflare R2 Presigned URL Fix: Updated  to correctly use virtual-host-style URLs to prevent 403 Forbidden errors. (DONE)
+- Tamper-Evident Receipts: Auto-embeds captured signatures onto printed receipts (via ) along with a cryptographic verification token and timestamp. (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-None.
+None
 
 **Known issue recurrence from previous fork**
   - Issue recurrence in previous fork: ESLint warnings for .
@@ -85,59 +76,63 @@ None.
 
 
 **Key Technical Concepts**
-- **Crop Credit Architecture:** The crop credit acts as a season tag () placed on standard invoices. The  is NOT stored independently on the crop credit document; instead, it is computed dynamically by summing the balances of all linked invoices. This prevents totals from falling out of sync with .
-- **Background Jobs:**  is configured in  to handle daily interest accruals and harvest notification blasts.
+- **Polymorphic Drill-Down Modals**:  and  are the gold standard for reviewing records. They are triggered globally from any invoice number or customer name string.
+- **Real-Time Badge Cache**:  leverages a 30s cached  call. Mutating actions (payments/sales) trigger  to update customer badges app-wide instantly.
+- **Signature Capture**: For Web POS, the cashier requests a signature -> backend generates a session token -> frontend shows a QR code -> customer signs on their mobile device via  -> Cloudflare R2 stores the PNG. For Terminal POS, the signature pad renders inline.
 
 **key DB schema**
-  - :  (Note: no  stored here)
-  - : Includes  when linked to a crop season.
+  - : Stores temporary auth tokens,  ('sale'/'invoice'), , , , , .
+  - : Read endpoints now evaluate  dynamically based on session existence.
 
 **changes in tech stack**
-  - None
+  - Added  and  usage. 
+  - Cloudflare R2 bucket URLs updated to virtual-host style syntax.
 
 **All files of reference** 
-  -  (Created for credit management)
-  -  (Created for processing digital signatures)
-  -  (Refactored to remove standalone payments)
-  -  (Created for checkout flow)
-  -  (Updated to prompt for credit type)
-  -  (Updated to prompt for credit type)
-  -  (Updated to view attached signatures)
-  -  (Updated to include APScheduler jobs)
+  -  (NEW - Global balance pill)
+  -  (NEW - Captures signatures)
+  -  (Updated - Customer-facing public signing page)
+  -  (Updated - Added signature rendering in compact mode)
+  -  (Updated - Embeds signatures & tokens on print)
+  -  (Updated - R2 integration and verify tokens)
+  -  (Updated - virtual-host presigned URL fix)
 
 **Areas that need refactoring**: 
-  -  is becoming massive (1600+ lines). Needs splitting into sub-components.
-  -  startup function is 900+ lines long.
+  -  is massive (1600+ lines) and needs splitting.
 
 **key api endpoints**
-  - 
-  - 
-  - 
-  - 
+  -  (powers open-balance badges app-wide)
+  -  (creates a signing session)
+  -  (public endpoint for customer to upload signature)
+  -  (validates the 8-char printed token)
 
 **Critical Info for New Agent** 
-- **Testing Agent Success:** The testing agent was heavily utilized ( and ) to validate the new crop credit system and POS integrations with extremely high pass rates.
-- **Architectural Constraint:** For Charged to Crops, the  must ALWAYS be computed from the linked . Do not revert to tracking a separate balance field within the crop credit record.
-- **Auth Note:** The user is aware that the forgot password reset link points to their live domain rather than the local preview environment. They mentioned they will handle it later, but it may surface again.
+- **Cloudflare R2 URLs**: Cloudflare R2 requires **virtual-host-style** presigned URLs (e.g., ). Do not revert to Boto3's default path-style (), as it will trigger a 403 Forbidden error. This is handled in .
+- ****: When querying signatures for an invoice/sale, the backend handles both  and  interchangeably to preserve backward compatibility with older generated sessions.
+- **InvoiceDetailModal  mode**: The modal has two layouts (Full and Compact). If you add a new section to the modal (like the signature section), ensure you inject it into BOTH the standard  and the  block, otherwise it will be invisible in areas like  or the Audit Center.
 
 **documents and test reports created in this job** 
+  -  (Updated)
   - 
   - 
-  -  (Updated with Phase 1-4 completions)
+  - 
+  - 
 
 **Last 10 User Messages and any pending HUMAN messages** 
- - Agent: Integrated crop credit type into Terminal sales. Tested phase 1-3 with testing agent (100% backend / 95% frontend). Asked if ready for Phase 4 (Signature viewing).
- - User: Yes, add signature viewing. Also noticed total credits in  differs from  and .
- - Agent: Diagnosed architecture flaw. Fixed crop credits to compute principal LIVE from linked invoices instead of dual-tracking. Updated endpoints and schedulers. Added Signature viewing tab to .
- - Agent: Tested fix manually. Took screenshot of  reflecting the correct computed balances. Finished task. Offered to build a Crop Credit Status badge on the Customer list.
+ -  Agent: Implemented QR/inline signatures, found payload bug, fixed it. Suggested auto-embedding signatures on printed receipts.
+ -  User: I like that improvement
+ -  Agent: Implemented auto-embed on print. Suggested a tamper-evident stamp (token/timestamp) for audit purposes.
+ -  User: I like that improvement
+ -  Agent: Implemented the tamper-evident stamp, verification endpoints, and updated . Self-tested. Suggested building a verification toolbar in the Audit Center as the next step. 
+ - *Pending Action*: None. Await user confirmation, or proceed to P1 tasks (Signature Verification Toolbar in Audit Center).
 
 **Project Health Check:**
   - Broken: None
-  - Mocked: Thermal printing (simulated via HTML to WebView bitmap).
+  - Mocked: Thermal printing (simulated via HTML to WebView bitmap)
 
 **3rd Party Integrations** 
-  - Resend (Emails) — requires User API Key
   - Cloudflare R2 / Boto3 (Backups and File Storage) — requires User API Key
+  - Resend (Emails) — requires User API Key
   - APScheduler (Backend background jobs)
 
 **Testing status**
@@ -147,10 +142,20 @@ None.
   - Known regressions: None
 
 **Credentials to test flow:**
-  - Super Admin:  / 
+  - Super Admin: See 
   - Company Admin:  / 
   - Manager PIN:  or 
   - Staff PIN: 
 
 **What agent forgot to execute**
-The agent offered to build the Crop Credit Status badge directly on the Customers list during the final task completion summary, which the user has not yet explicitly replied to, but it stands as the immediate logical next step (P1).</analysis>
+  - Nothing. 
+
+**Debugging checklist for current issue**
+    Issue: No active bug. Next suggested task is building the Signature Verification Toolbar in the Audit Center. 
+
+    Frontend files to check: 
+    -  (Target for the new toolbar input)
+    -  (To pop open the signature view when verified)
+  
+    Backend files to check:
+    -  (Ensure  returns enough data to trigger the modal).</analysis>
