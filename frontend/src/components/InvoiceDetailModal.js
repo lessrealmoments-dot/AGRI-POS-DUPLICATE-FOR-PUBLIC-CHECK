@@ -246,7 +246,15 @@ export default function InvoiceDetailModal({
         setInvoice(prev => prev ? { ...prev, doc_code: docCode } : prev);
       } catch { /* print without QR */ }
     }
-    PrintEngine.print({ type: docType, data: invoice, format, businessInfo, docCode });
+    // Pick the most recent signed signature (or bypass) to embed in the receipt
+    const signedSig = signatures.find(s => s.status === 'signed' && s.signature_url);
+    const bypassedSig = signatures.find(s => s.status === 'bypassed');
+    const printData = {
+      ...invoice,
+      signature_url: signedSig?.signature_url || null,
+      bypass_method: !signedSig && bypassedSig ? (bypassedSig.bypass_method || 'pin') : null,
+    };
+    PrintEngine.print({ type: docType, data: printData, format, businessInfo, docCode });
   };
 
   // ── Compact edit helpers ──────────────────────────────────────────────
