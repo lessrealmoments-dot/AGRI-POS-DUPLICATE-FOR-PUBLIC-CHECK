@@ -1025,6 +1025,7 @@ export default function SettingsPage() {
             </Card>
 
             {/* ── Danger Zone ─────────────────────────────────────────── */}
+            {currentUser?.organization_id && (
             <Card className="border-red-200 bg-red-50/30">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base font-semibold flex items-center gap-2 text-red-700" style={{ fontFamily: 'Manrope' }}>
@@ -1055,6 +1056,7 @@ export default function SettingsPage() {
                 </div>
               </CardContent>
             </Card>
+            )}
           </TabsContent>
         )}
 

@@ -4,9 +4,10 @@
 - Email: janmarkeahig@gmail.com
 - Password: Aa@58798546521325
 
-## Company Admin
-- Email: jovelyneahig@gmail.com
-- Password: Aa@050772
+## Company Admin (LimitTest Corp)
+- Email: limittest@testmail.com
+- Organization: LimitTest Corp (org_id prefix: 2b4b34c8)
+- Note: TOTP not enabled on this account; full Reset flow requires TOTP setup first
 
 ## Terminal PINs
 - Manager PIN: 521325, 587985

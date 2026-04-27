@@ -15,12 +15,19 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## Credentials
 - Super Admin: janmarkeahig@gmail.com / Aa@58798546521325
-- Company Admin: jovelyneahig@gmail.com / Aa@050772
+- Company Admin (LimitTest Corp): limittest@testmail.com (TOTP not set; use super admin for full testing)
 - Manager PIN: 521325
 
 ---
 
 ## What's Been Implemented
+
+### Reset Company Data Feature (2026-04-27) — Complete
+- **Backend**: `POST /api/backups/org/{org_id}/reset` — triple-verified (confirmation text + bcrypt password + TOTP), auto-creates compressed JSON backup to R2 first, wipes all ORG_COLLECTIONS, keeps owner admin account only. Logs event to `audit_log`.
+- **Backend**: `GET /api/backups/org/{org_id}/download/{filename}` — generates 1-hour R2 presigned download URL for any org backup file.
+- **Frontend**: `ResetCompanyModal.js` — 4-step wizard: Step 1 (type "[Company] Reset"), Step 2 (password), Step 3 (TOTP), Step 4 (final red confirm). Success screen shows backup metadata + Download + Restore buttons.
+- **Settings Page**: "Danger Zone" card added to Business Info tab (admin-only, guarded by `organization_id` check so super admins don't see it).
+- **Tested**: iteration 166 — Backend 10/10, Frontend 7/7 feature points verified.
 
 ### Tamper-Evident Signature Stamp on Receipts (2026-04-25) — Complete
 - **Backend**: `signatures.py` adds `_verify_token()` — 8-char uppercase HMAC-SHA256 prefix derived from session id (signed with `SIGNATURE_VERIFY_SECRET` or `JWT_SECRET`). Token is stable across re-fetches.
