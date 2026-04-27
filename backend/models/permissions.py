@@ -135,6 +135,14 @@ PERMISSION_MODULES = {
             "adjust": "Apply Inventory Adjustments",
         }
     },
+    "branch_transfers": {
+        "label": "Branch Transfers & Internal Invoices",
+        "actions": {
+            "view": "View Branch Transfers & Internal Invoices",
+            "create": "Create / Send Transfer",
+            "receive": "Receive Incoming Transfer",
+        }
+    },
 }
 
 # Preset role templates
@@ -156,6 +164,7 @@ ROLE_PRESETS = {
             "reports": {"view": True, "view_profit": True, "export": True, "close_day": True},
             "settings": {"view": True, "edit": True, "manage_users": True, "manage_permissions": True},
             "count_sheets": {"view": True, "create": True, "count": True, "complete": True, "cancel": True, "adjust": True},
+            "branch_transfers": {"view": True, "create": True, "receive": True},
         }
     },
     "manager": {
@@ -174,6 +183,7 @@ ROLE_PRESETS = {
             "reports": {"view": True, "view_profit": True, "export": True, "close_day": True},
             "settings": {"view": True, "edit": False, "manage_users": False, "manage_permissions": False},
             "count_sheets": {"view": True, "create": True, "count": True, "complete": True, "cancel": True, "adjust": False},
+            "branch_transfers": {"view": True, "create": True, "receive": True},
         }
     },
     "cashier": {
@@ -193,6 +203,7 @@ ROLE_PRESETS = {
             "reports": {"view": False, "view_profit": False, "export": False, "close_day": False},
             "settings": {"view": False, "edit": False, "manage_users": False, "manage_permissions": False},
             "count_sheets": {"view": False, "create": False, "count": False, "complete": False, "cancel": False, "adjust": False},
+            "branch_transfers": {"view": False, "create": False, "receive": False},
         }
     },
     "inventory_clerk": {
@@ -212,6 +223,7 @@ ROLE_PRESETS = {
             "reports": {"view": True, "view_profit": False, "export": False, "close_day": False},
             "settings": {"view": False, "edit": False, "manage_users": False, "manage_permissions": False},
             "count_sheets": {"view": True, "create": True, "count": True, "complete": False, "cancel": False, "adjust": False},
+            "branch_transfers": {"view": False, "create": False, "receive": False},
         }
     },
 }

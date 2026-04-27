@@ -37,7 +37,7 @@ const NAV_SECTIONS = [
       { path: '/returns',    label: 'Return & Refund',   icon: RotateCcw,    perm: 'sales.view' },
       { path: '/customers',  label: 'Customers',         icon: Users,        perm: 'customers.view',   offlineOk: 'readonly' },
       { path: '/payments',   label: 'Receive Payments',  icon: Tags,         perm: 'accounting.view' },
-      { path: '/crop-credits', label: 'Crop Credits',    icon: Sprout,       perm: 'pos.sell' },
+      { path: '/crop-credits', label: 'Crop Credits',    icon: Sprout,       perm: 'customers.manage_credit' },
       { path: '/expenses',   label: 'Expenses',          icon: Receipt,      perm: 'accounting.view' },
     ],
   },
@@ -58,8 +58,8 @@ const NAV_SECTIONS = [
     label: 'Branches',
     items: [
       { path: '/branches',         label: 'Branches',         icon: Building2, perm: 'branches.view' },
-      { path: '/branch-transfers', label: 'Branch Transfers', icon: ArrowRight, perm: 'branches.view', featureFlag: 'branch_transfers' },
-      { path: '/internal-invoices', label: 'Internal Invoices', icon: FileText, perm: 'branches.view', featureFlag: 'branch_transfers' },
+      { path: '/branch-transfers', label: 'Branch Transfers', icon: ArrowRight, perm: 'branch_transfers.view', featureFlag: 'branch_transfers' },
+      { path: '/internal-invoices', label: 'Internal Invoices', icon: FileText, perm: 'branch_transfers.view', featureFlag: 'branch_transfers' },
     ],
   },
   {
@@ -88,7 +88,7 @@ const NAV_SECTIONS = [
       { path: '/employees',       label: 'Employees',    icon: Briefcase, perm: 'settings.manage_users',       featureFlag: 'employee_management' },
       { path: '/price-schemes',   label: 'Price Schemes', icon: Tags,     perm: 'price_schemes.view' },
       { path: '/team',            label: 'Team',         icon: UserCog,   perm: 'settings.manage_users' },
-      { path: '/import',          label: 'Import Center', icon: Upload,   perm: 'products.create' },
+      { path: '/import',          label: 'Import Center', icon: Upload,   perm: 'products.create', adminOnly: true },
       { path: '/downloads',       label: 'App Downloads', icon: Smartphone, perm: null, adminOnly: true },
       { path: '/backups',         label: 'Backups',      icon: HardDrive, perm: 'settings.edit' },
       { path: '/settings',        label: 'Settings',     icon: Settings },
