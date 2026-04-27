@@ -13,6 +13,7 @@ import {
   Settings, Shield, Key, Smartphone, CheckCircle2, XCircle, Lock,
   RefreshCw, AlertTriangle, ShieldCheck, Eye, EyeOff, User, Building2, Save, Monitor, Trash2, Copy
 } from 'lucide-react';
+import ResetCompanyModal from '../components/ResetCompanyModal';
 import { QRCodeSVG } from 'qrcode.react';
 import { toast } from 'sonner';
 
@@ -350,6 +351,9 @@ function ConnectTerminalPanel({ branches }) {
 export default function SettingsPage() {
   const { user: currentUser, refreshUser, branches } = useAuth();
   const isAdmin = currentUser?.role === 'admin';
+
+  // ── Reset Company Modal ────────────────────────────────────────────────────
+  const [showResetModal, setShowResetModal] = useState(false);
 
   // ── TOTP ──────────────────────────────────────────────────────────────────
   const [totpStatus, setTotpStatus] = useState({ enabled: false, verified: false });
@@ -1019,6 +1023,38 @@ export default function SettingsPage() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* ── Danger Zone ─────────────────────────────────────────── */}
+            <Card className="border-red-200 bg-red-50/30">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base font-semibold flex items-center gap-2 text-red-700" style={{ fontFamily: 'Manrope' }}>
+                  <AlertTriangle size={18} className="text-red-600" /> Danger Zone
+                </CardTitle>
+                <p className="text-sm text-red-600/80">
+                  Irreversible actions. Proceed with caution.
+                </p>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-start justify-between gap-4 p-4 border border-red-200 rounded-lg bg-white">
+                  <div>
+                    <p className="font-semibold text-slate-800 text-sm">Reset Company Data</p>
+                    <p className="text-xs text-slate-500 mt-0.5 max-w-sm">
+                      Wipe all customers, invoices, sales, payments, employees, and inventory back to zero.
+                      A backup is automatically created before reset. Your owner account is preserved.
+                    </p>
+                  </div>
+                  <Button
+                    data-testid="open-reset-company-btn"
+                    onClick={() => setShowResetModal(true)}
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0 border-red-300 text-red-700 hover:bg-red-50 hover:border-red-400"
+                  >
+                    <Trash2 size={13} className="mr-1.5" /> Reset Company
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
           </TabsContent>
         )}
 
@@ -1029,6 +1065,14 @@ export default function SettingsPage() {
           </TabsContent>
         )}
       </Tabs>
+
+      {/* ── Reset Company Modal ──────────────────────────────────────── */}
+      <ResetCompanyModal
+        open={showResetModal}
+        onClose={() => setShowResetModal(false)}
+        orgId={currentUser?.organization_id}
+        companyName={bizInfo.business_name || 'Company'}
+      />
     </div>
   );
 }

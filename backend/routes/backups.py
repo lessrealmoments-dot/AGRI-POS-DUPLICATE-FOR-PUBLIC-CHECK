@@ -9,9 +9,11 @@ from config import db
 from utils import get_current_user, now_iso, new_id
 from services.backup_service import create_backup, list_backups, restore_backup
 from services.org_backup_service import (
-    create_org_backup, list_org_backups, restore_org_backup, get_org_data_stats
+    create_org_backup, list_org_backups, restore_org_backup, get_org_data_stats,
+    ORG_COLLECTIONS
 )
 import os
+import pyotp
 
 router = APIRouter(prefix="/backups", tags=["Backups"])
 
@@ -201,6 +203,148 @@ async def update_backup_schedule(data: dict, user=Depends(get_current_user)):
     )
     return {"message": "Schedule updated. Restart backend to apply new schedule.",
             "site_backup_hours": site_hours, "org_backup_hours": org_hours}
+
+
+# ── Reset Company Data ────────────────────────────────────────────────────────
+
+@router.post("/org/{org_id}/reset")
+async def reset_org_data(org_id: str, data: dict, user=Depends(get_current_user)):
+    """
+    Wipe all company data back to zero.
+    Keeps only the owner/admin account. Requires password + TOTP verification.
+    Automatically creates a backup before deleting.
+    """
+    # Only company admin can reset their own org (or super admin)
+    if not user.get("is_super_admin"):
+        if user.get("organization_id") != org_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        if user.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="Admin access required")
+
+    password = data.get("password", "").strip()
+    totp_code = str(data.get("totp_code", "")).strip()
+    confirmation = data.get("confirmation", "").strip()
+
+    if not password:
+        raise HTTPException(status_code=400, detail="Password required")
+    if not totp_code or len(totp_code) != 6:
+        raise HTTPException(status_code=400, detail="6-digit TOTP code required")
+    if not confirmation:
+        raise HTTPException(status_code=400, detail="Confirmation text required")
+
+    from motor.motor_asyncio import AsyncIOMotorClient
+    from utils.auth import verify_password
+    raw_db = AsyncIOMotorClient(os.environ.get("MONGO_URL"))[DB_NAME]
+
+    # Verify confirmation text matches "[Org Name] Reset"
+    org = await raw_db.organizations.find_one({"id": org_id}, {"_id": 0, "name": 1})
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    org_name = org.get("name", "")
+    expected = f"{org_name} Reset"
+    if confirmation != expected:
+        raise HTTPException(status_code=400, detail=f"Confirmation must be exactly: {expected}")
+
+    # Verify admin password
+    admin_user = await raw_db.users.find_one({"id": user["id"]}, {"_id": 0})
+    if not admin_user or not verify_password(password, admin_user.get("password_hash", "")):
+        raise HTTPException(status_code=403, detail="Incorrect password")
+
+    # Verify TOTP (check all TOTP-enabled users in the org)
+    totp_users = await raw_db.users.find(
+        {"organization_id": org_id, "totp_enabled": True, "totp_secret": {"$exists": True}},
+        {"_id": 0, "totp_secret": 1}
+    ).to_list(20)
+
+    totp_verified = False
+    for tu in totp_users:
+        secret = tu.get("totp_secret")
+        if secret:
+            if pyotp.TOTP(secret).verify(totp_code, valid_window=1):
+                totp_verified = True
+                break
+
+    if not totp_verified:
+        raise HTTPException(status_code=403, detail="Invalid TOTP code")
+
+    # Step 1: Auto-backup BEFORE wiping
+    triggered_by = user.get("full_name") or user.get("username", "admin")
+    backup = await create_org_backup(
+        org_id,
+        org_name=org_name,
+        triggered_by=f"pre-reset by {triggered_by}"
+    )
+
+    # Step 2: Wipe all org data, keeping the admin user
+    total_deleted = 0
+    for coll_name in ORG_COLLECTIONS:
+        if coll_name == "users":
+            # Keep only the owner/admin, delete everyone else
+            result = await raw_db.users.delete_many({
+                "organization_id": org_id,
+                "id": {"$ne": user["id"]}
+            })
+        else:
+            result = await raw_db[coll_name].delete_many({"organization_id": org_id})
+        total_deleted += result.deleted_count
+
+    # Step 3: Log the reset event
+    await raw_db.audit_log.insert_one({
+        "organization_id": org_id,
+        "action": "company_reset",
+        "performed_by": triggered_by,
+        "user_id": user["id"],
+        "backup_filename": backup.get("filename"),
+        "backup_size_mb": backup.get("size_mb"),
+        "total_deleted": total_deleted,
+        "created_at": now_iso(),
+    })
+
+    return {
+        "success": True,
+        "backup": backup,
+        "total_deleted": total_deleted,
+        "message": "All company data has been reset. Owner account preserved.",
+    }
+
+
+# ── Download Backup (Presigned URL) ──────────────────────────────────────────
+
+@router.get("/org/{org_id}/download/{filename}")
+async def download_org_backup(org_id: str, filename: str, user=Depends(get_current_user)):
+    """Generate a 1-hour presigned download URL for an org backup file stored in R2."""
+    if not user.get("is_super_admin"):
+        if user.get("organization_id") != org_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        if user.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="Admin required")
+
+    endpoint = os.environ.get("R2_ENDPOINT_URL", "").strip()
+    access_key = os.environ.get("R2_ACCESS_KEY_ID", "").strip()
+    secret_key = os.environ.get("R2_SECRET_ACCESS_KEY", "").strip()
+    bucket = os.environ.get("R2_BUCKET_NAME", "agribooks-backups")
+
+    if not all([endpoint, access_key, secret_key]):
+        raise HTTPException(status_code=503, detail="R2 storage not configured")
+
+    import boto3
+    r2 = boto3.client(
+        "s3",
+        endpoint_url=endpoint,
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        region_name="auto",
+    )
+    r2_key = f"org/{org_id}/{filename}"
+    try:
+        url = r2.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": bucket, "Key": r2_key},
+            ExpiresIn=3600,
+        )
+        return {"download_url": url, "filename": filename, "expires_in_seconds": 3600}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to generate download URL: {exc}")
 
 
 # ── Legacy endpoints (backward compat) ───────────────────────────────────────
