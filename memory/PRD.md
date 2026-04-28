@@ -22,6 +22,12 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### Price Manager Feature (2026-04-28) — Complete
+- **Backend**: `GET /products/price-audit-summary` (counts missing capital + low-margin products), `POST /products/bulk-price-update` (batch global price save), `POST /branch-prices/bulk-update` (batch branch override save including capital + manual flag).
+- **Frontend**: `/price-manager` — Tab 1 (Price Manager): product search, collapsed color-coded cards (red/yellow/green status dots), expandable branch table showing `current → new` inputs per scheme per branch, smart category fill toolbar (pre-fills suggestions only), session checkmarks. Tab 2 (Capital & Price Setup): same layout + capital inputs, capital method badges, smart audit prompts ("200 products have no capital — load first 30"), auto-switch logic on next PO already in place.
+- **Permission Fixes**: Crop Credits `pos.sell`→`customers.manage_credit`, Branch Transfers + Internal Invoices→`branch_transfers.view`, Import Center `adminOnly:true`. Added `branch_transfers` module (view/create/receive) to permissions system. Manager preset: branch_transfers ON by default.
+- **Tested**: iteration_167 — Backend 26/26, Frontend 16/16. One search bug fixed (wrong param name).
+
 ### Reset Company Data Feature (2026-04-27) — Complete
 - **Backend**: `POST /api/backups/org/{org_id}/reset` — triple-verified (confirmation text + bcrypt password + TOTP), auto-creates compressed JSON backup to R2 first, wipes all ORG_COLLECTIONS, keeps owner admin account only. Logs event to `audit_log`.
 - **Backend**: `GET /api/backups/org/{org_id}/download/{filename}` — generates 1-hour R2 presigned download URL for any org backup file.
