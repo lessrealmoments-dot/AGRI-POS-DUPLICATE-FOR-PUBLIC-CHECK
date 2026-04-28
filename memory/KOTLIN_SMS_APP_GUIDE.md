@@ -580,6 +580,8 @@ import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
@@ -607,6 +609,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statsText: TextView
     private lateinit var lastCheckText: TextView
     private lateinit var logText: TextView
+
+    // Debounce rapid UI refreshes — only update once per 500ms
+    private val uiHandler = Handler(Looper.getMainLooper())
+    private var refreshPending = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -652,8 +658,6 @@ class MainActivity : AppCompatActivity() {
         saveBtn.setOnClickListener { saveAndStart() }
         stopBtn.setOnClickListener { stopGateway() }
 
-        SmsGatewayService.onUpdate = { runOnUiThread { refreshUI() } }
-
         // Auto-start if already configured
         val savedUrl   = prefs.getString("server_url", "")
         val savedEmail = prefs.getString("email", "")
@@ -662,6 +666,31 @@ class MainActivity : AppCompatActivity() {
         }
 
         refreshUI()
+    }
+
+    // Attach callback only while activity is visible — prevents crash on detached views
+    override fun onStart() {
+        super.onStart()
+        SmsGatewayService.onUpdate = { scheduleRefresh() }
+        refreshUI()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Detach callback so service doesn't call back to a hidden/destroyed activity
+        SmsGatewayService.onUpdate = null
+        uiHandler.removeCallbacksAndMessages(null)
+        refreshPending = false
+    }
+
+    /** Debounced refresh — batches rapid updates into one UI pass every 500ms */
+    private fun scheduleRefresh() {
+        if (refreshPending) return
+        refreshPending = true
+        uiHandler.postDelayed({
+            refreshPending = false
+            if (!isFinishing && !isDestroyed) refreshUI()
+        }, 500)
     }
 
     private fun highlightSelected(active: Button, inactive: Button) {
@@ -728,7 +757,8 @@ class MainActivity : AppCompatActivity() {
                 "Failed: ${SmsGatewayService.failedCount}  |  " +
                 "Pending: ${SmsGatewayService.pendingCount}"
         lastCheckText.text = "Last check: ${SmsGatewayService.lastCheck.ifEmpty { "never" }}"
-        logText.text       = SmsGatewayService.logLines.joinToString("\n")
+        // Build log string from thread-safe list snapshot
+        logText.text = SmsGatewayService.logLines.toList().joinToString("\n")
     }
 
     private fun requestPermissions() {
