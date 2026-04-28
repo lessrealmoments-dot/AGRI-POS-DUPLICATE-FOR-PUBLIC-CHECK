@@ -312,15 +312,29 @@ export async function mergeProducts(changed, deletedIds = []) {
   });
 }
 
-/** Merge delta customers into existing cache */
-export async function mergeCustomers(changed) {
-  if (!changed.length) return 0;
+/** Merge delta customers into existing cache (upsert changed, remove deleted) */
+export async function mergeCustomers(changed, deletedIds = []) {
+  if (!changed.length && !deletedIds.length) return 0;
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORES.CUSTOMERS, 'readwrite');
     const store = tx.objectStore(STORES.CUSTOMERS);
     for (const c of changed) store.put(c);
-    tx.oncomplete = () => { db.close(); resolve(changed.length); };
+    for (const id of deletedIds) store.delete(id);
+    tx.oncomplete = () => { db.close(); resolve(changed.length + deletedIds.length); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  });
+}
+
+/** Bulk-delete cached customers by id */
+export async function deleteCachedCustomers(ids = []) {
+  if (!ids.length) return 0;
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORES.CUSTOMERS, 'readwrite');
+    const store = tx.objectStore(STORES.CUSTOMERS);
+    for (const id of ids) store.delete(id);
+    tx.oncomplete = () => { db.close(); resolve(ids.length); };
     tx.onerror = () => { db.close(); reject(tx.error); };
   });
 }

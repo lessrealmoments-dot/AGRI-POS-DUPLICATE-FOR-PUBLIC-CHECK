@@ -90,6 +90,7 @@ async def get_pos_sync_data(user=Depends(get_current_user), branch_id: str = Non
 
     # Deleted/deactivated products since last_sync (for delta cache cleanup)
     deleted_ids = []
+    deleted_customer_ids = []
     if last_sync:
         deactivated = await db.products.find(
             {"active": False, "$or": [
@@ -99,6 +100,16 @@ async def get_pos_sync_data(user=Depends(get_current_user), branch_id: str = Non
             {"_id": 0, "id": 1}
         ).to_list(1000)
         deleted_ids = [d["id"] for d in deactivated]
+
+        # Customers deleted/deactivated since last_sync — terminal needs to purge cache
+        deactivated_customers = await db.customers.find(
+            {"active": False, "$or": [
+                {"updated_at": {"$gte": last_sync}},
+                {"deactivated_at": {"$gte": last_sync}},
+            ]},
+            {"_id": 0, "id": 1}
+        ).to_list(5000)
+        deleted_customer_ids = [d["id"] for d in deactivated_customers]
 
     # For delta sync: we need ALL inventory for enrichment (product.available field)
     # because even unchanged products need current stock levels
@@ -138,6 +149,7 @@ async def get_pos_sync_data(user=Depends(get_current_user), branch_id: str = Non
         "inventory": inventory,
         "branch_prices": branch_prices,
         "deleted_ids": deleted_ids,
+        "deleted_customer_ids": deleted_customer_ids,
         "sync_time": now_iso(),
         "is_delta": is_delta,
     }

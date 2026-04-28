@@ -22,6 +22,25 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### Customer Single Source of Truth + Orphan Recovery (2026-04-28) — Complete
+- **RCA**: Live `agri-books.com` had 4 open invoices (₱4,890 total balance) referencing deleted customer `b38fed7b` (Janmark Ahig). Customer record fully gone. Receivables summary showed `[]` despite open balance. Terminal still cached the dead customer. Five interlocking bugs:
+  - **Bug A**: `routes/sales.py` — credit/partial sales accepted any `customer_id`; if customer didn't exist, `if customer:` block was skipped silently and invoice created anyway with orphan ID.
+  - **Bug B**: `routes/sync.py` — sync payload included `deleted_ids` for products only, not customers; terminal IndexedDB never purged stale entries.
+  - **Bug C**: `routes/customers.py DELETE` — no guard against open invoices or balance > 0; soft-delete didn't set `deactivated_at` so sync deletion-detection couldn't work.
+  - **Bug D**: No way to reattach orphan invoices to a recovered customer.
+  - **Bug E**: `receivables-summary` is blind to invoices whose customer doesn't exist.
+- **Backend fixes**:
+  - `routes/sales.py` — credit/partial sales now reject with clear error if customer_id resolves to nothing. Cash sales auto-strip invalid customer_id (treat as walk-in).
+  - `routes/sync.py` — payload now includes `deleted_customer_ids[]` (delta sync detects soft-deleted customers since `last_sync`).
+  - `routes/customers.py DELETE` — guards: outstanding balance > 0 → reject; open invoices > 0 → reject. `?force=true` admin-only override. Sets `deactivated_at` + `updated_at`.
+  - `routes/customers.py` new endpoints: `GET /customers/orphan-receivables` (lists invoices with dead customer_ids, grouped by id, with totals), `POST /customers/reattach-orphans` (bulk reassigns orphan invoices to a target customer + recomputes balance).
+- **Frontend fixes**:
+  - `lib/offlineDB.js` — `mergeCustomers(changed, deletedIds)` now upserts changed + deletes purged in one tx; new `deleteCachedCustomers()` helper.
+  - `lib/syncManager.js` — delta sync uses `mergeCustomers` (preserves unchanged customers + purges deleted), full sync still uses cacheCustomers.
+  - `pages/PaymentsPage.js` — red "phantom receivables" banner appears in customer-list panel when orphans exist (`orphan-receivables-alert`); opens dialog (`orphan-dialog`) showing each phantom group with Reattach button (`reattach-orphan-{id}`); admin picks target active customer from dropdown (`orphan-target-select`).
+- **Live data**: New active customer "Janmark Ahig" (id `505b884a-abaf-4318-9877-93a25d39c680`) created on `agri-books.com`. After deploy, owner clicks Phantom Receivables → reattach 4 orphan invoices to this customer → balance recomputes to ₱4,890.
+- **Tested**: `/app/backend/tests/test_orphan_fix_173.py` — 5/5 pass: delete-guard works, orphan-receivables returns proper structure, sync includes `deleted_customer_ids` field, credit sale rejected for ghost customer_id, reattach endpoint exists & validates input.
+
 ### Update-Existing Mode + CSV Export + PWA Landing (2026-04-28) — Complete
 - **Update Existing Products import mode**: New endpoint `POST /api/import/products/update-existing` — matches every row by Product Name (case-insensitive), merges only mapped fields, reports unmatched rows. No duplicate-review step needed. New "Update Existing Products" card in `/import` (`import-type-products-update`) with amber styling.
 - **Products CSV export**: New endpoint `GET /api/products/export-csv` returns full catalog as CSV with import-compatible columns: `Product Name, SKU, Category, Unit, Description, Type, Cost Price, Reorder Point, Barcode, <Scheme> Price` per active scheme. New "Export CSV" button on `/products` (`export-products-btn`). Round-trip flow: Export → edit in Excel → Import via Update Existing mode → done.

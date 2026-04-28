@@ -214,6 +214,44 @@ async def customer_receivables_summary(
     return result
 
 
+@router.get("/orphan-receivables")
+async def list_orphan_receivables(user=Depends(get_current_user)):
+    """
+    Surface invoices whose customer_id no longer resolves to an active customer.
+    Groups by orphan customer_id and aggregates name, count, and outstanding balance.
+    Use the reattach-orphans endpoint to fix.
+    """
+    check_perm(user, "customers", "view")
+
+    pipeline = [
+        {"$match": {"status": {"$nin": ["paid", "voided"]}, "customer_id": {"$nin": [None, ""]}}},
+        {"$group": {
+            "_id": "$customer_id",
+            "name": {"$first": "$customer_name"},
+            "branch_id": {"$first": "$branch_id"},
+            "invoice_count": {"$sum": 1},
+            "total_balance": {"$sum": "$balance"},
+            "newest": {"$max": "$created_at"},
+        }},
+        {"$sort": {"total_balance": -1}},
+    ]
+    rows = await db.invoices.aggregate(pipeline).to_list(500)
+
+    orphans = []
+    for r in rows:
+        cust = await db.customers.find_one({"id": r["_id"], "active": True}, {"_id": 0, "id": 1})
+        if not cust:
+            orphans.append({
+                "customer_id": r["_id"],
+                "customer_name": r.get("name") or "(unknown)",
+                "branch_id": r.get("branch_id"),
+                "invoice_count": r["invoice_count"],
+                "total_balance": float(r["total_balance"] or 0),
+                "newest": r.get("newest"),
+            })
+    return {"orphans": orphans, "total": len(orphans)}
+
+
 @router.get("/{customer_id}")
 async def get_customer(customer_id: str, user=Depends(get_current_user)):
     """Get customer details."""
@@ -303,11 +341,93 @@ async def remove_customer_phone(customer_id: str, phone_num: str, user=Depends(g
 
 
 @router.delete("/{customer_id}")
-async def delete_customer(customer_id: str, user=Depends(get_current_user)):
-    """Soft delete a customer."""
+async def delete_customer(customer_id: str, force: bool = False, user=Depends(get_current_user)):
+    """
+    Soft-delete a customer. Refuses if the customer has open invoices or a
+    non-zero balance, unless ?force=true is passed by an admin.
+    Sets deactivated_at so the sync API can tell terminals to purge cache.
+    """
     check_perm(user, "customers", "delete")
-    await db.customers.update_one({"id": customer_id}, {"$set": {"active": False}})
-    return {"message": "Customer deleted"}
+
+    customer = await db.customers.find_one({"id": customer_id, "active": True}, {"_id": 0})
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    # Guard against orphaning data
+    if not force:
+        balance = float(customer.get("balance", 0) or 0)
+        if balance > 0:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Cannot delete '{customer.get('name')}' — outstanding balance of ₱{balance:.2f}. "
+                    "Settle the balance first, or pass ?force=true to delete anyway (orphan invoices will remain)."
+                ),
+            )
+        open_count = await db.invoices.count_documents({
+            "customer_id": customer_id,
+            "status": {"$nin": ["paid", "voided"]},
+        })
+        if open_count > 0:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Cannot delete '{customer.get('name')}' — {open_count} open invoice(s) still pending. "
+                    "Settle or void them first, or pass ?force=true to override."
+                ),
+            )
+        # Admin-only override
+        if force and user.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="Only admins can force-delete customers")
+
+    await db.customers.update_one(
+        {"id": customer_id},
+        {"$set": {"active": False, "deactivated_at": now_iso(), "updated_at": now_iso()}},
+    )
+    return {"message": "Customer deleted", "id": customer_id}
+
+
+@router.post("/reattach-orphans")
+async def reattach_orphan_invoices(data: dict, user=Depends(get_current_user)):
+    """
+    Reattach invoices whose customer_id no longer resolves to an active customer.
+    Body: { "to_customer_id": "<existing_active_customer_id>", "from_customer_ids": ["<orphan_id>", ...] }
+    Updates all matched invoices' customer_id and customer_name. Recomputes the
+    target customer's balance as the sum of (open invoice balance) afterwards.
+    """
+    check_perm(user, "customers", "edit")
+    to_id = (data.get("to_customer_id") or "").strip()
+    from_ids = data.get("from_customer_ids") or []
+    if not to_id or not from_ids:
+        raise HTTPException(status_code=400, detail="to_customer_id and from_customer_ids are required")
+
+    target = await db.customers.find_one({"id": to_id, "active": True}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Target customer not found")
+
+    result = await db.invoices.update_many(
+        {"customer_id": {"$in": from_ids}},
+        {"$set": {
+            "customer_id": to_id,
+            "customer_name": target.get("name", ""),
+            "reattached_from": from_ids,
+            "reattached_at": now_iso(),
+        }},
+    )
+
+    # Recompute balance from open invoices
+    pipeline = [
+        {"$match": {"customer_id": to_id, "status": {"$nin": ["paid", "voided"]}}},
+        {"$group": {"_id": None, "balance": {"$sum": "$balance"}}},
+    ]
+    agg = await db.invoices.aggregate(pipeline).to_list(1)
+    new_balance = float(agg[0]["balance"]) if agg else 0.0
+    await db.customers.update_one(
+        {"id": to_id},
+        {"$set": {"balance": new_balance, "updated_at": now_iso()}},
+    )
+
+    return {"reattached": result.modified_count, "new_balance": new_balance, "to_customer_id": to_id}
 
 
 @router.get("/{customer_id}/transactions")

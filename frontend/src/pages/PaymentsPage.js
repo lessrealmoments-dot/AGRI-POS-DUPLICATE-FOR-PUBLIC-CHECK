@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import {
   Search, AlertTriangle, Percent, Receipt, Clock,
   Info, Zap, Edit3, Banknote, CreditCard, FileText, RefreshCw,
-  Building2, Smartphone, X, Tag, Users, ArrowDownAZ, ArrowDown01
+  Building2, Smartphone, X, Tag, Users, ArrowDownAZ, ArrowDown01, GhostIcon
 } from 'lucide-react';
 import { toast } from 'sonner';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
@@ -82,6 +82,45 @@ export default function PaymentsPage() {
   const [selectedInvoiceId, setSelectedInvoiceId] = useState(null);
 
   const [processing, setProcessing] = useState(false);
+
+  // ── Orphan receivables (invoices with deleted customers) ──
+  const [orphans, setOrphans] = useState([]);
+  const [orphanDialogOpen, setOrphanDialogOpen] = useState(false);
+  const [orphanTargetId, setOrphanTargetId] = useState('');
+  const [orphanReattaching, setOrphanReattaching] = useState(false);
+
+  const loadOrphans = useCallback(async () => {
+    try {
+      const res = await api.get('/customers/orphan-receivables');
+      setOrphans(res.data?.orphans || []);
+    } catch {
+      // silent — no orphans is the happy path
+    }
+  }, []);
+
+  useEffect(() => { loadOrphans(); }, [loadOrphans]);
+
+  const handleReattach = async (orphanCustomerId) => {
+    if (!orphanTargetId) {
+      toast.error('Pick the target customer first');
+      return;
+    }
+    setOrphanReattaching(true);
+    try {
+      const res = await api.post('/customers/reattach-orphans', {
+        to_customer_id: orphanTargetId,
+        from_customer_ids: [orphanCustomerId],
+      });
+      toast.success(`${res.data.reattached} invoice(s) reattached. New balance: ${formatPHP(res.data.new_balance)}`);
+      setOrphanDialogOpen(false);
+      setOrphanTargetId('');
+      await loadOrphans();
+      await loadCustList();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Reattach failed');
+    }
+    setOrphanReattaching(false);
+  };
 
   // ── Load customer list (receivables summary) ──
   const loadCustList = useCallback(async () => {
@@ -420,6 +459,27 @@ export default function PaymentsPage() {
 
       {/* ══════════ LEFT: Customer List ══════════ */}
       <div className="w-72 shrink-0 flex flex-col border-r border-slate-200" data-testid="customer-list-panel">
+        {/* Orphan receivables alert */}
+        {orphans.length > 0 && (
+          <button
+            onClick={() => setOrphanDialogOpen(true)}
+            data-testid="orphan-receivables-alert"
+            className="w-full text-left px-3 py-2 bg-red-50 border-b border-red-200 hover:bg-red-100 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <GhostIcon size={14} className="text-red-600 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold text-red-800">
+                  {orphans.length} phantom receivable{orphans.length === 1 ? '' : 's'}
+                </p>
+                <p className="text-[10px] text-red-600 truncate">
+                  {formatPHP(orphans.reduce((s, o) => s + o.total_balance, 0))} attached to deleted customers — click to fix
+                </p>
+              </div>
+            </div>
+          </button>
+        )}
+
         {/* Search + controls */}
         <div className="p-3 border-b border-slate-100 space-y-2">
           <div className="relative">
@@ -1003,6 +1063,80 @@ export default function PaymentsPage() {
         saleId={selectedInvoiceId}
         onUpdated={() => { if (selectedCustomer) { loadInvoices(selectedCustomer.id); loadChargesPreview(selectedCustomer.id); } }}
       />
+
+      {/* Orphan Receivables — reattach dialog */}
+      <Dialog open={orphanDialogOpen} onOpenChange={setOrphanDialogOpen}>
+        <DialogContent className="sm:max-w-2xl" data-testid="orphan-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <GhostIcon size={18} className="text-red-600" />
+              Phantom Receivables — Reattach to a customer
+            </DialogTitle>
+            <DialogDescription>
+              These invoices reference customer IDs that no longer exist. Pick a target active customer below, then click Reattach next to each phantom group.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs">Target Customer</Label>
+              <select
+                data-testid="orphan-target-select"
+                value={orphanTargetId}
+                onChange={e => setOrphanTargetId(e.target.value)}
+                className="w-full h-9 mt-1 text-sm border border-slate-200 rounded-md px-2 bg-white"
+              >
+                <option value="">— Select a customer to receive these invoices —</option>
+                {custList.map(c => (
+                  <option key={c.id} value={c.id}>{c.name} {c.balance > 0 ? `(₱${c.balance.toFixed(2)})` : ''}</option>
+                ))}
+              </select>
+              <p className="text-[10px] text-slate-500 mt-1">
+                Tip: if the customer was deleted by accident, create them again first on the Customers page, then come back here to reattach.
+              </p>
+            </div>
+
+            <div className="border border-slate-200 rounded-md overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-slate-50">
+                    <TableHead className="text-xs">Phantom Customer</TableHead>
+                    <TableHead className="text-xs text-center">Open invoices</TableHead>
+                    <TableHead className="text-xs text-right">Total balance</TableHead>
+                    <TableHead className="text-xs"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {orphans.map(o => (
+                    <TableRow key={o.customer_id} data-testid={`orphan-row-${o.customer_id}`}>
+                      <TableCell>
+                        <div className="text-sm font-medium">{o.customer_name}</div>
+                        <div className="font-mono text-[10px] text-slate-400">{o.customer_id?.slice(0, 12)}…</div>
+                      </TableCell>
+                      <TableCell className="text-center text-sm">{o.invoice_count}</TableCell>
+                      <TableCell className="text-right font-mono text-sm text-red-600">{formatPHP(o.total_balance)}</TableCell>
+                      <TableCell>
+                        <Button
+                          size="sm"
+                          disabled={!orphanTargetId || orphanReattaching}
+                          onClick={() => handleReattach(o.customer_id)}
+                          data-testid={`reattach-orphan-${o.customer_id}`}
+                          className="bg-amber-600 hover:bg-amber-700 text-white text-xs h-7"
+                        >
+                          {orphanReattaching ? 'Reattaching…' : 'Reattach'}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {orphans.length === 0 && (
+                    <TableRow><TableCell colSpan={4} className="text-center text-sm text-slate-400 py-4">No phantom receivables 🎉</TableCell></TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

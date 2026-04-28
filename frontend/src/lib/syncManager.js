@@ -17,7 +17,7 @@ import {
   getPendingSales, removePendingSale,
   cacheProducts, cacheCustomers, cachePriceSchemes, cacheInventory, cacheBranchPrices,
   setMeta, getMeta, getPendingSaleCount, putProduct,
-  updateInventoryBatch,
+  updateInventoryBatch, mergeCustomers,
 } from './offlineDB';
 
 let syncInProgress = false;
@@ -165,7 +165,7 @@ export async function refreshPOSCache(branchId = null) {
     if (lastSync) params.last_sync = lastSync;
 
     const response = await api.get('/sync/pos-data', { params });
-    const { products = [], customers = [], price_schemes = [], inventory = [], branch_prices = [], sync_time, is_delta } = response.data;
+    const { products = [], customers = [], price_schemes = [], inventory = [], branch_prices = [], deleted_ids = [], deleted_customer_ids = [], sync_time, is_delta } = response.data;
 
     emit({ type: 'sync_step', stepLabel: `Saving ${products.length} products...`, pct: 25 });
     if (is_delta && products.length > 0) {
@@ -187,7 +187,13 @@ export async function refreshPOSCache(branchId = null) {
     }
 
     emit({ type: 'sync_step', stepLabel: `Saving ${customers.length} customers...`, pct: 75 });
-    await cacheCustomers(customers);
+    if (is_delta) {
+      // Delta: merge updated customers and purge any deleted ones — preserves unchanged cache entries
+      await mergeCustomers(customers, deleted_customer_ids);
+    } else {
+      // Full sync: replace entire customer cache (deleted ones are excluded server-side)
+      await cacheCustomers(customers);
+    }
 
     emit({ type: 'sync_step', stepLabel: 'Saving price schemes & branch prices...', pct: 92 });
     await cachePriceSchemes(price_schemes);

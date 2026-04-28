@@ -103,22 +103,37 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
     customer_name = data.get("customer_name", "Walk-in")
     payment_type = data.get("payment_type", "cash")  # cash, partial, credit
     
-    # Credit limit check for credit/partial sales
+    # Validate customer_id resolves to an active customer for credit/partial sales.
+    # Prevents orphan invoices when a customer was deleted but still cached client-side.
     if payment_type in ["partial", "credit"] and customer_id:
-        customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
-        if customer:
-            current_balance = customer.get("balance", 0)
-            credit_limit = customer.get("credit_limit", 0)
-            balance_due = float(data.get("balance", 0))
-            
-            # Only block if credit limit is set and exceeded (unless manager approved)
-            if credit_limit > 0 and not data.get("approved_by"):
-                new_total = current_balance + balance_due
-                if new_total > credit_limit:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Credit limit exceeded. Limit: ₱{credit_limit:.2f}, Current: ₱{current_balance:.2f}, This sale: ₱{balance_due:.2f}"
-                    )
+        customer = await db.customers.find_one({"id": customer_id, "active": True}, {"_id": 0})
+        if not customer:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Customer '{customer_name}' no longer exists in the system "
+                    "(they may have been deleted). Please refresh your customer list "
+                    "and re-select the customer, or process this as a cash sale."
+                ),
+            )
+        current_balance = customer.get("balance", 0)
+        credit_limit = customer.get("credit_limit", 0)
+        balance_due = float(data.get("balance", 0))
+
+        # Only block if credit limit is set and exceeded (unless manager approved)
+        if credit_limit > 0 and not data.get("approved_by"):
+            new_total = current_balance + balance_due
+            if new_total > credit_limit:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Credit limit exceeded. Limit: ₱{credit_limit:.2f}, Current: ₱{current_balance:.2f}, This sale: ₱{balance_due:.2f}"
+                )
+    elif customer_id:
+        # Cash sale with a customer_id — silently strip if customer doesn't exist
+        # so the sale completes as a clean walk-in instead of attaching to a ghost.
+        ghost = await db.customers.find_one({"id": customer_id, "active": True}, {"_id": 0, "id": 1})
+        if not ghost:
+            customer_id = None
     
     # Get prefix settings
     settings = await db.settings.find_one({"key": "invoice_prefixes"}, {"_id": 0})
