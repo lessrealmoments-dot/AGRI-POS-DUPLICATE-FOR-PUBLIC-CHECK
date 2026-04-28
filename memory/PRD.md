@@ -22,6 +22,24 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### SMS Gateway Retry-Spiral Fix (2026-04-28) — Complete
+- **RCA from live VPS** (`agri-books.com/messages` gateway log inspection):
+  - Stuck SMS with `retry_count = 393` (a 3-char "Sup" message), `121`, `120`, `45`...
+  - Every failure: `SMS SENT failed (code 124)` — Android `SmsManager` carrier-level rejection (SIM no load / rate-limited / spam-filtered).
+  - Bug A: `mark_sms_failed` set status='failed' and bumped `retry_count` on every call but never moved to a terminal state — gateway kept re-trying via local logic.
+  - Bug B: `/queue/pending` did not exclude high-retry messages — repeatedly fed the same poisoned items back to the gateway.
+  - Bug C: `/sms/send` accepted single-char messages — accidental cashier sends ('A', 'J', 'Sup') burned carrier rate limits.
+  - Bug D: `mark-sent` and `mark-failed` were not idempotent. Gateway PATCH timeouts (visible in logs as `mark-failed failed: timeout`) caused duplicate state changes.
+  - Side note: messages still showed `"Jnd store"` in the body — proving the cross-tenant bleed (fixed in iter 175) is queued in their existing failed messages; new SMS will be correct after `git pull`.
+- **Backend fixes** (`routes/sms.py`):
+  - `MAX_GATEWAY_RETRIES = 3`. After cap, status becomes `failed_permanent` — terminal state, gateway never sees it again.
+  - `/queue/pending` filter: `{"status": "pending", "retry_count": {"$lt": MAX_GATEWAY_RETRIES}}` — defensive even if status is wrong.
+  - `mark-sent`: idempotent — second call on already-sent doc returns `{idempotent: true}` without 404 or state change.
+  - `mark-failed`: idempotent on `failed_permanent`. Uses `find_one + new_retry` instead of `$inc` so terminal-state docs aren't re-bumped.
+  - `/sms/send`: rejects messages with `len(strip()) < 5`.
+  - New `POST /api/sms/queue/clear-stuck` admin endpoint: bulk-skips all failed/failed_permanent items in one call so the gateway drains its backlog.
+- **Verified**: `pytest tests/test_sms_gateway_retry_cap_177.py` — 5/5 pass (short-msg rejection, retry cap, pending exclusion, idempotent mark-sent, bulk clear). Combined run with 174+175+176 = **14/14 pass**.
+
 ### Reset Company Re-Seed Audit (2026-04-28) — Complete
 - **RCA**: After Reset Company, additional gaps beyond the SMS bleed: the org had **no branches**, **no fund_wallets**, and various missing settings — making the system effectively unusable until manual recreation. Reset wiped `branches` (in `ORG_COLLECTIONS`) but only re-seeded `price_schemes`.
 - **Side-by-side audit (preview vs fresh-org expectations):**

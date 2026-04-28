@@ -445,49 +445,116 @@ async def list_sms_queue(
     return {"items": items, "total": total}
 
 
+# Hard cap on per-message retries — prevents infinite carrier spiral when
+# the SIM/network is rejecting outbound SMS (Android error code 124 etc).
+# After this many failures, the message is moved to status="failed_permanent"
+# and the gateway will stop trying. Admin can manually re-queue if needed.
+MAX_GATEWAY_RETRIES = 3
+
+
 @router.get("/queue/pending")
 async def get_pending_sms(limit: int = 50, user=Depends(get_current_user)):
-    """Get pending SMS for the gateway app to send."""
+    """Get pending SMS for the gateway app to send.
+
+    Excludes messages whose retry_count has already hit the cap — defensive
+    against any code path that might have left a poisoned message in 'pending'
+    state. The gateway must never poll a message we've decided to abandon.
+    """
     items = await db.sms_queue.find(
-        {"status": "pending"}, {"_id": 0}
+        {"status": "pending", "retry_count": {"$lt": MAX_GATEWAY_RETRIES}},
+        {"_id": 0},
     ).sort("created_at", 1).limit(limit).to_list(limit)
     return items
 
 
 @router.patch("/queue/{sms_id}/mark-sent")
 async def mark_sms_sent(sms_id: str, user=Depends(get_current_user)):
-    """Gateway app reports SMS was sent successfully."""
+    """Gateway app reports SMS was sent successfully.
+
+    Idempotent: if the doc is already 'sent', return ok without bumping anything.
+    Critical when the gateway times out on this PATCH and retries — we must NOT
+    treat the same successful send as a new event.
+    """
+    # Already-sent → no-op
+    existing = await db.sms_queue.find_one({"id": sms_id}, {"_id": 0, "status": 1})
+    if existing and existing.get("status") == "sent":
+        return {"status": "sent", "idempotent": True}
     result = await db.sms_queue.update_one(
-        {"id": sms_id, "status": "pending"},
-        {"$set": {"status": "sent", "sent_at": now_iso()}}
+        {"id": sms_id, "status": {"$in": ["pending", "failed"]}},
+        {"$set": {"status": "sent", "sent_at": now_iso(), "error": None}},
     )
     if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="SMS not found or not pending")
+        raise HTTPException(status_code=404, detail="SMS not found or already in terminal state")
     return {"status": "sent"}
 
 
 @router.patch("/queue/{sms_id}/mark-failed")
 async def mark_sms_failed(sms_id: str, data: dict = None, user=Depends(get_current_user)):
-    """Gateway app reports SMS send failure."""
+    """Gateway app reports SMS send failure.
+
+    After MAX_GATEWAY_RETRIES attempts the message becomes 'failed_permanent'
+    and is no longer fed back to the gateway — this stops the infinite-loop
+    spiral that was hammering the SIM card with duplicate retries when the
+    carrier was rejecting messages (Android error code 124 etc).
+    """
     error = (data or {}).get("error", "Unknown error")
+    existing = await db.sms_queue.find_one(
+        {"id": sms_id}, {"_id": 0, "status": 1, "retry_count": 1}
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="SMS not found")
+    # Already permanently failed — idempotent no-op (don't bump retry_count again)
+    if existing.get("status") == "failed_permanent":
+        return {"status": "failed_permanent", "idempotent": True}
+    new_retry = (existing.get("retry_count") or 0) + 1
+    final_status = "failed_permanent" if new_retry >= MAX_GATEWAY_RETRIES else "failed"
     await db.sms_queue.update_one(
         {"id": sms_id},
-        {"$set": {"status": "failed", "failed_at": now_iso(), "error": error},
-         "$inc": {"retry_count": 1}}
+        {"$set": {
+            "status": final_status,
+            "failed_at": now_iso(),
+            "error": error,
+            "retry_count": new_retry,
+        }},
     )
-    return {"status": "failed"}
+    return {
+        "status": final_status,
+        "retry_count": new_retry,
+        "max_retries": MAX_GATEWAY_RETRIES,
+    }
 
 
 @router.post("/queue/{sms_id}/retry")
 async def retry_sms(sms_id: str, user=Depends(get_current_user)):
-    """Re-queue a failed SMS."""
+    """Re-queue a failed SMS. Resets retry_count so it gets a fresh start."""
     result = await db.sms_queue.update_one(
-        {"id": sms_id, "status": "failed"},
-        {"$set": {"status": "pending", "error": None}}
+        {"id": sms_id, "status": {"$in": ["failed", "failed_permanent"]}},
+        {"$set": {
+            "status": "pending",
+            "error": None,
+            "retry_count": 0,
+            "failed_at": None,
+        }},
     )
     if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="SMS not found or not failed")
+        raise HTTPException(status_code=404, detail="SMS not found or not in failed state")
     return {"status": "pending"}
+
+
+@router.post("/queue/clear-stuck")
+async def clear_stuck_queue(user=Depends(get_current_user)):
+    """Admin: mark every failed/failed_permanent SMS in this org as 'skipped'.
+
+    Use this when the carrier/SIM is rejecting outbound SMS and the gateway has
+    accumulated a backlog of stuck messages. The skipped items remain in the
+    queue history (auditable) but are no longer pollable by the gateway.
+    """
+    check_perm(user, "settings", "edit")
+    result = await db.sms_queue.update_many(
+        {"status": {"$in": ["failed", "failed_permanent"]}},
+        {"$set": {"status": "skipped", "skipped_at": now_iso()}},
+    )
+    return {"cleared": result.modified_count}
 
 
 @router.post("/queue/{sms_id}/skip")
@@ -517,6 +584,13 @@ async def send_manual_sms(data: dict, user=Depends(get_current_user)):
 
     if not message:
         raise HTTPException(status_code=400, detail="Message is required")
+    # Minimum length guard — prevents accidental "A"/"J"/"Sup" sends from the
+    # cashier UI that otherwise burn carrier rate limits and clog the gateway.
+    if len(message.strip()) < 5:
+        raise HTTPException(
+            status_code=400,
+            detail="Message is too short (min 5 characters). Please type a complete message.",
+        )
 
     # Resolve phones — all registered numbers when customer_id given
     if customer_id:
