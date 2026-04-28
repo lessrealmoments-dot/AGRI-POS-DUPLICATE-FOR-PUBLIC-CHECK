@@ -174,4 +174,4 @@
 - Super Admin: `janmarkeahig@gmail.com` / `Aa@58798546521325`
 - Company Admin: `jovelyneahig@gmail.com` / `Aa@050772`
 - Manager PIN: `521325`
-- App URL: `https://agribooks-pos.preview.emergentagent.com`
+- App URL: `https://crop-credit.preview.emergentagent.com`

@@ -13,7 +13,7 @@ import os
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 if not BASE_URL:
-    BASE_URL = "https://agribooks-pos.preview.emergentagent.com"
+    BASE_URL = "https://crop-credit.preview.emergentagent.com"
 
 # Credentials from review_request
 SUPER_ADMIN_EMAIL = "janmarkeahig@gmail.com"
