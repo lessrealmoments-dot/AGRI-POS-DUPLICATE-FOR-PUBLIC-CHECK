@@ -600,7 +600,7 @@ export default function PriceManagerPage() {
   const handleSave = async () => {
     // Collect all changes
     const globalItems = [];    // {product_id, prices}
-    const branchItems = [];    // {product_id, branch_id, prices, cost_price, set_manual}
+    const branchItems = [];    // {product_id, branch_id, prices?, cost_price?}
     const repackItems = [];    // {product_id, prices}
 
     for (const entry of products) {

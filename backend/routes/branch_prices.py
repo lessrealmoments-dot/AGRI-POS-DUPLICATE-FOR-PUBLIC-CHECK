@@ -208,8 +208,6 @@ async def bulk_update_branch_prices(data: dict, user=Depends(get_current_user)):
 
     return {"updated": updated, "errors": errors}
 
-    return {"updated": updated, "errors": errors}
-
 
 async def get_capital_summary(source_branch_id: str, user=Depends(get_current_user)):
     """

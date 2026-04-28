@@ -22,6 +22,11 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### Signature Verification Toolbar in Audit Center (2026-04-28) — Complete
+- **Frontend**: `SignatureVerifyToolbar.js` — compact dark bar between Audit Center header and tabs. Paste `v.XXXXXXXX` token → Verify button → calls `GET /api/signatures/verify/{token}` → dialog shows: signature image, status badge (Signed / Manager PIN bypass), signer name, date/time, clickable invoice link (opens InvoiceDetailModal), credit context, tamper-evident token badge.
+- **Price Manager capital logic fix**: Removed `set_manual` flag from `bulk-update` — branch capital saves no longer touch `products.capital_method` globally (was overriding the auto-switch mode for all branches). Added `edit_cost` permission check + audit logging to `capital_changes` for all branch capital saves.
+- **Tested**: iteration_168 — Backend 24/24, Frontend 12/12. ✅
+
 ### Price Manager Feature (2026-04-28) — Complete
 - **Backend**: `GET /products/price-audit-summary` (counts missing capital + low-margin products), `POST /products/bulk-price-update` (batch global price save), `POST /branch-prices/bulk-update` (batch branch override save including capital + manual flag).
 - **Frontend**: `/price-manager` — Tab 1 (Price Manager): product search, collapsed color-coded cards (red/yellow/green status dots), expandable branch table showing `current → new` inputs per scheme per branch, smart category fill toolbar (pre-fills suggestions only), session checkmarks. Tab 2 (Capital & Price Setup): same layout + capital inputs, capital method badges, smart audit prompts ("200 products have no capital — load first 30"), auto-switch logic on next PO already in place.
