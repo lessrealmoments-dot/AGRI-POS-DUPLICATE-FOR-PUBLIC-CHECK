@@ -13,7 +13,7 @@ import math
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 from config import db
-from utils import get_current_user, check_perm, now_iso, new_id
+from utils import get_current_user, check_perm, has_perm, now_iso, new_id
 
 router = APIRouter(prefix="/branch-prices", tags=["Branch Prices"])
 
@@ -125,14 +125,27 @@ async def delete_branch_price(
 async def bulk_update_branch_prices(data: dict, user=Depends(get_current_user)):
     """
     Batch upsert branch price overrides for multiple products.
-    Body: { items: [{product_id, branch_id, prices: {scheme_key: price}, cost_price?, set_manual?}] }
-    - If set_manual=True: sets capital_method="manual" on the global product doc
+    Body: { items: [{product_id, branch_id, prices: {scheme_key: price}, cost_price?}] }
+
+    Rules:
     - prices and cost_price are each optional — only provided keys are written
+    - Requires products.edit_cost permission when cost_price is present
+    - Logs every capital change to capital_changes (same as PO receiving)
+    - Does NOT touch products.capital_method — that is managed by PO receiving
     """
     check_perm(user, "products", "edit")
     items = data.get("items", [])
     if not items:
         raise HTTPException(status_code=400, detail="No items provided")
+
+    # Determine if any item sets cost_price — requires edit_cost permission
+    has_capital_changes = any(item.get("cost_price") is not None for item in items)
+    if has_capital_changes:
+        if not has_perm(user, "products", "edit_cost"):
+            raise HTTPException(
+                status_code=403,
+                detail="No permission to edit capital/cost price (products.edit_cost required)"
+            )
 
     updated = 0
     errors = []
@@ -142,7 +155,6 @@ async def bulk_update_branch_prices(data: dict, user=Depends(get_current_user)):
         bid = item.get("branch_id")
         new_prices = item.get("prices") or {}
         new_capital = item.get("cost_price")
-        set_manual = item.get("set_manual", False)
 
         if not pid or not bid:
             continue
@@ -173,15 +185,28 @@ async def bulk_update_branch_prices(data: dict, user=Depends(get_current_user)):
                                 "prices": set_doc.get("prices", {})})
                 await db.branch_prices.insert_one(set_doc)
 
-            # If set_manual: flag global product as manually managed capital
-            if set_manual:
-                await db.products.update_one(
-                    {"id": pid},
-                    {"$set": {"capital_method": "manual", "updated_at": now_iso()}}
-                )
+            # Log capital change for audit trail (mirrors PO receiving flow)
+            if new_capital is not None:
+                old_capital = float(existing.get("cost_price", 0)) if existing else 0
+                await db.capital_changes.insert_one({
+                    "id": new_id(),
+                    "product_id": pid,
+                    "branch_id": bid,
+                    "old_capital": old_capital,
+                    "new_capital": float(new_capital),
+                    "method": "manual",
+                    "source_type": "price_manager",
+                    "source_ref": "bulk_branch_price_update",
+                    "changed_by_id": user["id"],
+                    "changed_by_name": user.get("full_name", user.get("username", "")),
+                    "changed_at": now_iso(),
+                })
+
             updated += 1
         except Exception as e:
             errors.append(f"{pid}/{bid}: {e}")
+
+    return {"updated": updated, "errors": errors}
 
     return {"updated": updated, "errors": errors}
 

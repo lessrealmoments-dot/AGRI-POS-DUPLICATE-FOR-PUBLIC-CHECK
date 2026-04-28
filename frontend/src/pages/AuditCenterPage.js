@@ -23,6 +23,7 @@ import InvoiceDetailModal from '../components/InvoiceDetailModal';
 import ExpenseDetailModal from '../components/ExpenseDetailModal';
 import CustomerStatementModal from '../components/CustomerStatementModal';
 import ReceiptGallery from '../components/ReceiptGallery';
+import SignatureVerifyToolbar from '../components/SignatureVerifyToolbar';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -839,6 +840,13 @@ export default function AuditCenterPage() {
           </div>
         )}
       </div>
+
+      {/* ── Signature Verification Toolbar ──────────────────────────────── */}
+      <SignatureVerifyToolbar onOpenInvoice={(invoiceNum) => {
+        setSelectedInvoiceNumber(invoiceNum);
+        setDetailType('sale');
+        setInvoiceModalOpen(true);
+      }} />
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>

@@ -624,7 +624,6 @@ export default function PriceManagerPage() {
             branch_id: branchId,
             prices: hasPrice ? changes.prices : undefined,
             cost_price: hasCap ? changes.capital : undefined,
-            set_manual: hasCap,
           });
         }
       }

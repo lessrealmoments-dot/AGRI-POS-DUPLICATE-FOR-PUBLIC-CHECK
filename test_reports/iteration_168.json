@@ -1,0 +1,54 @@
+{
+  "summary": "Iteration 168: Tested Signature Verify Toolbar (Audit Center) and Price Manager capital integrity (bulk-update, bulk-price-update). All 24 backend tests pass (100%). All frontend checks pass. set_manual flag confirmed removed from PriceManagerPage.js payload. capital_method is never touched by branch-prices/bulk-update.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "/api/branch-prices/bulk-update",
+        "issue": "Duplicate `return {updated, errors}` statement at line 211 in branch_prices.py (dead code after line 209's return). No runtime impact but should be cleaned up.",
+        "priority": "LOW"
+      },
+      {
+        "endpoint": "N/A",
+        "issue": "The 403 test case for edit_cost permission (user without products.edit_cost trying to set cost_price) could not be tested end-to-end because only super admin credentials are available. Code review confirms the check is correct (lines 142-148 in branch_prices.py).",
+        "priority": "LOW"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_signature_and_price_manager_168.py",
+    "/app/test_reports/pytest/pytest_sig_price_168.xml"
+  ],
+  "action_items": [
+    "Remove duplicate `return {updated, errors}` at line 211 in /app/backend/routes/branch_prices.py (dead code).",
+    "Update stale comment at line 603 in PriceManagerPage.js — `// {product_id, branch_id, prices, cost_price, set_manual}` still mentions removed `set_manual` field."
+  ],
+  "critical_code_review_comments": [
+    "branch_prices.py line 211: duplicate return statement is dead code. The first return at line 209 is correct. The second is never reached.",
+    "PriceManagerPage.js line 603 comment still references `set_manual` in the type annotation comment, but the actual branchItems.push() at line 622-627 does NOT send it — code is correct but comment is stale.",
+    "Global capital update path (branchId==='__global__') in PriceManagerPage.js correctly calls PUT /products/{id} with capital_method='manual' — this is intended for global capital changes.",
+    "Branch capital path (branchId !== '__global__') correctly sends only {product_id, branch_id, prices, cost_price} to /branch-prices/bulk-update — no set_manual field confirmed."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (24/24)",
+    "frontend": "100% (all 12 feature points verified)"
+  },
+  "test_credentials": {
+    "used": "janmarkeahig@gmail.com / Aa@58798546521325 (super admin)"
+  },
+  "seed_data_creation": "None — tests used existing products and branch_prices data",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Signature Verify toolbar fully tested: toolbar on /audit, testid sig-verify-token-input + sig-verify-btn present, button disabled <8 chars enabled at 8, invalid token shows error toast + dialog stays closed. Backend signatures/verify/{token}: 400 for <8 chars, 404 for non-existent token, 401 without auth — all correct. Branch-prices/bulk-update: capital_method on products never touched, capital_changes logged with source_type='price_manager', edit_cost permission check in place. Products/bulk-price-update: only touches products.prices, never cost_price or capital_method. PO auto-switch regression: capital_method unchanged after any bulk-update. Minor: duplicate return on branch_prices.py:211 (dead code).",
+  "rca_of_issues": {
+    "set_manual_removal": "Previous iteration had set_manual flag in bulk-update which caused global capital_method to be changed to 'manual' on products when branch capital was updated via Price Manager. Fix: removed set_manual from branchItems payload in PriceManagerPage.js and removed set_manual handling from branch_prices.py bulk-update. Now only PO receiving manages capital_method globally.",
+    "capital_changes_logging": "Added capital_changes insert_one() in branch_prices.py bulk-update (lines 189-203) with source_type='price_manager', mirrors PO receiving audit trail.",
+    "edit_cost_permission": "Added has_perm check for products.edit_cost when any item has cost_price (lines 142-148 in branch_prices.py). Returns 403 with clear message."
+  }
+}
