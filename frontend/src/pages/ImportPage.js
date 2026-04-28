@@ -144,32 +144,34 @@ export default function ImportPage() {
     setLoading(false);
   };
 
-  // ── Overwrite selected skipped items ────────────────────────────────────
+  // ── Overwrite selected skipped items: re-uploads the file and merges mapped fields ──
   const handleOverwrite = async () => {
     if (!overwriteIds.size) return;
+    if (!file) {
+      toast.error('Original file required to overwrite. Please re-import.');
+      return;
+    }
     setLoading(true);
     try {
-      // Build updates from the sample + mapping
       const ids = [...overwriteIds];
-      // Find these names in the parsed data
-      const namesToUpdate = result.skipped
-        .filter(s => overwriteIds.has(s.existing_id))
-        .map(s => s.name);
-
-      // Re-upload file with overwrite flag for these specific items
-      await api.post('/import/products/overwrite', {
-        product_ids: ids,
-        updates: { } // No specific updates — this is handled by re-importing specific rows
-      });
-      toast.success(`${ids.length} products updated`);
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('mapping', JSON.stringify(mapping));
+      fd.append('product_ids', JSON.stringify(ids));
+      const res = await api.post('/import/products/overwrite', fd);
+      const { updated = 0, not_matched = 0, schemes_auto_created = [] } = res.data || {};
+      let msg = `${updated} product${updated === 1 ? '' : 's'} updated`;
+      if (schemes_auto_created.length) msg += ` · ${schemes_auto_created.length} scheme(s) auto-created`;
+      if (not_matched) msg += ` · ${not_matched} unmatched row(s)`;
+      toast.success(msg);
       setOverwriteIds(new Set());
-      // Remove from skipped list in UI
+      // Remove the overwritten items from the skipped list
       setResult(prev => ({
         ...prev,
-        skipped: prev.skipped.filter(s => !overwriteIds.has(s.existing_id)),
+        skipped: (prev.skipped || []).filter(s => !overwriteIds.has(s.existing_id)),
       }));
     } catch (e) {
-      toast.error('Overwrite failed');
+      toast.error(e.response?.data?.detail || 'Overwrite failed');
     }
     setLoading(false);
   };
@@ -547,15 +549,39 @@ export default function ImportPage() {
             <Card className="border-amber-200">
               <CardHeader className="py-3 px-5 bg-amber-50 border-b border-amber-200">
                 <div className="flex items-center justify-between flex-wrap gap-2">
-                  <CardTitle className="text-sm text-amber-800">
-                    {result.skipped ? `${result.skipped.length} Duplicate Products — Review & Decide` : `${result.not_found.length} Products Not Found in System`}
-                  </CardTitle>
-                  {result.skipped && overwriteIds.size > 0 && (
-                    <Button size="sm" onClick={handleOverwrite} disabled={loading}
-                      className="bg-amber-600 hover:bg-amber-700 text-white text-xs h-7">
-                      Overwrite {overwriteIds.size} selected
-                    </Button>
-                  )}
+                  <div>
+                    <CardTitle className="text-sm text-amber-800">
+                      {result.skipped ? `${result.skipped.length} Duplicate Products — Review & Decide` : `${result.not_found.length} Products Not Found in System`}
+                    </CardTitle>
+                    {result.skipped && (
+                      <p className="text-[11px] text-amber-700 mt-1">
+                        Overwrite merges only the columns you mapped — unmapped fields (e.g. retail) are preserved.
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {result.skipped && result.skipped.length > 0 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        data-testid="select-all-duplicates-btn"
+                        onClick={() => {
+                          const allSelected = overwriteIds.size === result.skipped.length;
+                          setOverwriteIds(allSelected ? new Set() : new Set(result.skipped.map(s => s.existing_id)));
+                        }}
+                        className="text-xs h-7 border-amber-300 text-amber-800 hover:bg-amber-100"
+                      >
+                        {overwriteIds.size === result.skipped.length ? 'Deselect All' : `Select All (${result.skipped.length})`}
+                      </Button>
+                    )}
+                    {result.skipped && overwriteIds.size > 0 && (
+                      <Button size="sm" onClick={handleOverwrite} disabled={loading}
+                        data-testid="overwrite-selected-btn"
+                        className="bg-amber-600 hover:bg-amber-700 text-white text-xs h-7">
+                        {loading ? 'Merging…' : `Overwrite ${overwriteIds.size} selected`}
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="p-0 max-h-80 overflow-y-auto">

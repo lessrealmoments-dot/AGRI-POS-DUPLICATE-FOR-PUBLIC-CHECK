@@ -22,6 +22,12 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### Import Overwrite Merge Fix (2026-04-28) — Complete
+- **Bug**: `POST /api/import/products/overwrite` was a broken no-op. Frontend sent `updates: {}` and backend ran `update_many` with empty `$set`. Clicking "Overwrite" did nothing useful — users couldn't bulk-update existing products from a CSV.
+- **Fix backend** (`routes/import_data.py`): Endpoint now accepts the file + mapping + product_ids (multipart). For each row whose name matches a selected product, MERGES only the mapped fields into the existing product. The `prices` map is merged (existing scheme keys preserved unless explicitly mapped). Auto-creates missing schemes from `*_price` mappings. Returns `{updated, not_matched, errors, schemes_auto_created}`.
+- **Fix frontend** (`pages/ImportPage.js`): `handleOverwrite` now POSTs FormData with the original file + current mapping + selected product IDs. Added "Select All / Deselect All" toggle (`select-all-duplicates-btn`) for bulk operations on large duplicate lists, and a hint line explaining that unmapped fields are preserved. Toast now shows merged count + auto-created schemes + unmatched count.
+- **Test**: `/app/backend/tests/test_overwrite_merge_171.py` — 2/2 tests pass against live preview API. Confirms retail is preserved when only wholesale_price is mapped, and unselected products are not touched even if present in the file.
+
 ### Price Scheme Recovery + Import Fix (2026-04-28) — Complete
 - **RCA**: User's live `agri-books.com` org had ZERO price schemes (shown empty `[]` from `/api/price-schemes`). Result: dropdown unselectable on Sales/Terminal, no scheme columns on Products/Inventory, and 1,601 imported products had only `prices.retail` (no wholesale). Three root bugs:
   - **Bug A**: `Reset Company` wiped `price_schemes` collection without re-seeding defaults.

@@ -350,29 +350,169 @@ async def import_products(
 
 
 @router.post("/products/overwrite")
-async def overwrite_products(data: dict, user=Depends(get_current_user)):
+async def overwrite_products(
+    file: UploadFile = File(...),
+    mapping: str = Form(""),
+    product_ids: str = Form(""),   # JSON array of existing product IDs to overwrite
+    user=Depends(get_current_user),
+):
     """
-    Overwrite specific products from the skipped duplicates list.
-    Body: { product_ids: [...], updates: { name, cost_price, prices, unit, ... } }
-    Used when user reviews the skipped-duplicates report and chooses to overwrite specific ones.
+    Merge-overwrite existing products from the source file.
+
+    For each row whose Product Name matches one of the selected product_ids,
+    only the *mapped* fields are written. The `prices` map is MERGED — existing
+    scheme keys (e.g. retail) are preserved unless the user mapped a column for
+    them. This lets users add wholesale prices to 1000s of products without
+    losing their existing retail prices.
     """
     check_perm(user, "products", "edit")
 
-    updates = data.get("updates", {})
-    product_ids = data.get("product_ids", [])
-    if not product_ids:
-        raise HTTPException(status_code=400, detail="No product IDs provided")
+    import json
+    try:
+        col_map = json.loads(mapping) if mapping else {}
+        ids_to_overwrite = set(json.loads(product_ids) if product_ids else [])
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON for mapping or product_ids")
 
-    allowed = ["name", "category", "description", "unit", "cost_price", "prices",
-               "reorder_point", "product_type"]
-    clean = {k: v for k, v in updates.items() if k in allowed}
-    clean["updated_at"] = now_iso()
+    if not ids_to_overwrite:
+        raise HTTPException(status_code=400, detail="No products selected to overwrite")
+    if not col_map.get("name"):
+        raise HTTPException(status_code=400, detail="Column mapping must include 'name'")
 
-    result = await db.products.update_many(
-        {"id": {"$in": product_ids}},
-        {"$set": clean}
-    )
-    return {"updated": result.modified_count}
+    try:
+        content = await file.read()
+        rows = _read_file(content, file.filename)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Look up the selected products and index by name (case-insensitive)
+    targets = await db.products.find(
+        {"id": {"$in": list(ids_to_overwrite)}, "active": True},
+        {"_id": 0},
+    ).to_list(len(ids_to_overwrite))
+    name_to_product = {p["name"].lower(): p for p in targets}
+
+    # Discover & auto-create any missing schemes from mapped *_price columns
+    schemes = await db.price_schemes.find({"active": True}, {"_id": 0}).to_list(50)
+    scheme_keys = {s["key"]: s["name"] for s in schemes}
+
+    mapped_scheme_keys = set()
+    for map_key in col_map:
+        if map_key.endswith("_price") and map_key != "cost_price" and col_map.get(map_key):
+            mapped_scheme_keys.add(map_key[: -len("_price")])
+
+    schemes_auto_created = []
+    for sk in mapped_scheme_keys:
+        if sk and sk not in scheme_keys:
+            new_scheme = {
+                "id": new_id(),
+                "name": sk.replace("_", " ").title(),
+                "key": sk,
+                "description": f"Auto-created during overwrite on {now_iso()[:10]}",
+                "calculation_method": "fixed",
+                "calculation_value": 0.0,
+                "base_scheme": "cost_price",
+                "active": True,
+                "created_at": now_iso(),
+            }
+            await db.price_schemes.insert_one(new_scheme)
+            scheme_keys[sk] = new_scheme["name"]
+            schemes_auto_created.append({"key": sk, "name": new_scheme["name"]})
+
+    updated = 0
+    not_matched = 0
+    errors = []
+
+    for i, row in enumerate(rows, start=2):
+        try:
+            name = _safe_str(row.get(col_map["name"], ""))
+            if not name:
+                continue
+            target = name_to_product.get(name.lower())
+            if not target:
+                not_matched += 1
+                continue
+
+            update = {}
+
+            # Scalar field merges — only when user mapped the column
+            if col_map.get("sku") and col_map["sku"] in row:
+                v = _safe_str(row.get(col_map["sku"], ""))
+                if v:
+                    update["sku"] = v
+            if col_map.get("unit") and col_map["unit"] in row:
+                v = _safe_str(row.get(col_map["unit"], ""))
+                if v:
+                    update["unit"] = v
+                    update["unit_of_measurement"] = v
+            if col_map.get("category") and col_map["category"] in row:
+                v = _safe_str(row.get(col_map["category"], ""))
+                if v:
+                    update["category"] = v
+            if col_map.get("description") and col_map["description"] in row:
+                update["description"] = _safe_str(row.get(col_map["description"], ""))
+            if col_map.get("cost_price") and col_map["cost_price"] in row:
+                v = _safe_float(row.get(col_map["cost_price"], 0))
+                if v > 0:
+                    update["cost_price"] = v
+            if col_map.get("reorder_point") and col_map["reorder_point"] in row:
+                update["reorder_point"] = _safe_float(row.get(col_map["reorder_point"], 0))
+            if col_map.get("product_type") and col_map["product_type"] in row:
+                raw_type = _safe_str(row.get(col_map["product_type"], "")).lower()
+                if "service" in raw_type:
+                    update["product_type"] = "service"
+                elif raw_type:
+                    update["product_type"] = "stockable"
+
+            # MERGE prices: start from existing, layer in any mapped scheme prices
+            new_prices = dict(target.get("prices") or {})
+            prices_changed = False
+
+            if col_map.get("retail_price") and col_map["retail_price"] in row:
+                v = _safe_float(row.get(col_map["retail_price"], 0))
+                if v > 0 and new_prices.get("retail") != v:
+                    new_prices["retail"] = v
+                    prices_changed = True
+
+            for scheme_key in scheme_keys:
+                col = col_map.get(f"{scheme_key}_price", "")
+                if col and col in row:
+                    v = _safe_float(row.get(col, 0))
+                    if v > 0 and new_prices.get(scheme_key) != v:
+                        new_prices[scheme_key] = v
+                        prices_changed = True
+
+            # Defensive: any other *_price column the user mapped
+            for map_key, col in col_map.items():
+                if not map_key.endswith("_price") or map_key in ("cost_price", "retail_price"):
+                    continue
+                if not col or col not in row:
+                    continue
+                key = map_key[: -len("_price")]
+                v = _safe_float(row.get(col, 0))
+                if v > 0 and new_prices.get(key) != v:
+                    new_prices[key] = v
+                    prices_changed = True
+
+            if prices_changed:
+                update["prices"] = new_prices
+
+            if not update:
+                continue
+            update["updated_at"] = now_iso()
+            await db.products.update_one({"id": target["id"]}, {"$set": update})
+            updated += 1
+
+        except Exception as e:
+            errors.append({"row": i, "name": _safe_str(row.get(col_map.get("name", ""), "")), "error": str(e)})
+
+    return {
+        "updated": updated,
+        "not_matched": not_matched,
+        "errors": errors,
+        "schemes_auto_created": schemes_auto_created,
+        "summary": f"Merged {updated} products from file. {not_matched} rows did not match any selected product. {len(errors)} errors.",
+    }
 
 
 @router.post("/inventory-seed")
