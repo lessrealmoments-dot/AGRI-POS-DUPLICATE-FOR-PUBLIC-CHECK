@@ -534,6 +534,9 @@ export default function ProductsPage() {
                 <TableHead className="text-xs uppercase tracking-wider text-slate-500 font-medium">Category</TableHead>
                 <TableHead className="text-xs uppercase tracking-wider text-slate-500 font-medium">Unit</TableHead>
                 {canViewCost && <TableHead className="text-xs uppercase tracking-wider text-slate-500 font-medium text-right">Cost</TableHead>}
+                {schemes.map(s => (
+                  <TableHead key={s.key} className="text-xs uppercase tracking-wider text-slate-500 font-medium text-right capitalize">{s.name}</TableHead>
+                ))}
                 <TableHead className="text-xs uppercase tracking-wider text-slate-500 font-medium">Barcode</TableHead>
                 <TableHead className="text-xs uppercase tracking-wider text-slate-500 font-medium">Type</TableHead>
                 <TableHead className="text-xs uppercase tracking-wider text-slate-500 font-medium w-32">Actions</TableHead>
@@ -553,6 +556,11 @@ export default function ProductsPage() {
                   <TableCell className="text-slate-500">{p.category}</TableCell>
                   <TableCell>{p.unit}</TableCell>
                   {canViewCost && <TableCell className="text-right font-mono">{formatPHP(p.cost_price)}</TableCell>}
+                  {schemes.map(s => (
+                    <TableCell key={s.key} className="text-right font-mono text-sm">
+                      {p.prices?.[s.key] > 0 ? formatPHP(p.prices[s.key]) : <span className="text-slate-300 text-xs">—</span>}
+                    </TableCell>
+                  ))}
                   <TableCell>
                     {p.barcode ? (
                       <code className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded font-mono text-slate-600">{p.barcode}</code>
@@ -593,7 +601,7 @@ export default function ProductsPage() {
                 </TableRow>
               ))}
               {!products.length && (
-                <TableRow><TableCell colSpan={9} className="text-center py-8 text-slate-400">No products found</TableCell></TableRow>
+                <TableRow><TableCell colSpan={9 + schemes.length} className="text-center py-8 text-slate-400">No products found</TableCell></TableRow>
               )}
             </TableBody>
           </Table>
