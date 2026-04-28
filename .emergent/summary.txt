@@ -1,71 +1,105 @@
 <analysis>**original_problem_statement**: 
-Build a robust multi-tenant POS (AgriBooks) handling native hardware seamlessly. 
+Build a robust multi-tenant POS (AgriBooks) handling native hardware seamlessly. Recent additions include an offline-capable Terminal Shell, SMS CRM, Crop Credit system, and Tamper-Evident Signatures.
 **PRODUCT REQUIREMENTS**:
-- Charged to Crops credit system: specialized credit term for farmers based on planting date + 120 days + 7 days grace.
-- Automated SMS notifications sent to the customer, owner, manager, and auditor based on specific events and timelines.
-- Prevent Interest (INT) invoice accumulation by computing and displaying interest inline within the UI.
-- Secure, audit-grade record-keeping with digital signature captures for credit authorizations and tamper-evident receipt printing.
+- Implement a Reset Company feature with triple confirmation and automatic R2 backup.
+- Restrict employee permissions properly (fix Crop Credits access, lock Import Center, add Branch Transfers permissions).
+- Build a Price Manager to batch update global selling prices, branch overrides, and missing product capitals.
+- Add a Signature Verification Toolbar to the Audit Center for managers to lookup printed receipt tokens.
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
 **what currently exists?** 
-A full-stack multi-tenant POS and SMS CRM. Features include an offline-capable Terminal Shell, App Download portal, Super Admin dashboard, and a Crop Credit system. The UI now features a fully interactive click-to-review architecture across all tables (invoices and customers open detailed modals). Outstanding balances are displayed as global, real-time color-coded badges next to customer names. A robust digital signature flow captures customer authorization (via QR on Web POS, or inline pad on Terminal POS), securely stores them in Cloudflare R2, and automatically embeds them onto thermal/full-page receipts alongside a tamper-evident cryptographic verification token.
+A full-stack multi-tenant POS and SMS CRM. Features include an offline Terminal Shell, Super Admin dashboard, automated SMS, and interactive review modals. Recently added: A 4-step Reset Company wizard, a unified  page for bulk capital/price updates, a Signature Verification Toolbar in the Audit Center, and proper offline-friendly Terminal signature modal flows.
 
 **Last working item**: 
-    - Last item agent was working: Implementing the Tamper-Evident Signature Stamp on printed receipts. The agent added a cryptographic token () and timestamp to  templates, and built the backend  endpoint to allow managers to look up the original digital signature if a physical receipt is disputed.
-    - Status: USER VERIFICATION PENDING
-    - Agent Testing Done: Y
-    - Which testing method agent to use? Python script / curl for backend logic verification.
+    - Last item agent was working: Helping the user debug their live VPS MongoDB connection via Current Mongosh Log ID:	69f08c49fe900738203d88b2
+Connecting to:		mongodb://127.0.0.1:27017/?directConnection=true&serverSelectionTimeoutMS=2000&appName=mongosh+2.8.2
+Using MongoDB:		7.0.31
+Using Mongosh:		2.8.2
+
+For mongosh info see: https://www.mongodb.com/docs/mongodb-shell/
+
+
+To help improve our products, anonymous usage data is collected and sent to MongoDB periodically (https://www.mongodb.com/legal/privacy-policy).
+You can opt-out by running the disableTelemetry() command.
+
+------
+   The server generated these startup warnings when booting
+   2026-04-28T10:30:31.065+00:00: Using the XFS filesystem is strongly recommended with the WiredTiger storage engine. See http://dochub.mongodb.org/core/prodnotes-filesystem
+   2026-04-28T10:30:32.376+00:00: Access control is not enabled for the database. Read and write access to data and configuration is unrestricted
+   2026-04-28T10:30:32.376+00:00: You are running this process as the root user, which is not recommended
+   2026-04-28T10:30:32.376+00:00: Soft rlimits for open file descriptors too low
+------
+
+test>  to verify why the  price scheme wasn't syncing to their terminal device. The agent also added dynamic price scheme columns to the  table based on user feedback.
+    - Status: IN PROGRESS
+    - Agent Testing Done: Y (for ProductsPage)
+    - Which testing method agent to use? Screenshot tool for Frontend changes.
     - User Testing Done: N
 
 **All Pending/In progress Issue list**: 
-  Issue 1: Thermal Printing Bleeding on 58mm receipts (P1)
-     - Attempted fixes: Deferred from earlier sessions.
-     - Next debug checklist: Apply to  thermalCSS and inline styles: 1) Reduce QR image size to 100–112px, 2) Set QR margin: 3 in PrintBridge, 3) Change Grand total border-top to 1px solid #000, 4) Remove background and use solid #000 text/border for partial release rows, 5) Reduce .biz-detail font to 10px.
-     - Why fix this issue and what will be achieved with the fix? Prevents thermal spread of dense black areas on physical receipts.
+  Issue 1: Price schemes not visible on Inventory Page (P0)
+     - Attempted fixes: The agent added price scheme columns to the  table, but missed adding them to the  table, which the user explicitly requested in the same message.
+     - Next debug checklist: Check . Fetch the  state and add corresponding columns to the table just like what was done in .
+     - Why fix this issue and what will be achieved with the fix? Fulfills user's explicit request to see prices directly on the inventory list.
      - Status: NOT STARTED
      - Is recurring issue? N
-     - Should Test frontend/backend/both after fix? Frontend (screenshot)
+     - Should Test frontend/backend/both after fix? Frontend (Screenshot tool)
      - Blocked on other issue: None
 
-  Issue 2: React-hooks/exhaustive-deps ESLint warnings (P2)
-     - Attempted fixes: Identified but deferred.
-     - Next debug checklist: Fix in , , .
-     - Why fix this issue and what will be achieved with the fix? Silences valid build warnings.
-     - Status: NOT STARTED
-     - Is recurring issue? Y
-     - Should Test frontend/backend/both after fix? Frontend
+  Issue 2: Terminal app not showing 'wholesale' price scheme for live user (P1)
+     - Attempted fixes: Agent provided MongoDB shell commands to check if the scheme actually exists in the  collection with the correct . 
+     - Next debug checklist: Await user's Current Mongosh Log ID:	69f08c4afdd3ee0c4e3d88b2
+Connecting to:		mongodb://127.0.0.1:27017/?directConnection=true&serverSelectionTimeoutMS=2000&appName=mongosh+2.8.2
+Using MongoDB:		7.0.31
+Using Mongosh:		2.8.2
+
+For mongosh info see: https://www.mongodb.com/docs/mongodb-shell/
+
+------
+   The server generated these startup warnings when booting
+   2026-04-28T10:30:31.065+00:00: Using the XFS filesystem is strongly recommended with the WiredTiger storage engine. See http://dochub.mongodb.org/core/prodnotes-filesystem
+   2026-04-28T10:30:32.376+00:00: Access control is not enabled for the database. Read and write access to data and configuration is unrestricted
+   2026-04-28T10:30:32.376+00:00: You are running this process as the root user, which is not recommended
+   2026-04-28T10:30:32.376+00:00: Soft rlimits for open file descriptors too low
+------
+
+test>  output. If the scheme is missing or has a mismatched org ID, instruct the user to recreate it via the web app (Management -> Price Schemes) and force-sync their terminal.
+     - Why fix this issue and what will be achieved with the fix? Unblocks user's live deployment terminal operations.
+     - Status: IN PROGRESS
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix? NA (User is testing on their live VPS)
      - Blocked on other issue: None
 
 **In progress Task List**: 
-  (None currently active)
+  (None)
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
-    - **P1 - Signature Verification Toolbar (Audit Center)**: Add a simple text input in the Audit Center toolbar where staff can paste a printed token () from a physical receipt and instantly pop open the original digital signature image side-by-side with the invoice.
-    - **P1 - Crop Credit Status Badge**: Add a Crop Credit Status badge/mini-card directly on the Customers page/list to show harvest status and days-to-harvest at a glance.
     - **P1 - Compliance Calendar Widget**: Build the dashboard widget showing upcoming business document deadlines (expired docs in red, expiring within 30d in amber).
     - **P1 - Finance Reports**: Add Discount cashier drill-down and AP payment history per supplier views.
     
     Future Tasks:
+    - **P2 - Signature Coverage Report**: Add a report inside the Audit Center showing what percentage of credit sales in the period had a captured signature vs. manager PIN bypass.
     - **P2 - Codebase Refactoring**: Refactor  (currently 1600+ lines).
     - **P2 - Global Modal Context**: Add a global modal registry/context.
-    - **P2 - CORS Hardening**: Change  to explicit origins before production go-live.
-    - **P3 - Code Cleanup**: Clean up 6 orphaned users without .
+    - **P2 - CORS Hardening**: Change  before production go-live.
 
 **Completed work in this session**
--  UI Redesign: Compact header, inline interest computation, and QuickBooks-style interactive Statement popup. (DONE)
-- Global Interactive Click-to-Review: Wrapped invoice numbers and customer names across 7+ pages (Sales, Audit Center, Daily Log, Close Wizard, Reports, Dashboard, Accounting) to trigger  and . (DONE)
-- Terminal Modal Migration: Rewrote legacy  and  to use modern Shadcn  components. (DONE)
-- Global Inline Open-Balance Badges: Deployed  next to customer names across the app, highlighting overdue age (color-coded) and amounts, backed by a real-time  hook. (DONE)
-- Fix: By Term credit button is now properly blocked in  if an active Charged to Crop credit exists. (DONE)
-- Digital Signature Capture Flow: Deployed QR-based signature gathering () for Web POS, and an inline  flow for Terminal POS. (DONE)
-- Signature Rendering Fixes: Resolved  mismatch in backend, updated 's  mode to properly render signature images, and added Signed ✓ chips to UI tables. (DONE)
-- Cloudflare R2 Presigned URL Fix: Updated  to correctly use virtual-host-style URLs to prevent 403 Forbidden errors. (DONE)
-- Tamper-Evident Receipts: Auto-embeds captured signatures onto printed receipts (via ) along with a cryptographic verification token and timestamp. (DONE)
+- Reset Company Feature: Built 4-step confirmation wizard, generates R2 backup, wipes tenant DB. (DONE)
+- Granular Permissions Fixes: Fixed  bug, locked Import Center to admins, added  module. (DONE)
+- Price Manager Page (): Built batch update UI for global prices, branch overrides, and missing capitals. Fixed capital overwrite bug. (DONE)
+- Signature Verification Toolbar: Added to Audit Center to check  printed tokens. (DONE)
+- Terminal Signature Fixes: Passed Terminal's  to signature modals to fix 401 errors. Moved Charged to Crop selection inline. (DONE)
+- Products Table Update: Added dynamic columns to display all active price schemes. (DONE)
+- Kotlin SMS Gateway crash fix: Provided Android Studio code fixes ( and lifecycle hooks) to the user. (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-None
+   Issue 1: React-hooks/exhaustive-deps ESLint warnings
+   - Debug checklist: Fix missing dependency arrays in , , .
+   - Why to solve this issue and what will be achieved with this? Cleans up build logs and prevents potential state bugs.
+   - Should Test frontend/backend/both after fix: Frontend
+   - Is recurring issue? Y
 
 **Known issue recurrence from previous fork**
   - Issue recurrence in previous fork: ESLint warnings for .
@@ -76,42 +110,44 @@ None
 
 
 **Key Technical Concepts**
-- **Polymorphic Drill-Down Modals**:  and  are the gold standard for reviewing records. They are triggered globally from any invoice number or customer name string.
-- **Real-Time Badge Cache**:  leverages a 30s cached  call. Mutating actions (payments/sales) trigger  to update customer badges app-wide instantly.
-- **Signature Capture**: For Web POS, the cashier requests a signature -> backend generates a session token -> frontend shows a QR code -> customer signs on their mobile device via  -> Cloudflare R2 stores the PNG. For Terminal POS, the signature pad renders inline.
+- **Terminal Offline Cache**: The Terminal POS relies heavily on IndexedDB. Price schemes must exist in the  DB collection AND be synced down to the device to appear in the UI. Simply having  on a product document is not enough.
+- **TenantDB Proxy**: Backend database calls are automatically scoped to the current user's  via ContextVars, unless explicitly bypassed by a Super Admin.
 
 **key DB schema**
-  - : Stores temporary auth tokens,  ('sale'/'invoice'), , , , , .
-  - : Read endpoints now evaluate  dynamically based on session existence.
+  - : 
+  - : 
+  - : 
 
 **changes in tech stack**
-  - Added  and  usage. 
-  - Cloudflare R2 bucket URLs updated to virtual-host style syntax.
+  - Added  as an explicit dependency in frontend .
 
 **All files of reference** 
-  -  (NEW - Global balance pill)
-  -  (NEW - Captures signatures)
-  -  (Updated - Customer-facing public signing page)
-  -  (Updated - Added signature rendering in compact mode)
-  -  (Updated - Embeds signatures & tokens on print)
-  -  (Updated - R2 integration and verify tokens)
-  -  (Updated - virtual-host presigned URL fix)
+  -  (NEW)
+  -  (NEW)
+  -  (NEW)
+  -  (Updated)
+  -  (Updated)
+  -  (Updated)
+  -  (Updated)
+  -  (Updated)
+  -  (Updated)
 
 **Areas that need refactoring**: 
-  -  is massive (1600+ lines) and needs splitting.
+  -  (1600+ lines).
 
 **key api endpoints**
-  -  (powers open-balance badges app-wide)
-  -  (creates a signing session)
-  -  (public endpoint for customer to upload signature)
-  -  (validates the 8-char printed token)
+  - 
+  - 
+  - 
+  - 
 
 **Critical Info for New Agent** 
-- **Cloudflare R2 URLs**: Cloudflare R2 requires **virtual-host-style** presigned URLs (e.g., ). Do not revert to Boto3's default path-style (), as it will trigger a 403 Forbidden error. This is handled in .
-- ****: When querying signatures for an invoice/sale, the backend handles both  and  interchangeably to preserve backward compatibility with older generated sessions.
-- **InvoiceDetailModal  mode**: The modal has two layouts (Full and Compact). If you add a new section to the modal (like the signature section), ensure you inject it into BOTH the standard  and the  block, otherwise it will be invisible in areas like  or the Audit Center.
+- **Terminal API Instance**: Web app components use  from  (JWT). Terminal uses its own  instance with a separate device token. If you mount a global modal (like Signature capture) inside the Terminal, you MUST pass the terminal's  as a prop, otherwise it will fail with 401 Unauthorized.
+- **Capital Auto-Switch Logic**: The system automatically switches capital calculation methods ( ->  or ) when a new Purchase Order is received. This logic resides in  in .
+- **Do not share credentials**: User posted their live environment credentials in the chat. Remind the user to change their password if it comes up, but do not leak them in your responses.
 
 **documents and test reports created in this job** 
+  -  (Updated)
   -  (Updated)
   - 
   - 
@@ -119,43 +155,64 @@ None
   - 
 
 **Last 10 User Messages and any pending HUMAN messages** 
- -  Agent: Implemented QR/inline signatures, found payload bug, fixed it. Suggested auto-embedding signatures on printed receipts.
- -  User: I like that improvement
- -  Agent: Implemented auto-embed on print. Suggested a tamper-evident stamp (token/timestamp) for audit purposes.
- -  User: I like that improvement
- -  Agent: Implemented the tamper-evident stamp, verification endpoints, and updated . Self-tested. Suggested building a verification toolbar in the Audit Center as the next step. 
- - *Pending Action*: None. Await user confirmation, or proceed to P1 tasks (Signature Verification Toolbar in Audit Center).
+ - User: Terminal still isn't showing the wholesale price scheme. Products and Inventory pages also lack price scheme columns.
+ - Agent: Adds price columns to . Provides a Current Mongosh Log ID:	69f08c4b0286f809b93d88b2
+Connecting to:		mongodb://127.0.0.1:27017/?directConnection=true&serverSelectionTimeoutMS=2000&appName=mongosh+2.8.2
+Using MongoDB:		7.0.31
+Using Mongosh:		2.8.2
+
+For mongosh info see: https://www.mongodb.com/docs/mongodb-shell/
+
+------
+   The server generated these startup warnings when booting
+   2026-04-28T10:30:31.065+00:00: Using the XFS filesystem is strongly recommended with the WiredTiger storage engine. See http://dochub.mongodb.org/core/prodnotes-filesystem
+   2026-04-28T10:30:32.376+00:00: Access control is not enabled for the database. Read and write access to data and configuration is unrestricted
+   2026-04-28T10:30:32.376+00:00: You are running this process as the root user, which is not recommended
+   2026-04-28T10:30:32.376+00:00: Soft rlimits for open file descriptors too low
+------
+
+test>  script for the user to check their live MongoDB for the  scheme.
+ - User: Runs the script on VPS, gets .
+ - Agent: Provides updated script with auth credentials.
+ - User: Runs script, gets  and .
+ - Agent: Provides the final corrected Current Mongosh Log ID:	69f08c4bbeafa8f5173d88b2
+Connecting to:		mongodb://127.0.0.1:27017/?directConnection=true&serverSelectionTimeoutMS=2000&appName=mongosh+2.8.2
+Using MongoDB:		7.0.31
+Using Mongosh:		2.8.2
+
+For mongosh info see: https://www.mongodb.com/docs/mongodb-shell/
+
+------
+   The server generated these startup warnings when booting
+   2026-04-28T10:30:31.065+00:00: Using the XFS filesystem is strongly recommended with the WiredTiger storage engine. See http://dochub.mongodb.org/core/prodnotes-filesystem
+   2026-04-28T10:30:32.376+00:00: Access control is not enabled for the database. Read and write access to data and configuration is unrestricted
+   2026-04-28T10:30:32.376+00:00: You are running this process as the root user, which is not recommended
+   2026-04-28T10:30:32.376+00:00: Soft rlimits for open file descriptors too low
+------
+
+test>  script escaping the  in the password. (Pending user confirmation of output, and pending InventoryPage fix).
 
 **Project Health Check:**
-  - Broken: None
-  - Mocked: Thermal printing (simulated via HTML to WebView bitmap)
+  - Broken: None in codebase. User's live environment has minor config/sync mismatches.
+  - Mocked: Thermal printing.
 
 **3rd Party Integrations** 
   - Cloudflare R2 / Boto3 (Backups and File Storage) — requires User API Key
   - Resend (Emails) — requires User API Key
-  - APScheduler (Backend background jobs)
 
 **Testing status**
-  - Testing agent used after significant changes: YES
+  - Testing agent used after significant changes: YES (iterations 166-169)
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: None
+  - Test files created: 
   - Known regressions: None
 
 **Credentials to test flow:**
-  - Super Admin: See 
-  - Company Admin:  / 
-  - Manager PIN:  or 
-  - Staff PIN: 
+  - Check . Super admin: 
 
 **What agent forgot to execute**
-  - Nothing. 
+  - The user explicitly requested to see retail and other price schemes on the **Inventory page** (along with the Products page). The agent added the columns to  but completely missed updating .
 
 **Debugging checklist for current issue**
-    Issue: No active bug. Next suggested task is building the Signature Verification Toolbar in the Audit Center. 
-
-    Frontend files to check: 
-    -  (Target for the new toolbar input)
-    -  (To pop open the signature view when verified)
-  
-    Backend files to check:
-    -  (Ensure  returns enough data to trigger the modal).</analysis>
+    Issue: Price schemes not visible on Inventory Page
+    Frontend files to check: (with line number)
+    -  (Check table headers and rows. Add  state fetching if not present, and map over  to render price columns dynamically just like in ).</analysis>

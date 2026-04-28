@@ -8,7 +8,7 @@ import re
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://farmer-ledger-system.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://agribooks-pos.preview.emergentagent.com").rstrip("/")
 ADMIN_EMAIL = "janmarkeahig@gmail.com"
 ADMIN_PASS = "Aa@58798546521325"
 ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
