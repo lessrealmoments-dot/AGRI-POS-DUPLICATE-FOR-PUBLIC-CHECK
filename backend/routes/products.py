@@ -619,6 +619,89 @@ async def pricing_scan(
     }
 
 
+@router.get("/price-audit-summary")
+async def price_audit_summary(user=Depends(get_current_user)):
+    """
+    Returns counts (and first 100 IDs) for:
+    - Products with no capital (cost_price == 0 or null)
+    - Products with low margin across any price scheme (< ₱20 AND < 5%)
+    Used by the Price Manager page smart prompts.
+    """
+    schemes = await db.price_schemes.find({"active": True}, {"_id": 0, "key": 1}).to_list(50)
+    scheme_keys = [s["key"] for s in schemes]
+
+    all_products = await db.products.find(
+        {"active": True, "is_repack": {"$ne": True}},
+        {"_id": 0, "id": 1, "name": 1, "sku": 1, "category": 1, "cost_price": 1, "prices": 1}
+    ).to_list(5000)
+
+    missing_capital = []
+    low_margin = []
+
+    for p in all_products:
+        capital = float(p.get("cost_price") or 0)
+        prices = p.get("prices") or {}
+
+        if capital <= 0:
+            missing_capital.append({"id": p["id"], "name": p["name"], "sku": p.get("sku", ""), "category": p.get("category", "")})
+            continue
+
+        # Check any scheme price for low margin
+        flagged = False
+        for key in scheme_keys:
+            price = float(prices.get(key) or 0)
+            if price <= 0:
+                continue
+            markup = price - capital
+            pct = markup / capital if capital > 0 else 0
+            if markup < 20 and pct < 0.05:
+                flagged = True
+                break
+        if flagged:
+            low_margin.append({"id": p["id"], "name": p["name"], "sku": p.get("sku", ""), "category": p.get("category", "")})
+
+    return {
+        "missing_capital": {"count": len(missing_capital), "products": missing_capital[:100]},
+        "low_margin": {"count": len(low_margin), "products": low_margin[:100]},
+    }
+
+
+@router.post("/bulk-price-update")
+async def bulk_price_update(data: dict, user=Depends(get_current_user)):
+    """
+    Batch update global product prices (products.prices).
+    Body: { items: [{product_id, prices: {scheme_key: price}}] }
+    Does NOT touch cost_price — selling prices only.
+    """
+    check_perm(user, "products", "edit")
+    items = data.get("items", [])
+    if not items:
+        raise HTTPException(status_code=400, detail="No items provided")
+
+    updated = 0
+    errors = []
+    for item in items:
+        pid = item.get("product_id")
+        new_prices = item.get("prices", {})
+        if not pid or not new_prices:
+            continue
+        try:
+            product = await db.products.find_one({"id": pid, "active": True}, {"_id": 0, "prices": 1})
+            if not product:
+                errors.append(f"{pid}: not found")
+                continue
+            merged = {**(product.get("prices") or {}), **{k: float(v) for k, v in new_prices.items() if v is not None}}
+            await db.products.update_one(
+                {"id": pid},
+                {"$set": {"prices": merged, "updated_at": now_iso()}}
+            )
+            updated += 1
+        except Exception as e:
+            errors.append(f"{pid}: {e}")
+
+    return {"updated": updated, "errors": errors}
+
+
 @router.get("/{product_id}")
 async def get_product(product_id: str, user=Depends(get_current_user)):
     """Get a single product by ID."""

@@ -121,7 +121,71 @@ async def delete_branch_price(
 
 
 
-@router.get("/capital-summary")
+@router.post("/bulk-update")
+async def bulk_update_branch_prices(data: dict, user=Depends(get_current_user)):
+    """
+    Batch upsert branch price overrides for multiple products.
+    Body: { items: [{product_id, branch_id, prices: {scheme_key: price}, cost_price?, set_manual?}] }
+    - If set_manual=True: sets capital_method="manual" on the global product doc
+    - prices and cost_price are each optional — only provided keys are written
+    """
+    check_perm(user, "products", "edit")
+    items = data.get("items", [])
+    if not items:
+        raise HTTPException(status_code=400, detail="No items provided")
+
+    updated = 0
+    errors = []
+
+    for item in items:
+        pid = item.get("product_id")
+        bid = item.get("branch_id")
+        new_prices = item.get("prices") or {}
+        new_capital = item.get("cost_price")
+        set_manual = item.get("set_manual", False)
+
+        if not pid or not bid:
+            continue
+
+        try:
+            existing = await db.branch_prices.find_one(
+                {"product_id": pid, "branch_id": bid}, {"_id": 0}
+            )
+            set_doc = {"updated_at": now_iso(),
+                       "updated_by_id": user["id"],
+                       "updated_by_name": user.get("full_name", user["username"])}
+
+            if new_prices:
+                base = (existing.get("prices") or {}) if existing else {}
+                merged = {**base, **{k: float(v) for k, v in new_prices.items() if v is not None}}
+                set_doc["prices"] = merged
+            if new_capital is not None:
+                set_doc["cost_price"] = float(new_capital)
+                set_doc["source"] = "manual_override"
+
+            if existing:
+                await db.branch_prices.update_one(
+                    {"product_id": pid, "branch_id": bid}, {"$set": set_doc}
+                )
+            else:
+                set_doc.update({"id": new_id(), "product_id": pid, "branch_id": bid,
+                                "created_at": now_iso(),
+                                "prices": set_doc.get("prices", {})})
+                await db.branch_prices.insert_one(set_doc)
+
+            # If set_manual: flag global product as manually managed capital
+            if set_manual:
+                await db.products.update_one(
+                    {"id": pid},
+                    {"$set": {"capital_method": "manual", "updated_at": now_iso()}}
+                )
+            updated += 1
+        except Exception as e:
+            errors.append(f"{pid}/{bid}: {e}")
+
+    return {"updated": updated, "errors": errors}
+
+
 async def get_capital_summary(source_branch_id: str, user=Depends(get_current_user)):
     """
     Return per-category capital stats from the source branch (for reference display only).

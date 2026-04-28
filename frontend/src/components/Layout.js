@@ -10,7 +10,7 @@ import { Separator } from './ui/separator';
 import {
   LayoutDashboard, Building2, Package, Warehouse, ShoppingCart,
   Users, Tags, Receipt, Calculator, Settings, Menu, X,
-  ChevronDown, LogOut, User, Store, Truck, Shield, ClipboardList, UserCog, Briefcase, Upload, Lock, ArrowRight, BarChart3, RotateCcw, ShieldCheck, WifiOff, FileText, AlertTriangle, HardDrive, ScanBarcode, Search, BookOpen, FolderOpen, MessageSquare, Smartphone, Sprout
+  ChevronDown, LogOut, User, Store, Truck, Shield, ClipboardList, UserCog, Briefcase, Upload, Lock, ArrowRight, BarChart3, RotateCcw, ShieldCheck, WifiOff, FileText, AlertTriangle, HardDrive, ScanBarcode, Search, BookOpen, FolderOpen, MessageSquare, Smartphone, Sprout, TrendingUp
 } from 'lucide-react';
 import OfflineIndicator from './OfflineIndicator';
 import NotificationBell from './NotificationBell';
@@ -87,6 +87,7 @@ const NAV_SECTIONS = [
       { path: '/documents',      label: 'Documents',    icon: FolderOpen, perm: null },
       { path: '/employees',       label: 'Employees',    icon: Briefcase, perm: 'settings.manage_users',       featureFlag: 'employee_management' },
       { path: '/price-schemes',   label: 'Price Schemes', icon: Tags,     perm: 'price_schemes.view' },
+      { path: '/price-manager',   label: 'Price Manager', icon: TrendingUp, perm: 'products.edit' },
       { path: '/team',            label: 'Team',         icon: UserCog,   perm: 'settings.manage_users' },
       { path: '/import',          label: 'Import Center', icon: Upload,   perm: 'products.create', adminOnly: true },
       { path: '/downloads',       label: 'App Downloads', icon: Smartphone, perm: null, adminOnly: true },
