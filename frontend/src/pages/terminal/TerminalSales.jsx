@@ -55,6 +55,7 @@ function SchemeSwitcher({ schemes, activeScheme, onSwitch }) {
 }
 
 
+export default function TerminalSales({ api, session, isOnline, pendingCount, setPendingCount, syncVersion }) {
   const [products, setProducts] = useState([]);
   const [search, setSearch] = useState('');
   const [results, setResults] = useState([]);
