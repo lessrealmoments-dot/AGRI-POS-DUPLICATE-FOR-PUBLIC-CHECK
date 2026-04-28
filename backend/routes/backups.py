@@ -342,6 +342,34 @@ async def reset_org_data(org_id: str, data: dict, user=Depends(get_current_user)
         import logging
         logging.getLogger("reset").error(f"sms_templates re-seed failed: {tpl_err}")
 
+    # Step 2e: Re-seed a default Main Branch + 4-wallet system.
+    # Reset wipes `branches` and `fund_wallets`, leaving the org unable to make
+    # sales or track money. Recreate ONE default branch matching the fresh-org
+    # registration flow so the owner can immediately start using the system.
+    try:
+        from utils import provision_branch_wallets
+        from config import set_org_context
+        new_branch_id = new_id()
+        new_branch_name = f"{org_name} - Main Branch"
+        await raw_db.branches.insert_one({
+            "id": new_branch_id,
+            "name": new_branch_name,
+            "address": org_full.get("address", ""),
+            "phone": org_full.get("phone", ""),
+            "active": True,
+            "organization_id": org_id,
+            "created_at": now_seed,
+        })
+        # provision_branch_wallets needs org context to inject organization_id
+        set_org_context(org_id)
+        try:
+            await provision_branch_wallets(new_branch_id, new_branch_name)
+        finally:
+            set_org_context(None)
+    except Exception as br_err:
+        import logging
+        logging.getLogger("reset").error(f"default branch re-seed failed: {br_err}")
+
     # Step 3: Log the reset event
     await raw_db.audit_log.insert_one({
         "organization_id": org_id,

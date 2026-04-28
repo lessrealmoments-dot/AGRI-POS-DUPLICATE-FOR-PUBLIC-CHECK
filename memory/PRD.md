@@ -22,6 +22,27 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### Reset Company Re-Seed Audit (2026-04-28) — Complete
+- **RCA**: After Reset Company, additional gaps beyond the SMS bleed: the org had **no branches**, **no fund_wallets**, and various missing settings — making the system effectively unusable until manual recreation. Reset wiped `branches` (in `ORG_COLLECTIONS`) but only re-seeded `price_schemes`.
+- **Side-by-side audit (preview vs fresh-org expectations):**
+
+| Collection | Fresh org seeds | Reset wiped | Reset re-seeds (after fix) |
+|---|---|---|---|
+| `branches` (1 default) | ✓ | ✓ | ✓ NEW |
+| `fund_wallets` (4 per branch) | ✓ | ✓ | ✓ NEW |
+| `price_schemes` (Retail/Wholesale/Special) | ✓ | ✓ | ✓ |
+| `settings.company_info` | ✓ | ✓ | ✓ |
+| `sms_templates` (DEFAULT_TEMPLATES) | ✓ via `_ensure_templates` | ✓ | ✓ |
+| `sms_settings` | empty (lazy upsert) | ✓ | not needed |
+| `invoice_prefixes` / `business_print_info` | empty (defaults in code) | ✓ | not needed |
+| Admin user | ✓ (1) | preserved | preserved |
+| Customers / products / invoices / sales / inventory | empty | ✓ | not needed |
+
+- **Backend fix** (`routes/backups.py:reset_org_data`): after wiping, re-seeds:
+  - Default "Main Branch" using `org.name + ' - Main Branch'` and the org's address/phone.
+  - 4-wallet system on the new branch (cashier, safe, digital, bank) via `provision_branch_wallets`.
+- **Verified**: `pytest tests/test_reset_reseed_176.py` — 7 assertions covering branch, wallets, price schemes, company_info, SMS templates, admin preservation, and full data wipe. Combined regression run with iter 174 + 175 = **9/9 pass**.
+
 ### Multi-Tenant Data Integrity — Cross-Org Bleed Fix (2026-04-28) — Complete
 - **RCA (live)**: After Sibugay Agricultural Supply ran Reset Company, customer SMS started signing as "JND store" (another tenant). DB scan revealed 13 orphan `company_info` settings docs whose `organization_id` pointed to deleted orgs.
   - Bug A: `routes/sms_hooks.py:get_company_name` fell back to ANY tenant's company_info if the org-scoped lookup failed → cross-tenant signature bleed.
