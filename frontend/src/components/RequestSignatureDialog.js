@@ -147,12 +147,18 @@ export default function RequestSignatureDialog({
   // ── Inline signature pad (terminal mode) ──
   useEffect(() => {
     if (mode !== 'inline' || status !== 'pending' || !canvasRef.current) return;
-    // Resize canvas to its rendered size
     const canvas = canvasRef.current;
-    const ratio = Math.max(window.devicePixelRatio || 1, 1);
-    canvas.width = canvas.offsetWidth * ratio;
-    canvas.height = canvas.offsetHeight * ratio;
-    canvas.getContext('2d').scale(ratio, ratio);
+    // Guard: canvas must have rendered dimensions (Android WebView can report 0 briefly)
+    const w = canvas.offsetWidth;
+    const h = canvas.offsetHeight;
+    if (!w || !h) return;
+    // Cap devicePixelRatio to 2 — higher values cause OOM on low-memory Android devices
+    const ratio = Math.min(Math.max(window.devicePixelRatio || 1, 1), 2);
+    canvas.width = w * ratio;
+    canvas.height = h * ratio;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return; // Safety: getContext can return null on some Android WebViews
+    ctx.scale(ratio, ratio);
     padRef.current = new SignaturePad(canvas, {
       backgroundColor: 'rgb(255, 255, 255)',
       penColor: 'rgb(0, 0, 0)',

@@ -792,7 +792,7 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
       <div className="fixed bottom-4 left-4 z-50 safe-area-bottom" data-testid="mode-selector">
         {/* Mode menu popup */}
         {modeMenuOpen && (
-          <div className="absolute bottom-14 left-0 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden w-52 animate-in slide-in-from-bottom-2">
+          <div className="absolute bottom-14 left-0 bg-white rounded-2xl border border-slate-200 overflow-hidden w-52" style={{boxShadow:'0 4px 16px rgba(0,0,0,0.12)'}}>
             {TABS.map(tab => {
               const Icon = tab.icon;
               const active = activeTab === tab.key;
@@ -970,7 +970,7 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
           {/* Backdrop */}
           <div className="absolute inset-0 bg-black/40" onClick={() => setQuickScanDoc(null)} />
           {/* Sheet */}
-          <div className="relative bg-white rounded-t-3xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-4 duration-200">
+          <div className="relative bg-white rounded-t-3xl overflow-hidden" style={{boxShadow:'0 -4px 24px rgba(0,0,0,0.13)'}}>
             {/* Handle bar */}
             <div className="flex justify-center pt-3 pb-1">
               <div className="w-10 h-1 rounded-full bg-slate-300" />

@@ -17,7 +17,44 @@ import CropCreditTypeDialog from '../../components/CropCreditTypeDialog';
 import { invalidateBalanceCache } from '../../components/CustomerBalanceBadge';
 import RequestSignatureDialog from '../../components/RequestSignatureDialog';
 
-export default function TerminalSales({ api, session, isOnline, pendingCount, setPendingCount, syncVersion }) {
+const COLLAPSE_THRESHOLD = 4; // show all if ≤ 4, add "More" toggle if > 4
+
+function SchemeSwitcher({ schemes, activeScheme, onSwitch }) {
+  const [expanded, setExpanded] = useState(false);
+  const list = schemes.length > 0 ? schemes : [{ key: 'retail', name: 'Retail' }];
+  const needsCollapse = list.length > COLLAPSE_THRESHOLD;
+  const visible = needsCollapse && !expanded ? list.slice(0, COLLAPSE_THRESHOLD) : list;
+
+  return (
+    <div className="mb-2" data-testid="scheme-switcher">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {visible.map(s => (
+          <button key={s.key || s.id} onClick={() => onSwitch(s.key || s.id)}
+            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+              activeScheme === (s.key || s.id)
+                ? 'bg-[#1A4D2E] text-white'
+                : 'bg-slate-100 text-slate-600 active:bg-slate-200'
+            }`}
+            data-testid={`scheme-${s.key || s.id}`}
+          >
+            <Tag size={10} className="inline mr-1" />{s.name}
+          </button>
+        ))}
+        {needsCollapse && (
+          <button
+            onClick={() => setExpanded(v => !v)}
+            className="px-3 py-1 rounded-full text-xs font-medium bg-slate-50 border border-slate-200 text-slate-500"
+            data-testid="scheme-expand-btn"
+          >
+            {expanded ? '− Less' : `+${list.length - COLLAPSE_THRESHOLD} more`}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
   const [products, setProducts] = useState([]);
   const [search, setSearch] = useState('');
   const [results, setResults] = useState([]);
@@ -818,21 +855,8 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
       {/* Bottom: Scheme Switcher + Total + Checkout */}
       {cart.length > 0 && (
         <div className="bg-white border-t border-slate-200 p-3 safe-area-bottom">
-          {/* Price scheme switcher */}
-          <div className="flex items-center gap-1.5 mb-2" data-testid="scheme-switcher">
-            {(schemes.length > 0 ? schemes : [{ key: 'retail', name: 'Retail' }]).slice(0, 4).map(s => (
-              <button key={s.key || s.id} onClick={() => switchScheme(s.key || s.id)}
-                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                  activeScheme === (s.key || s.id)
-                    ? 'bg-[#1A4D2E] text-white'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-                data-testid={`scheme-${s.key || s.id}`}
-              >
-                <Tag size={10} className="inline mr-1" />{s.name}
-              </button>
-            ))}
-          </div>
+          {/* Price scheme switcher — show all schemes, collapse if > 4 */}
+          <SchemeSwitcher schemes={schemes} activeScheme={activeScheme} onSwitch={switchScheme} />
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs text-slate-500">{cart.length} item(s){discountAmount > 0 ? ` · ${formatPHP(discountAmount)} off` : ''}</p>
