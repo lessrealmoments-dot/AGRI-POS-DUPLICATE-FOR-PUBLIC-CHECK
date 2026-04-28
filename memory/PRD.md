@@ -22,6 +22,17 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### SMS Signature Company-Name Resolver Fallback (2026-04-28) — Complete
+- **RCA from live VPS**: User received messages signed `"- MAIN BRANCH"` only — company name missing. Cause: their `settings.company_info` doc was gone (post-Reset, before any Settings page save). All four send paths in `routes/sms.py` read the settings doc directly and silently degraded to empty when missing. The auto-trigger path was already fixed (iter 175); this completes the matrix.
+- **Backend fix** (`routes/sms.py`):
+  - New `_resolve_company_name()` helper: reads `settings.company_info.value.name` first; falls back to the immutable `organizations.name` (looked up by **explicit `id` from org context** — `organizations` is NOT in `TENANT_COLLECTIONS` so we MUST pass the id, otherwise we'd return the first-inserted org globally).
+  - `/sms/send` (manual) → uses helper.
+  - `/sms/blast` (promo blast) → uses helper.
+  - `/sms/credit-blast` (credit reminders) → uses helper.
+  - `/sms/admin-direct-send` (raw_db path) → adds the same own-tenant fallback inline.
+  - All four paths are now consistent with `sms_hooks.get_company_name` (auto-triggers).
+- **Verified**: `pytest tests/test_sms_signature_fallback_178.py` — 1 HTTP smoke. Full regression chain across 174+175+176+177+178 = **15/15 pass**. Lint clean.
+
 ### SMS Gateway Retry-Spiral Fix (2026-04-28) — Complete
 - **RCA from live VPS** (`agri-books.com/messages` gateway log inspection):
   - Stuck SMS with `retry_count = 393` (a 3-char "Sup" message), `121`, `120`, `45`...

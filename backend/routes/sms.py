@@ -6,10 +6,31 @@ GET /pending and marks sent via PATCH /{id}/mark-sent.
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 from datetime import datetime, timezone, timedelta, date
-from config import db, _raw_db, logger as _config_logger
+from config import db, _raw_db, logger as _config_logger, get_org_context
 from utils import get_current_user, check_perm, now_iso, new_id
 
 router = APIRouter(prefix="/sms", tags=["SMS"])
+
+
+# ── Org-scoped company-name resolver (no cross-tenant bleed) ──────────────
+# Falls back to the immutable organizations.name when the settings doc is
+# missing (e.g. after Reset Company before the user re-saves Settings).
+# Mirrors the contract used in sms_hooks.get_company_name — never reads
+# another tenant's company_info.
+async def _resolve_company_name() -> str:
+    biz = await db.settings.find_one({"key": "company_info"}, {"_id": 0})
+    name = (biz or {}).get("value", {}).get("name", "")
+    if name:
+        return name
+    # Settings doc missing → look up org by its known id (organizations is not
+    # auto-scoped, so we MUST use the explicit id from context to avoid
+    # returning some other tenant's first-inserted org row).
+    org_id = get_org_context()
+    if not org_id:
+        return ""
+    org = await _raw_db.organizations.find_one({"id": org_id}, {"_id": 0, "name": 1})
+    return (org or {}).get("name", "") if org else ""
+
 
 # ── Default Templates (seeded on first access) ─────────────────────────────
 
@@ -618,8 +639,7 @@ async def send_manual_sms(data: dict, user=Depends(get_current_user)):
         branch_name = (br or {}).get("name", "")
 
     # Auto-append signature server-side — cannot be removed or edited by the sender
-    biz = await db.settings.find_one({"key": "company_info"}, {"_id": 0})
-    company_name = (biz or {}).get("value", {}).get("name", "")
+    company_name = await _resolve_company_name()
     sig_parts = [p for p in [company_name, branch_name] if p]
     message_with_sig = message + ("\n\n- " + " | ".join(sig_parts) if sig_parts else "")
 
@@ -683,9 +703,8 @@ async def send_promo_blast(data: dict, user=Depends(get_current_user)):
 
     customers = await db.customers.find(query, {"_id": 0, "id": 1, "name": 1, "phone": 1}).to_list(5000)
 
-    # Get company name from settings
-    biz = await db.settings.find_one({"key": "company_info"}, {"_id": 0})
-    company_name = (biz or {}).get("value", {}).get("name", "")
+    # Get company name (settings → organizations.name fallback, no cross-org bleed)
+    company_name = await _resolve_company_name()
 
     queued = 0
     for c in customers:
@@ -771,9 +790,8 @@ async def credit_reminder_blast(data: dict, user=Depends(get_current_user)):
     ).to_list(100)
     branch_map = {b["id"]: b["name"] for b in branch_docs}
 
-    # 4. Company name
-    biz          = await db.settings.find_one({"key": "company_info"}, {"_id": 0})
-    company_name = (biz or {}).get("value", {}).get("name", "")
+    # 4. Company name (settings → organizations.name fallback, no cross-org bleed)
+    company_name = await _resolve_company_name()
 
     sent_by_name    = user.get("full_name") or user.get("email", "")
     organization_id = user.get("organization_id", "")
@@ -1011,12 +1029,12 @@ async def sent_from_device(data: dict, user=Depends(get_current_user)):
     # Build signature: full company name + "| Admin"
     # e.g. "Sibugay Agricultural Supply | Admin"
     biz = await _raw_db.settings.find_one({"key": "company_info", "organization_id": org_id}, {"_id": 0})
-    if not biz and org_id:
-        biz = await _raw_db.settings.find_one({"key": "company_info", "organization_id": {"$exists": False}}, {"_id": 0})
-    # Only fall back to any company if org_id is genuinely unknown (avoid wrong-org bleed)
-    if not biz and not org_id:
-        biz = await _raw_db.settings.find_one({"key": "company_info"}, {"_id": 0})
     company_name = (biz or {}).get("value", {}).get("name", "")
+    if not company_name and org_id:
+        # Settings doc missing for this org — fall back to the immutable
+        # organizations.name (own tenant only, no bleed). Mirrors helper logic.
+        org_doc = await _raw_db.organizations.find_one({"id": org_id}, {"_id": 0, "name": 1})
+        company_name = (org_doc or {}).get("name", "")
     device_sig = f"\n\n- {company_name} | Admin" if company_name else "\n\n- Admin"
 
     # Don't double-sign: skip if message already contains our signature marker
