@@ -1,0 +1,52 @@
+{
+  "summary": "Iteration 169: Tested Terminal Signature Dialog fix (apiInstance prop) + Inline Credit Type Selection (4-button grid). All 7 backend tests pass (100%). All frontend UI tests pass. Both bug fixes verified end-to-end.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "CropCreditTypeDialog internal crop credit check",
+        "issue": "CropCreditTypeDialog uses AuthContext api (import { api } from '../contexts/AuthContext') for internal API calls (checking existing crop credits). In terminal context, AuthContext has no valid web-app token → 403 on /api/crop-credits. This is a PRE-EXISTING issue, not introduced by the current fix. The dialog UI still renders correctly.",
+        "affected_selectors": ["CropCreditTypeDialog"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_terminal_sig_credit_169.py",
+    "/app/test_reports/pytest/pytest_terminal_sig_credit_169.xml"
+  ],
+  "action_items": [
+    "MINOR: resetCheckout() in TerminalSales.jsx (line 447-451) does not reset cropCreditConfig or cropTypeDialog state. If a Charged-to-Crop sale FAILS (400 from API), cropCreditConfig remains set on next checkout open. Fix: add setCropCreditConfig(null) and setCropTypeDialog(false) inside resetCheckout().",
+    "MINOR: CropCreditTypeDialog uses AuthContext api for its own crop-credit check. In terminal context this will 403 if no web-app login. To fully fix, pass apiInstance prop to CropCreditTypeDialog as well (same pattern as RequestSignatureDialog). Pre-existing issue."
+  ],
+  "critical_code_review_comments": [
+    "RequestSignatureDialog.js: All 5 API calls (lines 102, 125, 187, 206, 215) now use http. instead of api. — FIX CONFIRMED CORRECT.",
+    "TerminalSales.jsx line 1516: apiInstance={api} passed to RequestSignatureDialog — FIX CONFIRMED CORRECT.",
+    "TerminalSales.jsx lines 1087-1108: 4-button 2x2 grid (15 days, 30 days, 60 days, Charged to Crop) with correct data-testids — FIX CONFIRMED CORRECT.",
+    "TerminalSales.jsx lines 1211-1224: Confirm button calls processSale() directly, no setCropTypeDialog(true) — FIX CONFIRMED CORRECT.",
+    "MINOR: resetCheckout() missing setCropCreditConfig(null) — can cause stale crop config on failed sale recovery.",
+    "MINOR: CropCreditTypeDialog still uses AuthContext api (not terminal api) for its internal /crop-credits check — causes 403 in terminal context. Same antipattern that was fixed for RequestSignatureDialog."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_terminal_sig_credit_169.py"
+  ],
+  "success_rate": {
+    "backend": "100% (7/7)",
+    "frontend": "100% (all feature points verified)"
+  },
+  "test_credentials": {
+    "used": "janmarkeahig@gmail.com / Aa@58798546521325 (super admin) + Branch 1 terminal"
+  },
+  "seed_data_creation": "2 test signature sessions created in MongoDB (TEST_SignatureCustomer, TEST_StatusCustomer) — will expire in 5 minutes",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Both fixes verified: (1) RequestSignatureDialog.js uses http=apiInstance||api for ALL calls — no raw api. remains. (2) TerminalSales.jsx has 4-button credit grid (data-testid credit-days-15/30/60, credit-type-crop). Charged-to-Crop opens CropCreditTypeDialog immediately. Confirm button calls processSale() directly without triggering crop dialog. Backend: POST /api/signatures/session requires auth (401/403 without) and credit_context (400 if missing). Minor: resetCheckout() should also reset cropCreditConfig and cropTypeDialog. CropCreditTypeDialog still uses AuthContext api (403 in terminal).",
+  "rca_of_issues": {
+    "signature_not_authenticated": "RequestSignatureDialog was importing and calling api from AuthContext for all HTTP calls. In terminal context, AuthContext has no valid token (terminal uses its own axios instance). Fix: added apiInstance prop (line 34), created http=apiInstance||api fallback (line 54), replaced all 5 raw api.* calls with http.* calls. TerminalSales passes apiInstance={api} (terminal's axios) to the dialog.",
+    "crop_credit_inline": "Previously CropCreditTypeDialog was opened by the confirm button (setCropTypeDialog(true) inside onClick). Now the 4th button 'Charged to Crop' (credit-type-crop) directly calls setCropTypeDialog(true). Confirm button now calls processSale() directly. Consistent with 15/30/60 day buttons which set state and proceed."
+  }
+}

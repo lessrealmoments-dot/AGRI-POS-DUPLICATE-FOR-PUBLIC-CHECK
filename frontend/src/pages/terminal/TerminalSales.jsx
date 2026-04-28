@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, Plus, Minus, Trash2, ShoppingCart, Camera, X, Check, CreditCard, Banknote, ChevronUp, ChevronDown, Wallet, Upload, Loader2, Clock, Printer, AlertTriangle, ShieldAlert, PackageX, Eye, Tag, Percent } from 'lucide-react';
+import { Search, Plus, Minus, Trash2, ShoppingCart, Camera, X, Check, CreditCard, Banknote, ChevronUp, ChevronDown, Wallet, Upload, Loader2, Clock, Printer, AlertTriangle, ShieldAlert, PackageX, Eye, Tag, Percent, Sprout } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
@@ -1082,15 +1082,36 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
                   <p className="text-xs text-amber-600 mt-0.5">Customer will owe {formatPHP(grandTotal)}</p>
                 </div>
                 <div>
-                  <label className="text-xs text-slate-500 font-medium mb-1 block">Payment Terms</label>
-                  <div className="flex gap-2">
+                  <label className="text-xs text-slate-500 font-medium mb-1.5 block">Payment Terms</label>
+                  <div className="grid grid-cols-2 gap-2">
                     {[15, 30, 60].map(d => (
-                      <button key={d} onClick={() => setCreditDays(d)}
-                        className={`flex-1 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                          creditDays === d ? 'bg-[#1A4D2E] text-white border-[#1A4D2E]' : 'bg-white border-slate-200 text-slate-700 hover:border-emerald-300'
-                        }`}>{d} days</button>
+                      <button key={d}
+                        onClick={() => { setCreditDays(d); setCropCreditConfig(null); }}
+                        className={`py-2.5 rounded-lg text-sm font-medium border transition-colors flex items-center justify-center gap-1.5 ${
+                          creditDays === d && !cropCreditConfig
+                            ? 'bg-[#1A4D2E] text-white border-[#1A4D2E]'
+                            : 'bg-white border-slate-200 text-slate-700 hover:border-emerald-300'
+                        }`}
+                        data-testid={`credit-days-${d}`}>
+                        <Clock size={13} /> {d} days
+                      </button>
                     ))}
+                    <button
+                      onClick={() => setCropTypeDialog(true)}
+                      className={`py-2.5 rounded-lg text-sm font-medium border transition-colors flex items-center justify-center gap-1.5 ${
+                        cropCreditConfig?.type === 'charged_to_crop'
+                          ? 'bg-emerald-700 text-white border-emerald-700'
+                          : 'bg-white border-emerald-200 text-emerald-700 hover:border-emerald-400 hover:bg-emerald-50'
+                      }`}
+                      data-testid="credit-type-crop">
+                      <Sprout size={13} /> {cropCreditConfig?.type === 'charged_to_crop' ? 'Crop ✓' : 'Charged to Crop'}
+                    </button>
                   </div>
+                  {cropCreditConfig?.type === 'charged_to_crop' && (
+                    <p className="text-[10px] text-emerald-700 mt-1.5 bg-emerald-50 border border-emerald-200 rounded px-2 py-1">
+                      Charged to Crop selected. Signature required after confirming.
+                    </p>
+                  )}
                 </div>
               </div>
             )}
@@ -1189,11 +1210,11 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
                   <Button variant="outline" onClick={resetCheckout} className="flex-1">Back</Button>
                   <Button
                     onClick={() => {
-                      if (paymentType === 'credit' && selectedCustomer?.id) {
-                        setCropTypeDialog(true);
-                      } else {
-                        processSale();
+                      if (paymentType === 'credit' && !cropCreditConfig && !creditDays) {
+                        toast.error('Select payment terms (15/30/60 days or Charged to Crop)');
+                        return;
                       }
+                      processSale();
                     }}
                     disabled={saving}
                     className="flex-1 bg-[#1A4D2E] hover:bg-[#15412a] text-white h-12"
@@ -1492,6 +1513,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
         }}
         invoice={terminalSig.invoice}
         mode="inline"
+        apiInstance={api}
         onSigned={(sess) => {
           // Stash signature info on lastSaleData so the print step can use it
           setLastSaleData(prev => prev ? {

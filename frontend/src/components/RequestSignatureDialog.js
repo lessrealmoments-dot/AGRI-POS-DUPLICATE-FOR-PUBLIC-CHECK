@@ -31,6 +31,7 @@ export default function RequestSignatureDialog({
   onSigned,
   onPrintReceipt,
   mode = 'qr',        // 'qr' (web POS) | 'inline' (terminal)
+  apiInstance = null, // optional: pass terminal's own axios instance to override AuthContext api
 }) {
   const [sessionToken, setSessionToken] = useState('');
   const [sessionId, setSessionId] = useState('');
@@ -48,6 +49,9 @@ export default function RequestSignatureDialog({
   const pollRef = useRef(null);
   const canvasRef = useRef(null);
   const padRef = useRef(null);
+
+  // Use injected api instance (terminal) or fall back to AuthContext api (web POS)
+  const http = apiInstance || api;
 
   // ── Build absolute signing URL ──
   const buildAbsoluteUrl = (relPath) => {
@@ -95,7 +99,7 @@ export default function RequestSignatureDialog({
       },
     };
 
-    api.post('/signatures/session', payload)
+    http.post('/signatures/session', payload)
       .then(r => {
         if (cancelled) return;
         setSessionToken(r.data.token);
@@ -118,7 +122,7 @@ export default function RequestSignatureDialog({
     let stopped = false;
     const tick = async () => {
       try {
-        const r = await api.get(`/signatures/status/${sessionToken}`);
+        const r = await http.get(`/signatures/status/${sessionToken}`);
         if (stopped) return;
         setLastStatus(r.data);
         if (r.data.expired && r.data.status === 'pending') {
@@ -180,7 +184,7 @@ export default function RequestSignatureDialog({
         }),
       }).then(r => { if (!r.ok) throw new Error('submit failed'); return r.json(); });
       // Now fetch status to get presigned signature URL
-      const status_r = await api.get(`/signatures/status/${sessionToken}`);
+      const status_r = await http.get(`/signatures/status/${sessionToken}`);
       setLastStatus(status_r.data);
       setSignatureUrl(status_r.data.signature_url || dataUrl);
       setStatus('signed');
@@ -199,7 +203,7 @@ export default function RequestSignatureDialog({
     setBypassing(true);
     setBypassErr('');
     try {
-      await api.post(`/signatures/bypass/${sessionId}`, {
+      await http.post(`/signatures/bypass/${sessionId}`, {
         pin: bypassPin, reason: bypassReason || 'Customer unable to sign',
       });
       toast.success('Authorized via Manager PIN');
@@ -208,7 +212,7 @@ export default function RequestSignatureDialog({
       setStatus('bypassed');
       // Fetch status to get verification_token
       try {
-        const status_r = await api.get(`/signatures/status/${sessionToken}`);
+        const status_r = await http.get(`/signatures/status/${sessionToken}`);
         setLastStatus(status_r.data);
         onSigned?.(status_r.data);
       } catch {
