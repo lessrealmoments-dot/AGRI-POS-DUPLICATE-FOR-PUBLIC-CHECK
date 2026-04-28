@@ -22,6 +22,23 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### Price Scheme Recovery + Import Fix (2026-04-28) — Complete
+- **RCA**: User's live `agri-books.com` org had ZERO price schemes (shown empty `[]` from `/api/price-schemes`). Result: dropdown unselectable on Sales/Terminal, no scheme columns on Products/Inventory, and 1,601 imported products had only `prices.retail` (no wholesale). Three root bugs:
+  - **Bug A**: `Reset Company` wiped `price_schemes` collection without re-seeding defaults.
+  - **Bug B**: `import_products` only iterated *existing* schemes — if `wholesale` scheme didn't exist, mapped Wholesale Price column was silently dropped.
+  - **Bug C**: `InventoryPage.js` had no scheme columns at all.
+- **Backend fixes**:
+  - `routes/backups.py reset_org_data()` — now `insert_many` Retail/Wholesale/Special with `organization_id` after wipe.
+  - `routes/import_data.py import_products()` — auto-discovers `*_price` mapped columns, auto-creates missing schemes (with `fixed`/0 default calc), then runs the import. Returns `schemes_auto_created: [{key,name}]` in response. Defensive secondary loop ensures *any* `*_price` column gets stored even if auto-create was bypassed.
+  - `routes/price_schemes.py` — new `POST /api/price-schemes/restore-defaults` (idempotent: skip-if-active, reactivate-if-soft-deleted, create-if-missing).
+- **Frontend fixes**:
+  - `pages/InventoryPage.js` — added `schemes` state + dynamic `<TableHead>` and `<TableCell>` columns (mirrors ProductsPage).
+  - `pages/PriceSchemesPage.js` — amber banner with `restore-default-schemes-btn` shown when `schemes.length < 3`.
+  - `pages/ImportPage.js` — green "schemes auto-created" notice on Results step when `result.schemes_auto_created.length > 0`.
+  - `pages/UnifiedSalesPage.js` — amber `single-scheme-warning` shown under Price Scheme select when `schemes.length <= 1`, with link to `/price-schemes`.
+- **Live data repair**: User's `agri-books.com` org schemes restored via direct API (Retail / Wholesale / Special now exist, org_id `4fafe301-3a52-49d8-80b5-afa3e91fa8f5`). User must re-import their CSV to populate `prices.wholesale` on the 1,601 products.
+- **Tested**: iteration_170 — Backend 5/5 (100%), Frontend 4/4 verified. ✅
+
 ### Terminal Signature Fix + Inline Credit Type Selection (2026-04-28) — Complete
 - **Root cause fixed**: `RequestSignatureDialog`, `CropCreditTypeDialog` were importing `api` from `AuthContext` (web app JWT). Terminal uses its own separate axios instance with a terminal-specific token → all signature/crop-credit API calls were returning 403 "Not authenticated". Fix: added `apiInstance` prop to both dialogs; `TerminalSales` now passes its `api` prop to both.
 - **UX fix**: Credit type selection is now inline in checkout. The 15/30/60 day buttons now share a 2×2 grid with a "Charged to Crop" button. `CropCreditTypeDialog` opens immediately when tapped — not intercepted at the confirm button. Confirm button calls `processSale()` directly.
