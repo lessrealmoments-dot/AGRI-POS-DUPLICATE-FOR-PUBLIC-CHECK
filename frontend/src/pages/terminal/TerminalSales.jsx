@@ -77,7 +77,11 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   const CAMERA_SCAN_COOLDOWN = 2000;
   const [lastSaleData, setLastSaleData] = useState(null); // for print prompt
   const [showPrintPrompt, setShowPrintPrompt] = useState(false);
-  const [terminalSig, setTerminalSig] = useState({ open: false, invoice: null }); // mandatory inline sig for credit/partial
+  const [terminalSig, setTerminalSig] = useState({ open: false, invoice: null, preCommit: false }); // mandatory inline sig for credit/partial
+  // Pre-commit signature (legal sequence: signature BEFORE invoice creation)
+  const [pendingSigSession, setPendingSigSession] = useState(null); // { id, signature_url, bypass_method, signed_at, verification_token }
+  const saleIdRef = useRef(''); // stable per checkout intent → used as idempotency key
+  const processingRef = useRef(false); // guards against rapid double-click re-entry
   const [businessInfo, setBusinessInfo] = useState({});
   // Insufficient stock override
   const [stockModal, setStockModal] = useState(false);
@@ -487,12 +491,29 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
     setCreditDays(15); setSplitCash(''); setSplitDigital(''); setSplitScreenshot(null); setReleaseMode('');
     setDiscountInput(''); setMarginWarningAccepted(false);
     setCropCreditConfig(null); setCropTypeDialog(false);
+    // Reset pre-commit signature so the next sale starts a fresh signing session
+    setPendingSigSession(null);
+    saleIdRef.current = '';
+    processingRef.current = false;
   };
 
   const changeAmount = paymentType === 'cash' && amountTendered
     ? Math.max(0, parseFloat(amountTendered) - grandTotal) : 0;
 
-  const processSale = async () => {
+  // Generate a stable saleId once per checkout intent. Re-using the same
+  // idempotency_key on retries prevents duplicate invoices when network lag
+  // makes the cashier click "Confirm" twice.
+  const ensureSaleId = () => {
+    if (!saleIdRef.current) {
+      saleIdRef.current = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    }
+    return saleIdRef.current;
+  };
+
+  const processSale = async ({ sigSession = null } = {}) => {
+    if (processingRef.current) return; // hard guard against double-click re-entry
     if (cart.length === 0) { toast.error('Cart is empty'); return; }
     if (!paymentType) { toast.error('Select a payment type'); return; }
     if (!releaseMode) { toast.error('Select stock release mode'); return; }
@@ -513,9 +534,17 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
       if (cashAmt + digAmt < grandTotal) { toast.error('Cash + Digital must cover the total'); return; }
       if (digAmt > 0 && !splitScreenshot) { toast.error('Upload screenshot for the digital portion'); return; }
     }
+    // Hard block: credit/partial sales cannot commit without a signature/bypass
+    const requiresSignature = paymentType === 'credit' && selectedCustomer?.id;
+    const sig = sigSession || pendingSigSession;
+    if (requiresSignature && !sig?.id) {
+      toast.error('Customer signature is required before recording the credit sale');
+      return;
+    }
+    processingRef.current = true;
     setSaving(true);
 
-    const saleId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const saleId = ensureSaleId();
     const envelopeId = newEnvelopeId();
     const today = new Date().toISOString().slice(0, 10);
 
@@ -537,6 +566,12 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
 
     const saleData = {
       id: saleId, envelope_id: envelopeId, branch_id: session.branchId,
+      // idempotency_key is the canonical dedupe field on the backend.
+      // Stable per checkout intent — survives retries due to lag/timeout so
+      // the same Confirm click never produces two invoices.
+      idempotency_key: saleId,
+      // Pre-commit signature: backend will back-link this session to the new invoice
+      signature_session_id: sig?.id || null,
       customer_id: selectedCustomer?.id || null,
       customer_name: selectedCustomer?.name || 'Walk-in',
       items: saleItems, subtotal, freight: 0, overall_discount: discountAmount,
@@ -607,12 +642,26 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
           setCropCreditConfig(null);
         }
 
-        // Store sale data for print prompt
-        setLastSaleData({ ...saleData, invoice_number: invoiceNum, ...res.data });
-        // Mandatory signature for credit / partial sales
-        if (saleData.balance > 0 && selectedCustomer?.id) {
+        // Store sale data for print prompt (with signature info if pre-captured)
+        setLastSaleData({
+          ...saleData,
+          invoice_number: invoiceNum,
+          ...res.data,
+          signature_url: sig?.signature_url || null,
+          bypass_method: sig?.bypass_method || null,
+          signature_signed_at: sig?.signed_at || null,
+          signature_verification_token: sig?.verification_token || null,
+        });
+        // Pre-commit signature flow: signature is already captured BEFORE the invoice
+        // was created. Backend has linked it via signature_session_id. Go straight to print.
+        if (sig?.id) {
+          setShowPrintPrompt(true);
+        } else if (saleData.balance > 0 && selectedCustomer?.id) {
+          // Legacy fallback (shouldn't fire now — credit always pre-commits sig).
+          // Kept defensively in case a future code path skips the gate.
           setTerminalSig({
             open: true,
+            preCommit: false,
             invoice: {
               id: res.data.id,
               invoice_number: invoiceNum,
@@ -633,6 +682,9 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
         } else {
           setShowPrintPrompt(true);
         }
+        // Success — clear idempotency key + sig session so the next sale starts fresh
+        saleIdRef.current = '';
+        setPendingSigSession(null);
         clearCart(); setCheckoutOpen(false); resetCheckout();
       } catch (e) {
         const detail = e.response?.data?.detail;
@@ -642,6 +694,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
           setCheckoutOpen(false);
           setStockModal(true);
           setSaving(false);
+          processingRef.current = false; // allow retry via override
           return;
         }
         if (detail && typeof detail === 'object') {
@@ -650,6 +703,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
           toast.error(typeof detail === 'string' ? detail : 'Sale failed');
         }
         setSaving(false);
+        processingRef.current = false; // allow retry — same idempotency_key reused
         return;
       }
     } else {
@@ -660,6 +714,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
       clearCart(); setCheckoutOpen(false); resetCheckout();
     }
     setSaving(false);
+    processingRef.current = false;
   };
 
   // Manager override for insufficient stock
@@ -668,15 +723,31 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
     setOverrideSubmitting(true);
     setOverrideError('');
     try {
-      const res = await api.post('/unified-sale', { ...pendingSaleData, manager_override_pin: overridePin.trim() });
+      // Reuse the same idempotency_key + signature_session from the original
+      // pending sale — this is a retry of the SAME sale, just with manager auth.
+      const res = await api.post('/unified-sale', {
+        ...pendingSaleData,
+        manager_override_pin: overridePin.trim(),
+      });
       const invoiceNum = res.data.invoice_number || res.data.sale_number;
       invalidateBalanceCache();
       toast.success(`Sale ${invoiceNum} completed (manager override). Ticket created.`, { duration: 4000 });
-      setLastSaleData({ ...pendingSaleData, invoice_number: invoiceNum, ...res.data });
-      // Mandatory signature for credit/partial sales (after override)
-      if (pendingSaleData.balance > 0 && selectedCustomer?.id) {
+      setLastSaleData({
+        ...pendingSaleData,
+        invoice_number: invoiceNum,
+        ...res.data,
+        signature_url: pendingSigSession?.signature_url || null,
+        bypass_method: pendingSigSession?.bypass_method || null,
+        signature_signed_at: pendingSigSession?.signed_at || null,
+        signature_verification_token: pendingSigSession?.verification_token || null,
+      });
+      // Pre-commit signature already captured upstream — go straight to print.
+      if (pendingSigSession?.id) {
+        setShowPrintPrompt(true);
+      } else if (pendingSaleData.balance > 0 && selectedCustomer?.id) {
         setTerminalSig({
           open: true,
+          preCommit: false,
           invoice: {
             id: res.data.id,
             invoice_number: invoiceNum,
@@ -697,6 +768,10 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
       } else {
         setShowPrintPrompt(true);
       }
+      // Clear idempotency + sig session — sale is committed
+      saleIdRef.current = '';
+      setPendingSigSession(null);
+      processingRef.current = false;
       setStockModal(false);
       setPendingSaleData(null);
       setInsufficientItems([]);
@@ -1236,17 +1311,56 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
                   <Button variant="outline" onClick={resetCheckout} className="flex-1">Back</Button>
                   <Button
                     onClick={() => {
+                      if (saving || processingRef.current) return; // hard double-click guard
                       if (paymentType === 'credit' && !cropCreditConfig && !creditDays) {
                         toast.error('Select payment terms (15/30/60 days or Charged to Crop)');
                         return;
                       }
+                      // ── Credit/Partial: capture signature BEFORE creating the invoice ──
+                      // Legal sequence: signature → invoice → print. No invoice exists
+                      // until the signature/bypass session is sealed by the customer.
+                      const requiresSignature = paymentType === 'credit' && selectedCustomer?.id;
+                      if (requiresSignature && !pendingSigSession?.id) {
+                        const today = new Date().toISOString().slice(0, 10);
+                        setTerminalSig({
+                          open: true,
+                          preCommit: true,
+                          invoice: {
+                            id: '', // no invoice yet — backend will back-link after commit
+                            invoice_number: '(pending)',
+                            customer_name: selectedCustomer.name,
+                            customer_id: selectedCustomer.id,
+                            branch_id: session.branchId,
+                            branch_name: session.branchName || '',
+                            items: cart.map(c => ({
+                              product_name: c.product_name,
+                              quantity: c.quantity,
+                              unit: c.unit || 'unit',
+                              rate: c.price,
+                              total: c.total,
+                            })),
+                            subtotal,
+                            discount: discountAmount,
+                            partial_paid: 0,
+                            balance: grandTotal,
+                            payment_type: 'credit',
+                            order_date: today,
+                            credit_type: cropCreditConfig?.type === 'charged_to_crop' ? 'charged_to_crop' : 'by_term',
+                          },
+                        });
+                        return;
+                      }
                       processSale();
                     }}
-                    disabled={saving}
+                    disabled={saving || processingRef.current}
                     className="flex-1 bg-[#1A4D2E] hover:bg-[#15412a] text-white h-12"
                     data-testid="confirm-payment-btn">
                     {saving ? <Loader2 size={16} className="animate-spin mr-2" /> : <Check size={16} className="mr-2" />}
-                    {saving ? 'Processing...' : paymentType === 'credit' ? 'Confirm Credit Sale' : `Pay ${formatPHP(grandTotal)}`}
+                    {saving
+                      ? 'Processing...'
+                      : paymentType === 'credit'
+                        ? (pendingSigSession?.id ? 'Record Credit Sale' : 'Capture Signature')
+                        : `Pay ${formatPHP(grandTotal)}`}
                   </Button>
                 </div>
               </div>
@@ -1534,15 +1648,40 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
       <RequestSignatureDialog
         open={terminalSig.open}
         onOpenChange={(open) => {
-          // If user closes without signing/bypass, still proceed to print prompt
+          if (!open && terminalSig.preCommit && !pendingSigSession?.id) {
+            // Q3a: Hard block — pre-commit signature was not completed.
+            // No invoice has been created yet; just close and warn the cashier.
+            // Cart is preserved so they can re-confirm and try again.
+            toast.warning('Signature required to record this credit sale');
+            setTerminalSig({ open: false, invoice: null, preCommit: false });
+            return;
+          }
           setTerminalSig(prev => ({ ...prev, open }));
-          if (!open && lastSaleData) setShowPrintPrompt(true);
+          if (!open && !terminalSig.preCommit && lastSaleData) setShowPrintPrompt(true);
         }}
         invoice={terminalSig.invoice}
         mode="inline"
         apiInstance={api}
         onSigned={(sess) => {
-          // Stash signature info on lastSaleData so the print step can use it
+          if (terminalSig.preCommit) {
+            // ── Pre-commit flow: signature captured BEFORE invoice exists ──
+            // 1. Persist session info so processSale can attach signature_session_id
+            // 2. Close dialog
+            // 3. Trigger commit → backend creates invoice and back-links the session
+            const sigData = {
+              id: sess.id,
+              signature_url: sess.signature_url || null,
+              bypass_method: sess.bypass_method || null,
+              signed_at: sess.signed_at || sess.bypassed_at || null,
+              verification_token: sess.verification_token || null,
+            };
+            setPendingSigSession(sigData);
+            setTerminalSig({ open: false, invoice: null, preCommit: false });
+            // Defer to next tick so state settles, then commit
+            setTimeout(() => processSale({ sigSession: sigData }), 0);
+            return;
+          }
+          // ── Legacy post-commit flow (kept for safety): invoice already exists ──
           setLastSaleData(prev => prev ? {
             ...prev,
             signature_url: sess.signature_url || null,
@@ -1550,8 +1689,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
             signature_signed_at: sess.signed_at || sess.bypassed_at || null,
             signature_verification_token: sess.verification_token || null,
           } : prev);
-          // Auto-close + go to print prompt
-          setTerminalSig({ open: false, invoice: null });
+          setTerminalSig({ open: false, invoice: null, preCommit: false });
           setShowPrintPrompt(true);
         }}
       />

@@ -375,6 +375,19 @@ async def startup():
     await _raw_db.invoices.create_index("branch_id")
     await _raw_db.invoices.create_index("customer_id")
     await _raw_db.invoices.create_index("created_at")
+    # Idempotency: prevents duplicate invoices when Terminal retries on lag/timeout.
+    # partialFilterExpression is used instead of `sparse` because legacy invoices
+    # have idempotency_key:null which would collide on a sparse-unique index.
+    try:
+        await _raw_db.invoices.create_index(
+            "idempotency_key",
+            unique=True,
+            partialFilterExpression={
+                "idempotency_key": {"$exists": True, "$type": "string"}
+            },
+        )
+    except Exception:
+        pass  # Index may already exist with different options
     await _raw_db.customers.create_index("id", unique=True)
     await _raw_db.customers.create_index("branch_id")
     await _raw_db.branches.create_index("id", unique=True)

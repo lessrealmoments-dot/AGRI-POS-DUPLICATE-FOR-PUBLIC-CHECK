@@ -22,6 +22,22 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### Terminal Credit-Sale Duplicate Prevention + Signature-First Sequence (2026-04-28) — Complete
+- **RCA**: On the live VPS, SI-MB-001003 produced #104 + #105 from one click on a slow PC; earlier 001000/001001 had the same pattern. The cashier also reported that "Transaction Recorded Successfully" fired BEFORE a signature was captured for credit sales — wrong legal sequence.
+  - Root cause #1: Terminal generated a per-attempt UUID and put it in `id`, but the backend's `check_idempotency` looked at `idempotency_key` which Terminal **never sent**. Dedupe was dead-code; lag-induced retries created sibling invoices.
+  - Root cause #2: `db.invoices` had no unique index on `idempotency_key` — a true network race could duplicate even if the field were sent.
+  - Root cause #3: Sequence — invoice was created, success toast fired, THEN signature dialog opened. Customer could walk away leaving a binding AR with no signature.
+- **Backend fixes**:
+  - `routes/sales.py` — invoice insert is now race-safe (catches `DuplicateKeyError` and returns the prior invoice); after insert, if `signature_session_id` is in the payload, the signature_session is back-linked (`linked_record_id` + `credit_context.invoice_number`).
+  - `main.py` — added unique partial index on `invoices.idempotency_key` (filter `{$exists: true, $type: "string"}` to skip legacy null entries).
+- **Frontend fixes (`pages/terminal/TerminalSales.jsx`)**:
+  - `saleIdRef` (useRef) generates a stable `idempotency_key` per checkout intent — survives retries; cleared only on success or `resetCheckout`.
+  - `processingRef` guards against rapid double-clicks reaching `processSale` twice.
+  - **New legal sequence for credit sales**: Payment Type → Release Mode → Term/Charge-to-Crop → **Signature (pre-commit, no invoice yet)** → PIN if needed → POST `/unified-sale` with `signature_session_id` → Print prompt. Backend creates the invoice and back-links the session in one round-trip.
+  - Hard block: closing the signature dialog without sign/bypass aborts — no invoice is created (`Q3a`).
+  - Manager-stock-override path also reuses the same idempotency_key + signature_session.
+- **Verified**: `pytest tests/test_credit_idempotency_174.py` (4 tests) — unique index present, duplicate key rejected, `/unified-sale` accepts new field, pre-commit signature session creates with empty `linked_record_id`. Existing related suites (`test_orphan_fix_173`, `test_signatures_165`) still green.
+
 ### Customer Single Source of Truth + Orphan Recovery (2026-04-28) — Complete
 - **RCA**: Live `agri-books.com` had 4 open invoices (₱4,890 total balance) referencing deleted customer `b38fed7b` (Janmark Ahig). Customer record fully gone. Receivables summary showed `[]` despite open balance. Terminal still cached the dead customer. Five interlocking bugs:
   - **Bug A**: `routes/sales.py` — credit/partial sales accepted any `customer_id`; if customer didn't exist, `if customer:` block was skipped silently and invoice created anyway with orphan ID.

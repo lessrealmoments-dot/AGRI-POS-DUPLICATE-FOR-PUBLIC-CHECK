@@ -526,8 +526,38 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
             elif fund_source == "cashier":
                 await update_cashier_wallet(branch_id, amount_paid, f"Sale payment {inv_number}")
     
-    await db.invoices.insert_one(invoice)
-    del invoice["_id"]
+    # Race-safe insert: if a parallel retry already inserted (idempotency_key
+    # unique index trips), return the previously-saved invoice instead of 500.
+    try:
+        await db.invoices.insert_one(invoice)
+    except Exception as ins_err:
+        from pymongo.errors import DuplicateKeyError
+        if isinstance(ins_err, DuplicateKeyError) and idem_key:
+            existing = await check_idempotency("invoices", idem_key)
+            if existing:
+                return existing
+        raise
+    invoice.pop("_id", None)
+
+    # ── Link pre-commit signature session (Terminal credit/partial flow) ──────
+    # Terminal captures the signature BEFORE creating the invoice (legal sequence).
+    # Now that the invoice exists, back-link the session to it.
+    sig_session_id = data.get("signature_session_id")
+    if sig_session_id:
+        try:
+            await db.signature_sessions.update_one(
+                {"id": sig_session_id},
+                {"$set": {
+                    "linked_record_type": "invoice",
+                    "linked_record_id": invoice["id"],
+                    "credit_context.invoice_number": invoice["invoice_number"],
+                }},
+            )
+        except Exception as link_err:
+            import logging
+            logging.getLogger("signatures").error(
+                f"Failed to link signature_session {sig_session_id} -> invoice {invoice['id']}: {link_err}"
+            )
 
     # ── Auto-generate doc code for every invoice (QR ready at print time) ─────
     from routes.doc_lookup import auto_generate_doc_code
