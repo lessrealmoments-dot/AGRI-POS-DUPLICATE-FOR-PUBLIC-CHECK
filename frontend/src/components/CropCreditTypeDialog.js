@@ -30,7 +30,7 @@ const formatPHP = (n) => `₱${parseFloat(n || 0).toLocaleString('en-PH', { mini
  *   saleAmount        - number
  *   branchId          - string
  */
-export default function CropCreditTypeDialog({ open, onClose, onConfirm, customerId, customerName, saleAmount, branchId }) {
+export default function CropCreditTypeDialog({ open, onClose, onConfirm, customerId, customerName, saleAmount, branchId, apiInstance = null }) {
   const [step, setStep] = useState('type'); // 'type' | 'planting' | 'link_terms' | 'blocked'
   const [blockInfo, setBlockInfo] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -38,6 +38,8 @@ export default function CropCreditTypeDialog({ open, onClose, onConfirm, custome
   const [openTermInvoices, setOpenTermInvoices] = useState([]);
   const [linkTerms, setLinkTerms] = useState(false);
   const [loadingCheck, setLoadingCheck] = useState(false);
+
+  const http = apiInstance || api;
 
   // Reset on open
   useEffect(() => {
@@ -54,7 +56,7 @@ export default function CropCreditTypeDialog({ open, onClose, onConfirm, custome
   useEffect(() => {
     if (open && customerId) {
       setLoadingCheck(true);
-      api.get(`/crop-credits/check-block/${customerId}`)
+      http.get(`/crop-credits/check-block/${customerId}`)
         .then(r => setBlockInfo(r.data))
         .catch(() => {})
         .finally(() => setLoadingCheck(false));
@@ -74,7 +76,7 @@ export default function CropCreditTypeDialog({ open, onClose, onConfirm, custome
     if (blockInfo.blocked && blockInfo.reason === 'active_crop_credit') {
       // Check for open term credit invoices
       try {
-        const res = await api.get('/invoices', {
+        const res = await http.get('/invoices', {
           params: { customer_id: customerId, status: 'open', limit: 20 }
         });
         const termInvoices = (res.data.invoices || []).filter(inv =>

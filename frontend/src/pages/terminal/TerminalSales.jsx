@@ -448,6 +448,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
     setPaymentType(''); setAmountTendered(''); setDigitalScreenshot(null); setDigitalRef('');
     setCreditDays(15); setSplitCash(''); setSplitDigital(''); setSplitScreenshot(null); setReleaseMode('');
     setDiscountInput(''); setMarginWarningAccepted(false);
+    setCropCreditConfig(null); setCropTypeDialog(false);
   };
 
   const changeAmount = paymentType === 'cash' && amountTendered
@@ -1249,6 +1250,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
         customerName={selectedCustomer?.name || 'Customer'}
         saleAmount={grandTotal}
         branchId={session?.branchId}
+        apiInstance={api}
       />
         <DialogContent className="max-w-sm mx-auto">
           <DialogHeader>

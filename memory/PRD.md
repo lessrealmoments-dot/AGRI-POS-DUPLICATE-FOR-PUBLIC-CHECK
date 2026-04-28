@@ -22,6 +22,12 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### Terminal Signature Fix + Inline Credit Type Selection (2026-04-28) — Complete
+- **Root cause fixed**: `RequestSignatureDialog`, `CropCreditTypeDialog` were importing `api` from `AuthContext` (web app JWT). Terminal uses its own separate axios instance with a terminal-specific token → all signature/crop-credit API calls were returning 403 "Not authenticated". Fix: added `apiInstance` prop to both dialogs; `TerminalSales` now passes its `api` prop to both.
+- **UX fix**: Credit type selection is now inline in checkout. The 15/30/60 day buttons now share a 2×2 grid with a "Charged to Crop" button. `CropCreditTypeDialog` opens immediately when tapped — not intercepted at the confirm button. Confirm button calls `processSale()` directly.
+- **Cleanup**: `resetCheckout()` now also clears `cropCreditConfig` and `cropTypeDialog` state to prevent stale config on failed sale recovery.
+- **Tested**: iteration_169 — Backend 7/7, Frontend all features verified. ✅
+
 ### Signature Verification Toolbar in Audit Center (2026-04-28) — Complete
 - **Frontend**: `SignatureVerifyToolbar.js` — compact dark bar between Audit Center header and tabs. Paste `v.XXXXXXXX` token → Verify button → calls `GET /api/signatures/verify/{token}` → dialog shows: signature image, status badge (Signed / Manager PIN bypass), signer name, date/time, clickable invoice link (opens InvoiceDetailModal), credit context, tamper-evident token badge.
 - **Price Manager capital logic fix**: Removed `set_manual` flag from `bulk-update` — branch capital saves no longer touch `products.capital_method` globally (was overriding the auto-switch mode for all branches). Added `edit_cost` permission check + audit logging to `capital_changes` for all branch capital saves.
