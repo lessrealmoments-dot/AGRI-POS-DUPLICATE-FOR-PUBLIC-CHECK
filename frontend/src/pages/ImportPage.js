@@ -11,8 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import {
   Upload, FileSpreadsheet, CheckCircle, XCircle, AlertTriangle,
   Download, ChevronRight, RotateCcw, Zap, Package, Warehouse,
-} from 'lucide-react';
-import { toast } from 'sonner';
+} from 'lucide-react';import { toast } from 'sonner';
 
 // ── System field definitions per import type ─────────────────────────────────
 const PRODUCT_FIELDS = [
@@ -66,7 +65,7 @@ const Connector = () => <div className="w-8 h-px bg-slate-200 mx-1" />;
 export default function ImportPage() {
   const { currentBranch, branches, hasPerm } = useAuth();
 
-  const [importType, setImportType] = useState('products');   // products | inventory-seed
+  const [importType, setImportType] = useState('products');   // products | products-update | inventory-seed
   const [step, setStep] = useState('type');                    // type | upload | map | result
   const [file, setFile] = useState(null);
   const [parsed, setParsed] = useState(null);                  // { headers, sample_rows, total_rows }
@@ -79,7 +78,7 @@ export default function ImportPage() {
   const [overwriteIds, setOverwriteIds] = useState(new Set());
   const fileRef = useRef(null);
 
-  const fields = importType === 'products' ? PRODUCT_FIELDS : INVENTORY_FIELDS;
+  const fields = importType === 'inventory-seed' ? INVENTORY_FIELDS : PRODUCT_FIELDS;
 
   // ── File handling ────────────────────────────────────────────────────────
   const handleFile = useCallback(async (f) => {
@@ -100,7 +99,7 @@ export default function ImportPage() {
       const h = res.data.headers;
       const isQB = h.includes('Product/Service Name') && h.includes('Purchase Cost');
       if (isQB) {
-        setMapping(importType === 'products' ? QB_MAPPING : QB_INV_MAPPING);
+        setMapping(importType === 'inventory-seed' ? QB_INV_MAPPING : QB_MAPPING);
         toast.success('QuickBooks format detected — columns auto-mapped');
       } else {
         setMapping({});
@@ -134,7 +133,11 @@ export default function ImportPage() {
         fd.append('branch_id', branchId || currentBranch?.id || '');
         fd.append('pin', pin);
       }
-      const endpoint = importType === 'products' ? '/import/products' : '/import/inventory-seed';
+      const endpoint = importType === 'inventory-seed'
+        ? '/import/inventory-seed'
+        : importType === 'products-update'
+          ? '/import/products/update-existing'
+          : '/import/products';
       const res = await api.post(endpoint, fd);
       setResult(res.data);
       setStep('result');
@@ -241,15 +244,39 @@ export default function ImportPage() {
               </div>
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-1">
-                  <h3 className="font-semibold text-slate-800">Product Catalog</h3>
-                  <Badge className="text-[10px] bg-emerald-100 text-emerald-700 border-0">Global</Badge>
+                  <h3 className="font-semibold text-slate-800">New Product Catalog</h3>
+                  <Badge className="text-[10px] bg-emerald-100 text-emerald-700 border-0">Create</Badge>
                 </div>
-                <p className="text-sm text-slate-500">Import product names, units, categories, cost prices, and retail prices. Works with QuickBooks exports.</p>
+                <p className="text-sm text-slate-500">Import a fresh catalog. New products are created. Existing names are flagged as duplicates so you can review before overwriting.</p>
                 <div className="flex items-center gap-2 mt-3 text-xs text-slate-400">
                   <Zap size={12} /> QuickBooks auto-detect
                 </div>
               </div>
               <ChevronRight size={18} className="text-slate-300 group-hover:text-[#1A4D2E] transition-colors mt-1" />
+            </div>
+          </button>
+
+          {/* Update Existing card */}
+          <button
+            onClick={() => { setImportType('products-update'); setStep('upload'); }}
+            className="group text-left p-6 rounded-xl border-2 border-slate-200 hover:border-amber-600 bg-white transition-all hover:shadow-sm"
+            data-testid="import-type-products-update"
+          >
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-lg bg-amber-50 flex items-center justify-center group-hover:bg-amber-100 transition-colors">
+                <RotateCcw size={22} className="text-amber-600" />
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="font-semibold text-slate-800">Update Existing Products</h3>
+                  <Badge className="text-[10px] bg-amber-100 text-amber-700 border-0">Merge</Badge>
+                </div>
+                <p className="text-sm text-slate-500">Match by Product Name and merge only the columns you map. Retail/Wholesale/Cost stay untouched if not mapped. Best for bulk price updates.</p>
+                <div className="flex items-center gap-2 mt-3 text-xs text-emerald-600">
+                  <CheckCircle size={12} /> Safe: unmapped fields preserved
+                </div>
+              </div>
+              <ChevronRight size={18} className="text-slate-300 group-hover:text-amber-600 transition-colors mt-1" />
             </div>
           </button>
 
@@ -278,7 +305,7 @@ export default function ImportPage() {
           </button>
 
           {/* Templates */}
-          <Card className="sm:col-span-2 border-slate-100 bg-slate-50">
+          <Card className="border-slate-100 bg-slate-50">
             <CardContent className="py-4 px-5">
               <div className="flex items-center justify-between flex-wrap gap-3">
                 <div>
@@ -303,8 +330,14 @@ export default function ImportPage() {
       {step === 'upload' && (
         <div className="space-y-4">
           <div className="flex items-center gap-3">
-            <Badge className={importType === 'products' ? 'bg-emerald-100 text-emerald-700 border-0' : 'bg-blue-100 text-blue-700 border-0'}>
-              {importType === 'products' ? 'Product Catalog' : 'Inventory Seed'}
+            <Badge className={
+              importType === 'products' ? 'bg-emerald-100 text-emerald-700 border-0'
+              : importType === 'products-update' ? 'bg-amber-100 text-amber-700 border-0'
+              : 'bg-blue-100 text-blue-700 border-0'
+            }>
+              {importType === 'products' ? 'New Product Catalog'
+                : importType === 'products-update' ? 'Update Existing Products'
+                : 'Inventory Seed'}
             </Badge>
             <span className="text-sm text-slate-500">Select your file below</span>
           </div>
@@ -476,9 +509,9 @@ export default function ImportPage() {
               data-testid="confirm-import-btn"
             >
               {loading ? (
-                <><div className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin mr-2" />Importing...</>
+                <><div className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin mr-2" />{importType === 'products-update' ? 'Updating...' : 'Importing...'}</>
               ) : (
-                <><Upload size={15} className="mr-2" />Import {parsed.total_rows} rows</>
+                <><Upload size={15} className="mr-2" />{importType === 'products-update' ? `Update ${parsed.total_rows} rows` : `Import ${parsed.total_rows} rows`}</>
               )}
             </Button>
           </div>
@@ -495,8 +528,8 @@ export default function ImportPage() {
                 <div className="flex items-center gap-3">
                   <CheckCircle size={24} className="text-emerald-600" />
                   <div>
-                    <div className="text-2xl font-bold text-emerald-800">{result.imported}</div>
-                    <div className="text-xs text-emerald-600">Successfully imported</div>
+                    <div className="text-2xl font-bold text-emerald-800">{result.imported ?? result.updated ?? 0}</div>
+                    <div className="text-xs text-emerald-600">{result.updated !== undefined ? 'Successfully updated' : 'Successfully imported'}</div>
                   </div>
                 </div>
               </CardContent>

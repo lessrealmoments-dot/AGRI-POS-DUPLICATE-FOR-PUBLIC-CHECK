@@ -22,6 +22,12 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### Update-Existing Mode + CSV Export + PWA Landing (2026-04-28) — Complete
+- **Update Existing Products import mode**: New endpoint `POST /api/import/products/update-existing` — matches every row by Product Name (case-insensitive), merges only mapped fields, reports unmatched rows. No duplicate-review step needed. New "Update Existing Products" card in `/import` (`import-type-products-update`) with amber styling.
+- **Products CSV export**: New endpoint `GET /api/products/export-csv` returns full catalog as CSV with import-compatible columns: `Product Name, SKU, Category, Unit, Description, Type, Cost Price, Reorder Point, Barcode, <Scheme> Price` per active scheme. New "Export CSV" button on `/products` (`export-products-btn`). Round-trip flow: Export → edit in Excel → Import via Update Existing mode → done.
+- **PWA landing fixed**: `manifest.json` `start_url` changed from `/terminal` to `/dashboard`. Renamed PWA from "AgriSmart Terminal" to "AgriBooks". Browser-installed app now opens to dashboard then routes by login. Dedicated APK still serves the cashier terminal.
+- **Tested**: `/app/backend/tests/test_update_existing_export_172.py` — 2/2 pass on live preview API. Update-existing correctly preserves retail+cost when only wholesale is mapped, and export returns 4 scheme columns (Retail/Wholesale/Special/Government).
+
 ### Import Overwrite Merge Fix (2026-04-28) — Complete
 - **Bug**: `POST /api/import/products/overwrite` was a broken no-op. Frontend sent `updates: {}` and backend ran `update_many` with empty `$set`. Clicking "Overwrite" did nothing useful — users couldn't bulk-update existing products from a CSV.
 - **Fix backend** (`routes/import_data.py`): Endpoint now accepts the file + mapping + product_ids (multipart). For each row whose name matches a selected product, MERGES only the mapped fields into the existing product. The `prices` map is merged (existing scheme keys preserved unless explicitly mapped). Auto-creates missing schemes from `*_price` mappings. Returns `{updated, not_matched, errors, schemes_auto_created}`.

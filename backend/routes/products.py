@@ -396,6 +396,63 @@ async def barcode_inventory_for_print(branch_id: str, user=Depends(get_current_u
 
 
 
+@router.get("/export-csv")
+async def export_products_csv(user=Depends(get_current_user)):
+    """
+    Export all active products as a CSV file with import-compatible columns.
+    The output can be edited in Excel and re-uploaded via /import (Update Existing mode)
+    to apply targeted bulk changes — perfect for migration cleanup.
+    """
+    check_perm(user, "products", "view")
+
+    import io
+    import csv as _csv
+    from fastapi.responses import StreamingResponse
+
+    schemes = await db.price_schemes.find({"active": True}, {"_id": 0, "key": 1, "name": 1}).to_list(50)
+    products = await db.products.find(
+        {"active": True}, {"_id": 0}
+    ).sort("name", 1).to_list(length=None)
+
+    # Header row
+    headers = [
+        "Product Name", "SKU", "Category", "Unit", "Description",
+        "Type", "Cost Price", "Reorder Point", "Barcode",
+    ]
+    # One column per active scheme — column header doubles as label and import-mapping hint
+    for s in schemes:
+        headers.append(f"{s['name']} Price")
+
+    buf = io.StringIO()
+    writer = _csv.writer(buf, quoting=_csv.QUOTE_MINIMAL)
+    writer.writerow(headers)
+
+    for p in products:
+        prices = p.get("prices") or {}
+        row = [
+            p.get("name", ""),
+            p.get("sku", ""),
+            p.get("category", ""),
+            p.get("unit", ""),
+            p.get("description", ""),
+            p.get("product_type", "stockable"),
+            p.get("cost_price", 0) or "",
+            p.get("reorder_point", 0) or "",
+            p.get("barcode", ""),
+        ]
+        for s in schemes:
+            v = prices.get(s["key"])
+            row.append(v if (v is not None and v != 0) else "")
+        writer.writerow(row)
+
+    buf.seek(0)
+    return StreamingResponse(
+        io.BytesIO(buf.getvalue().encode("utf-8-sig")),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=agribooks_products_{now_iso()[:10]}.csv"},
+    )
+
+
 @router.get("/categories")
 async def list_categories(user=Depends(get_current_user)):
     """Get all product categories — merges categories from existing products + manually defined ones."""

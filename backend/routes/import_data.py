@@ -515,6 +515,160 @@ async def overwrite_products(
     }
 
 
+@router.post("/products/update-existing")
+async def update_existing_products(
+    file: UploadFile = File(...),
+    mapping: str = Form(""),
+    user=Depends(get_current_user),
+):
+    """
+    Update Existing Products mode — match every row by Product Name and merge
+    only the mapped fields. Rows that don't match any existing product are
+    reported (NOT created). Use this for bulk migration cleanups where you
+    just want to update prices/SKUs/cost on existing data.
+    """
+    check_perm(user, "products", "edit")
+
+    import json
+    try:
+        col_map = json.loads(mapping) if mapping else {}
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid column mapping JSON")
+
+    if not col_map.get("name"):
+        raise HTTPException(status_code=400, detail="Column mapping must include 'name' field")
+
+    try:
+        content = await file.read()
+        rows = _read_file(content, file.filename)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Schemes — auto-create from any mapped *_price columns
+    schemes = await db.price_schemes.find({"active": True}, {"_id": 0}).to_list(50)
+    scheme_keys = {s["key"]: s["name"] for s in schemes}
+
+    mapped_scheme_keys = set()
+    for map_key in col_map:
+        if map_key.endswith("_price") and map_key != "cost_price" and col_map.get(map_key):
+            mapped_scheme_keys.add(map_key[: -len("_price")])
+
+    schemes_auto_created = []
+    for sk in mapped_scheme_keys:
+        if sk and sk not in scheme_keys:
+            new_scheme = {
+                "id": new_id(),
+                "name": sk.replace("_", " ").title(),
+                "key": sk,
+                "description": f"Auto-created during update-existing import on {now_iso()[:10]}",
+                "calculation_method": "fixed",
+                "calculation_value": 0.0,
+                "base_scheme": "cost_price",
+                "active": True,
+                "created_at": now_iso(),
+            }
+            await db.price_schemes.insert_one(new_scheme)
+            scheme_keys[sk] = new_scheme["name"]
+            schemes_auto_created.append({"key": sk, "name": new_scheme["name"]})
+
+    updated = 0
+    not_found = []
+    errors = []
+
+    for i, row in enumerate(rows, start=2):
+        try:
+            name = _safe_str(row.get(col_map["name"], ""))
+            if not name:
+                continue
+
+            existing = await db.products.find_one(
+                {"name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}, "active": True},
+                {"_id": 0},
+            )
+            if not existing:
+                not_found.append({"row": i, "name": name})
+                continue
+
+            update = {}
+            if col_map.get("sku") and col_map["sku"] in row:
+                v = _safe_str(row.get(col_map["sku"], ""))
+                if v:
+                    update["sku"] = v
+            if col_map.get("unit") and col_map["unit"] in row:
+                v = _safe_str(row.get(col_map["unit"], ""))
+                if v:
+                    update["unit"] = v
+                    update["unit_of_measurement"] = v
+            if col_map.get("category") and col_map["category"] in row:
+                v = _safe_str(row.get(col_map["category"], ""))
+                if v:
+                    update["category"] = v
+            if col_map.get("description") and col_map["description"] in row:
+                update["description"] = _safe_str(row.get(col_map["description"], ""))
+            if col_map.get("cost_price") and col_map["cost_price"] in row:
+                v = _safe_float(row.get(col_map["cost_price"], 0))
+                if v > 0:
+                    update["cost_price"] = v
+            if col_map.get("reorder_point") and col_map["reorder_point"] in row:
+                update["reorder_point"] = _safe_float(row.get(col_map["reorder_point"], 0))
+            if col_map.get("product_type") and col_map["product_type"] in row:
+                raw_type = _safe_str(row.get(col_map["product_type"], "")).lower()
+                if "service" in raw_type:
+                    update["product_type"] = "service"
+                elif raw_type:
+                    update["product_type"] = "stockable"
+
+            # MERGE prices map
+            new_prices = dict(existing.get("prices") or {})
+            prices_changed = False
+
+            if col_map.get("retail_price") and col_map["retail_price"] in row:
+                v = _safe_float(row.get(col_map["retail_price"], 0))
+                if v > 0 and new_prices.get("retail") != v:
+                    new_prices["retail"] = v
+                    prices_changed = True
+
+            for scheme_key in scheme_keys:
+                col = col_map.get(f"{scheme_key}_price", "")
+                if col and col in row:
+                    v = _safe_float(row.get(col, 0))
+                    if v > 0 and new_prices.get(scheme_key) != v:
+                        new_prices[scheme_key] = v
+                        prices_changed = True
+
+            for map_key, col in col_map.items():
+                if not map_key.endswith("_price") or map_key in ("cost_price", "retail_price"):
+                    continue
+                if not col or col not in row:
+                    continue
+                key = map_key[: -len("_price")]
+                v = _safe_float(row.get(col, 0))
+                if v > 0 and new_prices.get(key) != v:
+                    new_prices[key] = v
+                    prices_changed = True
+
+            if prices_changed:
+                update["prices"] = new_prices
+
+            if not update:
+                continue
+            update["updated_at"] = now_iso()
+            await db.products.update_one({"id": existing["id"]}, {"$set": update})
+            updated += 1
+
+        except Exception as e:
+            errors.append({"row": i, "name": _safe_str(row.get(col_map.get("name", ""), "")), "error": str(e)})
+
+    return {
+        "updated": updated,
+        "not_found": not_found,
+        "errors": errors,
+        "total_processed": len(rows),
+        "schemes_auto_created": schemes_auto_created,
+        "summary": f"Updated {updated} existing products. {len(not_found)} not found in system. {len(errors)} errors.",
+    }
+
+
 @router.post("/inventory-seed")
 async def import_inventory_seed(
     file: UploadFile = File(...),

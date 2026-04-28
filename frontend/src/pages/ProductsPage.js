@@ -9,7 +9,7 @@ import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Package, Plus, Pencil, Trash2, Search, Link2, ChevronRight, Eye, Upload, Zap, X, CheckCircle, XCircle, AlertTriangle, History, RefreshCw, Lock, ScanBarcode, Tag } from 'lucide-react';
+import { Package, Plus, Pencil, Trash2, Search, Link2, ChevronRight, Eye, Upload, Download, Zap, X, CheckCircle, XCircle, AlertTriangle, History, RefreshCw, Lock, ScanBarcode, Tag } from 'lucide-react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { formatPHP } from '../lib/utils';
@@ -37,6 +37,7 @@ export default function ProductsPage() {
   const [selected, setSelected] = useState(new Set());
   const [repackParentIds, setRepackParentIds] = useState(new Set()); // parents that have at least one repack
   const [repackConfirmParent, setRepackConfirmParent] = useState(null); // pending confirm dialog
+  const [exporting, setExporting] = useState(false);
   const LIMIT = 20;
 
   const [form, setForm] = useState({ sku: '', name: '', category: 'General', unit: 'Box', cost_price: 0, prices: {}, barcode: '', description: '', product_type: 'stockable', unit_of_measurement: 'Box' });
@@ -281,6 +282,25 @@ export default function ProductsPage() {
     api.get('/products/categories').then(r => setCategories(r.data)).catch(() => {});
   }, []);
 
+  const handleExportCsv = async () => {
+    setExporting(true);
+    try {
+      const res = await api.get('/products/export-csv', { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `agribooks_products_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success('Products exported');
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Export failed');
+    }
+    setExporting(false);
+  };
+
   // Load all repack parent IDs so we can show green/red indicator
   const refreshRepackIndicators = useCallback(async () => {
     try {
@@ -458,6 +478,9 @@ export default function ProductsPage() {
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => navigate('/import')} data-testid="go-to-import-btn">
             <Upload size={15} className="mr-1.5" /> Import
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleExportCsv} disabled={exporting} data-testid="export-products-btn">
+            <Download size={15} className="mr-1.5 text-slate-600" /> {exporting ? 'Exporting...' : 'Export CSV'}
           </Button>
           <Button variant="outline" size="sm" onClick={handleBulkGenerateBarcodes} disabled={barcodeGenerating} data-testid="bulk-barcode-btn">
             <ScanBarcode size={15} className="mr-1.5 text-blue-500" /> {barcodeGenerating ? 'Generating...' : 'Generate Barcodes'}

@@ -1,13 +1,13 @@
 {
-  "name": "AgriSmart Terminal",
-  "short_name": "AgriSmart",
-  "description": "AgriSmart POS Terminal — Sales, PO Check, Branch Transfers",
-  "start_url": "/terminal",
+  "name": "AgriBooks",
+  "short_name": "AgriBooks",
+  "description": "AgriBooks — Multi-branch POS, Inventory & Accounting",
+  "start_url": "/dashboard",
   "scope": "/",
   "display": "standalone",
   "background_color": "#1A4D2E",
   "theme_color": "#1A4D2E",
-  "orientation": "portrait",
+  "orientation": "any",
   "categories": ["business", "productivity"],
   "icons": [
     {
