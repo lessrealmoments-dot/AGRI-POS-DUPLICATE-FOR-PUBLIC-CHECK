@@ -7,7 +7,7 @@ import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Tags, Plus, Pencil, Trash2 } from 'lucide-react';
+import { Tags, Plus, Pencil, Trash2, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 
 const CALC_METHODS = [
@@ -51,6 +51,19 @@ export default function PriceSchemesPage() {
     catch { toast.error('Failed to delete'); }
   };
 
+  const handleRestoreDefaults = async () => {
+    if (!window.confirm('Restore the default Retail / Wholesale / Special schemes? Existing schemes are not modified.')) return;
+    try {
+      const res = await api.post('/price-schemes/restore-defaults');
+      const created = res.data?.created || [];
+      if (created.length === 0) toast.info('All default schemes already exist.');
+      else toast.success(`${created.length} scheme(s) restored: ${created.map(c => c.name).join(', ')}`);
+      fetchSchemes();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to restore defaults');
+    }
+  };
+
   return (
     <div className="space-y-6 animate-fadeIn" data-testid="price-schemes-page">
       <div className="flex items-center justify-between">
@@ -62,6 +75,30 @@ export default function PriceSchemesPage() {
           <Plus size={16} className="mr-2" /> Add Scheme
         </Button>
       </div>
+
+      {schemes.length < 3 && (
+        <Card className="border-amber-200 bg-amber-50">
+          <CardContent className="py-3 px-5 flex items-center justify-between gap-3">
+            <div className="text-sm">
+              <p className="font-medium text-amber-900">
+                {schemes.length === 0 ? 'No price schemes found.' : `Only ${schemes.length} scheme${schemes.length === 1 ? '' : 's'} configured.`}
+              </p>
+              <p className="text-amber-700 text-xs mt-0.5">
+                Restore the standard Retail / Wholesale / Special schemes to enable multi-tier pricing across Sales, Terminal, and Reports.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              data-testid="restore-default-schemes-btn"
+              onClick={handleRestoreDefaults}
+              className="border-amber-400 text-amber-800 hover:bg-amber-100 shrink-0"
+            >
+              <RotateCcw size={14} className="mr-2" /> Restore Defaults
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="border-slate-200">
         <CardContent className="p-0">

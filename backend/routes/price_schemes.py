@@ -56,6 +56,47 @@ async def update_price_scheme(scheme_id: str, data: dict, user=Depends(get_curre
     return scheme
 
 
+@router.post("/restore-defaults")
+async def restore_default_schemes(user=Depends(get_current_user)):
+    """
+    Idempotently ensure the standard Retail / Wholesale / Special schemes exist
+    for the current org. Use this after a Reset Company, or to recover from
+    accidental scheme deletion. Existing schemes are NOT modified.
+    """
+    check_perm(user, "price_schemes", "create")
+
+    DEFAULTS = [
+        {"name": "Retail",    "key": "retail",    "description": "Standard retail price",
+         "calculation_method": "percent_plus_capital", "calculation_value": 30, "base_scheme": "cost_price"},
+        {"name": "Wholesale", "key": "wholesale", "description": "Wholesale price",
+         "calculation_method": "percent_plus_capital", "calculation_value": 15, "base_scheme": "cost_price"},
+        {"name": "Special",   "key": "special",   "description": "Special customer price",
+         "calculation_method": "percent_minus_retail", "calculation_value": 10, "base_scheme": "retail"},
+    ]
+
+    created = []
+    for d in DEFAULTS:
+        existing = await db.price_schemes.find_one({"key": d["key"]}, {"_id": 0, "id": 1, "active": 1})
+        if existing and existing.get("active"):
+            continue
+        if existing and not existing.get("active"):
+            # Re-activate previously soft-deleted scheme
+            await db.price_schemes.update_one({"id": existing["id"]}, {"$set": {"active": True, "updated_at": now_iso()}})
+            created.append({"key": d["key"], "name": d["name"], "action": "reactivated"})
+            continue
+        scheme = {
+            "id": new_id(),
+            **d,
+            "calculation_value": float(d["calculation_value"]),
+            "active": True,
+            "created_at": now_iso(),
+        }
+        await db.price_schemes.insert_one(scheme)
+        created.append({"key": d["key"], "name": d["name"], "action": "created"})
+
+    return {"created": created, "total": len(created)}
+
+
 @router.delete("/{scheme_id}")
 async def delete_price_scheme(scheme_id: str, user=Depends(get_current_user)):
     """Soft delete a price scheme."""

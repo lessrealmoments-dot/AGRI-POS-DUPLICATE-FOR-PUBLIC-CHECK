@@ -8,7 +8,7 @@ import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { Warehouse, Search, AlertTriangle } from 'lucide-react';
+import { Search, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function InventoryPage() {
@@ -16,6 +16,7 @@ export default function InventoryPage() {
   const location = useLocation();
   const { currentBranch } = useAuth();
   const [items, setItems] = useState([]);
+  const [schemes, setSchemes] = useState([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState('');
   const [lowStock, setLowStock] = useState(false);
@@ -38,6 +39,9 @@ export default function InventoryPage() {
   // Re-fetch whenever user navigates to this page (location.key changes on every navigation)
   useEffect(() => { fetchInventory(); }, [location.key]); // eslint-disable-line
   useEffect(() => { fetchInventory(); }, [fetchInventory]);
+  useEffect(() => {
+    api.get('/price-schemes').then(r => setSchemes(r.data || [])).catch(() => {});
+  }, []);
 
   const totalPages = Math.ceil(total / LIMIT);
 
@@ -80,6 +84,9 @@ export default function InventoryPage() {
                 <TableHead className="text-xs uppercase tracking-wider text-slate-500 font-medium">Type</TableHead>
                 <TableHead className="text-xs uppercase tracking-wider text-slate-500 font-medium text-right">On Hand</TableHead>
                 <TableHead className="text-xs uppercase tracking-wider text-slate-500 font-medium text-right">Total (All)</TableHead>
+                {schemes.map(s => (
+                  <TableHead key={s.key} className="text-xs uppercase tracking-wider text-slate-500 font-medium text-right capitalize">{s.name}</TableHead>
+                ))}
                 <TableHead className="text-xs uppercase tracking-wider text-slate-500 font-medium">Status</TableHead>
               </TableRow>
             </TableHeader>
@@ -133,6 +140,11 @@ export default function InventoryPage() {
                       )}
                     </TableCell>
                     <TableCell className="text-right text-slate-500">{item.total_stock?.toFixed(2)}</TableCell>
+                    {schemes.map(s => (
+                      <TableCell key={s.key} className="text-right font-mono text-sm">
+                        {item.prices?.[s.key] > 0 ? formatPHP(item.prices[s.key]) : <span className="text-slate-300 text-xs">—</span>}
+                      </TableCell>
+                    ))}
                     <TableCell>
                       {isNegative ? <Badge className="bg-red-200 text-red-800 text-[10px]">Negative — Investigate</Badge>
                         : isOut ? <Badge className="bg-red-100 text-red-700 text-[10px]">Out of Stock</Badge>
@@ -143,7 +155,7 @@ export default function InventoryPage() {
                 );
               })}
               {!items.length && (
-                <TableRow><TableCell colSpan={7} className="text-center py-8 text-slate-400">No inventory data</TableCell></TableRow>
+                <TableRow><TableCell colSpan={7 + schemes.length} className="text-center py-8 text-slate-400">No inventory data</TableCell></TableRow>
               )}
             </TableBody>
           </Table>

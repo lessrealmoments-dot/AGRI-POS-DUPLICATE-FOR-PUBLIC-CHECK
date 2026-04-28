@@ -200,6 +200,31 @@ async def import_products(
     schemes = await db.price_schemes.find({"active": True}, {"_id": 0}).to_list(50)
     scheme_keys = {s["key"]: s["name"] for s in schemes}
 
+    # Discover which scheme keys the user mapped via *_price columns (e.g. wholesale_price, retail_price).
+    # We auto-create any missing schemes before importing so user-mapped prices are never silently dropped.
+    mapped_scheme_keys = set()
+    for map_key in col_map:
+        if map_key.endswith("_price") and map_key not in ("cost_price",) and col_map.get(map_key):
+            mapped_scheme_keys.add(map_key[:-len("_price")])  # strip "_price" → e.g. "wholesale"
+
+    schemes_auto_created = []
+    for sk in mapped_scheme_keys:
+        if sk and sk not in scheme_keys:
+            new_scheme = {
+                "id": new_id(),
+                "name": sk.replace("_", " ").title(),
+                "key": sk,
+                "description": f"Auto-created during import on {now_iso()[:10]}",
+                "calculation_method": "fixed",
+                "calculation_value": 0.0,
+                "base_scheme": "cost_price",
+                "active": True,
+                "created_at": now_iso(),
+            }
+            await db.price_schemes.insert_one(new_scheme)
+            scheme_keys[sk] = new_scheme["name"]
+            schemes_auto_created.append({"key": sk, "name": new_scheme["name"]})
+
     imported = 0
     skipped = []
     errors = []
@@ -240,6 +265,20 @@ async def import_products(
                     val = _safe_float(row.get(col_for_scheme, 0))
                     if val > 0:
                         prices[scheme_key] = val
+
+            # Defensive: also store any *_price column that the user mapped, even if its scheme
+            # wasn't auto-created above (e.g. exotic key, single-row imports). Never silently drop.
+            for map_key, col in col_map.items():
+                if not map_key.endswith("_price") or map_key in ("cost_price", "retail_price"):
+                    continue
+                if not col or col not in row:
+                    continue
+                key = map_key[:-len("_price")]
+                if key in prices:
+                    continue
+                val = _safe_float(row.get(col, 0))
+                if val > 0:
+                    prices[key] = val
 
             # Handle direct retail_price mapping (QB style)
             if col_map.get("retail_price") and col_map["retail_price"] in row:
@@ -305,6 +344,7 @@ async def import_products(
         "skipped": skipped,
         "errors": errors,
         "total_processed": len(rows),
+        "schemes_auto_created": schemes_auto_created,
         "summary": f"Imported {imported} products. {len(skipped)} skipped (duplicates). {len(errors)} errors.",
     }
 

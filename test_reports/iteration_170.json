@@ -1,0 +1,51 @@
+{
+  "summary": "Iteration 170: Tested wholesale-scheme restore + import auto-create + Inventory/Sales/PriceSchemes UI changes. All 5 backend tests PASS (100%). All 4 frontend feature points VERIFIED. Reset re-seed code-inspected (E2E blocked by TOTP+password gate).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/price-schemes/restore-defaults & list & delete", "issue": "Routes do NOT filter by organization_id (no org scope). However backups.reset_org_data inserts schemes WITH organization_id. This inconsistency means: in multi-tenant mode the global queries can leak/match other orgs' schemes by key. Pre-existing scope, not introduced by this fix, but worth noting since the new restore-defaults uses global key lookup (line 79: db.price_schemes.find_one({'key': d['key']})). For single-tenant deployments it's fine."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_price_schemes_import_170.py",
+    "/app/test_reports/pytest/pytest_price_schemes_170.xml"
+  ],
+  "action_items": [
+    "OPTIONAL/MINOR (multi-tenant hardening): scope all /price-schemes queries by organization_id (list, find_one in restore-defaults, delete, update). Currently global. The reset re-seed already sets organization_id correctly, but list/restore do not filter on it.",
+    "INFO: Reset re-seed E2E was NOT executed (blocked by required password+TOTP+confirmation gate as expected). The 3-scheme insert block at /app/backend/routes/backups.py lines 291-305 was code-inspected and is correct (insert_many of Retail/Wholesale/Special with organization_id, active=true, current timestamp)."
+  ],
+  "critical_code_review_comments": [
+    "POST /api/price-schemes/restore-defaults (lines 59-97): correctly handles 3 cases — already-active (skip), soft-deleted (reactivate via $set active:true), missing (insert). Idempotent. Returns {created:[{key,name,action}], total}. Permission check 'price_schemes.create' applied.",
+    "POST /api/import/products (lines 199-226): correctly auto-creates schemes from any *_price column mapping; new scheme has fixed/0 calculation as safe default; response includes schemes_auto_created list. Defensive secondary loop (lines 269-281) ensures even non-pre-created scheme keys still get prices stored — protects against silent data loss.",
+    "backups.py lines 291-305: insert_many of 3 default schemes WITH organization_id after wipe — correctly addresses Bug A.",
+    "InventoryPage.js: schemes fetched from /price-schemes, headers and cells rendered dynamically with colSpan handled (line 158: 7 + schemes.length). VERIFIED on UI: columns Retail/Special/Government/Wholesale all rendered.",
+    "PriceSchemesPage.js lines 79-101: amber banner shown only when schemes.length<3, with restore-default-schemes-btn data-testid. handleRestoreDefaults uses confirm + toast feedback. VERIFIED hidden at 4 schemes.",
+    "ImportPage.js lines 527-540: green panel rendered only when result.schemes_auto_created?.length > 0 — uses optional chaining defensively.",
+    "UnifiedSalesPage.js lines 1760-1764: amber 'Only N scheme — add more' shown when schemes.length<=1 with single-scheme-warning data-testid. VERIFIED hidden at 4 schemes.",
+    "POTENTIAL MULTI-TENANT LEAK: /price-schemes endpoints (GET, POST restore-defaults, DELETE, PUT) do NOT scope by user.organization_id. find_one({'key': d['key']}) in restore-defaults will match any org's scheme with that key. If app is multi-tenant in production, this is a HIGH severity issue. If single-tenant, no impact. Recommend adding org filters in a follow-up."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_price_schemes_import_170.py"
+  ],
+  "success_rate": {
+    "backend": "100% (5/5 tests passed)",
+    "frontend": "100% (4/4 feature points verified: PriceSchemes banner hidden at 4 schemes, SalesNew warning hidden at 4 schemes, Inventory dynamic columns rendered, restore-defaults idempotent path verified)"
+  },
+  "test_credentials": {
+    "used": "janmarkeahig@gmail.com / Aa@58798546521325 (super admin, no TOTP block on local preview)"
+  },
+  "seed_data_creation": "Tests created 2 TEST_ products (TEST_AutoWS_<ts>, TEST_RetailOnly_<ts>) and may have left soft-deleted+reactivated wholesale schemes. Cleanup not strictly required as test data is prefixed.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "All 7 plan items verified: (1) restore-defaults idempotent, total=0 when complete, reactivates soft-deleted schemes ✓; (2) reset re-seed code in backups.py is correct (E2E not run due to TOTP); (3) import auto-creates wholesale scheme + persists prices.wholesale on products ✓; (4) retail-only import has no regression ✓; (5) Inventory page dynamic scheme columns ✓; (6) PriceSchemes restore banner ✓; (7) ImportPage green notice + SalesNew amber warning ✓. The ONLY follow-up recommendation is adding organization_id scoping to /price-schemes routes for multi-tenant safety — it's not part of this fix scope but could cause cross-org issues at scale.",
+  "rca_of_the_issue": {
+    "bug_a_zero_schemes_after_reset": "reset_org_data wiped data including price_schemes but did not re-seed defaults. Fix: insert_many 3 schemes (Retail/Wholesale/Special) with org_id after wipe step.",
+    "bug_b_wholesale_dropped_on_import": "Old import code only iterated existing schemes. If wholesale scheme did not exist, the wholesale_price column was silently ignored. Fix: scan col_map for any '*_price' keys and auto-create missing schemes BEFORE the row loop. Defensive secondary loop also stores any *_price columns even if scheme creation was bypassed.",
+    "bug_c_inventory_no_scheme_columns": "InventoryPage.js had no schemes state. Fix: added useState/useEffect to fetch /price-schemes and dynamic <th>/<td> generation; colSpan corrected to 7+schemes.length."
+  }
+}

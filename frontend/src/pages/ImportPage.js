@@ -523,6 +523,25 @@ export default function ImportPage() {
             </Card>
           </div>
 
+          {/* Schemes auto-created notice */}
+          {result.schemes_auto_created?.length > 0 && (
+            <Card className="border-emerald-200 bg-emerald-50">
+              <CardContent className="py-3 px-5">
+                <div className="flex items-start gap-3">
+                  <Zap size={18} className="text-emerald-600 mt-0.5" />
+                  <div className="flex-1 text-sm">
+                    <p className="font-medium text-emerald-900">
+                      {result.schemes_auto_created.length} new price scheme{result.schemes_auto_created.length === 1 ? '' : 's'} auto-created from your file:
+                    </p>
+                    <p className="text-emerald-700 mt-0.5">
+                      {result.schemes_auto_created.map(s => s.name).join(', ')} — visit <span className="font-mono bg-emerald-100 px-1.5 py-0.5 rounded text-xs">Management → Price Schemes</span> to fine-tune calculation rules.
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Skipped / not found list */}
           {((result.skipped?.length > 0) || (result.not_found?.length > 0)) && (
             <Card className="border-amber-200">

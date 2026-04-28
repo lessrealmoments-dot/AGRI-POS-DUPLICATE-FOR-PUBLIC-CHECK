@@ -1757,6 +1757,11 @@ export default function UnifiedSalesPage() {
                     ))}
                   </SelectContent>
                 </Select>
+                {schemes.length <= 1 && (
+                  <p className="text-[10px] text-amber-600 mt-1 leading-tight" data-testid="single-scheme-warning">
+                    Only {schemes.length} scheme — <a href="/price-schemes" className="underline font-medium">add more</a>
+                  </p>
+                )}
               </div>
 
               {mode === 'order' && (

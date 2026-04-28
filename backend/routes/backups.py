@@ -288,6 +288,22 @@ async def reset_org_data(org_id: str, data: dict, user=Depends(get_current_user)
             result = await raw_db[coll_name].delete_many({"organization_id": org_id})
         total_deleted += result.deleted_count
 
+    # Step 2b: Re-seed default price schemes (Retail / Wholesale / Special)
+    # Reset must not leave the org without any pricing tiers — that breaks Sales/Terminal.
+    now_seed = now_iso()
+    default_schemes = [
+        {"id": new_id(), "name": "Retail", "key": "retail", "description": "Standard retail price",
+         "calculation_method": "percent_plus_capital", "calculation_value": 30,
+         "base_scheme": "cost_price", "active": True, "created_at": now_seed, "organization_id": org_id},
+        {"id": new_id(), "name": "Wholesale", "key": "wholesale", "description": "Wholesale price",
+         "calculation_method": "percent_plus_capital", "calculation_value": 15,
+         "base_scheme": "cost_price", "active": True, "created_at": now_seed, "organization_id": org_id},
+        {"id": new_id(), "name": "Special", "key": "special", "description": "Special customer price",
+         "calculation_method": "percent_minus_retail", "calculation_value": 10,
+         "base_scheme": "retail", "active": True, "created_at": now_seed, "organization_id": org_id},
+    ]
+    await raw_db.price_schemes.insert_many(default_schemes)
+
     # Step 3: Log the reset event
     await raw_db.audit_log.insert_one({
         "organization_id": org_id,
