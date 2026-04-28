@@ -22,6 +22,20 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### Multi-Tenant Data Integrity — Cross-Org Bleed Fix (2026-04-28) — Complete
+- **RCA (live)**: After Sibugay Agricultural Supply ran Reset Company, customer SMS started signing as "JND store" (another tenant). DB scan revealed 13 orphan `company_info` settings docs whose `organization_id` pointed to deleted orgs.
+  - Bug A: `routes/sms_hooks.py:get_company_name` fell back to ANY tenant's company_info if the org-scoped lookup failed → cross-tenant signature bleed.
+  - Bug B: `routes/sms.py:queue_sms` had the same fallback pattern on `sms_settings` (enable/disable trigger flags).
+  - Bug C: `routes/backups.py:reset_org_data` deleted the org's `settings`, `sms_templates`, `sms_settings` and only re-seeded `price_schemes` — leaving the door open for Bug A.
+- **Backend fixes**:
+  - `routes/sms_hooks.py`: `get_company_name` is now strictly org-scoped; falls back to the org's own `organizations.name` (immutable, same tenant) before returning empty. Never reads any other tenant's setting.
+  - `routes/sms.py:queue_sms`: removed the global `sms_settings` fallback (was bleed source). If no org-scoped trigger setting exists, default = enabled.
+  - `routes/backups.py:reset_org_data`: after wiping, re-seeds `company_info` (from the immutable `organizations` row) and `sms_templates` (from `DEFAULT_TEMPLATES`).
+  - `main.py` startup: one-shot orphan-settings sweep removes ghost docs across `settings`, `sms_settings`, `sms_templates`, `system_settings` whose `organization_id` no longer matches any organization. Idempotent and runs every boot.
+  - `routes/superadmin.py`: new `GET /api/superadmin/integrity-audit` (lists orgs missing `company_info` and orphan-doc counts per collection) and `POST /api/superadmin/integrity-audit/sweep` (manual sweep, refuses when 0 orgs exist as a safety guard).
+- **Cleanup performed on this DB**: 13 orphan `company_info` docs removed by the boot sweep.
+- **Verified**: `pytest tests/test_multitenant_integrity_175.py` (4/4 pass) — bleed prevented, fallback to own org name works, sweep removes planted ghosts, audit endpoint reports clean.
+
 ### Terminal Credit-Sale Duplicate Prevention + Signature-First Sequence (2026-04-28) — Complete
 - **RCA**: On the live VPS, SI-MB-001003 produced #104 + #105 from one click on a slow PC; earlier 001000/001001 had the same pattern. The cashier also reported that "Transaction Recorded Successfully" fired BEFORE a signature was captured for credit sales — wrong legal sequence.
   - Root cause #1: Terminal generated a per-attempt UUID and put it in `id`, but the backend's `check_idempotency` looked at `idempotency_key` which Terminal **never sent**. Dedupe was dead-code; lag-induced retries created sibling invoices.

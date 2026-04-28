@@ -55,17 +55,27 @@ async def _resolve_org_id(branch_id: str) -> str:
 
 
 async def get_company_name(organization_id: str = "") -> str:
-    """Get business name — org-scoped first, fallback to any company_info setting."""
-    biz = None
-    if organization_id:
-        biz = await raw_db.settings.find_one(
-            {"key": "company_info", "organization_id": organization_id}, {"_id": 0}
-        )
-    if not biz:
-        biz = await raw_db.settings.find_one({"key": "company_info"}, {"_id": 0})
-    if not biz:
-        return "AgriBooks"
-    return biz.get("value", {}).get("name", "AgriBooks")
+    """Get business name strictly scoped to this organization.
+
+    NEVER falls back to a different tenant's company_info — that caused live cross-org
+    bleed (a Sibugay reset → SMS signed as 'JND store'). If the org-scoped lookup
+    fails, we additionally try the immutable organizations.name as a safe last resort
+    BEFORE giving up. Returns '' on miss — caller must handle the empty case
+    (existing code skips the signature when name is empty).
+    """
+    if not organization_id:
+        return ""
+    biz = await raw_db.settings.find_one(
+        {"key": "company_info", "organization_id": organization_id}, {"_id": 0}
+    )
+    if biz:
+        return biz.get("value", {}).get("name", "")
+    # Settings doc missing (e.g. post-reset before re-seed) — read the immutable
+    # organizations.name. Same tenant, so no bleed risk.
+    org = await raw_db.organizations.find_one(
+        {"id": organization_id}, {"_id": 0, "name": 1}
+    )
+    return (org or {}).get("name", "") if org else ""
 
 
 async def get_branch_name(branch_id: str) -> str:

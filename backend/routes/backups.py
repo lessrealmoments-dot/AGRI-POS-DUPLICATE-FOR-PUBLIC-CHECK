@@ -304,6 +304,44 @@ async def reset_org_data(org_id: str, data: dict, user=Depends(get_current_user)
     ]
     await raw_db.price_schemes.insert_many(default_schemes)
 
+    # Step 2c: Re-seed `company_info` from the immutable organizations row.
+    # If we don't, the SMS/print signature lookup falls back to '' and (historically)
+    # bled to another tenant's company_info — see RCA for "JND store" leak.
+    org_full = await raw_db.organizations.find_one({"id": org_id}, {"_id": 0}) or {}
+    await raw_db.settings.insert_one({
+        "key": "company_info",
+        "organization_id": org_id,
+        "value": {
+            "name": org_full.get("name", "") or org_name,
+            "email": org_full.get("email", ""),
+            "phone": org_full.get("phone", ""),
+            "currency": "PHP",
+            "date_format": "MM/DD/YYYY",
+        },
+        "updated_at": now_seed,
+    })
+
+    # Step 2d: Re-seed SMS templates so post-reset orgs can still send messages.
+    # Templates live globally as "DEFAULT_TEMPLATES" in routes/sms.py — copy each
+    # missing one into this org. Safe even if some still survived (idempotent).
+    try:
+        from routes.sms import DEFAULT_TEMPLATES
+        existing_keys = {
+            d["key"] async for d in raw_db.sms_templates.find(
+                {"organization_id": org_id}, {"_id": 0, "key": 1}
+            )
+        }
+        missing_tpls = [
+            {**t, "id": new_id(), "organization_id": org_id,
+             "created_at": now_seed, "updated_at": now_seed}
+            for t in DEFAULT_TEMPLATES if t["key"] not in existing_keys
+        ]
+        if missing_tpls:
+            await raw_db.sms_templates.insert_many(missing_tpls)
+    except Exception as tpl_err:
+        import logging
+        logging.getLogger("reset").error(f"sms_templates re-seed failed: {tpl_err}")
+
     # Step 3: Log the reset event
     await raw_db.audit_log.insert_one({
         "organization_id": org_id,

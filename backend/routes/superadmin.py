@@ -916,3 +916,75 @@ async def restore_from_upload(
         org_doc=org_doc,
         restored_by=user.get("email", "super_admin"),
     )
+
+
+# ── Multi-Tenant Integrity Audit ──────────────────────────────────────────────
+
+@router.get("/integrity-audit")
+async def multitenant_integrity_audit(user=Depends(require_super_admin)):
+    """
+    Detect cross-tenant drift and orphan settings.
+
+    Returns a per-collection breakdown of:
+      - orgs_missing_company_info: orgs that have no company_info setting
+        (their SMS/print signature would silently fall back / read empty)
+      - orphan_docs: docs whose organization_id no longer matches any org
+        (these were the source of the live "JND store" bleed before sweep)
+    """
+    live_org_ids = {
+        o["id"] async for o in _raw_db.organizations.find({}, {"_id": 0, "id": 1})
+    }
+
+    # Orgs missing company_info
+    missing_company_info = []
+    async for o in _raw_db.organizations.find({}, {"_id": 0, "id": 1, "name": 1}):
+        has = await _raw_db.settings.count_documents(
+            {"key": "company_info", "organization_id": o["id"]}
+        )
+        if has == 0:
+            missing_company_info.append({"org_id": o["id"], "org_name": o.get("name", "")})
+
+    # Orphan settings across critical collections
+    orphan_breakdown = {}
+    for coll in ("settings", "sms_settings", "sms_templates", "system_settings"):
+        cnt = await _raw_db[coll].count_documents(
+            {"organization_id": {"$exists": True, "$nin": list(live_org_ids)}}
+        )
+        if cnt:
+            orphan_breakdown[coll] = cnt
+
+    return {
+        "live_org_count": len(live_org_ids),
+        "orgs_missing_company_info": missing_company_info,
+        "orphan_docs": orphan_breakdown,
+        "checked_at": now_iso(),
+    }
+
+
+@router.post("/integrity-audit/sweep")
+async def multitenant_integrity_sweep(user=Depends(require_super_admin)):
+    """
+    Manually trigger the orphan-settings sweep (also runs automatically on boot).
+    Removes settings docs whose organization_id no longer matches any organization.
+    Idempotent and safe — never touches docs belonging to active orgs.
+    """
+    live_org_ids = {
+        o["id"] async for o in _raw_db.organizations.find({}, {"_id": 0, "id": 1})
+    }
+    if not live_org_ids:
+        raise HTTPException(status_code=400, detail="No organizations exist — sweep aborted as a safety guard.")
+
+    deleted = {}
+    for coll in ("settings", "sms_settings", "sms_templates", "system_settings"):
+        res = await _raw_db[coll].delete_many(
+            {"organization_id": {"$exists": True, "$nin": list(live_org_ids)}}
+        )
+        if res.deleted_count:
+            deleted[coll] = res.deleted_count
+
+    return {
+        "message": "Orphan-settings sweep complete",
+        "deleted": deleted,
+        "total": sum(deleted.values()),
+        "swept_at": now_iso(),
+    }

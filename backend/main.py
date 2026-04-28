@@ -408,6 +408,29 @@ async def startup():
     if provisioned:
         logger.info("Wallet provisioning complete — %d branches checked", provisioned)
 
+    # ── One-shot orphan-settings sweep ────────────────────────────────────────
+    # Settings docs whose organization_id no longer matches any organization are
+    # the source of cross-tenant `company_info` bleed (live: "JND store" appearing
+    # on Sibugay's SMS). Sweep silently on every boot — idempotent and only
+    # touches settings docs that point to deleted orgs.
+    try:
+        live_org_ids = {
+            o["id"] async for o in _raw_db.organizations.find({}, {"_id": 0, "id": 1})
+        }
+        if live_org_ids:
+            orphan_q = {
+                "organization_id": {"$exists": True, "$nin": list(live_org_ids)}
+            }
+            for coll in ("settings", "sms_settings", "sms_templates", "system_settings"):
+                res = await _raw_db[coll].delete_many(orphan_q)
+                if res.deleted_count:
+                    logger.warning(
+                        "Orphan-settings sweep: removed %d ghost docs from %s",
+                        res.deleted_count, coll,
+                    )
+    except Exception as sweep_err:
+        logger.error("Orphan-settings sweep failed (non-fatal): %s", sweep_err)
+
     # ── Daily backup scheduler ────────────────────────────────────────────────
     from services.backup_service import create_backup, delete_old_local_backups
     db_name = os.environ.get("DB_NAME", "agripos_production")

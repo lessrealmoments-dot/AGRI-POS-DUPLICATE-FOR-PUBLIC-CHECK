@@ -314,13 +314,14 @@ async def queue_sms(
     if not template or not template.get("active", True):
         return None
 
-    # Check per-trigger setting — org-scoped first, fallback to global
+    # Check per-trigger setting — STRICTLY org-scoped to prevent cross-org bleed.
+    # Previously this fell back to ANY org's sms_settings if the scoped lookup
+    # failed; that caused another tenant's enable/disable flags to be honored
+    # for this org. Now: if no org-scoped setting exists, default to enabled.
     setting = None
     base_setting_query = {"trigger_key": template_key, "$or": [{"branch_id": branch_id}, {"branch_id": None}, {"branch_id": ""}]}
     if organization_id:
         setting = await _raw_db.sms_settings.find_one({**base_setting_query, "organization_id": organization_id}, {"_id": 0})
-    if not setting:
-        setting = await _raw_db.sms_settings.find_one(base_setting_query, {"_id": 0})
     if setting and not setting.get("enabled", True):
         return None
 
