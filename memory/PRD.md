@@ -22,6 +22,22 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### Branch Stock+Price Import & Customer Import w/ Smart Dupe Detection (2026-04-29) — Complete
+- **Why**: User opening a second branch needed a way to bulk-load per-branch prices/stock without nuking the global catalog, and to migrate customers (with credit limits + opening balances) cleanly. Previously, "Update Existing" overwrote the global `product.prices` (affecting ALL branches) and there was no customer importer.
+- **Backend** (`routes/import_data.py`):
+  - `POST /api/import/branch-stock-and-price` (preview/commit modes). Matches by name against global catalog. Writes to `branch_prices` + `inventory` only — never touches `product.prices`. Empty price cells → SKIPPED (preserves global fallback). Empty quantity cells → set to 0. Admin PIN required for non-admins.
+  - `POST /api/import/customers/preview` — analyzes file, classifies into `auto_create` / `exact_dupe` (auto-skipped) / `fuzzy` (needs review) / `errors`. Fuzzy uses token-sorted SequenceMatcher ≥ 0.85 + last-9-digit phone match. Skips pairs the user previously declared "distinct".
+  - `POST /api/import/customers/commit` — accepts user decisions (`merge` / `create` / `skip` / `skip_and_remember`). For each row with `opening_balance > 0`, creates a real invoice flagged `is_opening_balance: True`, payment_type=`credit`, status=`open`, dated to user-chosen migration date — flows through AR aging, customer ledger, closing wizard like any credit sale. Idempotent: re-imports don't duplicate the OB invoice. Triggers one-time SMS via new `opening_balance_notice` template (dedup_key per customer+phone). Persists "skip & remember" decisions in new `customer_import_decisions` collection.
+  - New CSV templates: `/api/import/template/branch-stock-and-price`, `/api/import/template/customers`.
+- **SMS** (`routes/sms.py`): added `opening_balance_notice` to `DEFAULT_TEMPLATES`. `_ensure_templates()` is called at import time so existing tenants get the new template auto-seeded without manual intervention.
+- **Frontend** (`pages/ImportPage.js`):
+  - 2 new type cards: Branch Stock+Price (purple) and Customers (rose).
+  - 4 template download buttons.
+  - New "Review" preview step for both new types (5-step flow: Type → Upload → Map → Review → Results).
+  - Customer fuzzy review UI: side-by-side comparison + 4 decision buttons per row (Merge / Create as new / Skip / Skip & Remember).
+  - Branch picker + admin PIN + opening-balance date inputs for branch-scoped imports.
+- **Tests** (`backend/tests/test_branch_stock_price_import_182.py` + `test_customer_import_183.py`): 10 passing pytests covering empty-cell rules, global price isolation, cross-branch isolation, preview-doesn't-write, duplicate detection (exact + fuzzy), merge flow, skip-and-remember persistence, and OB idempotency.
+
 ### Super-Admin Tenant Impersonation ("View as Tenant") (2026-04-29) — Complete
 - **Why**: After the iter 180 privacy fix, super admin sees nothing tenant-side (correct). To legitimately help a customer (debug pricing, fix data), super admin needs an explicit, audited way in. This is the other half of the privacy story.
 - **Backend** (`routes/superadmin.py`):

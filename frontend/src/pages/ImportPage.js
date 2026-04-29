@@ -6,12 +6,12 @@ import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Progress } from '../components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import {
   Upload, FileSpreadsheet, CheckCircle, XCircle, AlertTriangle,
-  Download, ChevronRight, RotateCcw, Zap, Package, Warehouse,
-} from 'lucide-react';import { toast } from 'sonner';
+  Download, ChevronRight, RotateCcw, Zap, Package, Warehouse, Store, Users,
+} from 'lucide-react';
+import { toast } from 'sonner';
 
 // ── System field definitions per import type ─────────────────────────────────
 const PRODUCT_FIELDS = [
@@ -30,6 +30,27 @@ const PRODUCT_FIELDS = [
 const INVENTORY_FIELDS = [
   { key: 'name',     label: 'Product Name (must match system exactly)', required: true  },
   { key: 'quantity', label: 'Quantity',                                  required: true  },
+];
+
+const BRANCH_STOCK_PRICE_FIELDS = [
+  { key: 'name',           label: 'Product Name (must match catalog)', required: true  },
+  { key: 'cost_price',     label: 'Cost / Capital Price',              required: false },
+  { key: 'retail_price',   label: 'Retail Price',                      required: false },
+  { key: 'wholesale_price',label: 'Wholesale Price',                   required: false },
+  { key: 'quantity',       label: 'Quantity (empty = 0)',              required: false },
+];
+
+const CUSTOMER_FIELDS = [
+  { key: 'name',            label: 'Customer Name',          required: true  },
+  { key: 'phone',           label: 'Phone',                  required: false },
+  { key: 'phone2',          label: 'Phone 2',                required: false },
+  { key: 'email',           label: 'Email',                  required: false },
+  { key: 'address',         label: 'Address',                required: false },
+  { key: 'price_scheme',    label: 'Price Scheme (retail/wholesale)', required: false },
+  { key: 'credit_limit',    label: 'Credit Limit',           required: false },
+  { key: 'interest_rate',   label: 'Interest Rate (%)',      required: false },
+  { key: 'grace_period',    label: 'Grace Period (days)',    required: false },
+  { key: 'opening_balance', label: 'Opening Balance',        required: false },
 ];
 
 // ── Column presets ────────────────────────────────────────────────────────────
@@ -65,8 +86,9 @@ const Connector = () => <div className="w-8 h-px bg-slate-200 mx-1" />;
 export default function ImportPage() {
   const { currentBranch, branches, hasPerm } = useAuth();
 
-  const [importType, setImportType] = useState('products');   // products | products-update | inventory-seed
-  const [step, setStep] = useState('type');                    // type | upload | map | result
+  // importType: products | products-update | inventory-seed | branch-stock-price | customers
+  const [importType, setImportType] = useState('products');
+  const [step, setStep] = useState('type');                    // type | upload | map | preview | result
   const [file, setFile] = useState(null);
   const [parsed, setParsed] = useState(null);                  // { headers, sample_rows, total_rows }
   const [mapping, setMapping] = useState({});
@@ -76,9 +98,19 @@ export default function ImportPage() {
   const [loading, setLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [overwriteIds, setOverwriteIds] = useState(new Set());
+  const [previewData, setPreviewData] = useState(null);        // for branch & customer preview
+  const [decisions, setDecisions] = useState({});              // {row: {action, target_id}} for fuzzy customer matches
+  const [openingBalanceDate, setOpeningBalanceDate] = useState(new Date().toISOString().slice(0, 10));
   const fileRef = useRef(null);
 
-  const fields = importType === 'inventory-seed' ? INVENTORY_FIELDS : PRODUCT_FIELDS;
+  const fields =
+    importType === 'inventory-seed'      ? INVENTORY_FIELDS
+    : importType === 'branch-stock-price'? BRANCH_STOCK_PRICE_FIELDS
+    : importType === 'customers'         ? CUSTOMER_FIELDS
+    : PRODUCT_FIELDS;
+  const branchScoped = ['inventory-seed', 'branch-stock-price', 'customers'].includes(importType);
+  const needsPin = ['inventory-seed', 'branch-stock-price'].includes(importType);
+  const hasPreviewStep = ['branch-stock-price', 'customers'].includes(importType);
 
   // ── File handling ────────────────────────────────────────────────────────
   const handleFile = useCallback(async (f) => {
@@ -118,10 +150,18 @@ export default function ImportPage() {
     if (f) handleFile(f);
   };
 
-  // ── Import ───────────────────────────────────────────────────────────────
+  // ── Import / Preview ─────────────────────────────────────────────────────
   const handleImport = async () => {
     if (!file || !mapping[fields.find(f => f.required)?.key]) {
       toast.error('Please map the required fields first');
+      return;
+    }
+    if (branchScoped && !(branchId || currentBranch?.id)) {
+      toast.error('Please select a target branch');
+      return;
+    }
+    if (needsPin && !pin) {
+      toast.error('Admin PIN is required');
       return;
     }
     setLoading(true);
@@ -129,20 +169,73 @@ export default function ImportPage() {
       const fd = new FormData();
       fd.append('file', file);
       fd.append('mapping', JSON.stringify(mapping));
-      if (importType === 'inventory-seed') {
-        fd.append('branch_id', branchId || currentBranch?.id || '');
+      const useBranch = branchId || currentBranch?.id || '';
+
+      if (importType === 'branch-stock-price') {
+        fd.append('branch_id', useBranch);
         fd.append('pin', pin);
+        fd.append('mode', 'preview');
+        const res = await api.post('/import/branch-stock-and-price', fd);
+        setPreviewData(res.data);
+        setStep('preview');
+      } else if (importType === 'customers') {
+        fd.append('branch_id', useBranch);
+        const res = await api.post('/import/customers/preview', fd);
+        setPreviewData(res.data);
+        // Init default decision for each fuzzy row = "skip" until user picks
+        const init = {};
+        (res.data.fuzzy || []).forEach(f => { init[f.row] = { action: 'skip' }; });
+        setDecisions(init);
+        setStep('preview');
+      } else {
+        if (importType === 'inventory-seed') {
+          fd.append('branch_id', useBranch);
+          fd.append('pin', pin);
+        }
+        const endpoint = importType === 'inventory-seed'
+          ? '/import/inventory-seed'
+          : importType === 'products-update'
+            ? '/import/products/update-existing'
+            : '/import/products';
+        const res = await api.post(endpoint, fd);
+        setResult(res.data);
+        setStep('result');
       }
-      const endpoint = importType === 'inventory-seed'
-        ? '/import/inventory-seed'
-        : importType === 'products-update'
-          ? '/import/products/update-existing'
-          : '/import/products';
-      const res = await api.post(endpoint, fd);
-      setResult(res.data);
-      setStep('result');
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Import failed');
+    }
+    setLoading(false);
+  };
+
+  // ── Commit after preview (branch-stock-price + customers) ────────────────
+  const commitAfterPreview = async () => {
+    if (!file) return;
+    setLoading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('mapping', JSON.stringify(mapping));
+      const useBranch = branchId || currentBranch?.id || '';
+      fd.append('branch_id', useBranch);
+
+      if (importType === 'branch-stock-price') {
+        fd.append('pin', pin);
+        fd.append('mode', 'commit');
+        const res = await api.post('/import/branch-stock-and-price', fd);
+        setResult(res.data);
+      } else {
+        // customers commit
+        const decisionList = Object.entries(decisions).map(([row, d]) => ({
+          row: parseInt(row, 10), ...d,
+        }));
+        fd.append('decisions', JSON.stringify(decisionList));
+        fd.append('opening_balance_date', openingBalanceDate);
+        const res = await api.post('/import/customers/commit', fd);
+        setResult(res.data);
+      }
+      setStep('result');
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Commit failed');
     }
     setLoading(false);
   };
@@ -183,6 +276,7 @@ export default function ImportPage() {
     setFile(null); setParsed(null); setMapping({});
     setResult(null); setPin(''); setStep('type');
     setOverwriteIds(new Set());
+    setPreviewData(null); setDecisions({});
   };
 
   // ── Download template ────────────────────────────────────────────────────
@@ -221,11 +315,17 @@ export default function ImportPage() {
         <div className="flex items-center gap-1 py-2">
           <StepDot num={1} label="Type" done={true} />
           <Connector />
-          <StepDot num={2} label="Upload" active={step === 'upload'} done={['map','result'].includes(step)} />
+          <StepDot num={2} label="Upload" active={step === 'upload'} done={['map','preview','result'].includes(step)} />
           <Connector />
-          <StepDot num={3} label="Map Columns" active={step === 'map'} done={step === 'result'} />
+          <StepDot num={3} label="Map Columns" active={step === 'map'} done={['preview','result'].includes(step)} />
+          {hasPreviewStep && (
+            <>
+              <Connector />
+              <StepDot num={4} label="Review" active={step === 'preview'} done={step === 'result'} />
+            </>
+          )}
           <Connector />
-          <StepDot num={4} label="Results" active={step === 'result'} done={false} />
+          <StepDot num={hasPreviewStep ? 5 : 4} label="Results" active={step === 'result'} done={false} />
         </div>
       )}
 
@@ -304,6 +404,54 @@ export default function ImportPage() {
             </div>
           </button>
 
+          {/* Branch Stock + Price card */}
+          <button
+            onClick={() => { setImportType('branch-stock-price'); setStep('upload'); }}
+            className="group text-left p-6 rounded-xl border-2 border-slate-200 hover:border-purple-600 bg-white transition-all hover:shadow-sm"
+            data-testid="import-type-branch-stock-price"
+          >
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-lg bg-purple-50 flex items-center justify-center group-hover:bg-purple-100 transition-colors">
+                <Store size={22} className="text-purple-600" />
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="font-semibold text-slate-800">Branch Stock + Price</h3>
+                  <Badge className="text-[10px] bg-purple-100 text-purple-700 border-0">Branch</Badge>
+                </div>
+                <p className="text-sm text-slate-500">Upload a per-branch CSV with cost, retail/wholesale prices, AND quantity. Matches against the global catalog. Never affects other branches.</p>
+                <div className="flex items-center gap-2 mt-3 text-xs text-emerald-600">
+                  <CheckCircle size={12} /> Safe: main branch untouched
+                </div>
+              </div>
+              <ChevronRight size={18} className="text-slate-300 group-hover:text-purple-600 transition-colors mt-1" />
+            </div>
+          </button>
+
+          {/* Customers card */}
+          <button
+            onClick={() => { setImportType('customers'); setStep('upload'); }}
+            className="group text-left p-6 rounded-xl border-2 border-slate-200 hover:border-rose-600 bg-white transition-all hover:shadow-sm"
+            data-testid="import-type-customers"
+          >
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-lg bg-rose-50 flex items-center justify-center group-hover:bg-rose-100 transition-colors">
+                <Users size={22} className="text-rose-600" />
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="font-semibold text-slate-800">Customers</h3>
+                  <Badge className="text-[10px] bg-rose-100 text-rose-700 border-0">Branch</Badge>
+                </div>
+                <p className="text-sm text-slate-500">Bulk-import customers with credit limits + opening balances. Smart duplicate detection (fuzzy match) lets you merge or split.</p>
+                <div className="flex items-center gap-2 mt-3 text-xs text-amber-500">
+                  <AlertTriangle size={12} /> Sends one-time SMS for opening balances
+                </div>
+              </div>
+              <ChevronRight size={18} className="text-slate-300 group-hover:text-rose-600 transition-colors mt-1" />
+            </div>
+          </button>
+
           {/* Templates */}
           <Card className="border-slate-100 bg-slate-50">
             <CardContent className="py-4 px-5">
@@ -312,12 +460,18 @@ export default function ImportPage() {
                   <p className="text-sm font-medium text-slate-700">Download Templates</p>
                   <p className="text-xs text-slate-500">Use these CSV templates to fill in data with the correct columns</p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   <Button variant="outline" size="sm" onClick={() => downloadTemplate('products')}>
-                    <Download size={13} className="mr-1.5" /> Product Template
+                    <Download size={13} className="mr-1.5" /> Products
                   </Button>
                   <Button variant="outline" size="sm" onClick={() => downloadTemplate('inventory-seed')}>
-                    <Download size={13} className="mr-1.5" /> Inventory Template
+                    <Download size={13} className="mr-1.5" /> Inventory
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => downloadTemplate('branch-stock-and-price')}>
+                    <Download size={13} className="mr-1.5" /> Branch Setup
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => downloadTemplate('customers')}>
+                    <Download size={13} className="mr-1.5" /> Customers
                   </Button>
                 </div>
               </div>
@@ -333,10 +487,14 @@ export default function ImportPage() {
             <Badge className={
               importType === 'products' ? 'bg-emerald-100 text-emerald-700 border-0'
               : importType === 'products-update' ? 'bg-amber-100 text-amber-700 border-0'
+              : importType === 'branch-stock-price' ? 'bg-purple-100 text-purple-700 border-0'
+              : importType === 'customers' ? 'bg-rose-100 text-rose-700 border-0'
               : 'bg-blue-100 text-blue-700 border-0'
             }>
               {importType === 'products' ? 'New Product Catalog'
                 : importType === 'products-update' ? 'Update Existing Products'
+                : importType === 'branch-stock-price' ? 'Branch Stock + Price'
+                : importType === 'customers' ? 'Customers'
                 : 'Inventory Seed'}
             </Badge>
             <span className="text-sm text-slate-500">Select your file below</span>
@@ -453,23 +611,34 @@ export default function ImportPage() {
             </CardContent>
           </Card>
 
-          {/* Inventory seed extras */}
-          {importType === 'inventory-seed' && (
-            <div className="grid sm:grid-cols-2 gap-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+          {/* Branch-scoped extras (branch picker + optional PIN + opening balance date) */}
+          {branchScoped && (
+            <div className={`grid sm:grid-cols-${importType === 'customers' ? '2' : '2'} gap-4 p-4 ${importType === 'customers' ? 'bg-rose-50 border-rose-200' : importType === 'branch-stock-price' ? 'bg-purple-50 border-purple-200' : 'bg-amber-50 border-amber-200'} border rounded-lg`}>
               <div>
                 <label className="text-sm font-medium mb-1.5 block">Target Branch <span className="text-red-500">*</span></label>
                 <Select value={branchId || currentBranch?.id || ''} onValueChange={setBranchId}>
-                  <SelectTrigger className="h-9"><SelectValue placeholder="Select branch" /></SelectTrigger>
+                  <SelectTrigger className="h-9" data-testid="branch-picker"><SelectValue placeholder="Select branch" /></SelectTrigger>
                   <SelectContent>
                     {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
-              <div>
-                <label className="text-sm font-medium mb-1.5 block">Admin PIN <span className="text-red-500">*</span></label>
-                <Input type="password" autoComplete="new-password" value={pin} onChange={e => setPin(e.target.value)}
-                  placeholder="Enter admin PIN" className="h-9" maxLength={6} />
-              </div>
+              {needsPin && (
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Admin PIN <span className="text-red-500">*</span></label>
+                  <Input type="password" autoComplete="new-password" value={pin} onChange={e => setPin(e.target.value)}
+                    placeholder="Enter admin PIN" className="h-9" maxLength={6} data-testid="admin-pin-input" />
+                </div>
+              )}
+              {importType === 'customers' && (
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Opening Balance Date</label>
+                  <Input type="date" value={openingBalanceDate}
+                    onChange={e => setOpeningBalanceDate(e.target.value)}
+                    className="h-9" data-testid="opening-balance-date" />
+                  <p className="text-[11px] text-slate-500 mt-1">All migrated balances will be invoiced as of this date.</p>
+                </div>
+              )}
             </div>
           )}
 
@@ -509,9 +678,233 @@ export default function ImportPage() {
               data-testid="confirm-import-btn"
             >
               {loading ? (
-                <><div className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin mr-2" />{importType === 'products-update' ? 'Updating...' : 'Importing...'}</>
+                <><div className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin mr-2" />{hasPreviewStep ? 'Analyzing...' : importType === 'products-update' ? 'Updating...' : 'Importing...'}</>
               ) : (
-                <><Upload size={15} className="mr-2" />{importType === 'products-update' ? `Update ${parsed.total_rows} rows` : `Import ${parsed.total_rows} rows`}</>
+                <><Upload size={15} className="mr-2" />{
+                  hasPreviewStep ? `Preview ${parsed.total_rows} rows`
+                  : importType === 'products-update' ? `Update ${parsed.total_rows} rows`
+                  : `Import ${parsed.total_rows} rows`
+                }</>
+              )}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* ── STEP: Preview (Branch Stock+Price + Customers) ── */}
+      {step === 'preview' && previewData && (
+        <div className="space-y-5" data-testid="preview-step">
+          {/* Summary banner */}
+          <Card className={importType === 'branch-stock-price' ? 'border-purple-200 bg-purple-50' : 'border-rose-200 bg-rose-50'}>
+            <CardContent className="py-3 px-5">
+              <div className="flex items-center gap-3">
+                <CheckCircle size={20} className={importType === 'branch-stock-price' ? 'text-purple-600' : 'text-rose-600'} />
+                <div className="flex-1 text-sm">
+                  <p className="font-medium text-slate-800">{previewData.summary}</p>
+                  {importType === 'branch-stock-price' && previewData.branch?.name && (
+                    <p className="text-xs text-slate-500 mt-0.5">Branch: <strong>{previewData.branch.name}</strong></p>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Branch Stock+Price preview table */}
+          {importType === 'branch-stock-price' && previewData.matched && previewData.matched.length > 0 && (
+            <Card className="border-slate-200">
+              <CardHeader className="py-3 px-5 bg-slate-50 border-b">
+                <CardTitle className="text-sm font-semibold text-slate-700">
+                  Will Update ({previewData.matched_count}) — first {Math.min(previewData.matched.length, 200)} shown
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0 max-h-96 overflow-y-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-slate-50">
+                      <TableHead className="text-xs">Product</TableHead>
+                      <TableHead className="text-xs text-right">New Cost</TableHead>
+                      <TableHead className="text-xs text-right">New Retail</TableHead>
+                      <TableHead className="text-xs text-right">New Wholesale</TableHead>
+                      <TableHead className="text-xs text-right">New Qty</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {previewData.matched.map((m, i) => (
+                      <TableRow key={i} className="text-sm">
+                        <TableCell className="font-medium">{m.name}<div className="text-[10px] text-slate-400 font-mono">{m.sku}</div></TableCell>
+                        <TableCell className="text-right text-xs">{m.new_cost !== null ? `₱${Number(m.new_cost).toFixed(2)}` : <span className="text-slate-300">—</span>}</TableCell>
+                        <TableCell className="text-right text-xs">{m.new_prices?.retail !== undefined ? `₱${Number(m.new_prices.retail).toFixed(2)}` : <span className="text-slate-300">—</span>}</TableCell>
+                        <TableCell className="text-right text-xs">{m.new_prices?.wholesale !== undefined ? `₱${Number(m.new_prices.wholesale).toFixed(2)}` : <span className="text-slate-300">—</span>}</TableCell>
+                        <TableCell className="text-right text-xs">{m.new_qty !== null ? Number(m.new_qty).toFixed(0) : <span className="text-slate-300">—</span>}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Customers — auto_create summary */}
+          {importType === 'customers' && previewData.auto_create?.length > 0 && (
+            <Card className="border-emerald-200">
+              <CardHeader className="py-3 px-5 bg-emerald-50 border-b border-emerald-200">
+                <CardTitle className="text-sm font-semibold text-emerald-800">
+                  Ready to Create ({previewData.auto_create.length})
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0 max-h-72 overflow-y-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-emerald-50/50">
+                      <TableHead className="text-xs">Name</TableHead>
+                      <TableHead className="text-xs">Phone</TableHead>
+                      <TableHead className="text-xs text-right">Credit Limit</TableHead>
+                      <TableHead className="text-xs text-right">Opening Balance</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {previewData.auto_create.slice(0, 100).map((r, i) => (
+                      <TableRow key={i}>
+                        <TableCell className="text-sm font-medium">{r.payload.name}</TableCell>
+                        <TableCell className="text-xs">{r.payload.phones?.[0] || ''}</TableCell>
+                        <TableCell className="text-xs text-right">₱{Number(r.payload.credit_limit || 0).toFixed(2)}</TableCell>
+                        <TableCell className="text-xs text-right font-medium">{r.payload.opening_balance > 0 ? `₱${Number(r.payload.opening_balance).toFixed(2)}` : <span className="text-slate-300">—</span>}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Customers — fuzzy review */}
+          {importType === 'customers' && previewData.fuzzy?.length > 0 && (
+            <Card className="border-amber-300 bg-amber-50/40">
+              <CardHeader className="py-3 px-5 bg-amber-50 border-b border-amber-200">
+                <CardTitle className="text-sm font-semibold text-amber-800">
+                  Possible Duplicates — Decide ({previewData.fuzzy.length})
+                </CardTitle>
+                <p className="text-xs text-amber-700 mt-1">
+                  These look similar to existing customers. For each row, choose: <strong>Merge</strong> (update existing), <strong>Create as new</strong>, <strong>Skip</strong>, or <strong>Skip & Remember</strong> (won't ask again).
+                </p>
+              </CardHeader>
+              <CardContent className="p-0 max-h-[600px] overflow-y-auto">
+                {previewData.fuzzy.map((f, i) => (
+                  <div key={i} className="border-b border-amber-100 p-4 space-y-2" data-testid={`fuzzy-row-${f.row}`}>
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div className="text-sm">
+                        <span className="text-slate-400 text-xs mr-2">Row {f.row}</span>
+                        <span className="font-semibold">{f.payload.name}</span>
+                        {f.payload.phones?.[0] && <span className="text-xs text-slate-500 ml-2">· {f.payload.phones[0]}</span>}
+                        {f.payload.opening_balance > 0 && (
+                          <Badge className="ml-2 text-[10px] bg-blue-100 text-blue-700 border-0">
+                            OB ₱{Number(f.payload.opening_balance).toFixed(2)}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      Looks like:
+                    </div>
+                    <div className="space-y-1.5 ml-4">
+                      {f.candidates.map((c, j) => (
+                        <div key={j} className="flex items-center gap-3 text-xs">
+                          <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded">{Math.round(c.similarity * 100)}%</span>
+                          <span className="font-medium">{c.name}</span>
+                          {c.phone && <span className="text-slate-500">· {c.phone}</span>}
+                          <span className="text-slate-400">({c.reason === 'phone_partial' ? 'phone match' : 'similar name'})</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      <Button size="sm" variant={decisions[f.row]?.action === 'merge' ? 'default' : 'outline'}
+                        className="text-xs h-7"
+                        onClick={() => setDecisions(prev => ({ ...prev, [f.row]: { action: 'merge', target_id: f.candidates[0].id } }))}
+                        data-testid={`decide-merge-${f.row}`}>
+                        Merge into "{f.candidates[0].name.slice(0, 20)}"
+                      </Button>
+                      <Button size="sm" variant={decisions[f.row]?.action === 'create' ? 'default' : 'outline'}
+                        className="text-xs h-7"
+                        onClick={() => setDecisions(prev => ({ ...prev, [f.row]: { action: 'create' } }))}
+                        data-testid={`decide-create-${f.row}`}>
+                        Create as new
+                      </Button>
+                      <Button size="sm" variant={decisions[f.row]?.action === 'skip' ? 'default' : 'outline'}
+                        className="text-xs h-7"
+                        onClick={() => setDecisions(prev => ({ ...prev, [f.row]: { action: 'skip' } }))}
+                        data-testid={`decide-skip-${f.row}`}>
+                        Skip
+                      </Button>
+                      <Button size="sm" variant={decisions[f.row]?.action === 'skip_and_remember' ? 'default' : 'outline'}
+                        className="text-xs h-7"
+                        onClick={() => setDecisions(prev => ({ ...prev, [f.row]: { action: 'skip_and_remember', target_id: f.candidates[0].id } }))}
+                        data-testid={`decide-remember-${f.row}`}>
+                        Skip &amp; Remember (different person)
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Customers — exact dupes (auto-skipped report) */}
+          {importType === 'customers' && previewData.exact_dupe?.length > 0 && (
+            <Card className="border-slate-200">
+              <CardHeader className="py-3 px-5 bg-slate-50 border-b">
+                <CardTitle className="text-sm text-slate-700">
+                  Auto-skipped Duplicates ({previewData.exact_dupe.length})
+                </CardTitle>
+                <p className="text-xs text-slate-500 mt-1">Hard duplicates (exact name or exact phone). These will not be imported.</p>
+              </CardHeader>
+              <CardContent className="p-0 max-h-48 overflow-y-auto">
+                <Table>
+                  <TableBody>
+                    {previewData.exact_dupe.map((d, i) => (
+                      <TableRow key={i}>
+                        <TableCell className="text-xs text-slate-400 w-12">{d.row}</TableCell>
+                        <TableCell className="text-sm">{d.name}</TableCell>
+                        <TableCell className="text-xs text-slate-500">{d.reason.replace(/_/g, ' ')}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Unmatched / errors */}
+          {previewData.unmatched?.length > 0 && (
+            <Card className="border-amber-200">
+              <CardHeader className="py-3 px-5 bg-amber-50 border-b border-amber-200">
+                <CardTitle className="text-sm text-amber-800">{previewData.unmatched.length} Products Not Found</CardTitle>
+                <p className="text-xs text-amber-700 mt-1">These rows didn't match any product in your global catalog. Add them to your catalog first, then re-import.</p>
+              </CardHeader>
+              <CardContent className="p-0 max-h-48 overflow-y-auto">
+                <Table>
+                  <TableBody>
+                    {previewData.unmatched.map((u, i) => (
+                      <TableRow key={i}>
+                        <TableCell className="text-xs text-slate-400 w-12">{u.row}</TableCell>
+                        <TableCell className="text-sm">{u.name}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Commit / Back actions */}
+          <div className="flex justify-end gap-3">
+            <Button variant="outline" onClick={() => setStep('map')}>Back to mapping</Button>
+            <Button onClick={commitAfterPreview} disabled={loading}
+              className="bg-[#1A4D2E] hover:bg-[#14532d] text-white min-w-40"
+              data-testid="commit-import-btn">
+              {loading ? (
+                <><div className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin mr-2" />Committing...</>
+              ) : (
+                <><Upload size={15} className="mr-2" />Confirm &amp; Import</>
               )}
             </Button>
           </div>
@@ -528,8 +921,21 @@ export default function ImportPage() {
                 <div className="flex items-center gap-3">
                   <CheckCircle size={24} className="text-emerald-600" />
                   <div>
-                    <div className="text-2xl font-bold text-emerald-800">{result.imported ?? result.updated ?? 0}</div>
-                    <div className="text-xs text-emerald-600">{result.updated !== undefined ? 'Successfully updated' : 'Successfully imported'}</div>
+                    <div className="text-2xl font-bold text-emerald-800">
+                      {result.imported ?? result.updated ?? result.created ?? 0}
+                      {result.merged > 0 && <span className="text-base font-medium ml-2">+{result.merged} merged</span>}
+                      {(result.prices_updated > 0 || result.qty_updated > 0) && (
+                        <span className="text-xs font-medium ml-1 text-emerald-700">
+                          ({result.prices_updated || 0} prices · {result.qty_updated || 0} stock)
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-emerald-600">
+                      {result.created !== undefined ? 'Customers created'
+                        : result.updated !== undefined ? 'Successfully updated'
+                        : result.prices_updated !== undefined ? 'Branch entries written'
+                        : 'Successfully imported'}
+                    </div>
                   </div>
                 </div>
               </CardContent>
@@ -539,8 +945,12 @@ export default function ImportPage() {
                 <div className="flex items-center gap-3">
                   <AlertTriangle size={24} className="text-amber-600" />
                   <div>
-                    <div className="text-2xl font-bold text-amber-800">{result.skipped?.length || result.not_found?.length || 0}</div>
-                    <div className="text-xs text-amber-600">{result.skipped ? 'Skipped (duplicates)' : 'Not found in system'}</div>
+                    <div className="text-2xl font-bold text-amber-800">
+                      {(result.skipped?.length ?? 0) + (result.not_found?.length ?? 0) + (result.unmatched?.length ?? 0)}
+                    </div>
+                    <div className="text-xs text-amber-600">
+                      {result.unmatched?.length ? 'Not found in catalog' : result.skipped ? 'Skipped' : 'Not found'}
+                    </div>
                   </div>
                 </div>
               </CardContent>
@@ -557,6 +967,25 @@ export default function ImportPage() {
               </CardContent>
             </Card>
           </div>
+
+          {/* Customer-import: opening balance + SMS summary */}
+          {result.invoiced_count > 0 && (
+            <Card className="border-blue-200 bg-blue-50">
+              <CardContent className="py-3 px-5">
+                <div className="flex items-start gap-3">
+                  <FileSpreadsheet size={18} className="text-blue-600 mt-0.5" />
+                  <div className="flex-1 text-sm">
+                    <p className="font-medium text-blue-900">
+                      {result.invoiced_count} opening-balance invoice{result.invoiced_count === 1 ? '' : 's'} created
+                    </p>
+                    <p className="text-blue-700 mt-0.5 text-xs">
+                      {result.sms_queued || 0} SMS notification{result.sms_queued === 1 ? '' : 's'} queued. These invoices appear in AR aging, customer statements, and the closing wizard like any credit sale.
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Schemes auto-created notice */}
           {result.schemes_auto_created?.length > 0 && (

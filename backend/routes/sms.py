@@ -36,6 +36,20 @@ async def _resolve_company_name() -> str:
 
 DEFAULT_TEMPLATES = [
     {
+        "key": "opening_balance_notice",
+        "name": "Opening Balance Carry-forward Notice",
+        "body": (
+            "Hi <customer_name>, ang account mo po sa <company_name> "
+            "may opening balance na P<amount> bilang carry-forward "
+            "mula sa aming previous records (<date>). "
+            "Pakiusap, settle po kapag nakakaya. Salamat! - <company_name>"
+        ),
+        "placeholders": ["customer_name", "amount", "company_name",
+                         "branch_name", "date"],
+        "trigger": "auto",
+        "active": True,
+    },
+    {
         "key": "credit_new",
         "name": "New Credit Notification",
         "body": (
