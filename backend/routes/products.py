@@ -17,6 +17,7 @@ async def list_products(
     category: Optional[str] = None,
     is_repack: Optional[bool] = None,
     parent_id: Optional[str] = None,
+    branch_id: Optional[str] = None,    # when provided, repack capital is branch-aware
     sort_by: Optional[str] = "name",   # "name" | "type" | "grouped"
     skip: int = 0,
     limit: int = 50
@@ -69,6 +70,7 @@ async def list_products(
         total = count_result[0]["total"] if count_result else 0
         pipeline += [{"$skip": skip}, {"$limit": limit}]
         products = await db.products.aggregate(pipeline).to_list(limit)
+        products = await _enrich_repacks_with_live_capital(products, branch_id)
         return {"products": products, "total": total, "skip": skip, "limit": limit}
 
     elif sort_by == "type":
@@ -78,7 +80,43 @@ async def list_products(
 
     total = await db.products.count_documents(query)
     products = await db.products.find(query, {"_id": 0}).sort(mongo_sort).skip(skip).limit(limit).to_list(limit)
+    products = await _enrich_repacks_with_live_capital(products, branch_id)
     return {"products": products, "total": total, "skip": skip, "limit": limit}
+
+
+async def _enrich_repacks_with_live_capital(products: list, branch_id: Optional[str]) -> list:
+    """Inject live parent-derived capital and branch retail into repack rows.
+
+    For repacks, `product.cost_price` was set to 0 at creation (we no longer
+    store it). We compute it on-the-fly from the parent's branch cost so the
+    Products list/detail UIs show a real number instead of ₱0.
+    """
+    repack_rows = [p for p in products if p.get("is_repack") and p.get("parent_id")]
+    if not repack_rows:
+        return products
+
+    # Bulk-fetch branch_prices for these repacks (retail) at the given branch
+    repack_ids = [p["id"] for p in repack_rows]
+    bp_map = {}
+    if branch_id:
+        bp_docs = await db.branch_prices.find(
+            {"product_id": {"$in": repack_ids}, "branch_id": branch_id}, {"_id": 0}
+        ).to_list(len(repack_ids))
+        bp_map = {d["product_id"]: d for d in bp_docs}
+
+    enriched = []
+    for p in products:
+        if p.get("is_repack") and p.get("parent_id"):
+            cap = await get_repack_capital(p, branch_id or "")
+            new_p = {**p, "cost_price": round(cap, 4)}
+            bp = bp_map.get(p["id"])
+            if bp and bp.get("prices"):
+                # Surface branch retail in the prices map so list views read it
+                new_p["prices"] = {**(p.get("prices") or {}), **bp["prices"]}
+            enriched.append(new_p)
+        else:
+            enriched.append(p)
+    return enriched
 
 
 @router.post("")
@@ -1276,11 +1314,22 @@ async def repack_pricing_bulk_save(data: dict, user=Depends(get_current_user)):
 
 
 @router.get("/{product_id}")
-async def get_product(product_id: str, user=Depends(get_current_user)):
-    """Get a single product by ID."""
+async def get_product(product_id: str, branch_id: Optional[str] = None, user=Depends(get_current_user)):
+    """Get a single product by ID. For repacks, capital is computed live
+    from the parent's branch cost when branch_id is provided."""
     product = await db.products.find_one({"id": product_id, "active": True}, {"_id": 0})
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
+    if product.get("is_repack") and product.get("parent_id"):
+        cap = await get_repack_capital(product, branch_id or "")
+        product = {**product, "cost_price": round(cap, 4)}
+        # Merge branch retail prices for this repack at the branch (if any)
+        if branch_id:
+            bp = await db.branch_prices.find_one(
+                {"product_id": product_id, "branch_id": branch_id}, {"_id": 0}
+            )
+            if bp and bp.get("prices"):
+                product["prices"] = {**(product.get("prices") or {}), **bp["prices"]}
     return product
 
 
@@ -1397,6 +1446,22 @@ async def get_product_detail(product_id: str, branch_id: Optional[str] = None, u
         "last_purchase": last_purchase,
         "last_purchase_warning": last_purchase > 0 and moving_average > 0 and last_purchase < moving_average,
     }
+
+    # Repacks: capital is derived live from parent's branch capital. Surface
+    # the computed value so the Product Detail page shows it (and the global
+    # capital field on the parent isn't 0 just because we no longer store it).
+    if product.get("is_repack") and product.get("parent_id"):
+        repack_capital = await get_repack_capital(product, branch_id or "")
+        cost["repack_capital"] = round(repack_capital, 4)
+        cost["cost_price"] = round(repack_capital, 4)
+        if branch_cost_price is None:
+            # No branch override → use the live derived value
+            cost["branch_cost_price"] = round(repack_capital, 4)
+            cost["is_branch_specific"] = True
+            cost["cost_source"] = "derived_from_parent"
+        # Also override product.cost_price in the response so frontend list/detail
+        # views reading product.cost_price see the live value, not the stored 0.
+        product = {**product, "cost_price": round(repack_capital, 4)}
     
     return {
         "product": product,

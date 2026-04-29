@@ -22,6 +22,15 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### Repack Capital + Retail Visible on Products List & Detail (2026-04-29) — Complete
+- **Why**: User reported repack capital showed correctly on Sales (uses `search-detail`) but was blank on `/products` list and `/products/{id}` detail pages — different endpoints didn't carry the live computation.
+- **Backend** — three endpoints now enrich repacks with live parent-derived capital:
+  - `GET /api/products?branch_id=...` — new `_enrich_repacks_with_live_capital()` helper injects live `cost_price` + merges branch retail into `prices` for repack rows. Works for `name`, `type`, and `grouped` sort modes.
+  - `GET /api/products/{id}?branch_id=...` — same enrichment for single fetch.
+  - `GET /api/products/{id}/detail?branch_id=...` — `cost.cost_price` and `product.cost_price` now reflect live capital; new `cost.repack_capital` field exposes the computed value explicitly. `cost.cost_source` becomes `derived_from_parent` when no branch override is set.
+- **Frontend** — `ProductsPage.fetchProducts` now passes `branch_id` query param so repacks list with correct capital from current branch. `ProductDetailPage` already passed branch_id.
+- **Tests**: 3 new pytests in `test_repack_list_detail_190.py` (1500/50 = 30 capital + 35 retail verified across all 3 endpoints). Suite total (Iter 184-190): 28 passing.
+
 ### SMS Auto-Seed + Health Diagnostics (2026-04-29) — Complete
 - **Why** (root cause of Jegger Edem's missing SMS): SMS templates (`credit_new`, `payment_received`, `opening_balance_notice`, etc.) are **per-org** in `sms_templates` collection. Defaults are seeded by `_ensure_templates()` — but this was only called when a user opened **Settings → Messages** page or imported customers. **Org registration never seeded templates**, so any new tenant that never opened that page had ZERO templates → every auto-SMS trigger silently bailed via `template_missing`.
 - **Three layers of fix**:

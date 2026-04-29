@@ -274,11 +274,12 @@ export default function ProductsPage() {
       if (search) params.search = search;
       if (filter === 'parent') params.is_repack = false;
       if (filter === 'repack') params.is_repack = true;
+      if (currentBranch?.id) params.branch_id = currentBranch.id;
       const res = await api.get('/products', { params });
       setProducts(res.data.products);
       setTotal(res.data.total);
     } catch { toast.error('Failed to load products'); }
-  }, [search, filter, sortBy, page]);
+  }, [search, filter, sortBy, page, currentBranch]);
 
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
   useEffect(() => {
