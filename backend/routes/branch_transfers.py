@@ -8,7 +8,8 @@ from datetime import datetime, timezone
 from config import db, _raw_db, get_org_context, set_org_context
 from utils import (
     get_current_user, check_perm, now_iso, new_id,
-    log_movement, get_branch_cost, ensure_org_context
+    log_movement, get_branch_cost, ensure_org_context,
+    mark_price_reviewed,
 )
 
 router = APIRouter(prefix="/branch-transfers", tags=["Branch Transfers"])
@@ -923,6 +924,11 @@ async def _apply_receipt(order, items, shortages, excesses, from_branch_id, to_b
             user["id"], user.get("full_name", user["username"]),
             f"Branch transfer from {from_name}"
         )
+
+        # Clear "Global Price" badge at destination — transfer = implicit price review.
+        # If admin used capital_choices to pick the value, that's still a manual decision,
+        # so the badge clears regardless of method.
+        await mark_price_reviewed(product_id, to_branch_id, source="transfer")
 
     # ── Apply repack price updates at destination ──────────────────────────────
     repack_updates = order.get("repack_price_updates", [])

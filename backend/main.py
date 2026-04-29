@@ -421,6 +421,23 @@ async def startup():
     if provisioned:
         logger.info("Wallet provisioning complete — %d branches checked", provisioned)
 
+    # ── One-shot migration: backfill price_reviewed_at on existing inventory ──
+    # All inventory rows that exist *before* this feature shipped are treated
+    # as already reviewed. Only NEW inventory rows (e.g. created when opening
+    # a new branch) will start as null and trigger the badge.
+    backfill = await _raw_db.inventory.update_many(
+        {"price_reviewed_at": {"$exists": False}},
+        {"$set": {
+            "price_reviewed_at": now_iso(),
+            "last_price_review_source": "migration_backfill",
+        }},
+    )
+    if backfill.modified_count:
+        logger.info(
+            "Global Price badge migration: marked %d existing inventory rows as reviewed",
+            backfill.modified_count,
+        )
+
     # ── One-shot orphan-settings sweep ────────────────────────────────────────
     # Settings docs whose organization_id no longer matches any organization are
     # the source of cross-tenant `company_info` bleed (live: "JND store" appearing

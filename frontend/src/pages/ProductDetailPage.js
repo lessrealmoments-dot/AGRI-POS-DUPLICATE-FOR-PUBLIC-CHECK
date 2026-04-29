@@ -18,6 +18,7 @@ import {
 import { toast } from 'sonner';
 import { BarcodeDisplay } from '../components/BarcodeDisplay';
 import CategorySelect from '../components/CategorySelect';
+import GlobalPriceBadge from '../components/GlobalPriceBadge';
 
 export default function ProductDetailPage() {
   const { id } = useParams();
@@ -43,6 +44,15 @@ export default function ProductDetailPage() {
   const [branchOverrides, setBranchOverrides] = useState({}); // { branch_id: override_doc }
   const [branchPriceEdit, setBranchPriceEdit] = useState(null); // { branch_id, prices: {}, cost_price }
   const [savingBranchPrice, setSavingBranchPrice] = useState(false);
+
+  // Global Price (price-review) status for the active branch
+  const [pendingReviewAtBranch, setPendingReviewAtBranch] = useState(false);
+  useEffect(() => {
+    if (!id || !currentBranch?.id) { setPendingReviewAtBranch(false); return; }
+    api.get('/inventory/pending-review-ids', { params: { branch_id: currentBranch.id } })
+      .then(r => setPendingReviewAtBranch((r.data?.product_ids || []).includes(id)))
+      .catch(() => {});
+  }, [id, currentBranch]);
 
   const isAdmin = user?.role === 'admin';
 
@@ -253,13 +263,21 @@ export default function ProductDetailPage() {
             ) : (
               <h1 className="text-2xl font-bold tracking-tight" style={{ fontFamily: 'Manrope' }}>{product.name}</h1>
             )}
-            <div className="flex items-center gap-2 mt-1">
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
               <span className="font-mono text-sm text-slate-500">{product.sku}</span>
               <Badge variant="outline" className={`text-[10px] ${product.is_repack ? 'border-amber-300 text-amber-700 bg-amber-50' : 'border-emerald-300 text-emerald-700 bg-emerald-50'}`}>
                 {product.is_repack ? 'Repack' : 'Parent'}
               </Badge>
               <Badge variant="outline" className="text-[10px]">{product.product_type || 'stockable'}</Badge>
               <Badge variant="outline" className="text-[10px]">{product.category}</Badge>
+              {pendingReviewAtBranch && currentBranch?.id && (
+                <GlobalPriceBadge
+                  productId={id}
+                  branchId={currentBranch.id}
+                  reviewed={false}
+                  onMarked={() => setPendingReviewAtBranch(false)}
+                />
+              )}
             </div>
           </div>
         </div>

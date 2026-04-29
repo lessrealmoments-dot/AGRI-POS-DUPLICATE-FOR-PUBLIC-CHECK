@@ -30,6 +30,7 @@ import CropCreditTypeDialog from '../components/CropCreditTypeDialog';
 import RequestSignatureDialog from '../components/RequestSignatureDialog';
 import { invalidateBalanceCache } from '../components/CustomerBalanceBadge';
 import PrintEngine from '../lib/PrintEngine';
+import GlobalPriceBadge from '../components/GlobalPriceBadge';
 
 // ── Insufficient Stock Override Modal ────────────────────────────────────────
 function InsufficientStockModal({ open, insufficientItems, onOverride, onCancel, onGoPO }) {
@@ -262,6 +263,11 @@ export default function UnifiedSalesPage() {
   // Cart/Lines
   const [cart, setCart] = useState([]);
   const [lines, setLines] = useState([{ ...EMPTY_LINE }]);
+
+  // Set of product IDs at the current branch that haven't been
+  // price-reviewed yet — used to show the "Global Price" badge
+  // inline on POS line items.
+  const [pendingReviewIds, setPendingReviewIds] = useState(new Set());
   
   // Customer
   const [selectedCustomer, setSelectedCustomer] = useState(null);
@@ -329,6 +335,16 @@ export default function UnifiedSalesPage() {
   // Business info for printing
   const [bizInfo, setBizInfo] = useState({});
   useEffect(() => { api.get('/settings/business-info').then(r => setBizInfo(r.data)).catch(() => {}); }, []);
+
+  // Refresh pending-review product IDs when the active branch changes.
+  const refreshPendingReviewIds = useCallback(async () => {
+    if (!currentBranch?.id) { setPendingReviewIds(new Set()); return; }
+    try {
+      const r = await api.get('/inventory/pending-review-ids', { params: { branch_id: currentBranch.id } });
+      setPendingReviewIds(new Set(r.data?.product_ids || []));
+    } catch { /* silent — badge just won't show */ }
+  }, [currentBranch]);
+  useEffect(() => { refreshPendingReviewIds(); }, [refreshPendingReviewIds]);
   
   // Credit approval
   const [creditApprovalDialog, setCreditApprovalDialog] = useState(false);
@@ -2127,7 +2143,21 @@ export default function UnifiedSalesPage() {
                             {line.product_id ? (
                               <div className="flex items-center gap-2">
                                 <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-medium truncate">{line.product_name}</p>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <p className="text-sm font-medium truncate">{line.product_name}</p>
+                                    {pendingReviewIds.has(line.product_id) && currentBranch?.id && (
+                                      <GlobalPriceBadge
+                                        productId={line.product_id}
+                                        branchId={currentBranch.id}
+                                        reviewed={false}
+                                        onMarked={() => {
+                                          setPendingReviewIds(prev => {
+                                            const s = new Set(prev); s.delete(line.product_id); return s;
+                                          });
+                                        }}
+                                      />
+                                    )}
+                                  </div>
                                   {line.description && <p className="text-[11px] text-slate-400 truncate">{line.description}</p>}
                                 </div>
                                 <button

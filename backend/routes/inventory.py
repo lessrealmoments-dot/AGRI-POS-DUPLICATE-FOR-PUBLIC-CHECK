@@ -7,7 +7,8 @@ from typing import Optional
 from config import db
 from utils import (
     get_current_user, check_perm, now_iso, new_id, log_movement,
-    get_branch_filter, apply_branch_filter, ensure_branch_access, get_default_branch
+    get_branch_filter, apply_branch_filter, ensure_branch_access, get_default_branch,
+    mark_price_reviewed,
 )
 
 router = APIRouter(prefix="/inventory", tags=["Inventory"])
@@ -59,6 +60,25 @@ async def list_inventory(
                     "input": "$stock_records",
                     "as": "s",
                     "in": {"k": "$$s.branch_id", "v": "$$s.quantity"}
+                }
+            }
+        },
+        # Per-branch price-reviewed status (used for the "Global Price" badge).
+        # When branch_id filter is applied, stock_records is already scoped
+        # to that branch, so the first element is the relevant one.
+        "branch_price_review": {
+            "$arrayToObject": {
+                "$map": {
+                    "input": "$stock_records",
+                    "as": "s",
+                    "in": {
+                        "k": "$$s.branch_id",
+                        "v": {"$cond": [
+                            {"$ifNull": ["$$s.price_reviewed_at", False]},
+                            "reviewed",
+                            "pending",
+                        ]},
+                    }
                 }
             }
         }
@@ -137,6 +157,83 @@ async def list_inventory(
         enriched_items.append(item)
     
     return {"items": enriched_items, "total": total}
+
+
+# ── Global Price Badge endpoints ─────────────────────────────────────────────
+
+@router.post("/mark-reviewed")
+async def mark_inventory_reviewed(data: dict, user=Depends(get_current_user)):
+    """
+    One-click mark a product's pricing as reviewed for a branch — clears the
+    "Global Price" badge.
+    Body: { product_id, branch_id }
+    """
+    check_perm(user, "products", "edit")
+    pid = (data.get("product_id") or "").strip()
+    bid = (data.get("branch_id") or "").strip()
+    if not pid or not bid:
+        raise HTTPException(status_code=400, detail="product_id and branch_id are required")
+    await mark_price_reviewed(pid, bid, source="manual_ack")
+    return {"ok": True, "product_id": pid, "branch_id": bid, "reviewed_at": now_iso()}
+
+
+@router.post("/mark-all-reviewed")
+async def mark_all_reviewed(data: dict, user=Depends(get_current_user)):
+    """
+    Bulk-mark every inventory row for a branch as reviewed — clears all
+    "Global Price" badges at this branch in one call.
+    Body: { branch_id }
+    Admin only.
+    """
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    bid = (data.get("branch_id") or "").strip()
+    if not bid:
+        raise HTTPException(status_code=400, detail="branch_id is required")
+    res = await db.inventory.update_many(
+        {"branch_id": bid, "$or": [
+            {"price_reviewed_at": {"$exists": False}},
+            {"price_reviewed_at": None},
+        ]},
+        {"$set": {
+            "price_reviewed_at": now_iso(),
+            "last_price_review_source": "bulk_ack",
+        }},
+    )
+    return {"ok": True, "branch_id": bid, "marked_count": res.modified_count}
+
+
+@router.get("/pending-review-count")
+async def pending_review_count(branch_id: str, user=Depends(get_current_user)):
+    """Return how many products at this branch still need price review (badge count)."""
+    n = await db.inventory.count_documents({
+        "branch_id": branch_id,
+        "$or": [
+            {"price_reviewed_at": {"$exists": False}},
+            {"price_reviewed_at": None},
+        ],
+    })
+    return {"branch_id": branch_id, "pending": n}
+
+
+@router.get("/pending-review-ids")
+async def pending_review_ids(branch_id: str, user=Depends(get_current_user)):
+    """
+    Return the set of product_ids at this branch still pending price review.
+    Frontend uses this to render the "Global Price" badge inline on POS line
+    items (single fetch on POS open).
+    """
+    docs = await db.inventory.find(
+        {
+            "branch_id": branch_id,
+            "$or": [
+                {"price_reviewed_at": {"$exists": False}},
+                {"price_reviewed_at": None},
+            ],
+        },
+        {"_id": 0, "product_id": 1},
+    ).to_list(50000)
+    return {"branch_id": branch_id, "product_ids": [d["product_id"] for d in docs if d.get("product_id")]}
 
 
 @router.post("/adjust")

@@ -13,7 +13,10 @@ import math
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 from config import db
-from utils import get_current_user, check_perm, has_perm, now_iso, new_id
+from utils import (
+    get_current_user, check_perm, has_perm, now_iso, new_id,
+    mark_price_reviewed,
+)
 
 router = APIRouter(prefix="/branch-prices", tags=["Branch Prices"])
 
@@ -95,6 +98,9 @@ async def upsert_branch_price(product_id: str, data: dict, user=Depends(get_curr
         update_doc["id"] = new_id()
         update_doc["created_at"] = now_iso()
         await db.branch_prices.insert_one(update_doc)
+
+    # Clear "Global Price" badge — manual override = explicit review.
+    await mark_price_reviewed(product_id, branch_id, source="override")
 
     result = await db.branch_prices.find_one(
         {"product_id": product_id, "branch_id": branch_id}, {"_id": 0}

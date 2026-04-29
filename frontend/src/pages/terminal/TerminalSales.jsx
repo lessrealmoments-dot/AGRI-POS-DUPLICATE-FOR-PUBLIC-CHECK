@@ -16,6 +16,7 @@ import { newEnvelopeId } from '../../lib/syncManager';
 import CropCreditTypeDialog from '../../components/CropCreditTypeDialog';
 import { invalidateBalanceCache } from '../../components/CustomerBalanceBadge';
 import RequestSignatureDialog from '../../components/RequestSignatureDialog';
+import GlobalPriceBadge from '../../components/GlobalPriceBadge';
 
 const COLLAPSE_THRESHOLD = 4; // show all if ≤ 4, add "More" toggle if > 4
 
@@ -92,6 +93,17 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   const [overrideError, setOverrideError] = useState('');
   // HID Barcode Scanner (H10) — scan detection & quantity prompt
   const [scanQtyModal, setScanQtyModal] = useState(false);
+
+  // Set of product IDs at the active branch with pending price review.
+  // Used to render a tiny amber dot beside cart line items as a passive cue.
+  const [pendingReviewIds, setPendingReviewIds] = useState(new Set());
+  useEffect(() => {
+    const bid = session?.branch_id;
+    if (!bid || !isOnline) { setPendingReviewIds(new Set()); return; }
+    api.get(`/inventory/pending-review-ids?branch_id=${bid}`)
+      .then(r => setPendingReviewIds(new Set(r?.data?.product_ids || [])))
+      .catch(() => {});
+  }, [session?.branch_id, isOnline, api, syncVersion]);
   const [scanQtyProduct, setScanQtyProduct] = useState(null);
   const [scanQty, setScanQty] = useState('1');
   const autoAddProductsRef = useRef(new Set());
@@ -884,7 +896,23 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
               return (
               <div key={item.product_id} className={`bg-white rounded-xl border p-3 flex items-center gap-3 ${isOverStock ? 'border-amber-300 bg-amber-50/30' : 'border-slate-200'}`} data-testid={`cart-item-${item.product_id}`}>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-slate-800 truncate">{item.product_name}</p>
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-sm font-medium text-slate-800 truncate">{item.product_name}</p>
+                    {pendingReviewIds.has(item.product_id) && session?.branch_id && (
+                      <GlobalPriceBadge
+                        productId={item.product_id}
+                        branchId={session.branch_id}
+                        reviewed={false}
+                        compact
+                        apiClient={api}
+                        onMarked={() => {
+                          setPendingReviewIds(prev => {
+                            const s = new Set(prev); s.delete(item.product_id); return s;
+                          });
+                        }}
+                      />
+                    )}
+                  </div>
                   <div className="flex items-center gap-2">
                     <p className="text-xs text-slate-400">{formatPHP(item.price)} each</p>
                     {stock !== null && (

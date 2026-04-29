@@ -16,6 +16,35 @@ def new_id():
     return str(uuid.uuid4())
 
 
+async def mark_price_reviewed(product_id: str, branch_id: str, source: str = ""):
+    """
+    Mark a product's pricing as 'reviewed' for a branch — clears the
+    "Global Price" badge. Idempotent. Auto-called from PO/transfer/import/manual
+    edit hooks. Upserts an inventory row if one doesn't exist yet.
+
+    source: short tag like 'po', 'transfer', 'import', 'override', 'manual'
+            (purely informational, stored on inventory.last_price_review_source).
+    """
+    if not product_id or not branch_id:
+        return
+    await db.inventory.update_one(
+        {"product_id": product_id, "branch_id": branch_id},
+        {
+            "$set": {
+                "price_reviewed_at": now_iso(),
+                "last_price_review_source": source or "auto",
+            },
+            "$setOnInsert": {
+                "id": str(uuid.uuid4()),
+                "product_id": product_id,
+                "branch_id": branch_id,
+                "quantity": 0,
+            },
+        },
+        upsert=True,
+    )
+
+
 async def ensure_org_context(branch_id: str = None, org_id: str = None):
     """Ensure org context is set. Super admins have None — resolve from branch or explicit org_id.
     Call this at the start of any write operation that could be triggered by a super admin."""

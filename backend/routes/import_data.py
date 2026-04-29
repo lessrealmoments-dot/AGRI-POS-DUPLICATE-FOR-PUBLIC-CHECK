@@ -21,7 +21,7 @@ from fastapi.responses import StreamingResponse
 from config import db
 from utils import (
     get_current_user, check_perm, now_iso, new_id, verify_password,
-    generate_next_number,
+    generate_next_number, mark_price_reviewed,
 )
 
 router = APIRouter(prefix="/import", tags=["Import"])
@@ -1013,6 +1013,7 @@ async def import_branch_stock_and_price(
     prices_updated = 0
     qty_updated = 0
     for m in matched:
+        wrote_something = False
         try:
             # Branch prices upsert (only if there's something to write)
             if m["new_prices"] or m["new_cost"] is not None:
@@ -1043,6 +1044,7 @@ async def import_branch_stock_and_price(
                     doc["created_at"] = now_iso()
                     await db.branch_prices.insert_one(doc)
                 prices_updated += 1
+                wrote_something = True
 
             # Inventory set (empty = 0)
             if m["new_qty"] is not None:
@@ -1063,8 +1065,17 @@ async def import_branch_stock_and_price(
                         "updated_at": now_iso(),
                     })
                 qty_updated += 1
+                wrote_something = True
         except Exception as e:
             errors.append({"row": m["row"], "name": m["name"], "error": str(e)})
+
+        # Only mark reviewed if we actually wrote something — rows with all
+        # empty cells should be left untouched (no implicit ack).
+        if wrote_something:
+            try:
+                await mark_price_reviewed(m["product_id"], branch_id, source="import")
+            except Exception:
+                pass
 
     return {
         "mode": "commit",

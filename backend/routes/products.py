@@ -4,7 +4,7 @@ Product management routes: CRUD, repacks, pricing, search, barcodes.
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional, List
 from config import db
-from utils import get_current_user, check_perm, has_perm, now_iso, new_id, get_product_price
+from utils import get_current_user, check_perm, has_perm, now_iso, new_id, get_product_price, mark_price_reviewed
 import random
 
 router = APIRouter(prefix="/products", tags=["Products"])
@@ -949,6 +949,17 @@ async def update_product(product_id: str, data: dict, user=Depends(get_current_u
         })
 
     await db.products.update_one({"id": product_id}, {"$set": update})
+
+    # Manual price/capital edit on the global product = treated as an explicit
+    # decision. Clear "Global Price" badge on every branch that has inventory
+    # of this product. Cheap: typically <30 branches.
+    if any(k in update for k in ("cost_price", "prices")):
+        inv_rows = await db.inventory.find(
+            {"product_id": product_id}, {"_id": 0, "branch_id": 1}
+        ).to_list(500)
+        for inv in inv_rows:
+            await mark_price_reviewed(product_id, inv["branch_id"], source="manual")
+
     product = await db.products.find_one({"id": product_id}, {"_id": 0})
     return product
 

@@ -22,6 +22,30 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### Global Price Badge — "Needs Price Review" (2026-04-29) — Complete
+- **Why**: When a new branch opens, every product starts on the global fallback price. Manager needs visual cue showing which products haven't been priced-reviewed for that branch yet so they can call suppliers / verify margins / set per-branch overrides where needed.
+- **Schema**: New `inventory.price_reviewed_at` field. Null = pending review (badge shows). Set = reviewed (badge hidden).
+- **Backend** (auto-clears on these events for that product+branch):
+  - Branch Stock+Price import commit (`import_data.py`)
+  - Branch price override upsert (`branch_prices.py`)
+  - Manual product price/cost edit on global product (`products.py`) — clears across all branches with inventory
+  - PO line item committed (`purchase_orders._apply_po_inventory`)
+  - Branch transfer received (`branch_transfers.receive_transfer`)
+  - Manual one-click `POST /api/inventory/mark-reviewed`
+  - Bulk admin-only `POST /api/inventory/mark-all-reviewed`
+- **Migration**: One-shot startup backfill marks ALL existing inventory rows as reviewed (159 rows on first deploy). Only NEW rows born after deploy will trigger the badge.
+- **New endpoints**:
+  - `GET /api/inventory/pending-review-count?branch_id=X` — badge count
+  - `GET /api/inventory/pending-review-ids?branch_id=X` — Set of pending product IDs (used by POS/Terminal to render inline)
+  - `POST /api/inventory/mark-reviewed` — single ack `{product_id, branch_id}`
+  - `POST /api/inventory/mark-all-reviewed` — bulk ack `{branch_id}` (admin only)
+- **Frontend**: Reusable `<GlobalPriceBadge>` component (amber chip with hover-to-Mark-reviewed CTA, plus a compact dot variant for Terminal). Wired into:
+  - **InventoryPage** — chip per row + "Global Price" filter (with pending count) + "Mark all reviewed" bulk button
+  - **UnifiedSalesPage (POS)** — chip beside line item product name
+  - **ProductDetailPage** — chip in the title row when current branch is pending
+  - **TerminalSales** (Android) — compact 1.5px amber dot beside cart line items (scanner-friendly)
+- **Tests** (`backend/tests/test_global_price_badge_184.py`): 7 passing pytests covering all 6 auto-clear triggers + manual ack + bulk ack + endpoint correctness.
+
 ### Branch Stock+Price Import & Customer Import w/ Smart Dupe Detection (2026-04-29) — Complete
 - **Why**: User opening a second branch needed a way to bulk-load per-branch prices/stock without nuking the global catalog, and to migrate customers (with credit limits + opening balances) cleanly. Previously, "Update Existing" overwrote the global `product.prices` (affecting ALL branches) and there was no customer importer.
 - **Backend** (`routes/import_data.py`):

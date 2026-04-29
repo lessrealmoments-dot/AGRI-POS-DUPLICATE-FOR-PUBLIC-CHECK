@@ -14,6 +14,7 @@ from utils import (
     log_movement, update_cashier_wallet, update_digital_wallet, record_safe_movement,
     get_branch_filter, apply_branch_filter, ensure_branch_access,
     generate_next_number, check_idempotency, ensure_org_context,
+    mark_price_reviewed,
 )
 
 logger = logging.getLogger("purchase_orders")
@@ -139,6 +140,9 @@ async def _apply_po_inventory(po: dict, user: dict, capital_choices: dict = None
                  "$setOnInsert": {"id": new_id(), "created_at": now_iso()}},
                 upsert=True
             )
+
+            # Step 10: Clear "Global Price" badge — PO arrival = pricing implicitly reviewed
+            await mark_price_reviewed(pid, branch_id, source="po")
 
         except Exception as e:
             logger.error(

@@ -8,18 +8,21 @@ import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { Search, AlertTriangle } from 'lucide-react';
+import { Search, AlertTriangle, Globe, CheckCheck } from 'lucide-react';
 import { toast } from 'sonner';
+import GlobalPriceBadge from '../components/GlobalPriceBadge';
 
 export default function InventoryPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { currentBranch } = useAuth();
+  const { currentBranch, hasPerm } = useAuth();
   const [items, setItems] = useState([]);
   const [schemes, setSchemes] = useState([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState('');
   const [lowStock, setLowStock] = useState(false);
+  const [unreviewedOnly, setUnreviewedOnly] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
   const [sortBy, setSortBy] = useState('grouped'); // "name" | "type" | "grouped"
   const [page, setPage] = useState(0);
   const LIMIT = 30;
@@ -36,12 +39,34 @@ export default function InventoryPage() {
     } catch { toast.error('Failed to load inventory'); }
   }, [currentBranch, search, lowStock, sortBy, page]);
 
+  const fetchPendingCount = useCallback(async () => {
+    if (!currentBranch?.id) { setPendingCount(0); return; }
+    try {
+      const res = await api.get('/inventory/pending-review-count', { params: { branch_id: currentBranch.id } });
+      setPendingCount(res.data?.pending || 0);
+    } catch { /* silent */ }
+  }, [currentBranch]);
+
   // Re-fetch whenever user navigates to this page (location.key changes on every navigation)
   useEffect(() => { fetchInventory(); }, [location.key]); // eslint-disable-line
   useEffect(() => { fetchInventory(); }, [fetchInventory]);
+  useEffect(() => { fetchPendingCount(); }, [fetchPendingCount]);
   useEffect(() => {
     api.get('/price-schemes').then(r => setSchemes(r.data || [])).catch(() => {});
   }, []);
+
+  const handleMarkAllReviewed = async () => {
+    if (!currentBranch?.id) return;
+    if (!window.confirm(`Mark all ${pendingCount} pending products at ${currentBranch.name} as price-reviewed?`)) return;
+    try {
+      const res = await api.post('/inventory/mark-all-reviewed', { branch_id: currentBranch.id });
+      toast.success(`${res.data.marked_count} products marked as reviewed`);
+      fetchInventory();
+      fetchPendingCount();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to mark all reviewed');
+    }
+  };
 
   const totalPages = Math.ceil(total / LIMIT);
 
@@ -61,6 +86,29 @@ export default function InventoryPage() {
           data-testid="low-stock-filter" className={lowStock ? "bg-amber-500 hover:bg-amber-600 text-white" : ""}>
           <AlertTriangle size={14} className="mr-2" /> Low Stock
         </Button>
+        <Button
+          variant={unreviewedOnly ? "default" : "outline"}
+          onClick={() => setUnreviewedOnly(v => !v)}
+          data-testid="unreviewed-filter"
+          className={unreviewedOnly ? "bg-amber-600 hover:bg-amber-700 text-white" : ""}
+        >
+          <Globe size={14} className="mr-2" /> Global Price
+          {pendingCount > 0 && (
+            <span className={`ml-2 text-[10px] px-1.5 py-0.5 rounded-full ${unreviewedOnly ? 'bg-white/20' : 'bg-amber-100 text-amber-800'}`}>
+              {pendingCount}
+            </span>
+          )}
+        </Button>
+        {pendingCount > 0 && hasPerm?.('products', 'edit') && (
+          <Button
+            variant="outline"
+            onClick={handleMarkAllReviewed}
+            data-testid="mark-all-reviewed-btn"
+            className="border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+          >
+            <CheckCheck size={14} className="mr-2" /> Mark all reviewed
+          </Button>
+        )}
         <Select value={sortBy} onValueChange={v => { setSortBy(v); setPage(0); }}>
           <SelectTrigger data-testid="inventory-sort" className="w-[200px] h-10">
             <SelectValue />
@@ -91,7 +139,14 @@ export default function InventoryPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {items.map(item => {
+              {items
+                .filter(item => {
+                  if (!unreviewedOnly) return true;
+                  if (!currentBranch?.id) return true;
+                  const status = item.branch_price_review?.[currentBranch.id];
+                  return status === 'pending';
+                })
+                .map(item => {
                 const branchQty = currentBranch 
                   ? (item.derived_from_parent ? item.total_stock : (item.branch_stock?.[currentBranch.id] || 0)) 
                   : item.total_stock;
@@ -99,6 +154,8 @@ export default function InventoryPage() {
                 const isLow = branchQty <= (item.reorder_point || 10) && branchQty > 0;
                 const isOut = branchQty === 0;
                 const isGrouped = sortBy === 'grouped';
+                const reviewStatus = currentBranch?.id ? item.branch_price_review?.[currentBranch.id] : 'reviewed';
+                const isPendingReview = reviewStatus === 'pending';
                 return (
                   <TableRow key={item.id}
                     className={`cursor-pointer transition-colors hover:bg-slate-50 ${isGrouped && item.is_repack ? 'bg-amber-50/30' : ''} ${isNegative ? 'bg-red-50/40' : ''}`}
@@ -109,7 +166,17 @@ export default function InventoryPage() {
                           <span className={`shrink-0 ${isGrouped ? 'w-5 h-4 border-l-2 border-b-2 border-amber-300 ml-1' : 'w-4 border-l-2 border-b-2 border-slate-300 h-3'}`} />
                         )}
                         <div>
-                          <span className={`font-medium ${item.is_repack && isGrouped ? 'text-sm text-slate-700' : ''}`}>{item.name}</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className={`font-medium ${item.is_repack && isGrouped ? 'text-sm text-slate-700' : ''}`}>{item.name}</span>
+                            {isPendingReview && currentBranch?.id && (
+                              <GlobalPriceBadge
+                                productId={item.id}
+                                branchId={currentBranch.id}
+                                reviewed={false}
+                                onMarked={() => { fetchInventory(); fetchPendingCount(); }}
+                              />
+                            )}
+                          </div>
                           {item.derived_from_parent && item.parent_name && (
                             <div className="text-[10px] text-slate-400">
                               From: {item.parent_name} ({item.parent_stock?.toFixed(2)} {item.parent_unit})
