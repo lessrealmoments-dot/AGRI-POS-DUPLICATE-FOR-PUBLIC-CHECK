@@ -66,8 +66,16 @@ export default function PriceScanManager() {
     return false;
   };
 
+  // Skip the scan entirely for super admins (no tenant context — would either
+  // leak cross-org data pre-fix, or pop an empty dialog post-fix). Same guard
+  // for users with no organization — there's nothing to scan.
+  const skipForSuperAdmin = !!user && (
+    user.is_super_admin || !user.organization_id
+  );
+
   const runScan = useCallback(async (showDialogIfFound = true) => {
     if (!user) return;
+    if (skipForSuperAdmin) return; // hard guard — never scan without tenant context
     setScanning(true);
     try {
       const branchId = currentBranch?.id || '';
@@ -110,6 +118,7 @@ export default function PriceScanManager() {
   // Start scan timer
   useEffect(() => {
     if (!user) return;
+    if (skipForSuperAdmin) return; // no scanning for super admin / no-org context
     // Initial scan after 30 seconds (let app load first)
     const initialDelay = setTimeout(() => runScan(true), 30_000);
     // Then every 5 minutes
@@ -118,14 +127,14 @@ export default function PriceScanManager() {
       clearTimeout(initialDelay);
       clearInterval(scanTimerRef.current);
     };
-  }, [user, runScan]);
+  }, [user, runScan, skipForSuperAdmin]);
 
   // Re-scan when branch changes
   useEffect(() => {
-    if (user && currentBranch?.id) {
+    if (user && currentBranch?.id && !skipForSuperAdmin) {
       runScan(false); // silent rescan on branch switch
     }
-  }, [currentBranch?.id]); // eslint-disable-line
+  }, [currentBranch?.id, skipForSuperAdmin]); // eslint-disable-line
 
   const handleSkip = (skipMs) => {
     const until = Date.now() + skipMs;

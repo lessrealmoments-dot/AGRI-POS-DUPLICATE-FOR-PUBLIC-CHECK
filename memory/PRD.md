@@ -23,8 +23,10 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 ## What's Been Implemented
 
 ### 🚨 CRITICAL — Cross-Tenant Privacy Fix (2026-04-29) — Complete
-- **RCA from live VPS**: Super admin reported being able to use the universal Find/Scan to view another company's invoices/customers/products (JND Store) — even after deleting that company. **This was a serious cross-tenant data leak.**
-- Root cause in `config.py:TenantCollection._org_filter`:
+- **RCA from live VPS**: Two reports from the super admin —
+  1. Universal Find/Scan returned another tenant's invoices (JND Store).
+  2. Smart Price Scan popped up asking the super admin to fix prices on a tenant's products ("capital is higher than retail" warning on someone else's products).
+- Both stem from the same root cause in `config.py:TenantCollection._org_filter`:
   ```python
   if not org_id:
       return filter_dict or {}     # ← UNSCOPED, leaks ALL tenants
@@ -37,7 +39,8 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
   - Clear error message points devs to `_raw_db` or `set_org_context()`.
 - **Boot-time fix** (`main.py`): Wallet provisioning now sets `set_org_context(branch_org_id)` per-branch before calling `provision_branch_wallets`.
 - **Test infrastructure** (`tests/_org_test_helpers.py`): New helper that auto-seeds a known-password org admin user (`test_org_admin@regression.local`) + a manager with PIN 521325 in any active org. Updated 4 existing test files (165, 173, 177, 178) that were previously relying on the leak.
-- **Verified**: `pytest tests/test_cross_tenant_privacy_180.py` — 4 tests covering search, listing endpoints, source-level fail-closed sentinel, and insert guard. Full chain across iter 165, 173, 174, 175, 176, 177, 178, 179, 180 = **35/35 pass**. Lint clean.
+- **Frontend defense-in-depth** (`PriceScanManager.js`): added `skipForSuperAdmin` guard so the smart price scan dialog never even attempts a poll for super admins or users without `organization_id`. Even if a future regression slipped through the backend, the UI cannot pop a tenant's pricing dialog to a super admin.
+- **Verified**: `pytest tests/test_cross_tenant_privacy_180.py` — 5 tests covering search, listing endpoints, **pricing-scan + price-update PUT for tenant products**, source-level fail-closed sentinel, and insert guard. Full chain across iter 165, 173-180 = **36/36 pass**. Lint clean.
 
 ### Messages Page Default Tab + Company Info Self-Heal (2026-04-29) — Complete
 - **Task A (UX)**: Messages page (`/messages`) now defaults to **Conversations** tab (was: Message Queue). One-line change in `MessagesPage.js:91`.

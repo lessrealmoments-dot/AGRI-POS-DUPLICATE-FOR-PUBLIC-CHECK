@@ -172,9 +172,70 @@ def test_tenant_collection_fail_closed_on_insert():
     print("PASS · TenantCollection raises with helpful message on context-less insert")
 
 
+def test_super_admin_cannot_scan_or_edit_tenant_pricing():
+    """
+    The user reported: as super admin, the Smart Price Scan dialog popped up
+    asking them to fix prices on a TENANT's products. Now the scan must
+    return zero issues for super admin and the price-update PUT must 404
+    (scoped find returns nothing).
+    """
+    db = _db()
+    org_id = f"pricetest-{uuid.uuid4()}"
+    prod_id = f"prod-{uuid.uuid4()}"
+    db.organizations.insert_one({"id": org_id, "name": "Tenant With Bad Price"})
+    # Plant a product with a price BELOW cost — this is the trigger for the
+    # smart price scan dialog. If the leak existed, super admin would see it.
+    db.products.insert_one({
+        "id": prod_id,
+        "organization_id": org_id,
+        "name": "PRIVATE PRODUCT - DO NOT LEAK",
+        "active": True,
+        "is_repack": False,
+        "cost_price": 100.0,
+        "prices": {"retail": 50.0, "wholesale": 60.0},  # both below cost
+    })
+
+    try:
+        token = _login_super_admin()
+        h = {"Authorization": f"Bearer {token}"}
+
+        # 1. Pricing scan must NOT surface the tenant's product
+        r = requests.get(f"{API}/products/pricing-scan", headers=h, timeout=15)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        issues = body.get("issues", [])
+        leaked = [i for i in issues if "PRIVATE PRODUCT" in str(i)]
+        assert not leaked, (
+            f"PRIVACY BREACH: pricing-scan exposed tenant product to super "
+            f"admin: {leaked}"
+        )
+        # And critical_total/total reflect zero
+        assert body.get("total", 0) == 0, (
+            f"pricing-scan returned total={body.get('total')} for super admin"
+        )
+        print(
+            f"PASS · super-admin pricing-scan returned 0 issues "
+            f"(tenant product hidden)"
+        )
+
+        # 2. Even if super admin somehow knew the product_id, update-price must 404
+        r = requests.put(
+            f"{API}/products/{prod_id}/update-price",
+            headers=h,
+            json={"scheme": "retail", "price": 999},
+            timeout=15,
+        )
+        assert r.status_code in (404, 403), r.text
+        print(f"PASS · super-admin update-price → {r.status_code} (cannot edit tenant product)")
+    finally:
+        db.organizations.delete_one({"id": org_id})
+        db.products.delete_many({"id": prod_id})
+
+
 if __name__ == "__main__":
     test_super_admin_universal_search_returns_empty()
     test_super_admin_listing_endpoints_return_empty()
+    test_super_admin_cannot_scan_or_edit_tenant_pricing()
     test_tenant_collection_fail_closed_in_filter()
     test_tenant_collection_fail_closed_on_insert()
     print("\nIteration 180 cross-tenant privacy enforcement tests passed.")
