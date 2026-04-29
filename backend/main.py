@@ -388,6 +388,19 @@ async def startup():
         )
     except Exception:
         pass  # Index may already exist with different options
+    # Defense-in-depth: also enforce uniqueness on envelope_id (offline sync queue).
+    # This catches the theoretical race where a client double-sync POST succeeds
+    # twice — Mongo will reject the second insert at write time.
+    try:
+        await _raw_db.invoices.create_index(
+            "envelope_id",
+            unique=True,
+            partialFilterExpression={
+                "envelope_id": {"$exists": True, "$type": "string"}
+            },
+        )
+    except Exception:
+        pass
     await _raw_db.customers.create_index("id", unique=True)
     await _raw_db.customers.create_index("branch_id")
     await _raw_db.branches.create_index("id", unique=True)
@@ -1133,6 +1146,12 @@ app.add_middleware(
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
+    return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/api/health")
+async def health_check_api():
+    """API-prefixed health endpoint (used by Terminal for connectivity probes)."""
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 

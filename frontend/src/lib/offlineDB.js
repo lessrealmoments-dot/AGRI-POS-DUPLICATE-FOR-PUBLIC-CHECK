@@ -58,7 +58,7 @@ async function clearOrgCache(oldOrgId) {
   }
 }
 
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 const STORES = {
   PRODUCTS: 'products',
@@ -359,5 +359,29 @@ export async function updateInventoryBatch(items) {
 export async function hasPendingSales() {
   const count = await countStore(STORES.PENDING_SALES);
   return count > 0;
+}
+
+// ─── Phase 1/2: Offline auth (admin PIN hash) helpers ──────────────────────
+// We cache the bcrypt-hashed admin PIN in META store so that when the
+// terminal is offline we can still validate a manager-bypass PIN locally
+// using bcryptjs.compareSync(). The hash is one-way so device compromise
+// alone cannot recover the PIN.
+export async function setOfflineAdminPinHash(hash) {
+  await setMeta('admin_pin_hash', hash || null);
+}
+
+export async function getOfflineAdminPinHash() {
+  return getMeta('admin_pin_hash');
+}
+
+/** Find a pending sale by id (for retry/inspection UIs) */
+export async function getPendingSale(saleId) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORES.PENDING_SALES, 'readonly');
+    const req = tx.objectStore(STORES.PENDING_SALES).get(saleId);
+    req.onsuccess = () => { db.close(); resolve(req.result || null); };
+    req.onerror = () => { db.close(); reject(req.error); };
+  });
 }
 

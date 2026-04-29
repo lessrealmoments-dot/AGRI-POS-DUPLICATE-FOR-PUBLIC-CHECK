@@ -2,8 +2,8 @@
 Sync routes: Offline POS data sync.
 """
 from fastapi import APIRouter, Depends, HTTPException
-from datetime import datetime, timezone
-from config import db
+from datetime import datetime, timezone, timedelta
+from config import db, _raw_db
 from utils import get_current_user, now_iso, new_id, log_movement, log_sale_items, update_cashier_wallet, get_active_date
 
 router = APIRouter(tags=["Sync"])
@@ -126,6 +126,38 @@ async def get_pos_sync_data(user=Depends(get_current_user), branch_id: str = Non
         all_bp_map = {bp["product_id"]: bp for bp in branch_prices}
 
     enriched_products = []
+    # ── Offline analytics: pre-compute moving_average + last_purchase per product ──
+    # Server-aggregates last 30 days of movements for the branch so the Terminal
+    # POS can show capital reveal data even when offline.
+    ma_lp_map = {}
+    if branch_id:
+        thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        try:
+            mv_pipeline = [
+                {"$match": {
+                    "branch_id": branch_id,
+                    "movement_type": {"$in": ["purchase", "transfer_in"]},
+                    "created_at": {"$gte": thirty_days_ago},
+                }},
+                {"$group": {
+                    "_id": "$product_id",
+                    "total_qty": {"$sum": {"$abs": "$quantity"}},
+                    "total_cost": {"$sum": {"$multiply": [{"$abs": "$quantity"}, {"$ifNull": ["$cost_price", 0]}]}},
+                    "last_cost": {"$last": {"$ifNull": ["$cost_price", 0]}},
+                    "last_date": {"$last": "$created_at"},
+                }},
+            ]
+            for r in await db.movements.aggregate(mv_pipeline).to_list(20000):
+                qty = float(r.get("total_qty") or 0)
+                tc = float(r.get("total_cost") or 0)
+                ma = round(tc / qty, 4) if qty > 0 else 0
+                ma_lp_map[r["_id"]] = {
+                    "moving_average": ma,
+                    "last_purchase": float(r.get("last_cost") or 0),
+                }
+        except Exception:
+            ma_lp_map = {}
+
     for p in products:
         p = dict(p)
         if p.get("is_repack") and p.get("parent_id"):
@@ -157,16 +189,48 @@ async def get_pos_sync_data(user=Depends(get_current_user), branch_id: str = Non
                 # So we only apply branch_prices.cost_price for non-repacks.
                 if not p.get("is_repack"):
                     p["cost_price"] = bp["cost_price"]
+        # ── Phase 1: Pre-built search index + offline analytics ──
+        # Lowercase concat used by Terminal search filter — single string compare
+        # instead of 3 separate lowercase ops per item per keystroke.
+        p["search_blob"] = f"{(p.get('name') or '').lower()}|{(p.get('sku') or '').lower()}|{(p.get('barcode') or '').lower()}"
+        ma_lp = ma_lp_map.get(p["id"])
+        if ma_lp:
+            p["moving_average_cost"] = ma_lp["moving_average"]
+            p["last_purchase_cost"] = ma_lp["last_purchase"]
         enriched_products.append(p)
     
+    # ── Phase 1: Cache admin_pin bcrypt hash for offline manager bypass ──
+    # This is the bcrypt hash (one-way) — even if device is stolen, attacker
+    # cannot reverse it. Local bcrypt.compareSync() validates an entered PIN
+    # without requiring the server.
+    admin_pin_hash = None
+    try:
+        admin_pin_doc = await db.system_settings.find_one(
+            {"key": "admin_pin"}, {"_id": 0, "pin_hash": 1}
+        )
+        if admin_pin_doc:
+            admin_pin_hash = admin_pin_doc.get("pin_hash")
+    except Exception:
+        admin_pin_hash = None
+
+    # ── Phase 1: Customers enriched with credit_limit + credit_blocked_at ──
+    # Already on the document; ensure the fields are explicit.
+    enriched_customers = []
+    for c in customers:
+        c = dict(c)
+        c["credit_limit"] = float(c.get("credit_limit") or 0)
+        c["credit_blocked_at"] = c.get("credit_blocked_at")
+        enriched_customers.append(c)
+
     return {
         "products": enriched_products,
-        "customers": customers,
+        "customers": enriched_customers,
         "price_schemes": schemes,
         "inventory": inventory,
         "branch_prices": branch_prices,
         "deleted_ids": deleted_ids,
         "deleted_customer_ids": deleted_customer_ids,
+        "admin_pin_hash": admin_pin_hash,
         "sync_time": now_iso(),
         "is_delta": is_delta,
     }
@@ -325,8 +389,80 @@ async def sync_offline_sales(data: dict, user=Depends(get_current_user)):
                 "created_at": now_iso(),
             }
 
-            await db.invoices.insert_one(invoice)
-            del invoice["_id"]
+            try:
+                await db.invoices.insert_one(invoice)
+            except Exception as _dup_err:
+                # Defense-in-depth: unique index on envelope_id can reject a true
+                # network-race retry. Treat as duplicate (not a hard error) so the
+                # client clears the pending entry instead of looping forever.
+                err_name = type(_dup_err).__name__
+                if "Duplicate" in err_name or "duplicate" in str(_dup_err).lower() or "E11000" in str(_dup_err):
+                    synced.append({"id": sale_id, "envelope_id": envelope_id, "status": "duplicate"})
+                    continue
+                raise
+            invoice.pop("_id", None)
+
+            # ── Phase 2: Retroactive signature_session for offline credit sales ──
+            # When credit sale was captured offline, the cashier could not create a
+            # server-side signature_session. Instead they collected a Manager PIN
+            # bypass locally with a reason. Now (during sync replay) we create
+            # the session with status=bypassed and link it to the invoice for audit.
+            offline_bypass = sale.get("offline_bypass") or None
+            if offline_bypass and invoice.get("balance", 0) > 0 and invoice.get("customer_id"):
+                try:
+                    sig_session_id = new_id()
+                    sig_session = {
+                        "id": sig_session_id,
+                        "token": new_id(),  # not used for verification (offline path)
+                        "organization_id": user.get("organization_id", ""),
+                        "branch_id": branch_id,
+                        "credit_context": {
+                            "customer_name": invoice.get("customer_name", ""),
+                            "amount": float(invoice.get("balance") or 0),
+                            "credit_type": offline_bypass.get("credit_type", "by_term"),
+                            "date": invoice.get("order_date", now_iso()[:10]),
+                            "branch_name": offline_bypass.get("branch_name", ""),
+                            "description": "Offline credit sale (manager PIN bypass)",
+                            "invoice_number": inv_number,
+                            "items": invoice.get("items", []),
+                            "subtotal": invoice.get("subtotal"),
+                            "discount": invoice.get("overall_discount"),
+                            "partial_paid": invoice.get("amount_paid"),
+                        },
+                        "linked_record_type": "invoice",
+                        "linked_record_id": sale_id,
+                        "status": "bypassed",
+                        "signature_r2_key": None,
+                        "signature_url": None,
+                        "signed_at": None,
+                        "signer_info": None,
+                        "bypass_method": offline_bypass.get("method", "manager_pin"),
+                        "bypass_by_id": offline_bypass.get("by_id") or user["id"],
+                        "bypass_by_name": offline_bypass.get("by_name") or user.get("full_name", user.get("username", "")),
+                        "bypass_reason": (offline_bypass.get("reason") or "Offline credit sale - customer unable to sign").strip(),
+                        "bypassed_at": offline_bypass.get("at") or sale.get("timestamp") or now_iso(),
+                        "expires_at": now_iso(),
+                        "created_by_id": user["id"],
+                        "created_by_name": user.get("full_name", user.get("username", "")),
+                        "created_at": offline_bypass.get("at") or sale.get("timestamp") or now_iso(),
+                        "offline_origin": True,
+                    }
+                    await db.signature_sessions.insert_one(sig_session)
+                    # Back-link to invoice
+                    await db.invoices.update_one(
+                        {"id": sale_id},
+                        {"$set": {
+                            "signature_session_id": sig_session_id,
+                            "signature_bypass_method": sig_session["bypass_method"],
+                            "signature_bypass_reason": sig_session["bypass_reason"],
+                            "signature_signed_at": sig_session["bypassed_at"],
+                            "offline_signature_origin": True,
+                        }},
+                    )
+                except Exception as _e:
+                    # Non-blocking — sale is already saved; log for audit follow-up
+                    import logging
+                    logging.getLogger(__name__).warning(f"Offline bypass session create failed for {sale_id}: {_e}")
 
             if invoice["amount_paid"] > 0:
                 await update_cashier_wallet(branch_id, invoice["amount_paid"], f"Synced sale {inv_number}")
@@ -373,4 +509,59 @@ async def sync_offline_sales(data: dict, user=Depends(get_current_user)):
         "total_synced": len([s for s in synced if s.get("status") == "synced"]),
         "total_errors": len(errors),
         "results": synced,
+    }
+
+
+
+@router.get("/sync/offline-summary")
+async def get_offline_sync_summary(user=Depends(get_current_user), branch_id: str = None, days: int = 7):
+    """Phase 3: Stock warning summary for offline-synced sales.
+
+    Returns counts of sales that synced from offline mode and how many had
+    stock warnings (inventory went negative). Used by Dashboard widget to
+    surface offline operations needing manager review.
+    """
+    try:
+        days = max(1, min(int(days or 7), 90))
+    except Exception:
+        days = 7
+    cutoff_iso = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    base_q = {
+        "synced_from_offline": True,
+        "created_at": {"$gte": cutoff_iso},
+    }
+    if branch_id:
+        base_q["branch_id"] = branch_id
+
+    total = await db.invoices.count_documents(base_q)
+
+    warn_q = dict(base_q)
+    warn_q["stock_warnings.0"] = {"$exists": True}  # array has at least 1 element
+    warned = await db.invoices.count_documents(warn_q)
+
+    # Recent samples for surfacing
+    samples = await db.invoices.find(
+        warn_q,
+        {"_id": 0, "id": 1, "invoice_number": 1, "customer_name": 1,
+         "branch_id": 1, "stock_warnings": 1, "created_at": 1, "grand_total": 1},
+    ).sort("created_at", -1).to_list(20)
+
+    # Offline credit sales (manager-PIN bypass) needing review
+    offline_credit_q = {
+        "synced_from_offline": True,
+        "offline_signature_origin": True,
+        "created_at": {"$gte": cutoff_iso},
+    }
+    if branch_id:
+        offline_credit_q["branch_id"] = branch_id
+    offline_credit_count = await db.invoices.count_documents(offline_credit_q)
+
+    return {
+        "period_days": days,
+        "branch_id": branch_id,
+        "total_synced": total,
+        "warned_count": warned,
+        "offline_credit_count": offline_credit_count,
+        "samples": samples,
     }

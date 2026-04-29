@@ -16,6 +16,7 @@ import { newEnvelopeId } from '../../lib/syncManager';
 import CropCreditTypeDialog from '../../components/CropCreditTypeDialog';
 import { invalidateBalanceCache } from '../../components/CustomerBalanceBadge';
 import RequestSignatureDialog from '../../components/RequestSignatureDialog';
+import OfflineCreditBypassDialog from '../../components/OfflineCreditBypassDialog';
 import GlobalPriceBadge from '../../components/GlobalPriceBadge';
 
 const COLLAPSE_THRESHOLD = 4; // show all if ≤ 4, add "More" toggle if > 4
@@ -81,6 +82,9 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   const [terminalSig, setTerminalSig] = useState({ open: false, invoice: null, preCommit: false }); // mandatory inline sig for credit/partial
   // Pre-commit signature (legal sequence: signature BEFORE invoice creation)
   const [pendingSigSession, setPendingSigSession] = useState(null); // { id, signature_url, bypass_method, signed_at, verification_token }
+  // Phase 2: Offline credit-sale manager-PIN bypass
+  const [offlineBypassDialog, setOfflineBypassDialog] = useState({ open: false, invoice: null });
+  const [pendingOfflineBypass, setPendingOfflineBypass] = useState(null); // { method, by_name, reason, at }
   const saleIdRef = useRef(''); // stable per checkout intent → used as idempotency key
   const processingRef = useRef(false); // guards against rapid double-click re-entry
   const [businessInfo, setBusinessInfo] = useState({});
@@ -194,17 +198,28 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
     setSchemePinLoading(false);
   };
 
-  // Search products
+  // Search products — debounced 150ms + uses pre-built search_blob
+  // (server-merged on /sync/pos-data) for fast filtering at 5K+ SKUs.
+  // Falls back to multi-field lowercase concat if search_blob is missing
+  // (older cache that hasn't synced since the upgrade).
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   useEffect(() => {
-    if (!search.trim()) { setResults([]); return; }
-    const q = search.toLowerCase();
-    const filtered = products.filter(p =>
-      (p.name || '').toLowerCase().includes(q) ||
-      (p.sku || '').toLowerCase().includes(q) ||
-      (p.barcode || '').includes(search)
-    ).slice(0, 20);
+    const t = setTimeout(() => setDebouncedSearch(search), 150);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  useEffect(() => {
+    if (!debouncedSearch.trim()) { setResults([]); return; }
+    const q = debouncedSearch.toLowerCase();
+    const filtered = products.filter(p => {
+      if (p.search_blob) return p.search_blob.includes(q);
+      // Legacy fallback
+      return (p.name || '').toLowerCase().includes(q)
+        || (p.sku || '').toLowerCase().includes(q)
+        || (p.barcode || '').includes(debouncedSearch);
+    }).slice(0, 20);
     setResults(filtered);
-  }, [search, products]);
+  }, [debouncedSearch, products]);
 
   const getPrice = (product) => product.prices?.[activeScheme] ?? 0;
 
@@ -505,6 +520,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
     setCropCreditConfig(null); setCropTypeDialog(false);
     // Reset pre-commit signature so the next sale starts a fresh signing session
     setPendingSigSession(null);
+    setPendingOfflineBypass(null);
     saleIdRef.current = '';
     processingRef.current = false;
   };
@@ -549,8 +565,13 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
     // Hard block: credit/partial sales cannot commit without a signature/bypass
     const requiresSignature = paymentType === 'credit' && selectedCustomer?.id;
     const sig = sigSession || pendingSigSession;
-    if (requiresSignature && !sig?.id) {
+    const offlineBypass = pendingOfflineBypass;
+    if (requiresSignature && isOnline && !sig?.id) {
       toast.error('Customer signature is required before recording the credit sale');
+      return;
+    }
+    if (requiresSignature && !isOnline && !offlineBypass?.method) {
+      toast.error('Manager PIN authorization is required before recording this offline credit sale');
       return;
     }
     processingRef.current = true;
@@ -604,6 +625,19 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
     if (paymentType === 'split') {
       saleData.split_cash = parseFloat(splitCash) || 0;
       saleData.split_digital = parseFloat(splitDigital) || 0;
+    }
+
+    // Phase 2: Offline credit sale — attach bypass metadata so /sales/sync
+    // retroactively creates a signature_session(status=bypassed) on replay.
+    if (offlineBypass?.method) {
+      saleData.offline_bypass = {
+        method: offlineBypass.method,
+        by_name: offlineBypass.by_name || 'Manager',
+        reason: offlineBypass.reason || '',
+        at: offlineBypass.at || new Date().toISOString(),
+        credit_type: cropCreditConfig?.type === 'charged_to_crop' ? 'charged_to_crop' : 'by_term',
+        branch_name: session.branchName || '',
+      };
     }
 
     if (isOnline) {
@@ -1344,10 +1378,43 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
                         toast.error('Select payment terms (15/30/60 days or Charged to Crop)');
                         return;
                       }
-                      // ── Credit/Partial: capture signature BEFORE creating the invoice ──
+                      const requiresSignature = paymentType === 'credit' && selectedCustomer?.id;
+                      // ── OFFLINE PATH ─────────────────────────────────────
+                      // Phase 2: When offline, skip signature_session creation
+                      // (server unreachable) and collect Manager PIN bypass
+                      // locally. Cached bcrypt hash verifies the PIN; sync
+                      // replay creates the bypassed signature_session.
+                      if (requiresSignature && !isOnline && !pendingOfflineBypass) {
+                        // Local credit-limit guard (Phase 3) — best-effort
+                        const lim = parseFloat(selectedCustomer?.credit_limit || 0) || 0;
+                        const bal = parseFloat(selectedCustomer?.balance || 0) || 0;
+                        if (lim > 0 && bal + grandTotal > lim) {
+                          toast.error(`Credit limit reached (${formatPHP(lim)}). Customer balance ${formatPHP(bal)} + this sale exceeds limit.`);
+                          return;
+                        }
+                        if (selectedCustomer?.credit_blocked_at) {
+                          toast.error('This customer is credit-blocked. Cannot extend more credit offline.');
+                          return;
+                        }
+                        setOfflineBypassDialog({
+                          open: true,
+                          invoice: {
+                            customer_name: selectedCustomer.name,
+                            balance: grandTotal,
+                            credit_type: cropCreditConfig?.type === 'charged_to_crop' ? 'charged_to_crop' : 'by_term',
+                            branch_name: session.branchName || '',
+                            items: cart.map(c => ({
+                              product_name: c.product_name, quantity: c.quantity,
+                              unit: c.unit || 'unit', rate: c.price, total: c.total,
+                            })),
+                          },
+                        });
+                        return;
+                      }
+                      // ── ONLINE PATH ──────────────────────────────────────
+                      // Credit/Partial: capture signature BEFORE creating the invoice
                       // Legal sequence: signature → invoice → print. No invoice exists
                       // until the signature/bypass session is sealed by the customer.
-                      const requiresSignature = paymentType === 'credit' && selectedCustomer?.id;
                       if (requiresSignature && !pendingSigSession?.id) {
                         const today = new Date().toISOString().slice(0, 10);
                         setTerminalSig({
@@ -1387,7 +1454,9 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
                     {saving
                       ? 'Processing...'
                       : paymentType === 'credit'
-                        ? (pendingSigSession?.id ? 'Record Credit Sale' : 'Capture Signature')
+                        ? (isOnline
+                            ? (pendingSigSession?.id ? 'Record Credit Sale' : 'Capture Signature')
+                            : (pendingOfflineBypass ? 'Record Credit Sale' : 'Manager PIN Required'))
                         : `Pay ${formatPHP(grandTotal)}`}
                   </Button>
                 </div>
@@ -1671,6 +1740,21 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Offline credit-sale bypass: when no internet, manager PIN authorizes
+          credit/partial sales (no signature capture possible). Sync replay
+          creates a bypassed signature_session for audit. */}
+      <OfflineCreditBypassDialog
+        open={offlineBypassDialog.open}
+        onOpenChange={(o) => setOfflineBypassDialog(prev => ({ ...prev, open: o }))}
+        invoice={offlineBypassDialog.invoice}
+        onConfirm={(meta) => {
+          setPendingOfflineBypass(meta);
+          setOfflineBypassDialog({ open: false, invoice: null });
+          // Defer to next tick so state settles, then commit (queues to pending_sales)
+          setTimeout(() => processSale(), 0);
+        }}
+      />
 
       {/* Mandatory inline signature for credit/partial sales (terminal mode) */}
       <RequestSignatureDialog

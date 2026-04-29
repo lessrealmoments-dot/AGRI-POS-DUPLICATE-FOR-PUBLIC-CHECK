@@ -17,7 +17,7 @@ import {
   getPendingSales, removePendingSale,
   cacheProducts, cacheCustomers, cachePriceSchemes, cacheInventory, cacheBranchPrices,
   setMeta, getMeta, getPendingSaleCount, putProduct,
-  updateInventoryBatch, mergeCustomers,
+  updateInventoryBatch, mergeCustomers, setOfflineAdminPinHash,
 } from './offlineDB';
 
 let syncInProgress = false;
@@ -165,7 +165,7 @@ export async function refreshPOSCache(branchId = null) {
     if (lastSync) params.last_sync = lastSync;
 
     const response = await api.get('/sync/pos-data', { params });
-    const { products = [], customers = [], price_schemes = [], inventory = [], branch_prices = [], deleted_ids = [], deleted_customer_ids = [], sync_time, is_delta } = response.data;
+    const { products = [], customers = [], price_schemes = [], inventory = [], branch_prices = [], deleted_ids = [], deleted_customer_ids = [], admin_pin_hash = null, sync_time, is_delta } = response.data;
 
     emit({ type: 'sync_step', stepLabel: `Saving ${products.length} products...`, pct: 25 });
     if (is_delta && products.length > 0) {
@@ -210,6 +210,10 @@ export async function refreshPOSCache(branchId = null) {
     const timestamp = sync_time || new Date().toISOString();
     await setMeta('last_sync', timestamp);
     await setMeta('last_sync_branch', branchId || 'all');
+    // Cache admin_pin hash for offline manager bypass (Phase 2)
+    if (admin_pin_hash) {
+      await setOfflineAdminPinHash(admin_pin_hash);
+    }
     await setMeta('last_sync_counts', {
       products: products.length,
       customers: customers.length,

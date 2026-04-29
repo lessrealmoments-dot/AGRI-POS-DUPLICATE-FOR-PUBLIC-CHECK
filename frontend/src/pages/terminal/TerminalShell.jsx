@@ -16,7 +16,7 @@ import {
   cacheBranchPrices, setOfflineOrg, getPendingSaleCount,
   getProductCount, getLastSyncTime, setLastSyncTime,
   mergeProducts, mergeCustomers, updateInventoryBatch,
-  getMeta,
+  getMeta, setOfflineAdminPinHash,
 } from '../../lib/offlineDB';
 import { syncPendingSales, startAutoSync, stopAutoSync } from '../../lib/syncManager';
 
@@ -383,13 +383,63 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
     return () => { window.removeEventListener('keydown', handleGlobalKey); clearTimeout(globalScanTimerRef.current); };
   }, [handleSmartInput]);
 
-  // Online/offline detection
+  // Online/offline detection — Phase 4: robust connectivity check
+  // navigator.onLine alone false-positives "offline" (captive portals,
+  // stale browser state). We additionally ping /api/health every 30s.
+  // Only flip to offline if BOTH navigator says offline AND ping fails,
+  // OR ping fails 3 times in a row while navigator claims online.
   useEffect(() => {
-    const goOnline = () => { setIsOnline(true); toast.success('Back online'); };
+    let pingFailures = 0;
+    let timer = null;
+    const probe = async () => {
+      // Browser thinks we're offline — trust it (saves bandwidth)
+      if (!navigator.onLine) {
+        setIsOnline(false);
+        pingFailures = 0;
+        return;
+      }
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 4000);
+        const res = await fetch(`${BACKEND_URL}/api/health`, {
+          method: 'GET', signal: ctrl.signal, cache: 'no-store',
+        });
+        clearTimeout(t);
+        if (res.ok) {
+          if (pingFailures > 0) {
+            // Recovered
+            setIsOnline(true);
+          } else {
+            // Make sure state is online (handles initial mount)
+            setIsOnline((prev) => prev ? prev : true);
+          }
+          pingFailures = 0;
+        } else {
+          throw new Error('non-ok');
+        }
+      } catch {
+        pingFailures += 1;
+        // Browser claims online but backend unreachable: be patient — only
+        // flip after 3 consecutive failures (90s window) to avoid the
+        // "false offline" toast the user hit before.
+        if (pingFailures >= 3) {
+          setIsOnline(false);
+        }
+      }
+    };
+    const goOnline = () => { pingFailures = 0; setIsOnline(true); toast.success('Back online'); };
     const goOffline = () => { setIsOnline(false); toast('Working offline', { duration: 3000 }); };
     window.addEventListener('online', goOnline);
     window.addEventListener('offline', goOffline);
-    return () => { window.removeEventListener('online', goOnline); window.removeEventListener('offline', goOffline); };
+    // Run a probe shortly after mount + every 30s
+    const initial = setTimeout(probe, 2000);
+    timer = setInterval(probe, 30000);
+    return () => {
+      window.removeEventListener('online', goOnline);
+      window.removeEventListener('offline', goOffline);
+      clearTimeout(initial);
+      if (timer) clearInterval(timer);
+    };
   }, []);
 
   // WebSocket connection for real-time events
@@ -491,6 +541,10 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
 
       // Save sync timestamp
       await setLastSyncTime(posRes.data.sync_time || new Date().toISOString());
+      // Phase 2: cache admin_pin hash for offline manager bypass
+      if (posRes.data.admin_pin_hash) {
+        await setOfflineAdminPinHash(posRes.data.admin_pin_hash);
+      }
 
       // Sync pending offline sales
       const count = await getPendingSaleCount();
@@ -567,6 +621,10 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
           ]);
 
           await setLastSyncTime(posRes.data.sync_time || new Date().toISOString());
+          // Phase 2: cache admin_pin hash for offline manager bypass
+          if (posRes.data.admin_pin_hash) {
+            await setOfflineAdminPinHash(posRes.data.admin_pin_hash);
+          }
 
           const count = await getPendingSaleCount();
           setPendingCount(count);

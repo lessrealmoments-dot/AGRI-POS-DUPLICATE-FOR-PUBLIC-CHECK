@@ -1,0 +1,53 @@
+{
+  "summary": "Iter 192 (Offline Mode Robustness Overhaul) backend independent verification: all 4 baseline tests + 10 new edge-case tests PASS (14/14 = 100%). Phase 1 enrichment, Phase 2 retroactive bypass session, Phase 3 envelope_id idempotency + offline-summary, and Phase 4 /api/health all behave per spec; aggressive probes (cash-sale ignored, missing customer/reason, lowercase contract, MA/LP arithmetic, days clamping, concurrent envelope_id race, malformed offline_bypass type) confirm robust behavior.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/sales/sync",
+        "issue": "When `offline_bypass` is supplied with an invalid type (e.g. a JSON string instead of dict) on a CREDIT sale, the inner `.get(...)` chain at routes/sync.py:439-443 will raise AttributeError. It IS swallowed by the surrounding try/except (line 462) so the sale is still persisted, but the exception path runs — increasing log noise. Suggest adding `if not isinstance(offline_bypass, dict): offline_bypass = None` right after line 410 to fail-fast cleanly. Cash sales aren't affected (early balance>0 guard)."
+      },
+      {
+        "endpoint": "GET /api/sync/offline-summary",
+        "issue": "FastAPI typed param `days: int` rejects non-integer query strings with 422 instead of clamping. Functional, but inconsistent with the documented 'tolerant clamp' behavior in routes/sync.py:524-527. Either drop the type hint to keep clamp logic, or document the 422 contract."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_offline_mode_192.py",
+    "/app/backend/tests/test_offline_mode_192_edge.py",
+    "/app/test_reports/pytest/pytest_offline_mode_192_edge.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: Harden routes/sync.py:410 — coerce non-dict offline_bypass to None to prevent inner AttributeError (currently swallowed, no functional bug but adds log noise).",
+    "OPTIONAL: Decide whether /sync/offline-summary should clamp invalid `days` values or 422 — currently it 422s on `days=abc` because of the int type hint, even though the body has clamp logic that never executes."
+  ],
+  "critical_code_review_comments": [
+    "Phase 1 (sync.py:128-200): search_blob built as `name|sku|barcode` lowercase concat — empty fields become empty strings between pipes, so search will never falsely match across field boundaries. MA/LP enrichment correctly aggregates only purchase + transfer_in movement_types (no sale movements, no negative qty fed). The `$last` accumulator in $group is order-dependent — without a $sort stage upstream, MongoDB does NOT guarantee insertion order in $group output, so `last_purchase_cost` can return a non-deterministic value if there are multiple movements per product on the same day. Should add `$sort: {created_at: -1}` before $group, and use `$first` instead of `$last`, to deterministically pick the latest. Currently only verified by happy-path test where all movements share an order.",
+    "Phase 1 admin_pin_hash lookup (sync.py:206-214) is wrapped in try/except returning None on any error — robust against missing collection. Bcrypt cost factor is 12 (helpers default) which yields ~250ms verify time on a low-end Android — acceptable for offline PIN entry but caller must ensure the IndexedDB compare runs in a worker.",
+    "Phase 2 retroactive signature_session (sync.py:405-465) is correctly gated by `balance>0 AND customer_id`, so cash sales and walk-ins with customer-less credit cannot accidentally create a bypass row. The session is wrapped in try/except so a session-write failure cannot lose the invoice. Defaults applied for missing reason/by_name/at fields. linked_record_type='invoice', linked_record_id=sale_id, status='bypassed', offline_origin=True — all 4 required audit fields verified.",
+    "Phase 3 envelope_id idempotency: pre-check find_one + post-write Mongo unique index is the right belt-and-braces design. Concurrent POST race verified — exactly 1 invoice persisted across 2 parallel threads using the same envelope_id. The unique index (main.py:391-403) is partial-filtered on $exists+$type=string, so legacy invoices without envelope_id are not affected.",
+    "Phase 3 /sync/offline-summary (sync.py:516-567) clamps days to [1,90] correctly for negative/zero/large values; samples list is bounded to 20 invoices and only contains warned ones (not all synced). Possible improvement: include offline_credit_count samples too, not just stock-warning samples — would help a Dashboard widget show ALL items needing manager review.",
+    "Phase 4 /api/health (main.py:1152-1155): bare 200 response with status=healthy, no DB ping — cannot detect a wedged Mongo. Acceptable for liveness but a separate /api/ready that pings Mongo would be a clean follow-up."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_offline_mode_192_edge.py (new — 10 edge-case probes)"
+  ],
+  "success_rate": {
+    "backend": "100% (14/14 tests passed: 4 baseline + 10 edge)",
+    "frontend": "skipped per request (testing_type=backend only)"
+  },
+  "test_credentials": {
+    "used": "test_org_admin@regression.local / RegressionPass!2026 (auto-seeded by tests/_org_test_helpers.ensure_org_admin_token); admin_pin=913712"
+  },
+  "seed_data_creation": "Tests created several edge-test products (Edge Item *, UPPERCASE NAME, Off Test Item, Dup Test Item, RACE) + 1 customer + 2 movements + 1 EdgeTest branch (only if no active branch existed). All test data is org-scoped; no production data touched. The admin_pin doc is wiped+restored under the test admin's organization_id by test_admin_pin_hash_returns_none_when_missing — leaves system in a clean state.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "All 7 review-request bullets verified end-to-end with both happy-path AND aggressive negative probes. Feature is production-ready from a backend perspective. Two MINOR follow-ups noted: (a) coerce non-dict offline_bypass to None for cleaner error paths; (b) /sync/offline-summary days param 422s on non-int (inconsistent w/ in-body clamp). Frontend changes (offlineDB.js, offlineAuth.js, OfflineCreditBypassDialog.js, TerminalSales.jsx, TerminalShell.jsx) were NOT tested per request — should be picked up in a future iteration. Also flagged a potential non-determinism in MA/LP $last aggregation (sync.py:147) — needs a $sort stage to be deterministic.",
+  "rca_of_the_issue": "N/A — this was a verification pass, not a bug fix. Two test-script errors were self-corrected (paginated dict response handling for /products and /customers, and admin_pin_hash restore needed to use the test admin's organization_id for the wrapped collection)."
+}
