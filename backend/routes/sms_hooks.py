@@ -89,14 +89,18 @@ async def on_credit_sale_created(invoice: dict):
     """Called after a credit sale invoice is created with balance > 0."""
     try:
         from routes.sms import queue_sms
+        inv_id = invoice.get("id", "")
         customer_id = invoice.get("customer_id", "")
         if not customer_id:
+            logger.warning(f"on_credit_sale_created skipped — no customer_id on invoice {inv_id}")
             return
         customer = await raw_db.customers.find_one({"id": customer_id}, {"_id": 0})
         if not customer:
+            logger.warning(f"on_credit_sale_created skipped — customer {customer_id} not found (invoice {inv_id})")
             return
         phones = customer.get("phones") or ([customer["phone"]] if customer.get("phone") else [])
         if not phones:
+            logger.warning(f"on_credit_sale_created skipped — customer {customer_id} ({customer.get('name','')}) has no phone numbers (invoice {inv_id})")
             return
 
         branch_id = invoice.get("branch_id", "")

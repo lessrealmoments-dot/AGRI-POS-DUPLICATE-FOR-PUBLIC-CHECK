@@ -331,8 +331,15 @@ async def queue_sms(
     trigger_ref: str = "",
     dedup_key: str = "",
 ):
-    """Insert an SMS into the queue. Scoped to organization_id for multi-tenant isolation."""
+    """Insert an SMS into the queue. Scoped to organization_id for multi-tenant isolation.
+
+    Logs a structured WARN line for each bail-out reason so operators can
+    diagnose "my SMS didn't fire" via grep on the backend log.
+    """
+    import logging
+    sms_log = logging.getLogger("sms")
     if not phone or not phone.strip():
+        sms_log.warning(f"queue_sms skipped — no phone | template={template_key} customer={customer_id} org={organization_id} ref={trigger_ref}")
         return None
 
     # Build org filter for _raw_db reads
@@ -347,6 +354,8 @@ async def queue_sms(
     if not template:
         template = await _raw_db.sms_templates.find_one({"key": template_key}, {"_id": 0})
     if not template or not template.get("active", True):
+        reason = "template_missing" if not template else "template_inactive"
+        sms_log.warning(f"queue_sms skipped — {reason} | template={template_key} org={organization_id} customer={customer_id} ref={trigger_ref}")
         return None
 
     # Check per-trigger setting — STRICTLY org-scoped to prevent cross-org bleed.
@@ -358,12 +367,14 @@ async def queue_sms(
     if organization_id:
         setting = await _raw_db.sms_settings.find_one({**base_setting_query, "organization_id": organization_id}, {"_id": 0})
     if setting and not setting.get("enabled", True):
+        sms_log.warning(f"queue_sms skipped — trigger_disabled in Settings | template={template_key} org={organization_id} branch={branch_id} customer={customer_id}")
         return None
 
     # De-duplication — always org-scoped to prevent cross-company dedup conflicts
     if dedup_key:
         existing = await _raw_db.sms_queue.find_one({"dedup_key": dedup_key, **org_filter}, {"_id": 0})
         if existing:
+            sms_log.info(f"queue_sms skipped — duplicate dedup_key={dedup_key} (already queued)")
             return None
 
     message = render_template(template["body"], variables)
@@ -465,19 +476,77 @@ async def update_sms_setting(trigger_key: str, data: dict, user=Depends(get_curr
 async def list_sms_queue(
     status: Optional[str] = None,
     branch_id: Optional[str] = None,
+    trigger_ref: Optional[str] = None,
     limit: int = 100,
     skip: int = 0,
     user=Depends(get_current_user),
 ):
-    """List SMS queue entries. Filter by status and branch."""
+    """List SMS queue entries. Filter by status, branch, and/or trigger_ref."""
     query = {}
     if status:
         query["status"] = status
     if branch_id:
         query["branch_id"] = branch_id
+    if trigger_ref:
+        query["trigger_ref"] = trigger_ref
     total = await db.sms_queue.count_documents(query)
     items = await db.sms_queue.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
     return {"items": items, "total": total}
+
+
+@router.get("/diagnose-trigger/{template_key}")
+async def diagnose_sms_trigger(
+    template_key: str,
+    branch_id: Optional[str] = None,
+    user=Depends(get_current_user),
+):
+    """Diagnose why an SMS trigger may have been skipped.
+
+    Returns the live state of: template existence + active flag, sms_settings
+    enabled flag for the trigger, and per-trigger setting hits. Helpful for
+    customers who say "my credit_new SMS didn't fire" — surfaces the bail-out
+    reason in plain text.
+    """
+    org_id = user.get("organization_id") or ""
+    diag = {
+        "template_key": template_key,
+        "organization_id": org_id,
+        "branch_id": branch_id or None,
+        "checks": [],
+    }
+
+    # Template
+    tpl = None
+    if org_id:
+        tpl = await _raw_db.sms_templates.find_one(
+            {"key": template_key, "organization_id": org_id}, {"_id": 0}
+        )
+    if not tpl:
+        tpl = await _raw_db.sms_templates.find_one(
+            {"key": template_key, "organization_id": {"$exists": False}}, {"_id": 0}
+        )
+    if not tpl:
+        diag["checks"].append({"step": "template", "ok": False, "detail": "No template found for this key (org-scoped or global)"})
+        diag["would_send"] = False
+        return diag
+    if not tpl.get("active", True):
+        diag["checks"].append({"step": "template", "ok": False, "detail": f"Template '{template_key}' exists but is INACTIVE"})
+        diag["would_send"] = False
+        return diag
+    diag["checks"].append({"step": "template", "ok": True, "detail": "Template found and active"})
+
+    # Per-trigger setting
+    base_q = {"trigger_key": template_key, "$or": [{"branch_id": branch_id}, {"branch_id": None}, {"branch_id": ""}]}
+    setting = None
+    if org_id:
+        setting = await _raw_db.sms_settings.find_one({**base_q, "organization_id": org_id}, {"_id": 0})
+    if setting and not setting.get("enabled", True):
+        diag["checks"].append({"step": "trigger_setting", "ok": False, "detail": f"Trigger '{template_key}' is DISABLED in Settings → Messages"})
+        diag["would_send"] = False
+        return diag
+    diag["checks"].append({"step": "trigger_setting", "ok": True, "detail": "Trigger is enabled (or not configured → defaults to enabled)"})
+    diag["would_send"] = True
+    return diag
 
 
 # Hard cap on per-message retries — prevents infinite carrier spiral when

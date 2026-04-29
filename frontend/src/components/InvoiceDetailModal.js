@@ -21,7 +21,7 @@ import {
   FileText, Edit3, History, Save, X, AlertTriangle, Package,
   User, Calendar, DollarSign, Trash2, Clock, CheckCircle2,
   Copy, Check, ShieldCheck, Ban, ImageIcon, Upload, Smartphone,
-  Truck, CreditCard, Wallet, Pencil, RefreshCw, Printer
+  Truck, CreditCard, Wallet, Pencil, RefreshCw, Printer, MessageSquare
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -73,6 +73,11 @@ export default function InvoiceDetailModal({
   const [signatures, setSignatures] = useState([]);
   const [sigLoading, setSigLoading] = useState(false);
 
+  // SMS state
+  const [smsItems, setSmsItems] = useState([]);
+  const [smsLoading, setSmsLoading] = useState(false);
+  const [smsDiagnosis, setSmsDiagnosis] = useState(null);
+
   // Load business info for printing (compact mode)
   useEffect(() => {
     if (compact) api.get('/settings/business-info').then(r => setBusinessInfo(r.data)).catch(() => {});
@@ -118,6 +123,12 @@ export default function InvoiceDetailModal({
           .then(r => setSignatures(r.data || []))
           .catch(() => setSignatures([]))
           .finally(() => setSigLoading(false));
+        // Load SMS queue items linked to this invoice (best-effort)
+        setSmsLoading(true);
+        api.get('/sms/queue', { params: { trigger_ref: invId, limit: 50 } })
+          .then(r => setSmsItems(r.data?.items || []))
+          .catch(() => setSmsItems([]))
+          .finally(() => setSmsLoading(false));
       }
     } catch (e) {
       toast.error('Failed to load details');
@@ -767,6 +778,9 @@ export default function InvoiceDetailModal({
                     ...(signatures.length > 0 ? [{ key: 'signature', label: `Signature (${signatures.length})`, icon: ShieldCheck }] : [
                       { key: 'signature', label: 'Signature', icon: ShieldCheck }
                     ]),
+                    ...(invoice.balance > 0 || smsItems.length > 0
+                      ? [{ key: 'sms', label: smsItems.length > 0 ? `SMS (${smsItems.length})` : 'SMS', icon: MessageSquare }]
+                      : []),
                   ].map(t => (
                     <button key={t.key} data-testid={`section-${t.key}`}
                       onClick={() => { setSection(t.key); if (t.key === 'history') loadEditHistory(); }}
@@ -1235,6 +1249,100 @@ export default function InvoiceDetailModal({
                                   <p>Authorized by: {sig.bypass_by_name}</p>
                                 </div>
                               ) : null}
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* SMS section */}
+                {section === 'sms' && (
+                  <div className="space-y-3" data-testid="sms-section">
+                    <h3 className="font-semibold text-sm flex items-center gap-2">
+                      <MessageSquare size={16} className="text-sky-600" /> SMS Notifications
+                    </h3>
+                    {smsLoading ? (
+                      <p className="text-slate-400 text-sm text-center py-6">Loading SMS history…</p>
+                    ) : smsItems.length === 0 ? (
+                      <div className="space-y-3">
+                        <div className="text-center py-6 text-slate-400 space-y-1.5">
+                          <MessageSquare size={28} className="mx-auto text-slate-200" />
+                          <p className="text-sm">No SMS was queued for this invoice.</p>
+                        </div>
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs space-y-2" data-testid="sms-troubleshoot">
+                          <p className="font-semibold text-amber-800">Common reasons SMS doesn't fire:</p>
+                          <ul className="list-disc pl-5 space-y-0.5 text-amber-700">
+                            <li>Customer record has <strong>no phone number</strong> on file</li>
+                            <li>Trigger <code className="bg-white px-1 rounded">credit_new</code> is <strong>disabled</strong> in Settings → Messages</li>
+                            <li>SMS template <code className="bg-white px-1 rounded">credit_new</code> is missing or marked inactive</li>
+                            <li>This invoice was created BEFORE the SMS feature was enabled</li>
+                          </ul>
+                          <Button
+                            variant="outline" size="sm" className="text-xs h-7 mt-1"
+                            onClick={async () => {
+                              try {
+                                const r = await api.get('/sms/diagnose-trigger/credit_new', {
+                                  params: { branch_id: invoice?.branch_id || '' }
+                                });
+                                setSmsDiagnosis(r.data);
+                              } catch {
+                                toast.error('Diagnosis failed');
+                              }
+                            }}
+                            data-testid="run-sms-diagnosis-btn"
+                          >
+                            Run live diagnosis (credit_new)
+                          </Button>
+                          {smsDiagnosis && (
+                            <div className="mt-2 p-2 bg-white rounded border border-slate-200 space-y-1 font-mono text-[11px]">
+                              {(smsDiagnosis.checks || []).map((c, i) => (
+                                <div key={i} className={c.ok ? 'text-emerald-700' : 'text-red-700'}>
+                                  {c.ok ? '✓' : '✗'} {c.step}: {c.detail}
+                                </div>
+                              ))}
+                              <div className="pt-1 border-t mt-1 font-semibold">
+                                Outcome: {smsDiagnosis.would_send ? '✓ Trigger would fire (template + setting OK)' : '✗ Trigger would be skipped'}
+                              </div>
+                              <div className="text-slate-400 italic">
+                                Customer phone is checked at invoice creation time (not in this diagnosis).
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {smsItems.map((s) => (
+                          <Card key={s.id} className="border border-slate-200" data-testid={`sms-item-${s.id}`}>
+                            <CardContent className="p-3 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <Badge className={`text-[10px] ${
+                                    s.status === 'sent' ? 'bg-emerald-100 text-emerald-700'
+                                    : s.status === 'pending' ? 'bg-sky-100 text-sky-700'
+                                    : s.status === 'failed' || s.status === 'failed_permanent' ? 'bg-red-100 text-red-700'
+                                    : 'bg-slate-100 text-slate-700'
+                                  }`}>
+                                    {s.status}
+                                  </Badge>
+                                  <span className="text-[11px] text-slate-500 font-mono">{s.template_key}</span>
+                                  <span className="text-[11px] text-slate-400">→ {s.phone}</span>
+                                </div>
+                                <span className="text-[10px] text-slate-400">
+                                  {s.created_at ? new Date(s.created_at).toLocaleString('en-PH') : ''}
+                                </span>
+                              </div>
+                              <div className="bg-slate-50 rounded p-2 text-[11px] text-slate-700 whitespace-pre-wrap">
+                                {s.message || ''}
+                              </div>
+                              {s.error && (
+                                <p className="text-[11px] text-red-600">Error: {s.error}</p>
+                              )}
+                              {s.sent_at && (
+                                <p className="text-[10px] text-emerald-700">Sent {new Date(s.sent_at).toLocaleString('en-PH')}</p>
+                              )}
                             </CardContent>
                           </Card>
                         ))}

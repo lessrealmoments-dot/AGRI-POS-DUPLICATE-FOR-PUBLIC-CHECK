@@ -22,6 +22,16 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### Invoice Modal — Signature Display + SMS Diagnostics (2026-04-29) — Complete
+- **Why**: User wanted to see captured signatures attached to invoices when reviewing sales history (click receipt → modal → see signature). Also reported a credit sale to "Jegger Edem" didn't auto-generate the customer SMS — needed visibility into why.
+- **Signature display** — `InvoiceDetailModal.js` already had a Signature tab. The new pre-invoice flow back-links `signature_sessions.linked_record_id → invoice.id`, so the existing tab now displays signatures captured via the new flow with no extra UI work needed.
+- **NEW SMS tab** in `InvoiceDetailModal`:
+  - Lists all SMS queue items linked to this invoice (`trigger_ref = invoice.id`) with status (pending/sent/failed/failed_permanent), template, phone, message body, error, sent timestamp.
+  - When **no SMS** was queued, shows a troubleshoot panel with common reasons (no phone on customer, trigger disabled, template missing, invoice predates feature) + a "Run live diagnosis" button.
+  - **`GET /api/sms/queue?trigger_ref=...`** — extended existing endpoint with trigger_ref filter.
+  - **`GET /api/sms/diagnose-trigger/{template_key}`** — new endpoint: returns each check (template existence/active, per-trigger setting enabled) with a clear pass/fail breakdown.
+- **Better SMS logs** — `queue_sms()` and `on_credit_sale_created()` now emit structured `WARN`/`INFO` log lines for every bail-out reason (no phone, template missing, trigger disabled, dedup hit). Operators can now grep `/var/log/supervisor/backend.err.log` for `queue_sms skipped` to see why a specific message didn't fire.
+
 ### Pre-Invoice Signature for Credit/Partial Sales (2026-04-29) — Complete
 - **Why**: User reported credit sale flow was wrong — signature dialog appeared AFTER the invoice was already created (and after the Reference Number prompt). Correct UX: customer signs FIRST, then sale finalizes with signature attached, then RefPrompt opens for printing.
 - **New flow** (Web POS Sales / Sales-New):
