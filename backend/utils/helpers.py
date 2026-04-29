@@ -344,8 +344,19 @@ async def get_product_price(product: dict, branch_id: str, scheme: str) -> float
 async def get_branch_cost(product: dict, branch_id: str) -> float:
     """
     Get the effective cost/capital price for a product at a specific branch.
-    Fallback chain: branch_prices.cost_price → product.cost_price (global)
+
+    Repacks: derive on-the-fly from parent's branch capital (parent_branch_cost
+    ÷ units_per_parent + add_on_cost). This keeps repack capital always in sync
+    with PO/transfer/manual updates to the parent — no migration or sync required.
+
+    Fallback chain (non-repack):
+        branch_prices.cost_price → product.cost_price (global)
+    Fallback chain (repack):
+        parent.branch_prices.cost_price → parent.cost_price → repack.cost_price (legacy)
     """
+    if product.get("is_repack") and product.get("parent_id"):
+        return await get_repack_capital(product, branch_id)
+
     if branch_id:
         override = await db.branch_prices.find_one(
             {"product_id": product["id"], "branch_id": branch_id}, {"_id": 0}
@@ -353,3 +364,40 @@ async def get_branch_cost(product: dict, branch_id: str) -> float:
         if override and override.get("cost_price") is not None:
             return float(override["cost_price"])
     return float(product.get("cost_price", 0))
+
+
+async def get_repack_capital(repack: dict, branch_id: str) -> float:
+    """
+    Compute a repack's capital on-the-fly for a specific branch.
+
+    Formula: parent_branch_cost ÷ units_per_parent + add_on_cost
+
+    Fallback chain:
+      1. parent.branch_prices.cost_price (Branch X)  → branch-specific live data
+      2. parent.cost_price                            → global parent cost
+      3. repack.cost_price                            → legacy stored repack cost
+    """
+    units_per_parent = float(repack.get("units_per_parent", 1) or 1)
+    if units_per_parent <= 0:
+        units_per_parent = 1
+    add_on = float(repack.get("add_on_cost", 0) or 0)
+    parent_id = repack.get("parent_id")
+
+    parent_cost = None
+    if parent_id and branch_id:
+        bp = await db.branch_prices.find_one(
+            {"product_id": parent_id, "branch_id": branch_id}, {"_id": 0}
+        )
+        if bp and bp.get("cost_price") is not None:
+            parent_cost = float(bp["cost_price"])
+
+    if parent_cost is None and parent_id:
+        parent = await db.products.find_one({"id": parent_id}, {"_id": 0, "cost_price": 1})
+        if parent and parent.get("cost_price") is not None:
+            parent_cost = float(parent.get("cost_price", 0))
+
+    if parent_cost is None:
+        # Last-ditch: use legacy stored repack cost
+        return float(repack.get("cost_price", 0) or 0)
+
+    return round(parent_cost / units_per_parent + add_on, 4)

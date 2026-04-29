@@ -17,6 +17,7 @@ import BranchesPage from './pages/BranchesPage';
 import BranchTransferPage from './pages/BranchTransferPage';
 import InternalInvoicesPage from './pages/InternalInvoicesPage';
 import ProductsPage from './pages/ProductsPage';
+import RepackPricingPage from './pages/RepackPricingPage';
 import ProductDetailPage from './pages/ProductDetailPage';
 import InventoryPage from './pages/InventoryPage';
 import POSPage from './pages/POSPage';
@@ -177,6 +178,7 @@ function AppRoutes() {
       <Route path="/branch-transfers" element={<ProtectedRoute><FeatureGate featureKey="branch_transfers"><BranchTransferPage /></FeatureGate></ProtectedRoute>} />
       <Route path="/internal-invoices" element={<ProtectedRoute><InternalInvoicesPage /></ProtectedRoute>} />
       <Route path="/products" element={<ProtectedRoute><ProductsPage /></ProtectedRoute>} />
+      <Route path="/products/repack-pricing" element={<ProtectedRoute><RepackPricingPage /></ProtectedRoute>} />
       <Route path="/products/:id" element={<ProtectedRoute><ProductDetailPage /></ProtectedRoute>} />
       <Route path="/inventory" element={<ProtectedRoute><InventoryPage /></ProtectedRoute>} />
       <Route path="/sales-new" element={<ProtectedRoute><UnifiedSalesPage /></ProtectedRoute>} />

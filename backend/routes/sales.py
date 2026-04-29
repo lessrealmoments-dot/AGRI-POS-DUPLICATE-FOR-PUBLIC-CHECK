@@ -149,6 +149,68 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
     ).to_list(len(product_ids))
     products_map = {p["id"]: p for p in products_list}
 
+    # ── Just-In-Time (JIT) retail prices for repacks ──────────────────────────
+    # The Sales UI may surface an inline retail input for repack lines whose
+    # branch has no retail price set. Those entries arrive as `jit_retail_prices`
+    # and are persisted to branch_prices after Owner PIN verification.
+    jit_retail_prices = data.get("jit_retail_prices", []) or []
+    jit_owner_pin = (data.get("jit_owner_pin") or "").strip()
+    jit_persisted = []
+    if jit_retail_prices:
+        # Filter to actual repack products
+        valid_jit = []
+        for entry in jit_retail_prices:
+            pid = (entry.get("product_id") or "").strip()
+            try:
+                rp = float(entry.get("retail"))
+            except (TypeError, ValueError):
+                continue
+            if rp <= 0 or not pid:
+                continue
+            prod = products_map.get(pid)
+            if not prod or not prod.get("is_repack"):
+                continue
+            valid_jit.append({"product_id": pid, "retail": rp})
+        if valid_jit:
+            if not jit_owner_pin:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "type": "jit_retail_pin_required",
+                        "items": valid_jit,
+                        "message": f"Owner PIN required to save {len(valid_jit)} new repack retail price(s).",
+                    }
+                )
+            from routes.verify import verify_pin_for_action
+            jit_verifier = await verify_pin_for_action(jit_owner_pin, "repack_retail_save")
+            if not jit_verifier:
+                raise HTTPException(status_code=403, detail="Invalid Owner PIN — cannot save repack retail prices")
+            for v in valid_jit:
+                existing = await db.branch_prices.find_one(
+                    {"product_id": v["product_id"], "branch_id": branch_id}, {"_id": 0}
+                )
+                merged_prices = (existing or {}).get("prices", {}) or {}
+                merged_prices["retail"] = v["retail"]
+                await db.branch_prices.update_one(
+                    {"product_id": v["product_id"], "branch_id": branch_id},
+                    {
+                        "$set": {
+                            "prices": merged_prices,
+                            "updated_at": now_iso(),
+                            "updated_by": user.get("full_name", user.get("username", "")),
+                            "source": "sales_jit",
+                        },
+                        "$setOnInsert": {
+                            "id": new_id(),
+                            "product_id": v["product_id"],
+                            "branch_id": branch_id,
+                            "created_at": now_iso(),
+                        },
+                    },
+                    upsert=True,
+                )
+                jit_persisted.append(v)
+
     # Process items and compute totals
     sale_items = []
     subtotal = 0
@@ -356,7 +418,9 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
             "discount_amount": disc_amt,
             "total": line_total,
             "is_repack": product.get("is_repack", False),
-            "cost_price": product.get("cost_price", 0),
+            # Live branch-aware capital (parent-derived for repacks). This is the
+            # historical snapshot stored on the sale line — never recomputed later.
+            "cost_price": branch_cost,
         })
         subtotal += line_total
     
@@ -776,6 +840,9 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
                 },
                 organization_id=user.get("organization_id"),
             )
+
+    if jit_persisted:
+        invoice["jit_persisted_count"] = len(jit_persisted)
 
     return invoice
 

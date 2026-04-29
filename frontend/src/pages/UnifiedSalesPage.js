@@ -199,6 +199,10 @@ export default function UnifiedSalesPage() {
   const [insufficientItems, setInsufficientItems] = useState([]);
   const [pendingSaleData, setPendingSaleData] = useState(null);
 
+  // ── JIT repack retail PIN modal ──────────────────────────────────────────
+  const [jitPinModal, setJitPinModal] = useState({ open: false, items: [], saleData: null });
+  const [jitPin, setJitPin] = useState('');
+
   // ── Digital payment ───────────────────────────────────────────────────────
   const [digitalPlatform, setDigitalPlatform] = useState('GCash');
   const [digitalRefNumber, setDigitalRefNumber] = useState('');
@@ -869,8 +873,18 @@ export default function UnifiedSalesPage() {
     : [];
 
   const getPriceForCustomer = (product) => {
-    // Use activeScheme — unified for both customer and walk-in
-    return product.prices?.[activeScheme] ?? 0;
+    // Repacks always price at retail tier — wholesale never applies (bulk
+    // purchases use the parent product, not the repack).
+    const scheme = product.is_repack ? 'retail' : activeScheme;
+    return product.prices?.[scheme] ?? 0;
+  };
+
+  // Detect if a repack line has no branch retail set (red "No Retail" badge)
+  const repackBranchHasRetail = (product) => {
+    if (!product?.is_repack) return true;
+    const branchSet = product.branch_set_scheme_keys || [];
+    if (branchSet.includes('retail')) return true;
+    return false;
   };
 
   // Quick mode: Add to cart
@@ -890,6 +904,9 @@ export default function UnifiedSalesPage() {
         effective_capital: product.effective_capital || product.cost_price || 0,
         capital_method: product.capital_method || 'manual',
         original_price: price,
+        // JIT retail: red flag when branch has no retail price set
+        needs_jit_retail: product.is_repack && !repackBranchHasRetail(product) && (!price || price <= 0),
+        global_only_retail: product.is_repack && !repackBranchHasRetail(product) && price > 0,
       }];
     });
   };
@@ -1034,7 +1051,11 @@ export default function UnifiedSalesPage() {
   // Order mode: Handle lines
   const handleProductSelect = (index, product) => {
     const newLines = [...lines];
-    const rate = product.prices?.[activeScheme] ?? 0;
+    // Repacks: always retail tier
+    const scheme = product.is_repack ? 'retail' : activeScheme;
+    const rate = product.prices?.[scheme] ?? 0;
+    const branchSet = product.branch_set_scheme_keys || [];
+    const hasBranchRetail = !product.is_repack || branchSet.includes('retail');
     newLines[index] = {
       ...newLines[index], product_id: product.id, product_name: product.name,
       description: product.description || '', rate, original_rate: rate,
@@ -1044,6 +1065,8 @@ export default function UnifiedSalesPage() {
       effective_capital: product.effective_capital || product.cost_price || 0,
       capital_method: product.capital_method || 'manual',
       is_repack: product.is_repack || false,
+      needs_jit_retail: product.is_repack && !hasBranchRetail && (!rate || rate <= 0),
+      global_only_retail: product.is_repack && !hasBranchRetail && rate > 0,
     };
     if (index === lines.length - 1) newLines.push({ ...EMPTY_LINE });
     setLines(newLines);
@@ -1299,7 +1322,7 @@ export default function UnifiedSalesPage() {
   };
 
   // Process the sale
-  const processSale = async (approvedBy = null) => {
+  const processSale = async (approvedBy = null, jitOverridePin = null) => {
     setSaving(true);
     
     const actualPaymentType = pendingCreditSale?.paymentType || paymentType;
@@ -1319,7 +1342,25 @@ export default function UnifiedSalesPage() {
       : actualPaymentType === 'partial' ? actualPartial
       : 0;
     const balance = grandTotal - amountPaid;
-    
+
+    // Collect JIT retail prices: any repack line that had its rate edited
+    // because the branch had no retail price set. Persist these to
+    // branch_prices after Owner PIN approval (collected after the sale's
+    // 422 response if the user hasn't already entered the PIN).
+    const collectJitRetail = (rows) => {
+      const out = {};
+      rows.forEach(r => {
+        if (r.is_repack && r.needs_jit_retail) {
+          const rate = parseFloat(r.rate ?? r.price ?? 0);
+          if (rate > 0) out[r.product_id] = rate;
+        }
+      });
+      return Object.entries(out).map(([product_id, retail]) => ({ product_id, retail }));
+    };
+    const jitRetailPrices = mode === 'quick'
+      ? collectJitRetail(cart.map(c => ({ ...c, rate: c.price })))
+      : collectJitRetail(lines.filter(l => l.product_id));
+
     // Prepare items
     const saleItems = mode === 'quick' 
       ? cart.map(c => ({
@@ -1389,6 +1430,8 @@ export default function UnifiedSalesPage() {
       status: balance > 0 ? 'open' : 'paid',
       release_mode: releaseMode,
       created_at: new Date().toISOString(),
+      jit_retail_prices: jitRetailPrices,
+      jit_owner_pin: jitOverridePin || undefined,
     };
 
     if (isOnline) {
@@ -1503,6 +1546,12 @@ export default function UnifiedSalesPage() {
           setPendingSaleData(saleData);
           setCheckoutDialog(false);
           setStockOverrideModal(true);
+          setSaving(false);
+          return;
+        }
+        // JIT retail PIN required — show Owner PIN modal then retry
+        if (e?.response?.status === 422 && detail?.type === 'jit_retail_pin_required') {
+          setJitPinModal({ open: true, items: detail.items || [], saleData });
           setSaving(false);
           return;
         }
@@ -2145,9 +2194,17 @@ export default function UnifiedSalesPage() {
                   ) : (
                     <div className="space-y-2">
                       {cart.map(item => (
-                        <div key={item.product_id} className="p-2 rounded-lg bg-slate-50 space-y-1.5">
+                        <div key={item.product_id} className={`p-2 rounded-lg ${item.needs_jit_retail ? 'bg-red-50 border border-red-200' : item.global_only_retail ? 'bg-amber-50 border border-amber-200' : 'bg-slate-50'} space-y-1.5`}>
                           <div className="flex items-start justify-between gap-2">
-                            <p className="text-sm font-medium truncate flex-1">{item.product_name}</p>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium truncate">{item.product_name}</p>
+                              {item.needs_jit_retail && (
+                                <Badge variant="destructive" className="text-[9px] py-0 px-1.5 mt-0.5" data-testid={`no-retail-badge-${item.product_id}`}>No Retail — set below</Badge>
+                              )}
+                              {item.global_only_retail && !item.needs_jit_retail && (
+                                <Badge className="text-[9px] py-0 px-1.5 mt-0.5 bg-amber-100 text-amber-700 hover:bg-amber-100" data-testid={`global-price-badge-${item.product_id}`}>Global Price</Badge>
+                              )}
+                            </div>
                             <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-400 flex-shrink-0" onClick={() => removeFromCart(item.product_id)}>
                               <Trash2 size={11} />
                             </Button>
@@ -2196,6 +2253,15 @@ export default function UnifiedSalesPage() {
                           </div>
                           {item.price <= 0 && (
                             <p className="text-[10px] text-amber-600 flex items-center gap-1"><AlertTriangle size={9}/> Set price before checkout</p>
+                          )}
+                          {item.is_repack && item.needs_jit_retail && item.price > 0 && (item.effective_capital || item.cost_price) > 0 && (
+                            <p className="text-[10px] text-emerald-700 flex items-center gap-1" data-testid={`jit-capital-${item.product_id}`}>
+                              Capital ₱{(item.effective_capital || item.cost_price).toFixed(2)}
+                              {' · '}
+                              Markup ₱{(item.price - (item.effective_capital || item.cost_price)).toFixed(2)}
+                              {' '}({(((item.price - (item.effective_capital || item.cost_price)) / (item.effective_capital || item.cost_price)) * 100).toFixed(1)}%)
+                              {' — '}<span className="italic text-slate-500">PIN required at checkout to save.</span>
+                            </p>
                           )}
                           {canViewCost && item.price > 0 && (item.effective_capital || item.cost_price) > 0 && item.price < (item.effective_capital || item.cost_price) && (
                             <p className="text-[10px] text-red-600 flex items-center gap-1">
@@ -2274,6 +2340,12 @@ export default function UnifiedSalesPage() {
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-1.5 flex-wrap">
                                     <p className="text-sm font-medium truncate">{line.product_name}</p>
+                                    {line.needs_jit_retail && (
+                                      <Badge variant="destructive" className="text-[9px] py-0 px-1.5" data-testid={`line-no-retail-${i}`}>No Retail</Badge>
+                                    )}
+                                    {line.global_only_retail && !line.needs_jit_retail && (
+                                      <Badge className="text-[9px] py-0 px-1.5 bg-amber-100 text-amber-700 hover:bg-amber-100" data-testid={`line-global-price-${i}`}>Global Price</Badge>
+                                    )}
                                     {pendingReviewIds.has(line.product_id) && currentBranch?.id && (
                                       <GlobalPriceBadge
                                         productId={line.product_id}
@@ -2298,6 +2370,18 @@ export default function UnifiedSalesPage() {
                                           {costMap[line.product_id].last_purchase ? <span className="ml-1.5">· LP {formatPHP(costMap[line.product_id].last_purchase)}</span> : null}
                                           {costMap[line.product_id].moving_average ? <span className="ml-1.5">· MA {formatPHP(costMap[line.product_id].moving_average)}</span> : null}
                                         </span>
+                                      )}
+                                    </p>
+                                  )}
+                                  {/* JIT capital hint — always visible for repacks needing retail */}
+                                  {line.needs_jit_retail && (line.effective_capital || line.cost_price) > 0 && (
+                                    <p className="text-[10px] text-emerald-700 mt-0.5 font-mono" data-testid={`line-jit-capital-${i}`}>
+                                      Capital ₱{(line.effective_capital || line.cost_price).toFixed(2)}
+                                      {line.rate > 0 && (
+                                        <>
+                                          {' · Markup ₱'}{(line.rate - (line.effective_capital || line.cost_price)).toFixed(2)}
+                                          {' '}({(((line.rate - (line.effective_capital || line.cost_price)) / (line.effective_capital || line.cost_price)) * 100).toFixed(1)}%)
+                                        </>
                                       )}
                                     </p>
                                   )}
@@ -3582,6 +3666,62 @@ export default function UnifiedSalesPage() {
           window.location.href = '/purchase-orders';
         }}
       />
+
+      {/* JIT Repack Retail PIN Modal */}
+      <Dialog open={jitPinModal.open} onOpenChange={(o) => { if (!o) { setJitPinModal({ open: false, items: [], saleData: null }); setJitPin(''); } }}>
+        <DialogContent className="max-w-md" data-testid="jit-pin-dialog">
+          <DialogHeader>
+            <DialogTitle>Save new repack retail price{(jitPinModal.items?.length || 0) > 1 ? 's' : ''}?</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p className="text-slate-600">
+              You're saving <strong>{jitPinModal.items?.length || 0}</strong> new repack retail price{(jitPinModal.items?.length || 0) > 1 ? 's' : ''} for <strong>{currentBranch?.name}</strong>.
+              Future sales of these repacks at this branch will use these prices automatically.
+            </p>
+            <ul className="text-xs space-y-1 max-h-40 overflow-auto bg-slate-50 rounded p-2">
+              {(jitPinModal.items || []).map((it, i) => (
+                <li key={i} className="flex justify-between" data-testid={`jit-item-${i}`}>
+                  <span className="truncate">{it.product_id}</span>
+                  <span className="font-mono font-semibold">{formatPHP(it.retail)}</span>
+                </li>
+              ))}
+            </ul>
+            <Input
+              type="password"
+              value={jitPin}
+              onChange={(e) => setJitPin(e.target.value)}
+              placeholder="Owner PIN (or 6-digit TOTP)"
+              autoFocus
+              onKeyDown={(e) => { if (e.key === 'Enter' && jitPin) document.getElementById('jit-pin-confirm-btn')?.click(); }}
+              data-testid="jit-pin-input"
+            />
+            <div className="flex justify-end gap-2 pt-1">
+              <Button
+                variant="outline"
+                onClick={() => { setJitPinModal({ open: false, items: [], saleData: null }); setJitPin(''); }}
+                data-testid="jit-pin-cancel-btn"
+              >
+                Cancel sale
+              </Button>
+              <Button
+                id="jit-pin-confirm-btn"
+                disabled={!jitPin}
+                data-testid="jit-pin-confirm-btn"
+                onClick={async () => {
+                  if (!jitPin) return;
+                  const pinToUse = jitPin;
+                  setJitPinModal({ open: false, items: [], saleData: null });
+                  setJitPin('');
+                  // Re-trigger save with PIN passed inline
+                  setTimeout(() => processSale(null, pinToUse), 30);
+                }}
+              >
+                Confirm & Continue Sale
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
     </div>
   );

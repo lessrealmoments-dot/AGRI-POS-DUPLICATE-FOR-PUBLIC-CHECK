@@ -22,6 +22,30 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### Branch-Aware Repack Pricing System (2026-04-29) — Complete
+- **Why**: Repacks were created with **global** capital and prices. Each branch has different parent capital (e.g., Branch 1 = ₱1000/50kg, Branch 2 = ₱1200/50kg), so repack capital and retail must follow per-branch. Owner needed: capital that auto-updates on every PO/transfer; per-branch retail prices; soft red flag at sale when retail missing; bulk pricing module; hard rule that repacks always use retail tier.
+- **Backend**:
+  - **`get_repack_capital(repack, branch_id)`** in `utils/helpers.py` — single source of truth. Computes capital live: `parent_branch_cost ÷ units_per_parent + add_on_cost`. Fallback chain: parent's `branch_prices.cost_price` → parent global `cost_price` → repack legacy `cost_price`. **No migration on production data needed** — old repacks auto-resolve correctly.
+  - `get_branch_cost()` now delegates to `get_repack_capital` for repacks (parent-aware everywhere: sales, capital reveal, reports).
+  - `POST /api/products/{id}/generate-repack` — now requires `branch_id`. Stores cost_price=0 (always derived live). Retail prices write to `branch_prices` for the selected branch only — no longer poisons the global catalog.
+  - `GET /api/products/repack-pricing/grid?branch_ids=...&with_inventory_only=true&missing_only=false` — Repack Pricing Manager grid: lists repacks × branches with live capital, current branch retail (or null), parent stock flag.
+  - `POST /api/products/repack-pricing/bulk-save` — PIN-gated bulk persist (action `repack_retail_save`).
+  - **`POST /api/sales` (`/unified-sale`)** — now:
+    - Stores **live branch-aware capital snapshot** on sale lines (parent-derived for repacks).
+    - Accepts `jit_retail_prices: [{product_id, retail}]` + `jit_owner_pin`. Returns `422` with `type=jit_retail_pin_required` when PIN missing → frontend shows PIN modal → retry persists to `branch_prices`.
+  - `cost-details` and `search-detail` updated to surface live repack capital + new `branch_set_scheme_keys` flag (frontend uses it for the green/amber/red badge logic).
+- **Frontend**:
+  - **`/products/repack-pricing` (NEW)** — `RepackPricingPage.js`: branch multi-picker (All / single / multi), filter (with-inventory only / missing-only), grid editor with live capital + per-cell ₱ markup + % markup, "Copy to all" per-branch button, bulk save with Owner PIN.
+  - **`UnifiedSalesPage.js`** — repack lines:
+    - **Hard rule**: always use `tier=retail` regardless of customer's wholesale tier.
+    - **Red "No Retail" badge** when branch_prices.retail not set.
+    - **Amber "Global Price" badge** when only global retail exists.
+    - Inline retail input + capital + ₱ markup + % markup hint (always visible for JIT lines, no PIN needed to view since it's needed to make the pricing decision).
+    - On checkout: if any repack line has JIT retail → backend returns 422 → frontend shows JIT PIN modal → on confirm, retries sale with `jit_owner_pin`. Single PIN persists all JIT prices.
+  - **`ProductsPage.js`** — Quick Repack form & batch Quick Repack now block when no branch selected (toast "Please select a branch first to set repack price"). New "Repack Pricing" toolbar button → /products/repack-pricing.
+- **Auto-update guarantee**: capital reflects PO arrival, branch transfer received, manual capital edit, smart-price-update, etc. — all of these write `branch_prices.cost_price` for the parent which is the live source for `get_repack_capital`. No sync job, no manual recalc needed.
+- **Tests**: 7 new pytests in `test_repack_pricing_187.py` — generate-repack branch-required, branch_prices write, parent-derived capital per branch (Branch A=20, Branch B=24 from same repack), grid endpoint, PIN-required bulk save, persistence. Total suite (Iter 182-187): 31 passing.
+
 ### PIN-gated Capital Reveal on Sales Screen (2026-04-29) — Complete
 - **Why**: Owner/manager wants to see capital cost, last-purchase, and moving-average per product directly on the Sales screen for margin awareness while making sales — but cashiers must NOT see it. One PIN-gated toggle for the whole page.
 - **Behavior**:

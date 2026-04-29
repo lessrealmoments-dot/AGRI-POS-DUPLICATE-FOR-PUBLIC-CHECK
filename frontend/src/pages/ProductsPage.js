@@ -226,18 +226,22 @@ export default function ProductsPage() {
       return;
     }
 
+    if (!currentBranch?.id) {
+      toast.error('Please select a branch first to set repack price');
+      return;
+    }
+
     setQrGenerating(true);
     const results = [];
     for (const row of qrRows) {
       try {
-        const allPrices = {};
-        schemes.forEach(s => { allPrices[s.key] = parseFloat(row.retailPrice); });
+        const allPrices = { retail: parseFloat(row.retailPrice) };
         await api.post(`/products/${row.parent.id}/generate-repack`, {
           name: row.repackName, unit: row.unit,
           units_per_parent: row.unitsPerParent,
           add_on_cost: row.addOnCost || 0,
-          cost_price: row.capital,
           prices: allPrices,
+          branch_id: currentBranch.id,
         });
         results.push({ name: row.repackName, status: 'ok' });
       } catch (e) {
@@ -401,9 +405,16 @@ export default function ProductsPage() {
   };
 
   const _launchRepackDialog = (p) => {
+    if (!currentBranch?.id) {
+      toast.error('Please select a branch first to set repack price');
+      return;
+    }
     setSelectedParent(p);
-    const autoCost = p.cost_price ? Math.round((p.cost_price / 1) * 100) / 100 : 0;
-    setRepackForm({ name: `R ${p.name}`, unit: 'Sachet', units_per_parent: 1, cost_price: autoCost, add_on_cost: 0, prices: {} });
+    const units = 1;
+    const branchCost = Number(p.branch_cost_price ?? p.cost_price ?? 0);
+    const globalCost = Number(p.cost_price ?? 0);
+    const autoCost = branchCost > 0 ? Math.round((branchCost / units) * 100) / 100 : Math.round((globalCost / units) * 100) / 100;
+    setRepackForm({ name: `R ${p.name}`, unit: 'Sachet', units_per_parent: units, cost_price: autoCost, add_on_cost: 0, prices: {}, branch_id: currentBranch.id });
     setRepackDialog(true);
   };
 
@@ -430,8 +441,9 @@ export default function ProductsPage() {
   };
 
   const handleRepack = async () => {
+    if (!currentBranch?.id) { toast.error('Please select a branch first'); return; }
     try {
-      await api.post(`/products/${selectedParent.id}/generate-repack`, repackForm);
+      await api.post(`/products/${selectedParent.id}/generate-repack`, { ...repackForm, branch_id: currentBranch.id });
       toast.success('Repack SKU generated!');
       setRepackDialog(false);
       fetchProducts();
@@ -490,6 +502,9 @@ export default function ProductsPage() {
           </Button>
           <Button variant="outline" size="sm" onClick={openQrModal} data-testid="quick-repack-btn">
             <Zap size={15} className="mr-1.5 text-amber-500" /> Quick Repack
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => navigate('/products/repack-pricing')} data-testid="repack-pricing-nav-btn">
+            <Tag size={15} className="mr-1.5 text-amber-600" /> Repack Pricing
           </Button>
           <Button variant="outline" size="sm" onClick={() => { loadCatMgmt(); setCatMgmtOpen(true); }} data-testid="manage-categories-btn">
             <Tag size={15} className="mr-1.5 text-violet-500" /> Categories

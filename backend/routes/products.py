@@ -4,7 +4,7 @@ Product management routes: CRUD, repacks, pricing, search, barcodes.
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional, List
 from config import db
-from utils import get_current_user, check_perm, has_perm, now_iso, new_id, get_product_price, mark_price_reviewed
+from utils import get_current_user, check_perm, has_perm, now_iso, new_id, get_product_price, get_repack_capital, mark_price_reviewed
 import random
 
 router = APIRouter(prefix="/products", tags=["Products"])
@@ -148,12 +148,16 @@ async def search_products_detail(q: str = "", branch_id: Optional[str] = None, a
     results = []
     
     for p in products:
-        # Apply branch price overrides
+        # Apply branch price overrides — track which schemes are branch-set
+        # vs falling back to the global product.prices map. Frontend uses this
+        # to decide between green / amber-Global-Price / red No-Retail badges.
+        branch_set_scheme_keys = []
         if branch_id:
             override = await db.branch_prices.find_one(
                 {"product_id": p["id"], "branch_id": branch_id}, {"_id": 0}
             )
             if override and override.get("prices"):
+                branch_set_scheme_keys = list(override["prices"].keys())
                 merged_prices = {**(p.get("prices") or {}), **override["prices"]}
                 p = {**p, "prices": merged_prices}
                 if override.get("cost_price") is not None:
@@ -183,14 +187,21 @@ async def search_products_detail(q: str = "", branch_id: Optional[str] = None, a
         else:
             moving_average_cost = float(p.get("cost_price", 0))
 
+        # For repacks: derive capital live from parent's branch capital
+        # so it always reflects current PO/transfer/manual updates.
+        if p.get("is_repack") and p.get("parent_id"):
+            repack_capital = await get_repack_capital(p, branch_id or "")
+        else:
+            repack_capital = None
+
         # Effective capital = the cost the system uses for below-capital validation
         capital_method = p.get("capital_method", "manual")
         if capital_method == "moving_average":
             effective_capital = moving_average_cost
         elif capital_method == "last_purchase":
-            effective_capital = last_purchase_cost or float(p.get("cost_price", 0))
+            effective_capital = last_purchase_cost or (repack_capital if repack_capital is not None else float(p.get("cost_price", 0)))
         else:
-            effective_capital = float(p.get("cost_price", 0))
+            effective_capital = repack_capital if repack_capital is not None else float(p.get("cost_price", 0))
 
         capital_data = {
             "moving_average_cost": moving_average_cost,
@@ -223,7 +234,12 @@ async def search_products_detail(q: str = "", branch_id: Optional[str] = None, a
                 "parent_stock": parent_stock,
                 "parent_unit": parent["unit"] if parent else "",
                 "derived_from_parent": True,
+                "branch_set_scheme_keys": branch_set_scheme_keys,
             }
+            # Override cost_price with live parent-derived capital for repacks.
+            # This is the value frontend uses for capital display & validation.
+            if repack_capital is not None:
+                result["cost_price"] = repack_capital
         else:
             if branch_id:
                 inv = await db.inventory.find_one(
@@ -254,6 +270,7 @@ async def search_products_detail(q: str = "", branch_id: Optional[str] = None, a
                 "available": available,
                 "reserved": reserved_r[0]["t"] if reserved_r else 0,
                 "coming": coming_r[0]["t"] if coming_r else 0,
+                "branch_set_scheme_keys": branch_set_scheme_keys,
             }
         # ── Also-branch stock (for Request Stock dual-view) ──────────────
         if also_branch_id and also_branch_id != branch_id:
@@ -726,8 +743,10 @@ async def cost_details_bulk(data: dict, user=Depends(get_current_user)):
     product_ids = [str(p) for p in product_ids if p][:1000]
 
     # 1) Effective cost per product (branch override → global fallback)
+    #    Repacks: derive on-the-fly from parent's branch capital.
     products = await db.products.find(
-        {"id": {"$in": product_ids}}, {"_id": 0, "id": 1, "cost_price": 1}
+        {"id": {"$in": product_ids}},
+        {"_id": 0, "id": 1, "cost_price": 1, "is_repack": 1, "parent_id": 1, "units_per_parent": 1, "add_on_cost": 1}
     ).to_list(2000)
     global_cost = {p["id"]: float(p.get("cost_price") or 0) for p in products}
 
@@ -736,6 +755,12 @@ async def cost_details_bulk(data: dict, user=Depends(get_current_user)):
         {"_id": 0, "product_id": 1, "cost_price": 1},
     ).to_list(2000)
     branch_cost = {o["product_id"]: float(o.get("cost_price") or 0) for o in overrides}
+
+    # Compute repack capital live (parent-aware) for any repack in the list
+    repack_cost = {}
+    for p in products:
+        if p.get("is_repack") and p.get("parent_id"):
+            repack_cost[p["id"]] = await get_repack_capital(p, branch_id)
 
     # 2) Last purchase + moving average via movements
     from datetime import datetime, timedelta, timezone
@@ -767,7 +792,11 @@ async def cost_details_bulk(data: dict, user=Depends(get_current_user)):
 
     out = {}
     for pid in product_ids:
-        eff = branch_cost.get(pid, global_cost.get(pid, 0))
+        # Repack: live parent-derived cost wins
+        if pid in repack_cost:
+            eff = repack_cost[pid]
+        else:
+            eff = branch_cost.get(pid, global_cost.get(pid, 0))
         mv = movement_map.get(pid, {})
         out[pid] = {
             "effective_cost": eff,
@@ -1045,6 +1074,207 @@ async def bulk_price_update(data: dict, user=Depends(get_current_user)):
     return {"updated": updated, "errors": errors}
 
 
+# ── Repack Pricing Manager ──────────────────────────────────────────────────
+
+@router.get("/repack-pricing/grid")
+async def repack_pricing_grid(
+    branch_ids: str = "",                  # comma-separated branch IDs (required, at least one)
+    with_inventory_only: bool = True,      # only repacks whose parent has stock in any selected branch
+    missing_only: bool = False,            # only rows that have at least one branch missing retail
+    user=Depends(get_current_user),
+):
+    """Build the Repack Pricing Manager grid.
+
+    Returns one row per repack × branch with:
+      - capital (computed live via get_repack_capital)
+      - current_retail (from branch_prices.prices.retail; null if not set)
+      - has_parent_stock (parent inventory.quantity > 0 in that branch)
+    """
+    if user.get("role") not in ("admin", "manager"):
+        raise HTTPException(status_code=403, detail="Admin or manager required")
+
+    branch_id_list = [b.strip() for b in (branch_ids or "").split(",") if b.strip()]
+    if not branch_id_list:
+        raise HTTPException(status_code=400, detail="At least one branch_id required")
+
+    # Load branches (for name in the response)
+    branches = await db.branches.find(
+        {"id": {"$in": branch_id_list}}, {"_id": 0, "id": 1, "name": 1}
+    ).to_list(100)
+    branch_map = {b["id"]: b for b in branches}
+
+    # All active repacks
+    repacks = await db.products.find(
+        {"active": True, "is_repack": True},
+        {"_id": 0}
+    ).to_list(10000)
+
+    if not repacks:
+        return {"branches": branches, "rows": []}
+
+    parent_ids = list({r["parent_id"] for r in repacks if r.get("parent_id")})
+    repack_ids = [r["id"] for r in repacks]
+
+    # Pre-fetch parent inventory in selected branches
+    parent_inv = await db.inventory.find(
+        {"product_id": {"$in": parent_ids}, "branch_id": {"$in": branch_id_list}},
+        {"_id": 0, "product_id": 1, "branch_id": 1, "quantity": 1}
+    ).to_list(50000)
+    parent_stock_map = {(i["product_id"], i["branch_id"]): float(i.get("quantity", 0) or 0) for i in parent_inv}
+
+    # Pre-fetch branch_prices for repacks in selected branches
+    bp_docs = await db.branch_prices.find(
+        {"product_id": {"$in": repack_ids}, "branch_id": {"$in": branch_id_list}},
+        {"_id": 0}
+    ).to_list(50000)
+    bp_map = {(d["product_id"], d["branch_id"]): d for d in bp_docs}
+
+    # Pre-fetch parent products (for name + global prices fallback display)
+    parents = await db.products.find(
+        {"id": {"$in": parent_ids}}, {"_id": 0, "id": 1, "name": 1, "prices": 1}
+    ).to_list(10000)
+    parent_map = {p["id"]: p for p in parents}
+
+    rows = []
+    for r in repacks:
+        parent = parent_map.get(r.get("parent_id"))
+        # Determine if this repack qualifies for inclusion
+        if with_inventory_only:
+            has_any_parent_stock = any(
+                parent_stock_map.get((r["parent_id"], bid), 0) > 0 for bid in branch_id_list
+            )
+            if not has_any_parent_stock:
+                continue
+
+        branches_data = []
+        any_missing = False
+        for bid in branch_id_list:
+            capital = await get_repack_capital(r, bid)
+            bp = bp_map.get((r["id"], bid))
+            current_retail = None
+            if bp and bp.get("prices") and bp["prices"].get("retail") is not None:
+                current_retail = float(bp["prices"]["retail"])
+
+            global_retail = None
+            if r.get("prices") and r["prices"].get("retail") is not None:
+                global_retail = float(r["prices"]["retail"])
+
+            parent_stock = parent_stock_map.get((r["parent_id"], bid), 0)
+            has_parent_stock = parent_stock > 0
+
+            if current_retail is None:
+                any_missing = True
+
+            branches_data.append({
+                "branch_id": bid,
+                "branch_name": branch_map.get(bid, {}).get("name", ""),
+                "capital": round(capital, 2),
+                "current_retail": current_retail,
+                "global_retail": global_retail,
+                "has_parent_stock": has_parent_stock,
+                "parent_stock": parent_stock,
+            })
+
+        if missing_only and not any_missing:
+            continue
+
+        rows.append({
+            "repack_id": r["id"],
+            "repack_name": r["name"],
+            "repack_sku": r.get("sku", ""),
+            "repack_unit": r.get("unit", ""),
+            "units_per_parent": r.get("units_per_parent", 1),
+            "parent_id": r.get("parent_id"),
+            "parent_name": parent.get("name", "") if parent else "",
+            "branches": branches_data,
+        })
+
+    # Sort rows by repack name
+    rows.sort(key=lambda r: r["repack_name"].lower())
+
+    return {"branches": branches, "rows": rows}
+
+
+@router.post("/repack-pricing/bulk-save")
+async def repack_pricing_bulk_save(data: dict, user=Depends(get_current_user)):
+    """Save retail prices for many repack × branch cells. PIN-gated.
+
+    Body:
+      {
+        "pin": "...",
+        "updates": [
+          {"repack_id": "...", "branch_id": "...", "retail": 200.0}
+        ]
+      }
+    """
+    if user.get("role") not in ("admin", "manager"):
+        raise HTTPException(status_code=403, detail="Admin or manager required")
+
+    pin = (data.get("pin") or "").strip()
+    if not pin:
+        raise HTTPException(status_code=400, detail="PIN required to save retail prices")
+
+    from routes.verify import verify_pin_for_action
+    verifier = await verify_pin_for_action(pin, "repack_retail_save")
+    if not verifier:
+        raise HTTPException(status_code=403, detail="Invalid PIN — admin or manager required")
+
+    updates = data.get("updates", []) or []
+    if not updates:
+        return {"saved": 0}
+
+    saved = 0
+    skipped = 0
+    for u in updates:
+        repack_id = (u.get("repack_id") or "").strip()
+        branch_id = (u.get("branch_id") or "").strip()
+        try:
+            retail = float(u.get("retail"))
+        except (TypeError, ValueError):
+            skipped += 1
+            continue
+        if not repack_id or not branch_id or retail <= 0:
+            skipped += 1
+            continue
+
+        # Confirm this is actually a repack
+        prod = await db.products.find_one({"id": repack_id, "is_repack": True}, {"_id": 0, "id": 1})
+        if not prod:
+            skipped += 1
+            continue
+
+        # Read existing to merge other scheme prices
+        existing = await db.branch_prices.find_one(
+            {"product_id": repack_id, "branch_id": branch_id}, {"_id": 0}
+        )
+        existing_prices = (existing or {}).get("prices", {}) or {}
+        existing_prices["retail"] = retail
+
+        await db.branch_prices.update_one(
+            {"product_id": repack_id, "branch_id": branch_id},
+            {
+                "$set": {
+                    "prices": existing_prices,
+                    "updated_at": now_iso(),
+                    "updated_by": user.get("full_name", user.get("username", "")),
+                    "source": "repack_pricing_manager",
+                },
+                "$setOnInsert": {
+                    "id": new_id(),
+                    "product_id": repack_id,
+                    "branch_id": branch_id,
+                    "created_at": now_iso(),
+                },
+            },
+            upsert=True,
+        )
+        saved += 1
+
+    return {"saved": saved, "skipped": skipped, "pin_method": verifier.get("method", "")}
+
+
+
+
 @router.get("/{product_id}")
 async def get_product(product_id: str, user=Depends(get_current_user)):
     """Get a single product by ID."""
@@ -1289,26 +1519,43 @@ async def delete_product(product_id: str, user=Depends(get_current_user), pin: s
 
 @router.post("/{product_id}/generate-repack")
 async def generate_repack(product_id: str, data: dict, user=Depends(get_current_user)):
-    """Generate a repack product from a parent product."""
+    """Generate a repack product from a parent product.
+
+    Branch-scoped pricing: caller MUST pass `branch_id`. The repack catalog row is
+    global (name/SKU/units_per_parent/add_on_cost), but cost_price is NOT stored
+    (always computed on-the-fly via get_repack_capital), and any retail prices
+    submitted are written to branch_prices for the selected branch only.
+    """
     check_perm(user, "products", "create")
-    
+
     parent = await db.products.find_one({"id": product_id, "active": True}, {"_id": 0})
     if not parent:
         raise HTTPException(status_code=404, detail="Parent product not found")
     if parent.get("is_repack"):
         raise HTTPException(status_code=400, detail="Cannot create repack from a repack")
-    
+
+    branch_id = (data.get("branch_id") or "").strip()
+    if not branch_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Please select a branch first to set repack price"
+        )
+
     repack_sku = f"R-{parent['sku']}"
     existing = await db.products.find_one({"sku": repack_sku, "active": True}, {"_id": 0})
     if existing:
         count = await db.products.count_documents({"parent_id": product_id, "active": True})
         repack_sku = f"R-{parent['sku']}-{count + 1}"
-    
+
     repack_name = data.get("name", f"R {parent['name']}")
     units = int(data.get("units_per_parent", 1))
-    add_on_cost = float(data.get("add_on_cost", 0))
-    auto_cost = (parent.get("cost_price", 0) / units) + add_on_cost if units > 0 else 0
-    
+    if units <= 0:
+        units = 1
+    add_on_cost = float(data.get("add_on_cost", 0) or 0)
+    submitted_prices = data.get("prices", {}) or {}
+    # Filter retail prices that are > 0
+    submitted_prices = {k: float(v) for k, v in submitted_prices.items() if float(v or 0) > 0}
+
     repack = {
         "id": new_id(),
         "sku": repack_sku,
@@ -1316,8 +1563,11 @@ async def generate_repack(product_id: str, data: dict, user=Depends(get_current_
         "category": parent["category"],
         "description": f"Repack from {parent['name']} ({parent['unit']})",
         "unit": data.get("unit", "Piece"),
-        "cost_price": float(data.get("cost_price", 0)) if float(data.get("cost_price", 0)) > 0 else round(auto_cost, 2),
-        "prices": data.get("prices", {}),
+        # cost_price is NOT stored — derived on-the-fly per branch via get_repack_capital()
+        # Keep field at 0 for legacy reads; runtime always uses get_repack_capital().
+        "cost_price": 0,
+        # prices stay empty globally — branch retail lives in branch_prices
+        "prices": {},
         "parent_id": product_id,
         "is_repack": True,
         "units_per_parent": units,
@@ -1334,8 +1584,31 @@ async def generate_repack(product_id: str, data: dict, user=Depends(get_current_
         "created_at": now_iso(),
     }
     await db.products.insert_one(repack)
-    del repack["_id"]
+
+    # Write retail prices to branch_prices for the selected branch
+    if submitted_prices:
+        await db.branch_prices.update_one(
+            {"product_id": repack["id"], "branch_id": branch_id},
+            {
+                "$set": {
+                    "prices": submitted_prices,
+                    "updated_at": now_iso(),
+                    "updated_by": user.get("full_name", user.get("username", "")),
+                    "source": "repack_create",
+                },
+                "$setOnInsert": {
+                    "id": new_id(),
+                    "product_id": repack["id"],
+                    "branch_id": branch_id,
+                    "created_at": now_iso(),
+                },
+            },
+            upsert=True,
+        )
+
+    repack.pop("_id", None)
     return repack
+
 
 
 @router.get("/{product_id}/repacks")
