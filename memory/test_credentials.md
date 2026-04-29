@@ -3,6 +3,20 @@
 ## Super Admin
 - Email: janmarkeahig@gmail.com
 - Password: Aa@58798546521325
+- IMPORTANT: After the cross-tenant privacy fix (iter 180), super admin
+  CANNOT see any tenant data via scoped endpoints (/customers, /products,
+  /search/transactions, etc.). Use the regression org-admin credentials
+  below to test tenant flows.
+
+## Regression Test Org Admin (auto-seeded by tests/_org_test_helpers.py)
+- Email: test_org_admin@regression.local
+- Password: RegressionPass!2026
+- Role: admin
+- Note: Auto-created on first test run. Idempotent — safe to delete and re-run.
+
+## Regression Test Manager (for PIN-bypass tests)
+- Email: test_org_manager@regression.local
+- manager_pin: 521325 (plain text on user doc, matches verify.py contract)
 
 ## Company Admin (LimitTest Corp)
 - Email: limittest@testmail.com

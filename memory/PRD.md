@@ -22,6 +22,23 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### 🚨 CRITICAL — Cross-Tenant Privacy Fix (2026-04-29) — Complete
+- **RCA from live VPS**: Super admin reported being able to use the universal Find/Scan to view another company's invoices/customers/products (JND Store) — even after deleting that company. **This was a serious cross-tenant data leak.**
+- Root cause in `config.py:TenantCollection._org_filter`:
+  ```python
+  if not org_id:
+      return filter_dict or {}     # ← UNSCOPED, leaks ALL tenants
+  ```
+  Whenever no org context was active (super admin, unauthenticated, scheduled task without explicit context), the scoped `db` proxy bypassed all org scoping and returned data across every tenant. Affected: `/search/transactions`, `/customers`, `/products`, `/invoices`, dashboard aggregations, signature sessions, SMS queue, and every other tenant-scoped endpoint.
+- **Fix** (`config.py`): TenantCollection now **fails CLOSED** when no org context:
+  - `_org_filter` injects sentinel `organization_id: "__no_org_context__"` → queries return empty.
+  - `aggregate` injects same sentinel as the first `$match` stage.
+  - `_inject_org` raises `RuntimeError` if caller has no context AND no explicit `organization_id` — prevents accidental orphan inserts.
+  - Clear error message points devs to `_raw_db` or `set_org_context()`.
+- **Boot-time fix** (`main.py`): Wallet provisioning now sets `set_org_context(branch_org_id)` per-branch before calling `provision_branch_wallets`.
+- **Test infrastructure** (`tests/_org_test_helpers.py`): New helper that auto-seeds a known-password org admin user (`test_org_admin@regression.local`) + a manager with PIN 521325 in any active org. Updated 4 existing test files (165, 173, 177, 178) that were previously relying on the leak.
+- **Verified**: `pytest tests/test_cross_tenant_privacy_180.py` — 4 tests covering search, listing endpoints, source-level fail-closed sentinel, and insert guard. Full chain across iter 165, 173, 174, 175, 176, 177, 178, 179, 180 = **35/35 pass**. Lint clean.
+
 ### Messages Page Default Tab + Company Info Self-Heal (2026-04-29) — Complete
 - **Task A (UX)**: Messages page (`/messages`) now defaults to **Conversations** tab (was: Message Queue). One-line change in `MessagesPage.js:91`.
 - **Task B (Self-heal)**: New Dashboard banner that auto-detects when `settings.company_info` is missing for the current org and offers a one-tap restore from the immutable `organizations` row.

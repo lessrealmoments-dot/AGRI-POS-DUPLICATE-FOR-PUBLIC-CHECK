@@ -61,7 +61,22 @@ TENANT_COLLECTIONS = {
 
 
 class TenantCollection:
-    """Transparent wrapper that injects organization_id into all DB operations."""
+    """Transparent wrapper that injects organization_id into all DB operations.
+
+    Fails CLOSED when no org context is set: returns no data and refuses to
+    insert orphan docs. This protects tenant data from leaking to a
+    super-admin or unauthenticated caller who would otherwise see/modify all
+    organizations' records via the scoped `db` proxy.
+
+    Routes that legitimately need cross-tenant access (super-admin tools,
+    boot-time sweeps, scheduled jobs) must use `_raw_db` directly with
+    explicit organization_id filters, OR call `set_org_context(target_org_id)`
+    first to scope the access intentionally.
+    """
+
+    # Sentinel value injected when no org context is active. No tenant doc has
+    # this string in its organization_id field, so queries return empty.
+    _NO_CONTEXT_SENTINEL = "__no_org_context__"
 
     def __init__(self, collection):
         self._col = collection
@@ -69,14 +84,25 @@ class TenantCollection:
     def _org_filter(self, filter_dict=None):
         org_id = _current_org_id.get()
         if not org_id:
-            return filter_dict or {}
+            # Fail-closed — match nothing rather than leak across tenants.
+            return {**(filter_dict or {}), 'organization_id': self._NO_CONTEXT_SENTINEL}
         f = dict(filter_dict or {})
         f['organization_id'] = org_id
         return f
 
     def _inject_org(self, document):
         org_id = _current_org_id.get()
-        if org_id and 'organization_id' not in document:
+        if not org_id:
+            # No context AND caller didn't set organization_id explicitly →
+            # refuse rather than create an orphan tenant doc that would later
+            # be invisible to its own org. Caller must use _raw_db or set
+            # the context first.
+            if 'organization_id' not in document:
+                raise RuntimeError(
+                    "TenantCollection: refusing to insert without an organization_id "
+                    "(no org context set). Use _raw_db or set_org_context() first."
+                )
+        elif 'organization_id' not in document:
             document['organization_id'] = org_id
         return document
 
@@ -115,7 +141,10 @@ class TenantCollection:
 
     def aggregate(self, pipeline, *args, **kwargs):
         org_id = _current_org_id.get()
-        if org_id:
+        if not org_id:
+            # Fail-closed — match nothing rather than aggregate across tenants.
+            pipeline = [{"$match": {"organization_id": self._NO_CONTEXT_SENTINEL}}] + list(pipeline)
+        else:
             pipeline = [{"$match": {"organization_id": org_id}}] + list(pipeline)
         return self._col.aggregate(pipeline, *args, **kwargs)
 

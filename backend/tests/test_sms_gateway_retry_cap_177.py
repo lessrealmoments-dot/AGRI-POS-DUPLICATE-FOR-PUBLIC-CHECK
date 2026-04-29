@@ -38,11 +38,12 @@ PASSWORD = os.environ.get("TEST_PASSWORD", "Aa@58798546521325")
 
 
 def _login():
-    r = requests.post(
-        f"{API}/auth/login", json={"email": EMAIL, "password": PASSWORD}, timeout=15
-    )
-    r.raise_for_status()
-    return r.json()["token"]
+    """Use a real org admin (super admin can no longer touch tenant data after
+    the privacy fix in config.TenantCollection)."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from _org_test_helpers import ensure_org_admin_token
+    token, _ = ensure_org_admin_token()
+    return token
 
 
 def _h(t):

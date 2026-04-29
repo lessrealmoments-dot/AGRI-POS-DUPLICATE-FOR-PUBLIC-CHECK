@@ -399,12 +399,25 @@ async def startup():
     logger.info("Database indexes created")
 
     # ── Provision 4-wallet system for all existing branches ──────────────────
+    # Each branch belongs to one org; we set the context per-branch so the
+    # TenantCollection wrapper can scope the inserts correctly. Without this
+    # the fail-closed wrapper rejects the insert (no org context set).
     from utils import provision_branch_wallets
-    branches = await _raw_db.branches.find({"active": True}, {"_id": 0, "id": 1, "name": 1}).to_list(500)
+    from config import set_org_context
+    branches = await _raw_db.branches.find(
+        {"active": True}, {"_id": 0, "id": 1, "name": 1, "organization_id": 1}
+    ).to_list(2000)
     provisioned = 0
     for branch in branches:
-        await provision_branch_wallets(branch["id"], branch.get("name", ""))
-        provisioned += 1
+        b_org = branch.get("organization_id")
+        if not b_org:
+            continue  # legacy/orphan branch — skip rather than insert orphan wallets
+        set_org_context(b_org)
+        try:
+            await provision_branch_wallets(branch["id"], branch.get("name", ""))
+            provisioned += 1
+        finally:
+            set_org_context(None)
     if provisioned:
         logger.info("Wallet provisioning complete — %d branches checked", provisioned)
 

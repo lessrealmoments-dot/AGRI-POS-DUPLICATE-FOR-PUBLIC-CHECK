@@ -21,9 +21,12 @@ BIG_PNG_B64 = base64.b64encode(BIG_PNG_BYTES).decode("ascii")
 
 @pytest.fixture(scope="module")
 def auth_token():
-    r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASS}, timeout=15)
-    assert r.status_code == 200, r.text
-    return r.json().get("access_token") or r.json()["token"]
+    """Org-admin token (super-admin can't touch tenant data after privacy fix)."""
+    import sys, os as _os
+    sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+    from _org_test_helpers import ensure_org_admin_token
+    token, _ = ensure_org_admin_token()
+    return token
 
 
 @pytest.fixture(scope="module")
@@ -91,11 +94,8 @@ def test_status_includes_signature_url_field(headers):
 
 
 # ── 3. Public submit endpoint marks signed; status returns signature_url ──
-def test_submit_then_status_returns_signature_url():
-    # login
-    _r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASS}, timeout=15).json()
-    tok = _r.get("access_token") or _r.get("token")
-    h = {"Authorization": f"Bearer {tok}", "Content-Type": "application/json"}
+def test_submit_then_status_returns_signature_url(auth_token):
+    h = {"Authorization": f"Bearer {auth_token}", "Content-Type": "application/json"}
     r = _make_session(h)
     token = r.json()["token"]
 
