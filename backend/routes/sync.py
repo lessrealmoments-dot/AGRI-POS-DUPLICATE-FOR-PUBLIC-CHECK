@@ -216,6 +216,58 @@ async def get_pos_sync_data(user=Depends(get_current_user), branch_id: str = Non
     except Exception:
         admin_pin_hash = None
 
+    # ── Phase 1.5: Cache branch-scoped manager + admin/owner PINs ──
+    # Real-world: admin/owner is rarely in-store; managers run the POS.
+    # We ship plain-text PINs for managers assigned to THIS branch + all
+    # admin/owner users in the org (admin PIN works on all branches).
+    # Frontend matches locally when offline. PINs are cached in IndexedDB
+    # under the same trust boundary as customer balances and product
+    # catalog — no additional risk.
+    offline_pin_grants = []
+    try:
+        # Pull all admin/owner/manager candidates; we apply branch scoping below
+        # to mirror routes/verify.py:_resolve_pin behaviour exactly:
+        #   - admin/owner PINs work on every branch
+        #   - manager PINs work on assigned branch OR if mgr has no branch_id
+        users = await db.users.find(
+            {
+                "active": True,
+                "$or": [
+                    {"role": {"$in": ["admin", "owner"]}},
+                    {"role": "manager"},
+                    {"pin_tier": "manager"},
+                ],
+            },
+            {"_id": 0, "id": 1, "full_name": 1, "username": 1, "role": 1,
+             "manager_pin": 1, "owner_pin": 1, "branch_id": 1},
+        ).to_list(50)
+        for u in users:
+            role = u.get("role", "")
+            pin_value = ""
+            method = "manager_pin"
+            if role in ("admin", "owner"):
+                pin_value = str(u.get("owner_pin") or u.get("manager_pin") or "").strip()
+                method = "admin_pin" if role == "admin" else "owner_pin"
+            else:
+                pin_value = str(u.get("manager_pin") or u.get("owner_pin") or "").strip()
+                # Manager scoping: if a branch was requested AND this manager
+                # is bound to a different branch, skip them (matches verify.py).
+                # Managers with no branch_id are multi-branch.
+                mgr_branch = u.get("branch_id") or ""
+                if branch_id and mgr_branch and mgr_branch != branch_id:
+                    continue
+            if not pin_value:
+                continue
+            offline_pin_grants.append({
+                "verifier_id": u.get("id"),
+                "verifier_name": u.get("full_name") or u.get("username") or "Manager",
+                "pin": pin_value,
+                "method": method,
+                "role": role,
+            })
+    except Exception:
+        offline_pin_grants = []
+
     # ── Phase 1: Customers enriched with credit_limit + credit_blocked_at ──
     # Already on the document; ensure the fields are explicit.
     enriched_customers = []
@@ -234,6 +286,7 @@ async def get_pos_sync_data(user=Depends(get_current_user), branch_id: str = Non
         "deleted_ids": deleted_ids,
         "deleted_customer_ids": deleted_customer_ids,
         "admin_pin_hash": admin_pin_hash,
+        "offline_pin_grants": offline_pin_grants,
         "sync_time": now_iso(),
         "is_delta": is_delta,
     }

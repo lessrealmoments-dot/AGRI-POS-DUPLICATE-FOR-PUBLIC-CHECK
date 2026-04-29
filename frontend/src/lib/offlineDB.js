@@ -374,6 +374,18 @@ export async function getOfflineAdminPinHash() {
   return getMeta('admin_pin_hash');
 }
 
+// Branch-scoped manager + admin/owner PIN grants. Plain-text PINs (same
+// trust boundary as cached customers/products), used when offline so
+// managers — not just admins — can authorize credit sales.
+export async function setOfflinePinGrants(grants) {
+  await setMeta('offline_pin_grants', Array.isArray(grants) ? grants : []);
+}
+
+export async function getOfflinePinGrants() {
+  const v = await getMeta('offline_pin_grants');
+  return Array.isArray(v) ? v : [];
+}
+
 /** Find a pending sale by id (for retry/inspection UIs) */
 export async function getPendingSale(saleId) {
   const db = await openDB();

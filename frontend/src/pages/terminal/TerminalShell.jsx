@@ -16,7 +16,7 @@ import {
   cacheBranchPrices, setOfflineOrg, getPendingSaleCount,
   getProductCount, getLastSyncTime, setLastSyncTime,
   mergeProducts, mergeCustomers, updateInventoryBatch,
-  getMeta, setOfflineAdminPinHash,
+  getMeta, setOfflineAdminPinHash, setOfflinePinGrants,
 } from '../../lib/offlineDB';
 import { syncPendingSales, startAutoSync, stopAutoSync } from '../../lib/syncManager';
 
@@ -545,6 +545,9 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
       if (posRes.data.admin_pin_hash) {
         await setOfflineAdminPinHash(posRes.data.admin_pin_hash);
       }
+      if (Array.isArray(posRes.data.offline_pin_grants)) {
+        await setOfflinePinGrants(posRes.data.offline_pin_grants);
+      }
 
       // Sync pending offline sales
       const count = await getPendingSaleCount();
@@ -624,6 +627,9 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
           // Phase 2: cache admin_pin hash for offline manager bypass
           if (posRes.data.admin_pin_hash) {
             await setOfflineAdminPinHash(posRes.data.admin_pin_hash);
+          }
+          if (Array.isArray(posRes.data.offline_pin_grants)) {
+            await setOfflinePinGrants(posRes.data.offline_pin_grants);
           }
 
           const count = await getPendingSaleCount();

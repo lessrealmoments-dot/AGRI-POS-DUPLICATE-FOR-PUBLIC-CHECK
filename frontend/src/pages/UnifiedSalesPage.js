@@ -23,7 +23,7 @@ import { toast } from 'sonner';
 import {
   cacheProducts, getProducts, cacheCustomers, getCustomers,
   cachePriceSchemes, getPriceSchemes, addPendingSale, getPendingSaleCount,
-  setOfflineAdminPinHash,
+  setOfflineAdminPinHash, setOfflinePinGrants,
 } from '../lib/offlineDB';
 import { syncPendingSales, startAutoSync, stopAutoSync, newEnvelopeId } from '../lib/syncManager';
 import ReferenceNumberPrompt from '../components/ReferenceNumberPrompt';
@@ -646,10 +646,15 @@ export default function UnifiedSalesPage() {
           cacheCustomers(custRes.data.customers || posRes.data.customers),
           cachePriceSchemes(schemeRes.data || posRes.data.price_schemes),
         ]);
-        // Cache admin_pin bcrypt hash for offline manager-PIN verification
-        // (Iter 192 — Offline Mode Robustness Overhaul)
+        // Cache admin_pin bcrypt hash + branch-scoped manager PIN grants
+        // for offline manager-PIN verification (Iter 192 — Offline Mode
+        // Robustness Overhaul). Managers run the POS, so we ship their
+        // PINs scoped to this branch. Admin PINs work all branches.
         if (posRes.data.admin_pin_hash) {
           await setOfflineAdminPinHash(posRes.data.admin_pin_hash);
+        }
+        if (Array.isArray(posRes.data.offline_pin_grants)) {
+          await setOfflinePinGrants(posRes.data.offline_pin_grants);
         }
         setDataLoaded(true);
         return;
@@ -3086,7 +3091,7 @@ export default function UnifiedSalesPage() {
             {!isOnline && (paymentType === 'credit' || paymentType === 'partial') && selectedCustomer?.id && (
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
                 <p className="text-[11px] font-semibold text-amber-800 flex items-center gap-1">
-                  <WifiOff size={11} /> Offline mode — only system Admin PIN works
+                  <WifiOff size={11} /> Offline mode — Admin PIN or branch Manager PIN
                 </p>
                 <Label className="text-[11px]">Reason for offline credit (required)</Label>
                 <Input

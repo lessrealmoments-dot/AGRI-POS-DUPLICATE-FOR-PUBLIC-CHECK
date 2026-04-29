@@ -103,7 +103,7 @@ export default function OfflineCreditBypassDialog({
               autoFocus
             />
             <p className="text-[10px] text-slate-400 mt-1">
-              Use the system Admin PIN. (Manager-only PINs cannot be verified offline.)
+              Admin PIN or branch Manager PIN. The bypass + reason is logged for audit on next sync.
             </p>
           </div>
 

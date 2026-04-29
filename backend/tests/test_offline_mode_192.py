@@ -58,6 +58,17 @@ def test_sync_posdata_enrichment(auth, branch_id):
     assert data["admin_pin_hash"], "admin_pin_hash should be cached"
     assert data["admin_pin_hash"].startswith("$2"), "should be bcrypt hash"
 
+    # Phase 1.5: offline_pin_grants — branch-scoped manager + admin/owner PINs
+    assert "offline_pin_grants" in data
+    grants = data["offline_pin_grants"]
+    assert isinstance(grants, list)
+    # The test_org_admin user has owner_pin set → should appear in grants
+    pins = [g.get("pin") for g in grants]
+    assert TEST_ORG_ADMIN_PIN in pins, f"Expected admin PIN in grants, got: {grants}"
+    # Manager PIN seeded by helper (521325) should also appear
+    assert any(g.get("method") == "manager_pin" for g in grants), \
+        "At least one manager_pin grant should be present"
+
     # search_blob present on each product
     if data["products"]:
         for p in data["products"][:5]:
