@@ -1295,6 +1295,25 @@ export default function InvoiceDetailModal({
                           >
                             Run live diagnosis (credit_new)
                           </Button>
+                          <Button
+                            variant="outline" size="sm" className="text-xs h-7 mt-1 ml-2"
+                            onClick={async () => {
+                              try {
+                                const r = await api.post('/sms/templates/backfill');
+                                toast.success(r.data?.message || 'Done');
+                                // re-run diagnosis
+                                const dr = await api.get('/sms/diagnose-trigger/credit_new', {
+                                  params: { branch_id: invoice?.branch_id || '' }
+                                });
+                                setSmsDiagnosis(dr.data);
+                              } catch (e) {
+                                toast.error(e.response?.data?.detail || 'Backfill failed');
+                              }
+                            }}
+                            data-testid="backfill-sms-templates-btn"
+                          >
+                            Backfill default templates
+                          </Button>
                           {smsDiagnosis && (
                             <div className="mt-2 p-2 bg-white rounded border border-slate-200 space-y-1 font-mono text-[11px]">
                               {(smsDiagnosis.checks || []).map((c, i) => (

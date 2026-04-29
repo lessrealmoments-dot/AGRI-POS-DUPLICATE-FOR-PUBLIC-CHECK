@@ -22,6 +22,17 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### SMS Auto-Seed + Health Diagnostics (2026-04-29) — Complete
+- **Why** (root cause of Jegger Edem's missing SMS): SMS templates (`credit_new`, `payment_received`, `opening_balance_notice`, etc.) are **per-org** in `sms_templates` collection. Defaults are seeded by `_ensure_templates()` — but this was only called when a user opened **Settings → Messages** page or imported customers. **Org registration never seeded templates**, so any new tenant that never opened that page had ZERO templates → every auto-SMS trigger silently bailed via `template_missing`.
+- **Three layers of fix**:
+  1. **Org registration** — `routes/organizations.py:register_organization` now calls `_ensure_templates()` after creating the org so all default templates exist from day 1.
+  2. **`queue_sms()` self-heal** — if the org has zero templates and a hook fires, defaults are auto-inserted on-the-fly so the very first auto-SMS triggers also succeed.
+  3. **`POST /api/sms/templates/backfill`** — manual safety net for existing tenants (admin/manager only). Idempotent — only inserts missing keys, never overwrites customizations.
+- **Frontend**:
+  - **Invoice Modal SMS tab** — when no SMS was queued for an invoice, shows a 1-click "Backfill default templates" button + "Run live diagnosis (credit_new)" button. Diagnostic output is rendered inline (template found ✓/✗, trigger setting enabled ✓/✗, would_send: yes/no).
+- **Backend logging** — every `queue_sms` bail-out now emits a structured WARN log line so operators can grep `/var/log/supervisor/backend.err.log` for `"queue_sms skipped"` to see exactly why.
+- **Tests**: 3 new pytests in `test_sms_autoseed_189.py`. Suite total (Iter 184-189): 25 passing.
+
 ### Invoice Modal — Signature Display + SMS Diagnostics (2026-04-29) — Complete
 - **Why**: User wanted to see captured signatures attached to invoices when reviewing sales history (click receipt → modal → see signature). Also reported a credit sale to "Jegger Edem" didn't auto-generate the customer SMS — needed visibility into why.
 - **Signature display** — `InvoiceDetailModal.js` already had a Signature tab. The new pre-invoice flow back-links `signature_sessions.linked_record_id → invoice.id`, so the existing tab now displays signatures captured via the new flow with no extra UI work needed.

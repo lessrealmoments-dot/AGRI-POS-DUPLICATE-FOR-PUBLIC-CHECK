@@ -345,10 +345,31 @@ async def queue_sms(
     # Build org filter for _raw_db reads
     org_filter = {"organization_id": organization_id} if organization_id else {}
 
-    # Check template — org-scoped first, fallback to global default
+    # Check template — org-scoped first, fallback to global default.
+    # SELF-HEALING: if no template exists for this org at all (org never opened
+    # Settings → Messages), seed DEFAULT_TEMPLATES for the org transparently
+    # so SMS hooks don't silently fail for new tenants.
     template = None
     if organization_id:
         template = await _raw_db.sms_templates.find_one({"key": template_key, "organization_id": organization_id}, {"_id": 0})
+        if not template:
+            org_template_count = await _raw_db.sms_templates.count_documents({"organization_id": organization_id})
+            if org_template_count == 0:
+                # Org has zero templates — seed defaults silently
+                seed_docs = [
+                    {**t, "id": new_id(), "organization_id": organization_id,
+                     "created_at": now_iso(), "updated_at": now_iso()}
+                    for t in DEFAULT_TEMPLATES
+                ]
+                if seed_docs:
+                    try:
+                        await _raw_db.sms_templates.insert_many(seed_docs)
+                        sms_log.info(f"queue_sms auto-seeded {len(seed_docs)} default templates for org={organization_id}")
+                        template = await _raw_db.sms_templates.find_one(
+                            {"key": template_key, "organization_id": organization_id}, {"_id": 0}
+                        )
+                    except Exception as seed_err:
+                        sms_log.error(f"queue_sms auto-seed failed for org={organization_id}: {seed_err}")
     if not template:
         template = await _raw_db.sms_templates.find_one({"key": template_key, "organization_id": {"$exists": False}}, {"_id": 0})
     if not template:
@@ -492,6 +513,37 @@ async def list_sms_queue(
     total = await db.sms_queue.count_documents(query)
     items = await db.sms_queue.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
     return {"items": items, "total": total}
+
+
+@router.post("/templates/backfill")
+async def backfill_sms_templates(user=Depends(get_current_user)):
+    """Backfill default SMS templates for the current org.
+
+    Use case: existing tenants whose org was created BEFORE auto-seeding was
+    added to org-registration. Calling this endpoint will insert any missing
+    default templates without overwriting customizations. Idempotent.
+    """
+    if user.get("role") not in ("admin", "manager"):
+        raise HTTPException(status_code=403, detail="Admin or manager required")
+
+    existing_keys = set()
+    async for doc in db.sms_templates.find({}, {"_id": 0, "key": 1}):
+        existing_keys.add(doc["key"])
+
+    missing = [t for t in DEFAULT_TEMPLATES if t["key"] not in existing_keys]
+    if not missing:
+        return {"seeded": 0, "existing": len(existing_keys), "message": "All default templates already present."}
+
+    docs = [{**t, "id": new_id(), "created_at": now_iso(), "updated_at": now_iso()}
+            for t in missing]
+    await db.sms_templates.insert_many(docs)
+    return {
+        "seeded": len(missing),
+        "existing": len(existing_keys),
+        "seeded_keys": [t["key"] for t in missing],
+        "message": f"Seeded {len(missing)} missing default template(s).",
+    }
+
 
 
 @router.get("/diagnose-trigger/{template_key}")

@@ -266,6 +266,16 @@ async def register_organization(data: dict):
     })
     await provision_branch_wallets(branch_id, branch_name)  # uses active org context
 
+    # Seed default SMS templates so all auto-SMS triggers (credit_new,
+    # payment_received, opening_balance_notice, etc.) work from day 1 for
+    # this new org without the user having to visit Settings → Messages.
+    try:
+        from routes.sms import _ensure_templates
+        await _ensure_templates()
+    except Exception as e:
+        import logging
+        logging.getLogger("sms").error(f"Failed to seed SMS templates for new org {org_id}: {e}")
+
     set_org_context(None)
 
     # Send welcome email (async, non-blocking)
