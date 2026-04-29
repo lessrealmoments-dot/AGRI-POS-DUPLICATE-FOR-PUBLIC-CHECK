@@ -139,12 +139,15 @@ async def get_pos_sync_data(user=Depends(get_current_user), branch_id: str = Non
                     "movement_type": {"$in": ["purchase", "transfer_in"]},
                     "created_at": {"$gte": thirty_days_ago},
                 }},
+                # Sort newest-first so $first picks the latest record per product
+                # (replaces non-deterministic $last accumulator).
+                {"$sort": {"created_at": -1}},
                 {"$group": {
                     "_id": "$product_id",
                     "total_qty": {"$sum": {"$abs": "$quantity"}},
                     "total_cost": {"$sum": {"$multiply": [{"$abs": "$quantity"}, {"$ifNull": ["$cost_price", 0]}]}},
-                    "last_cost": {"$last": {"$ifNull": ["$cost_price", 0]}},
-                    "last_date": {"$last": "$created_at"},
+                    "last_cost": {"$first": {"$ifNull": ["$cost_price", 0]}},
+                    "last_date": {"$first": "$created_at"},
                 }},
             ]
             for r in await db.movements.aggregate(mv_pipeline).to_list(20000):
@@ -408,6 +411,10 @@ async def sync_offline_sales(data: dict, user=Depends(get_current_user)):
             # bypass locally with a reason. Now (during sync replay) we create
             # the session with status=bypassed and link it to the invoice for audit.
             offline_bypass = sale.get("offline_bypass") or None
+            # Defensive: only operate on dict payloads — a malformed type would
+            # otherwise raise AttributeError below (swallowed but noisy in logs).
+            if not isinstance(offline_bypass, dict):
+                offline_bypass = None
             if offline_bypass and invoice.get("balance", 0) > 0 and invoice.get("customer_id"):
                 try:
                     sig_session_id = new_id()
@@ -514,17 +521,21 @@ async def sync_offline_sales(data: dict, user=Depends(get_current_user)):
 
 
 @router.get("/sync/offline-summary")
-async def get_offline_sync_summary(user=Depends(get_current_user), branch_id: str = None, days: int = 7):
+async def get_offline_sync_summary(user=Depends(get_current_user), branch_id: str = None, days: str = "7"):
     """Phase 3: Stock warning summary for offline-synced sales.
 
     Returns counts of sales that synced from offline mode and how many had
     stock warnings (inventory went negative). Used by Dashboard widget to
     surface offline operations needing manager review.
+
+    `days` is accepted as string so we can clamp invalid values gracefully
+    instead of returning a hard 422 from FastAPI's int coercion.
     """
     try:
-        days = max(1, min(int(days or 7), 90))
+        days_i = max(1, min(int(days or 7), 90))
     except Exception:
-        days = 7
+        days_i = 7
+    days = days_i
     cutoff_iso = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
     base_q = {
