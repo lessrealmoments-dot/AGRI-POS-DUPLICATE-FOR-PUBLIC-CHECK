@@ -247,15 +247,38 @@ export function AuthProvider({ children }) {
 
   const fetchUser = useCallback(async () => {
     if (!token) { setLoading(false); return; }
+    // ── Offline reload guard ──
+    // When the browser is offline (or backend is unreachable), /auth/me will
+    // fail and would log the cashier out — losing pending sales context if
+    // they accidentally pressed reload. Hydrate from the cached user
+    // snapshot so the session survives the reload, and re-validate when
+    // the network returns.
+    const cachedUserRaw = localStorage.getItem('agripos_user');
+    let cachedUser = null;
+    try { cachedUser = cachedUserRaw ? JSON.parse(cachedUserRaw) : null; } catch { cachedUser = null; }
+
     try {
       const res = await api.get('/auth/me');
       setUser(res.data);
+      localStorage.setItem('agripos_user', JSON.stringify(res.data));
       // Scope offline DB to this organization
       if (res.data.organization_id) setOfflineOrg(res.data.organization_id);
-      
-      const branchRes = await api.get('/branches');
-      setBranches(branchRes.data);
-      
+
+      let branchList = [];
+      try {
+        const branchRes = await api.get('/branches');
+        branchList = branchRes.data || [];
+        setBranches(branchList);
+        localStorage.setItem('agripos_branches', JSON.stringify(branchList));
+      } catch {
+        // Use cached branches if branch fetch failed
+        try {
+          const cachedBranches = JSON.parse(localStorage.getItem('agripos_branches') || '[]');
+          branchList = cachedBranches;
+          setBranches(cachedBranches);
+        } catch { /* ignore */ }
+      }
+
       // If user is branch-restricted, force that branch
       if (res.data.branch_id) {
         setSelectedBranchId(res.data.branch_id);
@@ -263,15 +286,49 @@ export function AuthProvider({ children }) {
       } else {
         // Admin/owner: use saved preference or default to 'all'
         const saved = localStorage.getItem('agripos_selected_branch');
-        if (saved && (saved === 'all' || branchRes.data.some(b => b.id === saved))) {
+        if (saved && (saved === 'all' || branchList.some(b => b.id === saved))) {
           setSelectedBranchId(saved);
         } else {
           setSelectedBranchId('all');
         }
       }
     } catch {
-      localStorage.removeItem('agripos_token');
-      setToken(null);
+      // /auth/me failed — could be offline OR a real auth failure (401/403).
+      // We can't distinguish without the response code in this catch, so we
+      // do a lightweight ping to /api/health: if reachable AND /auth/me
+      // failed, the token is genuinely invalid → log out. If unreachable,
+      // hydrate from cache and stay logged in.
+      let backendReachable = false;
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 4000);
+        const r = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/health`, {
+          method: 'GET', signal: ctrl.signal, cache: 'no-store',
+        });
+        clearTimeout(t);
+        backendReachable = r.ok;
+      } catch { backendReachable = false; }
+
+      if (!backendReachable && cachedUser) {
+        // Offline reload — keep the user signed in with cached snapshot.
+        setUser(cachedUser);
+        if (cachedUser.organization_id) setOfflineOrg(cachedUser.organization_id);
+        try {
+          const cachedBranches = JSON.parse(localStorage.getItem('agripos_branches') || '[]');
+          setBranches(cachedBranches);
+          if (cachedUser.branch_id) {
+            setSelectedBranchId(cachedUser.branch_id);
+          } else {
+            const saved = localStorage.getItem('agripos_selected_branch');
+            setSelectedBranchId(saved || 'all');
+          }
+        } catch { /* ignore */ }
+      } else {
+        // Backend reachable but /auth/me rejected → real auth failure.
+        localStorage.removeItem('agripos_token');
+        localStorage.removeItem('agripos_user');
+        setToken(null);
+      }
     }
     setLoading(false);
   }, [token]);
@@ -282,6 +339,7 @@ export function AuthProvider({ children }) {
     // Support both email and username via the 'email' field (backend checks both)
     const res = await api.post('/auth/login', { email: identifier, password });
     localStorage.setItem('agripos_token', res.data.token);
+    localStorage.setItem('agripos_user', JSON.stringify(res.data.user));
     setToken(res.data.token);
     setUser(res.data.user);
     // Scope offline DB to this organization
