@@ -2227,9 +2227,9 @@ export default function UnifiedSalesPage() {
             </div>
 
             {/* Cart */}
-            <Card className="w-80 flex flex-col border-slate-200">
-              <CardContent className="flex-1 flex flex-col p-0">
-                <div className="p-3 border-b border-slate-100 flex items-center justify-between">
+            <Card className="w-80 flex flex-col border-slate-200 min-h-0">
+              <CardContent className="flex-1 flex flex-col p-0 min-h-0">
+                <div className="p-3 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
                   <div className="flex items-center gap-2">
                     <ShoppingCart size={16} className="text-slate-400" />
                     <span className="font-semibold text-sm">Cart</span>
@@ -2240,7 +2240,7 @@ export default function UnifiedSalesPage() {
                   )}
                 </div>
                 
-                <ScrollArea className="flex-1 p-3">
+                <ScrollArea className="flex-1 p-3 min-h-0">
                   {cart.length === 0 ? (
                     <p className="text-center text-slate-400 text-sm py-8">Cart empty</p>
                   ) : (
@@ -2347,7 +2347,7 @@ export default function UnifiedSalesPage() {
                   )}
                 </ScrollArea>
 
-                <div className="p-3 border-t border-slate-100 space-y-2">
+                <div className="p-3 border-t border-slate-100 space-y-2 flex-shrink-0">
                   <div className="flex justify-between text-sm"><span>Subtotal</span><span>{formatPHP(subtotal)}</span></div>
                   <Separator />
                   <div className="flex justify-between font-bold"><span>Total</span><span className="text-lg">{formatPHP(grandTotal)}</span></div>
