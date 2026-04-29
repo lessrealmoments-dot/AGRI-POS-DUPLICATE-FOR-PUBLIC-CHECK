@@ -22,7 +22,8 @@ import {
 import { toast } from 'sonner';
 import {
   cacheProducts, getProducts, cacheCustomers, getCustomers,
-  cachePriceSchemes, getPriceSchemes, addPendingSale, getPendingSaleCount
+  cachePriceSchemes, getPriceSchemes, addPendingSale, getPendingSaleCount,
+  setOfflineAdminPinHash,
 } from '../lib/offlineDB';
 import { syncPendingSales, startAutoSync, stopAutoSync, newEnvelopeId } from '../lib/syncManager';
 import ReferenceNumberPrompt from '../components/ReferenceNumberPrompt';
@@ -438,6 +439,8 @@ export default function UnifiedSalesPage() {
   // Credit approval
   const [creditApprovalDialog, setCreditApprovalDialog] = useState(false);
   const [managerPin, setManagerPin] = useState('');
+  // Iter 192 — Offline credit-sale bypass reason (required when offline)
+  const [offlineBypassReason, setOfflineBypassReason] = useState('');
   const [creditCheckResult, setCreditCheckResult] = useState(null);
   const [pendingCreditSale, setPendingCreditSale] = useState(null);
   // Crop credit type selection
@@ -643,6 +646,11 @@ export default function UnifiedSalesPage() {
           cacheCustomers(custRes.data.customers || posRes.data.customers),
           cachePriceSchemes(schemeRes.data || posRes.data.price_schemes),
         ]);
+        // Cache admin_pin bcrypt hash for offline manager-PIN verification
+        // (Iter 192 — Offline Mode Robustness Overhaul)
+        if (posRes.data.admin_pin_hash) {
+          await setOfflineAdminPinHash(posRes.data.admin_pin_hash);
+        }
         setDataLoaded(true);
         return;
       } catch (e) { console.warn('API failed, using offline cache'); }
@@ -1298,6 +1306,13 @@ export default function UnifiedSalesPage() {
   // Verify manager PIN
   const verifyManagerPin = async () => {
     if (!managerPin) { toast.error('Enter authorization code'); return; }
+    // Offline credit sale: a written reason is required for the audit log
+    if (!isOnline && (paymentType === 'credit' || paymentType === 'partial') && selectedCustomer?.id) {
+      if (!offlineBypassReason.trim() || offlineBypassReason.trim().length < 4) {
+        toast.error('Reason is required for offline credit sales (e.g. "Customer in a hurry, signed paper slip")');
+        return;
+      }
+    }
     
     try {
       const customerName = selectedCustomer?.name || 'Walk-in';
@@ -1319,12 +1334,29 @@ export default function UnifiedSalesPage() {
         setCreditApprovalDialog(false);
         setManagerPin('');
 
-        // ── Pre-invoice signature flow (credit / partial with customer) ───
-        // For credit/partial sales that have a customer attached, capture
-        // signature BEFORE creating the invoice. After signing, processSale
-        // is invoked with signature data so the invoice is born signed.
         const balanceForCheck = grandTotal - (pendingCreditSale?.partialPayment || 0);
         const isCreditOrPartial = paymentType === 'credit' || paymentType === 'partial';
+
+        // ── OFFLINE PATH ─────────────────────────────────────────────────
+        // Iter 192: Skip signature (server unreachable) → attach offline_bypass
+        // metadata to the sale. /sales/sync retroactively creates a
+        // signature_session(status=bypassed) on replay for full audit.
+        if (!isOnline && isCreditOrPartial && balanceForCheck > 0 && selectedCustomer?.id) {
+          const offlineBypass = {
+            method: res.data.method || 'admin_pin',
+            by_name: res.data.manager_name || 'Manager',
+            reason: offlineBypassReason.trim(),
+            at: new Date().toISOString(),
+            credit_type: cropCreditConfig?.type === 'charged_to_crop' ? 'charged_to_crop' : 'by_term',
+            branch_name: currentBranch?.name || '',
+          };
+          setOfflineBypassReason('');
+          await processSale(res.data.manager_name, null, null, offlineBypass);
+          return;
+        }
+
+        // ── ONLINE PATH ──────────────────────────────────────────────────
+        // Pre-invoice signature flow (credit / partial with customer attached)
         if (isCreditOrPartial && balanceForCheck > 0 && selectedCustomer?.id) {
           // Build a draft invoice for the signature dialog
           const draftItems = mode === 'quick'
@@ -1368,7 +1400,7 @@ export default function UnifiedSalesPage() {
   };
 
   // Process the sale
-  const processSale = async (approvedBy = null, jitOverridePin = null, signatureData = null) => {
+  const processSale = async (approvedBy = null, jitOverridePin = null, signatureData = null, offlineBypass = null) => {
     setSaving(true);
     
     const actualPaymentType = pendingCreditSale?.paymentType || paymentType;
@@ -1481,6 +1513,9 @@ export default function UnifiedSalesPage() {
       // Pre-invoice signature (when captured via the new flow)
       signature: signatureData || undefined,
       signature_session_id: signatureData?.session_id || undefined,
+      // Offline credit-sale bypass metadata (Iter 192) — replayed by /sales/sync
+      // which retroactively creates a signature_session(status=bypassed)
+      offline_bypass: offlineBypass || undefined,
     };
 
     if (isOnline) {
@@ -3047,8 +3082,28 @@ export default function UnifiedSalesPage() {
               </div>
             </div>
 
+            {/* Offline credit-sale: required reason for audit log */}
+            {!isOnline && (paymentType === 'credit' || paymentType === 'partial') && selectedCustomer?.id && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
+                <p className="text-[11px] font-semibold text-amber-800 flex items-center gap-1">
+                  <WifiOff size={11} /> Offline mode — only system Admin PIN works
+                </p>
+                <Label className="text-[11px]">Reason for offline credit (required)</Label>
+                <Input
+                  data-testid="offline-bypass-reason"
+                  value={offlineBypassReason}
+                  onChange={e => setOfflineBypassReason(e.target.value)}
+                  placeholder="e.g. Customer in a hurry, signed paper slip"
+                  className="h-9 text-xs bg-white"
+                />
+                <p className="text-[10px] text-amber-700 leading-relaxed">
+                  No signature can be captured offline. The bypass + reason is logged for audit when the device reconnects.
+                </p>
+              </div>
+            )}
+
             <div className="flex gap-2">
-              <Button variant="outline" className="flex-1" onClick={() => { setCreditApprovalDialog(false); setManagerPin(''); }}>
+              <Button variant="outline" className="flex-1" onClick={() => { setCreditApprovalDialog(false); setManagerPin(''); setOfflineBypassReason(''); }}>
                 Cancel
               </Button>
               <Button 

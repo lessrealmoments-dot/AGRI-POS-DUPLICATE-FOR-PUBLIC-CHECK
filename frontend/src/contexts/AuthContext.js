@@ -120,18 +120,43 @@ async function handleOfflineRequest(config) {
     };
   }
 
-  // Offline PIN verification (for kiosk unlock / cost reveal)
+  // Offline PIN verification (for kiosk unlock / cost reveal / credit sale approval)
   if (method === 'post' && path === '/auth/verify-manager-pin') {
     const body = typeof config.data === 'string' ? JSON.parse(config.data) : (config.data || {});
     const pin = body.pin || '';
+    if (!pin) {
+      return { data: { valid: false, detail: 'PIN required' } };
+    }
+    // Primary path: bcrypt-hashed admin_pin from /sync/pos-data (offline robustness Iter 192)
+    try {
+      const { verifyOfflinePin } = await import('../lib/offlineAuth');
+      const result = await verifyOfflinePin(pin);
+      if (result.ok) {
+        return {
+          data: {
+            valid: true,
+            manager_id: 'offline_admin_pin',
+            manager_name: 'Manager (offline)',
+            role: 'admin_pin',
+            method: result.method || 'admin_pin',
+          },
+        };
+      }
+    } catch { /* fall through to legacy kiosk cache */ }
+    // Legacy fallback: SHA-256 kiosk_pin_cache (older flow)
     const cachedHash = localStorage.getItem('kiosk_pin_cache');
-    if (cachedHash && pin) {
+    if (cachedHash) {
       const inputHash = await hashPinOffline(pin);
       if (inputHash === cachedHash) {
         return { data: { valid: true, manager_id: 'offline_cached', manager_name: 'Manager (offline)', role: 'cached' } };
       }
     }
-    return { data: { valid: false, detail: 'Cannot verify PIN offline. No cached credentials.' } };
+    return {
+      data: {
+        valid: false,
+        detail: 'Invalid PIN. Offline mode accepts only the system Admin PIN. Sync once while online to refresh credentials.',
+      },
+    };
   }
 
   // Can't serve from cache — propagate original error
