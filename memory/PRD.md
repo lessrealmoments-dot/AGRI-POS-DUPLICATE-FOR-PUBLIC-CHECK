@@ -22,6 +22,18 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### Messages Page Default Tab + Company Info Self-Heal (2026-04-29) — Complete
+- **Task A (UX)**: Messages page (`/messages`) now defaults to **Conversations** tab (was: Message Queue). One-line change in `MessagesPage.js:91`.
+- **Task B (Self-heal)**: New Dashboard banner that auto-detects when `settings.company_info` is missing for the current org and offers a one-tap restore from the immutable `organizations` row.
+- **Backend** (`routes/settings.py`):
+  - `GET /api/settings/company-info-status` — returns `{has_company_info, suggested: {name, phone, email, address}}`. The suggested values are pulled from the organizations row so the banner can show the user what will be restored.
+  - `POST /api/settings/restore-company-info` — idempotent self-heal. If `settings.company_info.value.name` is already set, returns `{restored: false, reason: "already_set"}` and does NOT overwrite (protects user edits). Otherwise upserts with values from `organizations`.
+- **Frontend** (`pages/DashboardPage.js`):
+  - Calls `/company-info-status` on mount.
+  - If `has_company_info=false`, shows a green banner: "Your company info is missing — Restore **Sibugay Agricultural Supply** as your business name so SMS signatures & receipts read correctly."
+  - One-tap "Restore Company Info" button → posts to restore endpoint → toast → banner dismisses.
+- **Verified**: `pytest tests/test_company_info_selfheal_179.py` 3/3 (status-shape, no-org-rejection, seed write + idempotency-guard source check). Full chain across 174→179 = **18/18 pass**. Lint clean.
+
 ### SMS Signature Company-Name Resolver Fallback (2026-04-28) — Complete
 - **RCA from live VPS**: User received messages signed `"- MAIN BRANCH"` only — company name missing. Cause: their `settings.company_info` doc was gone (post-Reset, before any Settings page save). All four send paths in `routes/sms.py` read the settings doc directly and silently degraded to empty when missing. The auto-trigger path was already fixed (iter 175); this completes the matrix.
 - **Backend fix** (`routes/sms.py`):

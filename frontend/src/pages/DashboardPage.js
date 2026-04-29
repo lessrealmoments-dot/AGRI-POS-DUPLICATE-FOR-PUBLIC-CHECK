@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Separator } from '../components/ui/separator';
+import { toast } from 'sonner';
 import {
   DollarSign, ShoppingCart, Package, Users, AlertTriangle,
   TrendingUp, ArrowDown, Building2, Wallet, Receipt, ArrowRight,
@@ -225,6 +226,12 @@ export default function DashboardPage() {
   const openCustStmt = (id, name) => { if (!id) return; setStmtCustomer({ id, name }); setStmtOpen(true); };
   const [analyticsPeriod, setAnalyticsPeriod] = useState('this_month');
   const [unclosedDays, setUnclosedDays] = useState(null);
+  // Self-heal banner: shown when settings.company_info is missing (e.g.
+  // post-Reset). One-tap restore reads from the immutable organizations row
+  // so SMS signatures stop reading just "- MAIN BRANCH".
+  const [companyInfoMissing, setCompanyInfoMissing] = useState(false);
+  const [companyInfoSuggested, setCompanyInfoSuggested] = useState(null);
+  const [restoringCompanyInfo, setRestoringCompanyInfo] = useState(false);
   const { width: gridWidth, containerRef: gridRef, mounted: gridMounted } = useContainerWidth();
 
   const layoutKey = `${LAYOUT_KEY}_${user?.id || 'default'}_${isConsolidatedView ? 'owner' : 'branch'}`;
@@ -299,6 +306,37 @@ export default function DashboardPage() {
   };
 
   useEffect(() => { loadData(); }, [isConsolidatedView, selectedBranchId]); // eslint-disable-line
+
+  // Check if company_info is missing (post-reset self-heal)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api.get('/settings/company-info-status');
+        if (cancelled) return;
+        setCompanyInfoMissing(!r.data?.has_company_info);
+        setCompanyInfoSuggested(r.data?.suggested || null);
+      } catch { /* silent — banner just won't show */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleRestoreCompanyInfo = async () => {
+    setRestoringCompanyInfo(true);
+    try {
+      const r = await api.post('/settings/restore-company-info');
+      if (r.data?.restored) {
+        toast.success(`Company info restored: ${r.data.value?.name}`);
+        setCompanyInfoMissing(false);
+      } else {
+        toast.info('Company info already set');
+        setCompanyInfoMissing(false);
+      }
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Failed to restore company info');
+    }
+    setRestoringCompanyInfo(false);
+  };
 
   if (loading) return (
     <div className="flex items-center justify-center h-64 text-slate-400">
@@ -641,6 +679,36 @@ export default function DashboardPage() {
           <Button size="sm" onClick={() => navigate('/close-wizard')} className="bg-[#1A4D2E] text-white"><Lock size={13} className="mr-1.5" /> Close Wizard</Button>
         </div>
       </div>
+
+      {/* Self-heal banner: company_info missing (typically post-Reset) */}
+      {companyInfoMissing && (
+        <div className="flex items-center justify-between px-4 py-3 rounded-lg border border-emerald-300 bg-emerald-50" data-testid="dashboard-restore-company-info">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0">
+              <Building2 size={18} className="text-emerald-700" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-emerald-900">
+                Your company info is missing
+              </p>
+              <p className="text-xs text-emerald-700">
+                {companyInfoSuggested?.name
+                  ? <>Restore <b>{companyInfoSuggested.name}</b> as your business name so SMS signatures &amp; receipts read correctly.</>
+                  : 'Restore your business name so SMS signatures and receipts read correctly.'}
+              </p>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            onClick={handleRestoreCompanyInfo}
+            disabled={restoringCompanyInfo}
+            className="bg-emerald-700 hover:bg-emerald-800 text-white flex-shrink-0"
+            data-testid="dashboard-restore-company-info-btn">
+            {restoringCompanyInfo ? <RefreshCw size={13} className="mr-1.5 animate-spin" /> : <Building2 size={13} className="mr-1.5" />}
+            {restoringCompanyInfo ? 'Restoring...' : 'Restore Company Info'}
+          </Button>
+        </div>
+      )}
 
       {/* Unclosed Days Warning */}
       {unclosedDays && unclosedDays.days.length > 0 && (

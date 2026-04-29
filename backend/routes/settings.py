@@ -277,3 +277,65 @@ async def update_collection_recipients(data: dict, user=Depends(get_current_user
         upsert=True
     )
     return {"message": "Collection recipients updated", **recipients}
+
+
+# ── Company Info Self-Heal ───────────────────────────────────────────────────
+# After Reset Company (or any state where settings.company_info is missing),
+# SMS signatures degrade to "- MAIN BRANCH" only and the Dashboard reads no
+# brand. These two endpoints power a "Restore my Company Info" banner that
+# rebuilds the setting from the immutable `organizations` row in one tap.
+
+@router.get("/company-info-status")
+async def get_company_info_status(user=Depends(get_current_user)):
+    """Tell the dashboard banner whether company_info is missing and what we
+    can pre-fill from `organizations` if so."""
+    from config import _raw_db, get_org_context
+    org_id = user.get("organization_id") or get_org_context()
+    has = bool(await db.settings.find_one({"key": "company_info"}, {"_id": 0}))
+    suggested = {}
+    if org_id:
+        org = await _raw_db.organizations.find_one(
+            {"id": org_id}, {"_id": 0, "name": 1, "phone": 1, "email": 1, "address": 1}
+        )
+        if org:
+            suggested = {
+                "name": org.get("name", ""),
+                "phone": org.get("phone", ""),
+                "email": org.get("email", ""),
+                "address": org.get("address", ""),
+            }
+    return {"has_company_info": has, "suggested": suggested}
+
+
+@router.post("/restore-company-info")
+async def restore_company_info(user=Depends(get_current_user)):
+    """One-tap self-heal: rebuild settings.company_info from the immutable
+    `organizations` row. Idempotent; only writes when missing or empty so it
+    never overwrites a user-edited value."""
+    check_perm(user, "settings", "edit")
+    from config import _raw_db, get_org_context
+    org_id = user.get("organization_id") or get_org_context()
+    if not org_id:
+        raise HTTPException(status_code=400, detail="No organization context")
+    org = await _raw_db.organizations.find_one({"id": org_id}, {"_id": 0})
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization record missing")
+    existing = await db.settings.find_one({"key": "company_info"}, {"_id": 0})
+    existing_name = (existing or {}).get("value", {}).get("name", "").strip()
+    if existing_name:
+        # Already populated — return as-is, don't clobber user edits
+        return {"restored": False, "reason": "already_set", "value": existing["value"]}
+    value = {
+        "name": org.get("name", ""),
+        "phone": org.get("phone", ""),
+        "email": org.get("email", ""),
+        "address": org.get("address", ""),
+        "currency": (existing or {}).get("value", {}).get("currency", "PHP"),
+        "date_format": (existing or {}).get("value", {}).get("date_format", "MM/DD/YYYY"),
+    }
+    await db.settings.update_one(
+        {"key": "company_info"},
+        {"$set": {"key": "company_info", "value": value, "updated_at": now_iso()}},
+        upsert=True,
+    )
+    return {"restored": True, "value": value}

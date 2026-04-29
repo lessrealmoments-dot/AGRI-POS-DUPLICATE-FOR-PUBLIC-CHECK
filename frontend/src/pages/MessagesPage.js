@@ -88,7 +88,7 @@ function GatewayLogLine({ log }) {
 
 export default function MessagesPage() {
   const { user, currentBranch, branches } = useAuth();
-  const [activeTab, setActiveTab] = useState('queue');
+  const [activeTab, setActiveTab] = useState('conversations');
 
   // Queue state
   const [statusFilter, setStatusFilter] = useState('pending');
