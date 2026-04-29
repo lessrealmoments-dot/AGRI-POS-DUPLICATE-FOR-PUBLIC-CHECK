@@ -970,11 +970,14 @@ async def import_branch_stock_and_price(
                 if v not in (None, "", " "):
                     new_cost = _safe_float(v)
 
-            # Quantity — empty = 0
+            # Quantity — empty SKIPPED (treat empty as "no info", not as zero;
+            # writing 0 to a row with a blank/un-cached cell is too risky).
+            # If you truly want zero stock, type 0 explicitly.
             new_qty = None
             if qty_col and qty_col in row:
                 v = row.get(qty_col, "")
-                new_qty = _safe_float(v, 0.0) if qty_col else None
+                if v not in (None, "", " "):
+                    new_qty = _safe_float(v)
 
             matched.append({
                 "row": i,

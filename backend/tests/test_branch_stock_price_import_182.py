@@ -67,7 +67,7 @@ def _pick_two_branches(user):
     return branches[0], branches[1]
 
 
-def test_empty_price_skipped_empty_qty_zero(auth, seeded_products):
+def test_empty_price_skipped_empty_qty_skipped(auth, seeded_products):
     token, user = auth
     b1, _ = _pick_two_branches(user)
 
@@ -75,7 +75,7 @@ def test_empty_price_skipped_empty_qty_zero(auth, seeded_products):
     csv_data = _csv_bytes([
         ["Product Name", "Cost Price", "Retail Price", "Wholesale Price", "Quantity"],
         ["BSP-Test-A", "60", "150", "135", "30"],
-        ["BSP-Test-B", "", "", "", ""],   # empty everything → qty becomes 0, prices skipped
+        ["BSP-Test-B", "", "", "", ""],   # empty everything → ALL skipped (no qty zero-out)
     ])
     mapping = {
         "name": "Product Name",
@@ -100,7 +100,7 @@ def test_empty_price_skipped_empty_qty_zero(auth, seeded_products):
     body = r.json()
     assert body["mode"] == "commit"
     assert body["prices_updated"] >= 1  # only A had non-empty prices
-    assert body["qty_updated"] == 2     # both got quantity (B = 0)
+    assert body["qty_updated"] == 1     # only A — B's empty cell was skipped
 
     # Verify in DB: branch_prices for A has new prices, B has NO override doc OR no prices
     db = _db()
@@ -117,11 +117,35 @@ def test_empty_price_skipped_empty_qty_zero(auth, seeded_products):
     # B should have no override doc (all prices were empty)
     assert bp_b is None or not bp_b.get("prices")
 
-    # Inventory: both are present
+    # Inventory: only A is present. B was untouched (empty quantity cell skipped).
     inv_a = db.inventory.find_one({"product_id": a["id"], "branch_id": b1["id"]}, {"_id": 0})
     inv_b = db.inventory.find_one({"product_id": b["id"], "branch_id": b1["id"]}, {"_id": 0})
     assert inv_a["quantity"] == 30
-    assert inv_b["quantity"] == 0
+    assert inv_b is None, "Empty quantity cell must NOT create a zero-stock entry"
+
+
+def test_explicit_zero_quantity_is_written(auth, seeded_products):
+    """If user types 0 explicitly, stock should be set to 0 (zero is intentional, blank is not)."""
+    token, user = auth
+    b1, _ = _pick_two_branches(user)
+    a = next(p for p in seeded_products if p["name"] == "BSP-Test-A")
+
+    csv_data = _csv_bytes([
+        ["Product Name", "Quantity"],
+        ["BSP-Test-A", "0"],
+    ])
+    mapping = {"name": "Product Name", "quantity": "Quantity"}
+    r = requests.post(
+        f"{API}/import/branch-stock-and-price",
+        files={"file": ("z.csv", csv_data, "text/csv")},
+        data={"mapping": __import__("json").dumps(mapping), "branch_id": b1["id"], "mode": "commit"},
+        headers={"Authorization": f"Bearer {token}"}, timeout=30,
+    )
+    assert r.status_code == 200, r.text
+    db = _db()
+    inv = db.inventory.find_one({"product_id": a["id"], "branch_id": b1["id"]}, {"_id": 0})
+    assert inv is not None
+    assert inv["quantity"] == 0
 
 
 def test_global_product_prices_not_touched(auth, seeded_products):

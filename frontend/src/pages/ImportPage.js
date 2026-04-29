@@ -37,7 +37,7 @@ const BRANCH_STOCK_PRICE_FIELDS = [
   { key: 'cost_price',     label: 'Cost / Capital Price',              required: false },
   { key: 'retail_price',   label: 'Retail Price',                      required: false },
   { key: 'wholesale_price',label: 'Wholesale Price',                   required: false },
-  { key: 'quantity',       label: 'Quantity (empty = 0)',              required: false },
+  { key: 'quantity',       label: 'Quantity (empty = skip, type 0 to zero out)', required: false },
 ];
 
 const CUSTOMER_FIELDS = [
