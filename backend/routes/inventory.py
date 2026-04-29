@@ -154,6 +154,12 @@ async def list_inventory(
             )
             item["parent_name"] = parent["name"] if parent else ""
             item["parent_unit"] = parent["unit"] if parent else ""
+
+            # Repack capital: derive live from parent's branch capital so the
+            # Inventory page shows real numbers instead of the stored ₱0.
+            from utils.helpers import get_repack_capital
+            cap = await get_repack_capital(item, branch_id or "")
+            item["cost_price"] = round(cap, 4)
         enriched_items.append(item)
     
     return {"items": enriched_items, "total": total}

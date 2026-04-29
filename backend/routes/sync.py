@@ -132,6 +132,19 @@ async def get_pos_sync_data(user=Depends(get_current_user), branch_id: str = Non
             parent_qty = all_inv_map.get(p["parent_id"], 0)
             units = p.get("units_per_parent", 1) or 1
             p["available"] = round(parent_qty * units, 4)
+            # Derive live capital from parent's branch capital so Terminal POS
+            # offline cache shows real numbers (parent's branch_prices.cost_price
+            # is what the parent has after PO/transfer/manual updates).
+            parent_bp = all_bp_map.get(p["parent_id"]) or {}
+            parent_cost = float(parent_bp.get("cost_price")) if parent_bp.get("cost_price") is not None else None
+            if parent_cost is None:
+                # fallback: read parent's global cost from products list
+                parent_doc = next((q for q in products if q.get("id") == p["parent_id"]), None)
+                if parent_doc:
+                    parent_cost = float(parent_doc.get("cost_price") or 0)
+            if parent_cost is not None and units > 0:
+                add_on = float(p.get("add_on_cost") or 0)
+                p["cost_price"] = round(parent_cost / units + add_on, 4)
         else:
             p["available"] = all_inv_map.get(p["id"], 0)
         if p["id"] in all_bp_map:
@@ -139,7 +152,11 @@ async def get_pos_sync_data(user=Depends(get_current_user), branch_id: str = Non
             if bp.get("prices"):
                 p["prices"] = {**(p.get("prices") or {}), **bp["prices"]}
             if bp.get("cost_price") is not None:
-                p["cost_price"] = bp["cost_price"]
+                # For repacks: branch_prices.cost_price doesn't exist (we don't
+                # write it); the live derivation above is the source of truth.
+                # So we only apply branch_prices.cost_price for non-repacks.
+                if not p.get("is_repack"):
+                    p["cost_price"] = bp["cost_price"]
         enriched_products.append(p)
     
     return {

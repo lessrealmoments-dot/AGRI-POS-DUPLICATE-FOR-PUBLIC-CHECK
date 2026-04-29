@@ -17,9 +17,12 @@ router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 async def _compute_inventory_value(branch_id: str) -> dict:
     """
     Calculate stock value for a branch:
-      - capital_value  = sum(qty × cost_price)   [non-repack only]
+      - capital_value  = sum(qty × cost_price)   [non-repack only — repacks are
+                          derived from parent stock so they'd double-count]
       - retail_value   = sum(qty × retail_price)
       - potential_margin = retail_value - capital_value
+
+    Branch-aware: branch_prices.cost_price + prices override product globals.
     """
     pipeline = [
         {"$match": {"branch_id": branch_id}},
@@ -37,6 +40,7 @@ async def _compute_inventory_value(branch_id: str) -> dict:
         }},
         {"$project": {
             "_id": 0,
+            "product_id": "$product.id",
             "quantity": 1,
             "cost_price": "$product.cost_price",
             "prices": "$product.prices",
@@ -44,20 +48,29 @@ async def _compute_inventory_value(branch_id: str) -> dict:
     ]
     items = await db.inventory.aggregate(pipeline).to_list(10000)
 
+    # Branch overrides — single bulk fetch
+    pids = [i["product_id"] for i in items]
+    bp_docs = await db.branch_prices.find(
+        {"branch_id": branch_id, "product_id": {"$in": pids}}, {"_id": 0}
+    ).to_list(10000)
+    bp_map = {d["product_id"]: d for d in bp_docs}
+
     capital_value = 0.0
     retail_value = 0.0
     sku_count = len(items)
 
     for item in items:
         qty = float(item.get("quantity", 0))
-        cost = float(item.get("cost_price", 0))
+        bp = bp_map.get(item["product_id"]) or {}
+        # Branch-aware cost
+        cost = float(bp["cost_price"]) if bp.get("cost_price") is not None else float(item.get("cost_price", 0))
         capital_value += qty * cost
 
-        # Case-insensitive retail price lookup (handles 'retail' and 'Retail' from QB import)
-        prices = item.get("prices") or {}
+        # Merge global prices with branch override
+        prices = {**(item.get("prices") or {}), **(bp.get("prices") or {})}
         retail = next(
             (float(v) for k, v in prices.items() if k.lower() == "retail"),
-            cost  # fallback to cost if no retail price set
+            cost
         )
         retail_value += qty * retail
 
@@ -317,12 +330,13 @@ async def dashboard_stats(
             {"_id": 0, "id": 1, "cost_price": 1, "prices": 1}
         ).to_list(5000)
         for p in prods_for_scan:
-            cost = float(p.get("cost_price", 0))
+            bp = bp_map.get(p["id"]) or {}
+            # Branch-aware cost
+            cost = float(bp["cost_price"]) if bp.get("cost_price") is not None else float(p.get("cost_price", 0))
             if cost <= 0:
                 continue
-            bp = bp_map.get(p["id"])
             prices = {k: float(v or 0) for k, v in (p.get("prices") or {}).items()}
-            if bp and bp.get("prices"):
+            if bp.get("prices"):
                 prices.update({k: float(v or 0) for k, v in bp["prices"].items()})
             for key in ("retail", "wholesale"):
                 val = prices.get(key, 0)

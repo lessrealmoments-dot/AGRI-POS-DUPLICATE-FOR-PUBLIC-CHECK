@@ -20,12 +20,10 @@ import ProductsPage from './pages/ProductsPage';
 import RepackPricingPage from './pages/RepackPricingPage';
 import ProductDetailPage from './pages/ProductDetailPage';
 import InventoryPage from './pages/InventoryPage';
-import POSPage from './pages/POSPage';
 import CustomersPage from './pages/CustomersPage';
 import PriceSchemesPage from './pages/PriceSchemesPage';
 import PriceManagerPage from './pages/PriceManagerPage';
 import SalesPage from './pages/SalesPage';
-import SalesOrderPage from './pages/SalesOrderPage';
 import UnifiedSalesPage from './pages/UnifiedSalesPage';
 import PurchaseOrderPage from './pages/PurchaseOrderPage';
 import SuppliersPage from './pages/SuppliersPage';
@@ -71,9 +69,7 @@ import DocViewerPage from './pages/DocViewerPage';
 import CropCreditsPage from './pages/CropCreditsPage';
 import SignaturePage from './pages/SignaturePage';
 
-// Legacy pages (keep files but not in primary nav)
-// POSPage → replaced by UnifiedSalesPage (/sales-new)
-// SalesOrderPage → replaced by UnifiedSalesPage order mode
+// Legacy pages removed (POSPage, SalesOrderPage) — replaced by UnifiedSalesPage
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 

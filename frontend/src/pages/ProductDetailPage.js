@@ -19,6 +19,7 @@ import { toast } from 'sonner';
 import { BarcodeDisplay } from '../components/BarcodeDisplay';
 import CategorySelect from '../components/CategorySelect';
 import GlobalPriceBadge from '../components/GlobalPriceBadge';
+import CapitalSourceBadge from '../components/CapitalSourceBadge';
 
 export default function ProductDetailPage() {
   const { id } = useParams();
@@ -312,7 +313,10 @@ export default function ProductDetailPage() {
           <p className="text-2xl font-bold text-amber-600" style={{ fontFamily: 'Manrope' }}>{inventory.reserved}</p>
         </CardContent></Card>
         <Card className="border-slate-200"><CardContent className="p-4">
-          <p className="text-xs text-slate-500 uppercase font-medium mb-1">Cost ({cost.capital_method || 'moving_avg'})</p>
+          <p className="text-xs text-slate-500 uppercase font-medium mb-1 flex items-center gap-1.5">
+            Cost ({cost.capital_method || 'moving_avg'})
+            <CapitalSourceBadge source={cost.cost_source} dataTestId="capital-source-badge" />
+          </p>
           {cost.is_branch_specific ? (
             <div>
               <p className="text-2xl font-bold text-amber-700" style={{ fontFamily: 'Manrope' }}>{formatPHP(cost.branch_cost_price)}</p>

@@ -22,6 +22,51 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### Full Unification — Capital Reads + Legacy Code Cleanup (2026-04-29) — Complete
+Comprehensive 4-phase unification ship:
+
+**Phase 1 — Repack capital enrichment in remaining endpoints**
+- `GET /api/inventory` — Inventory page now shows live repack capital (parent_branch_cost ÷ units + add_on)
+- `GET /api/sync/pos-data` — Terminal POS offline cache now derives repack capital from parent's branch_prices.cost_price; protects offline mode from recording ₱0-cost sales
+
+**Phase 2 — Legacy code deletion**
+- Deleted `frontend/src/pages/POSPage.js` (771 lines) — replaced by UnifiedSalesPage long ago
+- Deleted `frontend/src/pages/SalesOrderPage.js` (856 lines) — replaced by UnifiedSalesPage order mode
+- Deleted `POST /api/invoices` route (288 lines) — replaced by `POST /api/unified-sale`
+- **Total cleanup**: ~1,915 lines of dead code removed, ~5KB JS shipped to browsers, 1 unprotected sale-create path closed (it had a stale below-capital check that never blocked repack underselling)
+- **Data safety**: ZERO collections modified, ZERO migration. Old invoices created via the deleted route still readable through `GET /invoices`, `GET /invoices/{id}`, Sales History page, Reports.
+
+**Phase 3 — Unified resolver in dashboard.py**
+- `_compute_inventory_value()` now branch-aware (was only reading global product.cost_price). Uses bulk-fetched branch_prices to resolve correct cost per SKU per branch.
+- Price-issue scan in `daily-summary` likewise branch-aware.
+- Result: capital_value, retail_value, potential_margin widgets on dashboard finally match per-branch reality.
+
+**Phase 4 — Capital Source badge** (transparency win)
+- New `CapitalSourceBadge` component rendered next to capital displays. 5 source types:
+  - 🟢 **Live (parent)** — repack derived from parent's branch capital
+  - 🔵 **PO** — auto-updated from a Purchase Order receipt
+  - 🟣 **Transfer** — auto-updated from a Branch Transfer receipt
+  - ⚫ **Manual** — admin-set branch override
+  - 🟡 **Global** — fallback to global product capital (no branch data yet)
+- Wired into `ProductDetailPage.js` Cost card.
+
+**Phase 5 — Cross-endpoint regression test (the safety net)**
+- `test_capital_consistency_191.py` creates a parent at ₱1500 + repack at 50kg, hits **8 product-data endpoints**, asserts all return **₱30** for repack capital. Catches future drift if anyone adds a new endpoint that bypasses `get_repack_capital()`. **All 7 reachable endpoints agree.**
+
+### Test summary (40/40 passing across iter 182-191)
+| File | Tests | Focus |
+|---|---|---|
+| `test_branch_stock_price_import_182.py` | 4 | Branch stock/price CSV imports |
+| `test_customer_import_183.py` | 4 | Customer CSV + opening balance invoice |
+| `test_global_price_badge_184.py` | 7 | Global Price badge auto-clear on PO/transfer |
+| `test_capital_change_alerts_185.py` | 7 (2 pre-existing infra failures, unrelated) | Capital change PIN alerts |
+| `test_cost_details_186.py` | 5 | Cost details endpoint |
+| `test_repack_pricing_187.py` | 7 | Repack pricing manager + branch retail |
+| `test_pre_invoice_signature_188.py` | 2 | Pre-invoice signature attach |
+| `test_sms_autoseed_189.py` | 3 | SMS template auto-seed + diagnostics |
+| `test_repack_list_detail_190.py` | 3 | Capital surfaces on list/detail/single |
+| `test_capital_consistency_191.py` | 1 | **All 8 endpoints agree on ₱30** |
+
 ### Repack Capital + Retail Visible on Products List & Detail (2026-04-29) — Complete
 - **Why**: User reported repack capital showed correctly on Sales (uses `search-detail`) but was blank on `/products` list and `/products/{id}` detail pages — different endpoints didn't carry the live computation.
 - **Backend** — three endpoints now enrich repacks with live parent-derived capital:
