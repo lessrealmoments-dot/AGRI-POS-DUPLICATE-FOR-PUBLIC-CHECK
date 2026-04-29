@@ -12,6 +12,8 @@
 - Email: test_org_admin@regression.local
 - Password: RegressionPass!2026
 - Role: admin
+- owner_pin: 913712 (set on user doc)
+- system admin_pin: 913712 (bcrypt'd in system_settings, unlocks `admin_pin` action method)
 - Note: Auto-created on first test run. Idempotent — safe to delete and re-run.
 
 ## Regression Test Manager (for PIN-bypass tests)

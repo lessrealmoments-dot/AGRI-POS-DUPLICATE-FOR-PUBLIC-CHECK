@@ -1,8 +1,10 @@
 /**
  * PriceScanManager — Global smart price scanner.
- * Runs every 5 minutes. Detects products where any price scheme is below cost.
- * Shows a dialog with editable price table. Skip stores a cooldown in localStorage.
- * Even when skipped, a notification is created for admins/managers.
+ * Two surfaces:
+ *   1) "Below Cost" — products where any scheme is sold below capital.
+ *      All price updates are PIN-gated (admin or TOTP only).
+ *   2) "Capital Changes" — recent capital-cost moves from POs/transfers
+ *      worth reviewing. ≥₱1 threshold. Skips admin-overridden ones.
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth, api } from '../contexts/AuthContext';
@@ -12,7 +14,7 @@ import { Input } from './ui/input';
 import { Badge } from './ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { AlertTriangle, RefreshCw, Check, Clock, ChevronDown, X } from 'lucide-react';
+import { AlertTriangle, RefreshCw, Check, Clock, ChevronDown, X, TrendingUp, TrendingDown, Lock } from 'lucide-react';
 import { toast } from 'sonner';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -29,6 +31,7 @@ const SKIP_OPTIONS = [
 export default function PriceScanManager() {
   const { user, selectedBranchId, currentBranch, branches } = useAuth();
   const [dialog, setDialog] = useState(false);
+  const [tab, setTab] = useState('below_cost'); // 'below_cost' | 'capital_changes'
   const [issues, setIssues] = useState([]);
   const [schemes, setSchemes] = useState([]);
   const [editPrices, setEditPrices] = useState({}); // { product_id: { scheme_key: value } }
@@ -37,6 +40,16 @@ export default function PriceScanManager() {
   const [showSkipMenu, setShowSkipMenu] = useState(false);
   const [skipUntil, setSkipUntil] = useState(null); // timestamp
   const [lastScanCount, setLastScanCount] = useState(null);
+
+  // Capital-change alerts (Stage 2)
+  const [capAlerts, setCapAlerts] = useState([]);
+  const [capLoading, setCapLoading] = useState(false);
+
+  // Admin PIN modal — gates ALL price changes from this dialog
+  const [pinModal, setPinModal] = useState(null); // { kind: 'single'|'all', issue?, onConfirm }
+  const [adminPin, setAdminPin] = useState('');
+  const [pinSubmitting, setPinSubmitting] = useState(false);
+
   const scanTimerRef = useRef(null);
   const skipMenuRef = useRef(null);
 
@@ -136,6 +149,42 @@ export default function PriceScanManager() {
     }
   }, [currentBranch?.id, skipForSuperAdmin]); // eslint-disable-line
 
+  // ── Capital change alerts ──────────────────────────────────────────────
+  const fetchCapAlerts = useCallback(async () => {
+    if (!user || skipForSuperAdmin) return;
+    setCapLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (currentBranch?.id) params.set('branch_id', currentBranch.id);
+      params.set('days', '14');
+      const r = await api.get(`${BACKEND_URL}/api/products/capital-change-alerts?${params}`);
+      setCapAlerts(r.data?.alerts || []);
+    } catch { /* silent */ }
+    setCapLoading(false);
+  }, [user, currentBranch?.id, skipForSuperAdmin]);
+
+  useEffect(() => { fetchCapAlerts(); }, [fetchCapAlerts]);
+
+  const ackCapAlert = async (id) => {
+    try {
+      await api.post(`${BACKEND_URL}/api/products/capital-change-alerts/${id}/acknowledge`);
+      setCapAlerts(prev => prev.filter(a => a.id !== id));
+      toast.success('Alert dismissed');
+    } catch (e) {
+      toast.error('Failed to dismiss');
+    }
+  };
+
+  const ackAllCapAlerts = async () => {
+    if (user.role !== 'admin') { toast.error('Admin only'); return; }
+    try {
+      const body = currentBranch?.id ? { branch_id: currentBranch.id } : {};
+      await api.post(`${BACKEND_URL}/api/products/capital-change-alerts/acknowledge-all`, body);
+      setCapAlerts([]);
+      toast.success('All alerts dismissed');
+    } catch { toast.error('Failed'); }
+  };
+
   const handleSkip = (skipMs) => {
     const until = Date.now() + skipMs;
     localStorage.setItem(SKIP_KEY, String(until));
@@ -157,48 +206,89 @@ export default function PriceScanManager() {
     }));
   };
 
-  const handleSaveProduct = async (issue) => {
-    const prices = editPrices[issue.product_id] || {};
-    const cleaned = {};
-    Object.entries(prices).forEach(([k, v]) => {
-      const num = parseFloat(v);
-      if (!isNaN(num) && num > 0) cleaned[k] = num;
-    });
-    try {
-      await api.put(`${BACKEND_URL}/api/products/${issue.product_id}`, { prices: cleaned });
-      toast.success(`${issue.product_name} prices updated`);
-      // Remove from issues list
-      setIssues(prev => prev.filter(i => i.product_id !== issue.product_id));
-      if (issues.length <= 1) {
-        setDialog(false);
-        toast.success('All pricing issues resolved!');
-      }
-    } catch (e) {
-      toast.error(e.response?.data?.detail || 'Failed to update prices');
-    }
+  const handleSaveProduct = (issue) => {
+    // Open PIN modal — actual save happens after PIN is verified
+    setPinModal({ kind: 'single', issue });
+    setAdminPin('');
   };
 
-  const handleSaveAll = async () => {
+  const handleSaveAll = () => {
     if (!issues.length) return;
-    setSaving(true);
-    let fixed = 0;
-    for (const issue of issues) {
-      const prices = editPrices[issue.product_id] || {};
-      const cleaned = {};
-      Object.entries(prices).forEach(([k, v]) => {
-        const num = parseFloat(v);
-        if (!isNaN(num) && num > 0) cleaned[k] = num;
-      });
-      try {
-        await api.put(`${BACKEND_URL}/api/products/${issue.product_id}`, { prices: cleaned });
-        fixed++;
-      } catch {}
+    setPinModal({ kind: 'all' });
+    setAdminPin('');
+  };
+
+  // PIN-gated execution. The backend /products/smart-price-update endpoint
+  // re-validates the PIN against admin/TOTP — managers/cashiers cannot bypass.
+  const executePinned = async () => {
+    if (!adminPin) {
+      toast.error('Admin PIN is required');
+      return;
     }
-    toast.success(`${fixed} product(s) updated`);
-    setDialog(false);
-    setIssues([]);
-    setLastScanCount(0);
-    setSaving(false);
+    setPinSubmitting(true);
+    try {
+      if (pinModal.kind === 'single') {
+        const issue = pinModal.issue;
+        const prices = editPrices[issue.product_id] || {};
+        const cleaned = {};
+        Object.entries(prices).forEach(([k, v]) => {
+          const num = parseFloat(v);
+          if (!isNaN(num) && num > 0) cleaned[k] = num;
+        });
+        await api.post(`${BACKEND_URL}/api/products/smart-price-update`, {
+          product_id: issue.product_id,
+          prices: cleaned,
+          pin: adminPin,
+        });
+        toast.success(`${issue.product_name} prices updated`);
+        setIssues(prev => prev.filter(i => i.product_id !== issue.product_id));
+        if (issues.length <= 1) {
+          setDialog(false);
+          toast.success('All pricing issues resolved!');
+        }
+      } else {
+        // Bulk fix-all: one PIN unlocks the whole batch
+        let fixed = 0;
+        let failed = 0;
+        for (const issue of issues) {
+          const prices = editPrices[issue.product_id] || {};
+          const cleaned = {};
+          Object.entries(prices).forEach(([k, v]) => {
+            const num = parseFloat(v);
+            if (!isNaN(num) && num > 0) cleaned[k] = num;
+          });
+          if (!Object.keys(cleaned).length) continue;
+          try {
+            await api.post(`${BACKEND_URL}/api/products/smart-price-update`, {
+              product_id: issue.product_id,
+              prices: cleaned,
+              pin: adminPin,
+            });
+            fixed++;
+          } catch (e) {
+            failed++;
+            // If PIN was wrong, abort early to avoid dozens of identical errors
+            if (e.response?.status === 403) {
+              throw e;
+            }
+          }
+        }
+        toast.success(`${fixed} product(s) updated${failed ? `, ${failed} failed` : ''}`);
+        setDialog(false);
+        setIssues([]);
+        setLastScanCount(0);
+      }
+      setPinModal(null);
+      setAdminPin('');
+    } catch (e) {
+      const msg = e.response?.data?.detail || 'Failed';
+      toast.error(msg);
+      // Keep the modal open on PIN failure so they can retry
+      if (e.response?.status !== 403) {
+        setPinModal(null);
+      }
+    }
+    setPinSubmitting(false);
   };
 
   // Primary schemes to show prominently
@@ -210,14 +300,25 @@ export default function PriceScanManager() {
   return (
     <>
       {/* Floating scan indicator — shows when issues exist and dialog is closed */}
-      {lastScanCount !== null && lastScanCount > 0 && !dialog && (
+      {((lastScanCount !== null && lastScanCount > 0) || capAlerts.length > 0) && !dialog && (
         <button
-          onClick={() => setDialog(true)}
+          onClick={() => {
+            setDialog(true);
+            // Auto-open the more urgent tab
+            if (lastScanCount > 0) setTab('below_cost');
+            else setTab('capital_changes');
+          }}
           className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-full shadow-lg text-sm font-medium transition-all animate-bounce"
           data-testid="price-scan-alert-btn"
         >
           <AlertTriangle size={16} />
-          {lastScanCount} product{lastScanCount !== 1 ? 's' : ''}: price below cost
+          {lastScanCount > 0 && (
+            <span>{lastScanCount} below cost</span>
+          )}
+          {lastScanCount > 0 && capAlerts.length > 0 && <span className="opacity-50">·</span>}
+          {capAlerts.length > 0 && (
+            <span>{capAlerts.length} capital change{capAlerts.length === 1 ? '' : 's'}</span>
+          )}
         </button>
       )}
 
@@ -293,21 +394,51 @@ export default function PriceScanManager() {
           </div>
 
           <div className="px-6 py-2 flex items-center gap-4 text-xs border-b bg-slate-50">
-            <span className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded bg-red-100 border border-red-400" />
-              <span className="text-slate-600">Below capital — <b>must fix</b> (Retail / Wholesale)</span>
-            </span>
-            <span className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded bg-amber-50 border border-amber-300" />
-              <span className="text-slate-600">Below capital — <i>optional</i> (Special / Gov't)</span>
-            </span>
-            <span className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded bg-emerald-100 border border-emerald-300" />
-              <span className="text-slate-600">Valid price</span>
-            </span>
+            {/* Tabs */}
+            <button
+              onClick={() => setTab('below_cost')}
+              data-testid="tab-below-cost"
+              className={`pb-1.5 -mb-2 border-b-2 transition-colors text-xs font-medium ${
+                tab === 'below_cost' ? 'border-amber-600 text-amber-700' : 'border-transparent text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              Below Cost ({issues.length})
+            </button>
+            <button
+              onClick={() => { setTab('capital_changes'); fetchCapAlerts(); }}
+              data-testid="tab-capital-changes"
+              className={`pb-1.5 -mb-2 border-b-2 transition-colors text-xs font-medium ${
+                tab === 'capital_changes' ? 'border-amber-600 text-amber-700' : 'border-transparent text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              Capital Changes ({capAlerts.length})
+            </button>
+            <span className="ml-auto" />
+            {tab === 'below_cost' && (
+              <>
+                <span className="flex items-center gap-1.5">
+                  <div className="w-3 h-3 rounded bg-red-100 border border-red-400" />
+                  <span className="text-slate-600">Below capital — <b>must fix</b></span>
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <div className="w-3 h-3 rounded bg-amber-50 border border-amber-300" />
+                  <span className="text-slate-600">Below capital — <i>optional</i></span>
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <Lock size={11} className="text-slate-500" />
+                  <span className="text-slate-600">Admin PIN required</span>
+                </span>
+              </>
+            )}
+            {tab === 'capital_changes' && (
+              <span className="text-slate-500">
+                Showing changes ≥ ₱1 from POs &amp; transfers (last 14 days). Admin overrides skipped.
+              </span>
+            )}
           </div>
 
           {/* Table */}
+          {tab === 'below_cost' && (
           <div className="flex-1 overflow-auto">
             <table className="w-full text-sm border-collapse" data-testid="price-scan-table">
               <thead className="sticky top-0 z-10">
@@ -488,12 +619,79 @@ export default function PriceScanManager() {
               </tbody>
             </table>
           </div>
+          )}
+
+          {/* Capital Changes tab */}
+          {tab === 'capital_changes' && (
+            <div className="flex-1 overflow-auto" data-testid="capital-changes-list">
+              {capLoading && capAlerts.length === 0 && (
+                <div className="p-12 text-center text-sm text-slate-400">Loading…</div>
+              )}
+              {!capLoading && capAlerts.length === 0 && (
+                <div className="p-12 text-center">
+                  <Check size={32} className="text-emerald-500 mx-auto mb-2" />
+                  <p className="text-sm font-medium text-slate-700">No capital changes pending review</p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    All recent POs and branch transfers within tolerance, or already acknowledged.
+                  </p>
+                </div>
+              )}
+              {capAlerts.length > 0 && (
+                <div className="divide-y divide-slate-100">
+                  {capAlerts.map(a => (
+                    <div key={a.id} className="px-6 py-3 flex items-start gap-3 hover:bg-amber-50/30" data-testid={`cap-alert-${a.id}`}>
+                      <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${a.direction === 'up' ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                        {a.direction === 'up' ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-baseline gap-2 flex-wrap">
+                          <p className="text-sm font-semibold text-slate-800 truncate">{a.product_name}</p>
+                          <span className="text-[10px] text-slate-400 font-mono">{a.sku}</span>
+                          {a.branch_name && (
+                            <Badge variant="outline" className="text-[9px] py-0 px-1.5">{a.branch_name}</Badge>
+                          )}
+                        </div>
+                        <p className={`text-sm font-medium mt-0.5 ${a.direction === 'up' ? 'text-red-700' : 'text-emerald-700'}`}>
+                          Capital {a.direction === 'up' ? 'up' : 'down'} by {a.delta_pct !== null ? `${a.delta_pct >= 0 ? '+' : ''}${a.delta_pct.toFixed(1)}%` : '—'}
+                          {' '}({a.delta_amount >= 0 ? '+' : ''}{formatPHP(a.delta_amount)})
+                        </p>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {formatPHP(a.old_capital)} → <strong>{formatPHP(a.new_capital)}</strong>
+                          <span className="ml-2 text-slate-400">·</span>
+                          <span className="ml-2">
+                            {a.source_type === 'purchase_order' ? 'PO' : 'Transfer'} {a.source_ref}
+                          </span>
+                          {a.vendor && <span className="ml-2">· Vendor: <strong>{a.vendor}</strong></span>}
+                          {a.from_branch && <span className="ml-2">· From: {a.from_branch}</span>}
+                          <span className="ml-2 text-slate-400">·</span>
+                          <span className="ml-2">{new Date(a.changed_at).toLocaleString()}</span>
+                          {a.changed_by_name && <span className="ml-2">· {a.changed_by_name}</span>}
+                        </p>
+                      </div>
+                      <Button
+                        size="sm" variant="outline"
+                        onClick={() => ackCapAlert(a.id)}
+                        className="h-7 text-[11px] flex-shrink-0"
+                        data-testid={`ack-cap-${a.id}`}
+                      >
+                        <Check size={11} className="mr-1" /> Acknowledge
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Footer */}
           <div className="px-6 py-3 border-t bg-slate-50 flex items-center justify-between">
             <p className="text-xs text-slate-500">
-              Scans run every 5 minutes. Notifications sent to owner and branch managers.
-              {skipUntil && skipUntil > Date.now() && (
+              {tab === 'below_cost' ? (
+                <>Scans run every 5 minutes. Notifications sent to owner and branch managers.</>
+              ) : (
+                <>Capital change alerts surface within 14 days of the change. ≥₱1 threshold.</>
+              )}
+              {skipUntil && skipUntil > Date.now() && tab === 'below_cost' && (
                 <span className="ml-2 text-amber-600">
                   Next popup: {new Date(skipUntil).toLocaleTimeString()}
                 </span>
@@ -503,10 +701,61 @@ export default function PriceScanManager() {
               <Button variant="outline" size="sm" onClick={() => setDialog(false)}>
                 Close
               </Button>
-              <Button size="sm" onClick={handleSaveAll} disabled={saving}
-                className="bg-[#1A4D2E] hover:bg-[#14532d] text-white">
-                {saving ? <RefreshCw size={13} className="animate-spin mr-1.5" /> : <Check size={13} className="mr-1.5" />}
-                Update All ({issues.length})
+              {tab === 'below_cost' && (
+                <Button size="sm" onClick={handleSaveAll} disabled={saving || !issues.length}
+                  className="bg-[#1A4D2E] hover:bg-[#14532d] text-white">
+                  <Lock size={11} className="mr-1.5" />
+                  Update All ({issues.length}) — PIN required
+                </Button>
+              )}
+              {tab === 'capital_changes' && capAlerts.length > 0 && user?.role === 'admin' && (
+                <Button size="sm" onClick={ackAllCapAlerts}
+                  className="bg-[#1A4D2E] hover:bg-[#14532d] text-white" data-testid="ack-all-cap-btn">
+                  <Check size={13} className="mr-1.5" />
+                  Acknowledge All ({capAlerts.length})
+                </Button>
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Admin PIN Modal — gates all price changes from Smart Price Checker */}
+      <Dialog open={!!pinModal} onOpenChange={v => { if (!v) { setPinModal(null); setAdminPin(''); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Lock size={16} className="text-amber-600" />
+              Admin Authorization Required
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-slate-600">
+              {pinModal?.kind === 'all'
+                ? `Apply price updates to ${issues.length} product${issues.length === 1 ? '' : 's'}.`
+                : `Apply price update to ${pinModal?.issue?.product_name}.`}
+            </p>
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+              Only an admin PIN or TOTP code can authorize price changes from Smart Price Checker. Manager / cashier PINs will be rejected.
+            </p>
+            <div>
+              <label className="text-xs font-medium text-slate-700 mb-1 block">Admin PIN or TOTP</label>
+              <Input
+                type="password" autoComplete="off" inputMode="numeric"
+                value={adminPin} onChange={e => setAdminPin(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') executePinned(); }}
+                placeholder="Enter PIN or 6-digit TOTP" className="h-9"
+                autoFocus data-testid="smart-price-pin-input"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" size="sm" onClick={() => { setPinModal(null); setAdminPin(''); }}>
+                Cancel
+              </Button>
+              <Button size="sm" onClick={executePinned} disabled={pinSubmitting || !adminPin}
+                className="bg-[#1A4D2E] hover:bg-[#14532d] text-white" data-testid="smart-price-pin-confirm">
+                {pinSubmitting ? <RefreshCw size={12} className="animate-spin mr-1.5" /> : <Check size={12} className="mr-1.5" />}
+                Authorize &amp; Apply
               </Button>
             </div>
           </div>

@@ -19,6 +19,8 @@ API = os.environ.get(
 
 TEST_ORG_ADMIN_EMAIL = "test_org_admin@regression.local"
 TEST_ORG_ADMIN_PASSWORD = "RegressionPass!2026"
+TEST_ORG_ADMIN_PIN = "913712"
+TEST_ORG_MANAGER_PIN = "521325"
 
 
 def _db():
@@ -54,6 +56,7 @@ def ensure_org_admin_token():
                 "active": True,
                 "role": "admin",
                 "organization_id": org_id,
+                "owner_pin": TEST_ORG_ADMIN_PIN,
             }},
         )
     else:
@@ -66,6 +69,7 @@ def ensure_org_admin_token():
             "password_hash": _hash_password(TEST_ORG_ADMIN_PASSWORD),
             "role": "admin",
             "active": True,
+            "owner_pin": TEST_ORG_ADMIN_PIN,
             "branch_id": None,
             "organization_id": org_id,
             "permissions": {},
@@ -99,6 +103,14 @@ def ensure_org_admin_token():
             {"email": mgr_email, "organization_id": org_id},
             {"$set": {"manager_pin": mgr_pin, "active": True, "role": "manager"}},
         )
+
+    # Seed system-wide admin_pin (bcrypt'd) so PIN-gated actions whose policy
+    # only allows "admin_pin" or "totp" can be tested. Idempotent.
+    db.system_settings.update_one(
+        {"key": "admin_pin"},
+        {"$set": {"key": "admin_pin", "pin_hash": _hash_password(TEST_ORG_ADMIN_PIN)}},
+        upsert=True,
+    )
 
     r = requests.post(
         f"{API}/auth/login",

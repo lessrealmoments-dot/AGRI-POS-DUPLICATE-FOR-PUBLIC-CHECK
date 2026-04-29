@@ -492,6 +492,203 @@ async def delete_category(name: str, user=Depends(get_current_user)):
     return {"deleted": name}
 
 
+
+# ── Capital Change Alerts (Stage 2 of Smart Price) ─────────────────────────
+# Surfaces recent capital-cost changes from POs and branch transfers, with
+# noise filtered out:
+#   • Skips changes where |delta| < ₱1 (decimal noise / vendor adjustments)
+#   • Skips changes flagged was_user_choice=True (admin already decided)
+#   • Skips changes already acknowledged
+# All pre-existing rows treated as already-acknowledged via startup migration.
+
+CAPITAL_DELTA_FLOOR = 1.0  # absolute peso threshold
+
+
+@router.get("/capital-change-alerts")
+async def capital_change_alerts(
+    branch_id: Optional[str] = None,
+    days: int = 14,
+    user=Depends(get_current_user),
+):
+    """
+    Return unacknowledged capital changes worth surfacing as alerts.
+    Default window: 14 days back.
+    """
+    from datetime import datetime, timedelta, timezone
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, int(days)))).isoformat()
+
+    q = {
+        "changed_at": {"$gte": cutoff},
+        "$or": [
+            {"acknowledged_at": {"$exists": False}},
+            {"acknowledged_at": None},
+        ],
+        "was_user_choice": {"$ne": True},
+    }
+    if branch_id:
+        q["branch_id"] = branch_id
+
+    rows = await db.capital_changes.find(q, {"_id": 0}).sort("changed_at", -1).to_list(500)
+
+    # Enrich + filter on delta floor
+    alerts = []
+    for r in rows:
+        old_cap = float(r.get("old_capital") or 0)
+        new_cap = float(r.get("new_capital") or 0)
+        delta_amount = round(new_cap - old_cap, 4)
+        if abs(delta_amount) < CAPITAL_DELTA_FLOOR:
+            continue
+        delta_pct = (delta_amount / old_cap * 100.0) if old_cap > 0 else None
+
+        # Pull product + branch names cheaply
+        product = await db.products.find_one(
+            {"id": r.get("product_id")},
+            {"_id": 0, "id": 1, "name": 1, "sku": 1, "category": 1, "unit": 1},
+        )
+        branch = await db.branches.find_one(
+            {"id": r.get("branch_id")},
+            {"_id": 0, "id": 1, "name": 1},
+        )
+        alerts.append({
+            "id": r["id"],
+            "product_id": r.get("product_id"),
+            "product_name": (product or {}).get("name", "Unknown product"),
+            "sku": (product or {}).get("sku", ""),
+            "category": (product or {}).get("category", ""),
+            "unit": (product or {}).get("unit", ""),
+            "branch_id": r.get("branch_id"),
+            "branch_name": (branch or {}).get("name", ""),
+            "old_capital": old_cap,
+            "new_capital": new_cap,
+            "delta_amount": delta_amount,
+            "delta_pct": delta_pct,
+            "direction": "up" if delta_amount > 0 else "down",
+            "method": r.get("method", ""),
+            "source_type": r.get("source_type", ""),
+            "source_ref": r.get("source_ref", ""),
+            "vendor": r.get("vendor", ""),
+            "from_branch": r.get("from_branch", ""),
+            "to_branch": r.get("to_branch", ""),
+            "changed_by_name": r.get("changed_by_name", ""),
+            "changed_at": r.get("changed_at", ""),
+        })
+
+    return {
+        "alerts": alerts,
+        "count": len(alerts),
+        "branch_id": branch_id,
+        "days": days,
+        "threshold_amount": CAPITAL_DELTA_FLOOR,
+    }
+
+
+@router.post("/capital-change-alerts/{change_id}/acknowledge")
+async def acknowledge_capital_change(change_id: str, user=Depends(get_current_user)):
+    """Dismiss a single capital change alert."""
+    res = await db.capital_changes.update_one(
+        {"id": change_id},
+        {"$set": {
+            "acknowledged_at": now_iso(),
+            "acknowledged_by_id": user["id"],
+            "acknowledged_by_name": user.get("full_name", user.get("username", "")),
+        }},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return {"ok": True, "id": change_id}
+
+
+@router.post("/capital-change-alerts/acknowledge-all")
+async def acknowledge_all_capital_changes(data: dict, user=Depends(get_current_user)):
+    """
+    Bulk-dismiss alerts. Admin only.
+    Body: { branch_id?: str }  — if omitted, applies tenant-wide.
+    """
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    q = {
+        "$or": [
+            {"acknowledged_at": {"$exists": False}},
+            {"acknowledged_at": None},
+        ],
+    }
+    bid = (data.get("branch_id") or "").strip()
+    if bid:
+        q["branch_id"] = bid
+    res = await db.capital_changes.update_many(
+        q,
+        {"$set": {
+            "acknowledged_at": now_iso(),
+            "acknowledged_by_id": user["id"],
+            "acknowledged_by_name": user.get("full_name", user.get("username", "")),
+        }},
+    )
+    return {"ok": True, "acknowledged_count": res.modified_count}
+
+
+# ── Smart Price PIN-gated update ──────────────────────────────────────────
+# Used by the Smart Price Checker dialog to apply admin-approved price fixes.
+# Always requires a PIN that resolves to admin or TOTP — managers/cashiers
+# cannot push price updates through this path even if they have edit perms.
+
+@router.post("/smart-price-update")
+async def smart_price_update(data: dict, user=Depends(get_current_user)):
+    """
+    PIN-gated price update from Smart Price Checker.
+    Body: { product_id, prices: {scheme: amount}, pin }
+    """
+    pid = (data.get("product_id") or "").strip()
+    prices = data.get("prices") or {}
+    pin = str(data.get("pin") or "")
+    if not pid or not prices:
+        raise HTTPException(status_code=400, detail="product_id and prices are required")
+    if not pin:
+        raise HTTPException(status_code=400, detail="Admin PIN is required")
+
+    # Hard PIN gate — admin or TOTP only (no manager/cashier)
+    from routes.verify import verify_pin_for_action
+    verifier = await verify_pin_for_action(pin, "smart_price_update")
+    if not verifier:
+        raise HTTPException(status_code=403, detail="Invalid PIN — admin or TOTP required")
+
+    # Validate prices > 0
+    cleaned = {}
+    for k, v in prices.items():
+        try:
+            num = float(v)
+        except Exception:
+            continue
+        if num > 0:
+            cleaned[k] = num
+    if not cleaned:
+        raise HTTPException(status_code=400, detail="No valid prices provided")
+
+    product = await db.products.find_one({"id": pid, "active": True}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    merged = dict(product.get("prices") or {})
+    merged.update(cleaned)
+
+    await db.products.update_one(
+        {"id": pid},
+        {"$set": {"prices": merged, "updated_at": now_iso()}},
+    )
+
+    # Same hook as the regular product edit: clear Global Price badge across
+    # branches that hold inventory (manual price decision).
+    inv_rows = await db.inventory.find(
+        {"product_id": pid}, {"_id": 0, "branch_id": 1}
+    ).to_list(500)
+    for inv in inv_rows:
+        await mark_price_reviewed(pid, inv["branch_id"], source="smart_price")
+
+    return {"ok": True, "product_id": pid, "prices": merged,
+            "pin_method": verifier.get("method", "")}
+
+
+
+
 @router.get("/pricing-scan")
 async def pricing_scan(
     branch_id: Optional[str] = None,

@@ -438,6 +438,22 @@ async def startup():
             backfill.modified_count,
         )
 
+    # ── One-shot migration: mark existing capital_changes as acknowledged ──
+    # Only NEW capital changes that happen after this deploy will surface
+    # as Smart Price alerts. Avoids drowning the admin in historical noise.
+    cap_backfill = await _raw_db.capital_changes.update_many(
+        {"acknowledged_at": {"$exists": False}},
+        {"$set": {
+            "acknowledged_at": now_iso(),
+            "acknowledged_by_name": "system_migration",
+        }},
+    )
+    if cap_backfill.modified_count:
+        logger.info(
+            "Capital Change alerts migration: marked %d existing changes as acknowledged",
+            cap_backfill.modified_count,
+        )
+
     # ── One-shot orphan-settings sweep ────────────────────────────────────────
     # Settings docs whose organization_id no longer matches any organization are
     # the source of cross-tenant `company_info` bleed (live: "JND store" appearing

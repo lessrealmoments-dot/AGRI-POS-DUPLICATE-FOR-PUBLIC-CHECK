@@ -199,6 +199,7 @@ PIN_POLICY_ACTIONS = [
     {"key": "inventory_adjust",       "label": "Direct Inventory Correction",     "module": "Inventory",         "defaults": ["admin_pin", "manager_pin", "totp"]},
     {"key": "product_delete",         "label": "Delete Product",                  "module": "Products",          "defaults": ["admin_pin", "totp"]},
     {"key": "price_override",         "label": "Override Branch Price",           "module": "Products",          "defaults": ["admin_pin", "manager_pin", "totp"]},
+    {"key": "smart_price_update",     "label": "Smart Price Checker — Update Price", "module": "Products",       "defaults": ["admin_pin", "totp"]},
     {"key": "reopen_po",              "label": "Reopen Purchase Order",           "module": "Purchase Orders",   "defaults": ["admin_pin", "manager_pin", "totp"]},
     {"key": "cancel_po",              "label": "Cancel Purchase Order",           "module": "Purchase Orders",   "defaults": ["admin_pin", "manager_pin", "totp"]},
     # Incident Tickets

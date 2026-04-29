@@ -910,6 +910,9 @@ async def _apply_receipt(order, items, shortages, excesses, from_branch_id, to_b
             "changed_by_id": user["id"],
             "changed_by_name": user.get("full_name", user.get("username", "")),
             "changed_at": now_iso(),
+            # was_user_choice: True if admin explicitly picked the new capital
+            # via capital_choices (skip Smart Price alert in that case).
+            "was_user_choice": product_id in capital_choices,
         })
 
         await log_movement(

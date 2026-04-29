@@ -131,6 +131,11 @@ async def _apply_po_inventory(po: dict, user: dict, capital_choices: dict = None
                 "changed_by_id": user["id"],
                 "changed_by_name": user.get("full_name", user.get("username", "")),
                 "changed_at": now_iso(),
+                # was_user_choice: True if this product's capital was explicitly
+                # picked by the user via capital_choices (vs auto-derived).
+                # Used by Smart Price Checker to skip alerts the admin/owner
+                # already made an explicit decision on.
+                "was_user_choice": bool(explicit_choice),
             })
 
             # Step 9: Update vendor last_price — BRANCH-SPECIFIC

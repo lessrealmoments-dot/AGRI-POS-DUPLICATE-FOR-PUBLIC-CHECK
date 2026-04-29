@@ -22,7 +22,23 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
-### Global Price Badge — "Needs Price Review" (2026-04-29) — Complete
+### Capital Change Alerts + PIN-gated Smart Price (2026-04-29) — Complete (Stage 2)
+- **Why**: Owner needs visibility on every capital cost movement from POs / branch transfers (≥₱1) to call vendors and confirm "is this a new price or an error?" Plus, manager/cashier should NOT be able to change retail/wholesale prices without admin authorization.
+- **Backend**:
+  - Added `was_user_choice` flag to `capital_changes` schema (PO + branch transfer commits). True = admin explicitly picked the new capital → alert is suppressed (per user spec: *"if the admin or owner already made it, ignore"*).
+  - `GET /api/products/capital-change-alerts?branch_id=X&days=14` — returns unacknowledged changes ≥ ₱1 with computed `delta_amount`, `delta_pct`, `direction`. Filters out `was_user_choice=True`.
+  - `POST /api/products/capital-change-alerts/{id}/acknowledge` (single dismiss).
+  - `POST /api/products/capital-change-alerts/acknowledge-all` (bulk, admin only, optional branch scope).
+  - `POST /api/products/smart-price-update` — PIN-gated price update endpoint. Verifies PIN against new `smart_price_update` action policy (`admin_pin` or `totp` only — manager/cashier rejected). Auto-clears Global Price badge across affected branches.
+- **Migration**: One-shot startup backfill marked all 96 existing `capital_changes` rows as acknowledged. Only NEW changes after deploy will surface.
+- **Frontend** (`PriceScanManager.js`):
+  - Existing dialog now has **2 tabs**: "Below Cost" + "Capital Changes (N)".
+  - **All "Fix" / "Update All" / "Fix All" buttons now open an Admin PIN modal** before submitting. Backend re-validates the PIN. Manager/cashier PINs blocked end-to-end.
+  - Capital Changes tab shows each alert with: product name, branch, ↑/↓ icon, % change + ₱ delta, old → new, source (PO# or Transfer#), vendor, who/when, and an Acknowledge button per row. Admin-only "Acknowledge All" bulk action.
+  - Floating bottom-right alert pill now combines both signal types ("3 below cost · 2 capital changes").
+- **Tests**: 9 new pytests in `test_capital_change_alerts_185.py`. Total suite: 27 passing (delta calc, was_user_choice skip, ₱1 floor, single + bulk ack, PIN gate accept admin, reject manager, reject invalid, require PIN). `test_credentials.md` updated with admin PIN seed details.
+
+### Global Price Badge — "Needs Price Review" (2026-04-29) — Complete (Stage 1)
 - **Why**: When a new branch opens, every product starts on the global fallback price. Manager needs visual cue showing which products haven't been priced-reviewed for that branch yet so they can call suppliers / verify margins / set per-branch overrides where needed.
 - **Schema**: New `inventory.price_reviewed_at` field. Null = pending review (badge shows). Set = reviewed (badge hidden).
 - **Backend** (auto-clears on these events for that product+branch):
