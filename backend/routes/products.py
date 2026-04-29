@@ -687,6 +687,95 @@ async def smart_price_update(data: dict, user=Depends(get_current_user)):
             "pin_method": verifier.get("method", "")}
 
 
+# ── PIN-gated bulk cost-details lookup ────────────────────────────────────
+# Returns effective branch cost, last-purchase cost, and moving-average cost
+# for a list of products at a branch. Capital is sensitive — every call
+# requires a PIN that satisfies the `view_capital_costs` policy
+# (admin/manager/TOTP by default). Even admins must re-PIN when reopening
+# the Sales screen, so a logged-in account left unattended doesn't leak
+# margin info.
+
+@router.post("/cost-details")
+async def cost_details_bulk(data: dict, user=Depends(get_current_user)):
+    """
+    Body: { branch_id, product_ids: [str, ...], pin: str }
+    Returns: {
+      product_id: {
+        effective_cost: float,   # branch override or global
+        last_purchase: float,    # most recent purchase/transfer-in cost
+        moving_average: float,   # weighted avg over last 30d
+      }
+    }
+    """
+    branch_id = (data.get("branch_id") or "").strip()
+    product_ids = data.get("product_ids") or []
+    pin = str(data.get("pin") or "")
+    if not branch_id:
+        raise HTTPException(status_code=400, detail="branch_id is required")
+    if not isinstance(product_ids, list) or not product_ids:
+        raise HTTPException(status_code=400, detail="product_ids[] is required")
+    if not pin:
+        raise HTTPException(status_code=400, detail="PIN is required to view capital")
+
+    from routes.verify import verify_pin_for_action
+    verifier = await verify_pin_for_action(pin, "view_capital_costs")
+    if not verifier:
+        raise HTTPException(status_code=403, detail="Invalid PIN — admin or manager required")
+
+    # Cap input length defensively
+    product_ids = [str(p) for p in product_ids if p][:1000]
+
+    # 1) Effective cost per product (branch override → global fallback)
+    products = await db.products.find(
+        {"id": {"$in": product_ids}}, {"_id": 0, "id": 1, "cost_price": 1}
+    ).to_list(2000)
+    global_cost = {p["id"]: float(p.get("cost_price") or 0) for p in products}
+
+    overrides = await db.branch_prices.find(
+        {"product_id": {"$in": product_ids}, "branch_id": branch_id, "cost_price": {"$exists": True}},
+        {"_id": 0, "product_id": 1, "cost_price": 1},
+    ).to_list(2000)
+    branch_cost = {o["product_id"]: float(o.get("cost_price") or 0) for o in overrides}
+
+    # 2) Last purchase + moving average via movements
+    from datetime import datetime, timedelta, timezone
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+
+    pipeline = [
+        {"$match": {
+            "product_id": {"$in": product_ids},
+            "branch_id": branch_id,
+            "type": {"$in": ["purchase", "transfer_in"]},
+            "created_at": {"$gte": cutoff},
+        }},
+        {"$sort": {"created_at": -1}},
+        {"$group": {
+            "_id": "$product_id",
+            "last_purchase": {"$first": "$cost_price"},
+            "total_qty": {"$sum": "$quantity"},
+            "weighted_cost": {"$sum": {"$multiply": ["$quantity", "$cost_price"]}},
+        }},
+    ]
+    rows = await db.movements.aggregate(pipeline).to_list(2000)
+    movement_map = {}
+    for r in rows:
+        ma = (r["weighted_cost"] / r["total_qty"]) if r["total_qty"] else 0
+        movement_map[r["_id"]] = {
+            "last_purchase": float(r.get("last_purchase") or 0),
+            "moving_average": round(float(ma), 4),
+        }
+
+    out = {}
+    for pid in product_ids:
+        eff = branch_cost.get(pid, global_cost.get(pid, 0))
+        mv = movement_map.get(pid, {})
+        out[pid] = {
+            "effective_cost": eff,
+            "last_purchase": mv.get("last_purchase", 0),
+            "moving_average": mv.get("moving_average", 0),
+        }
+
+    return {"branch_id": branch_id, "costs": out, "pin_method": verifier.get("method", "")}
 
 
 @router.get("/pricing-scan")

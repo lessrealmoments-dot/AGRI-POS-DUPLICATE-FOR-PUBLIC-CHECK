@@ -22,6 +22,25 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### PIN-gated Capital Reveal on Sales Screen (2026-04-29) — Complete
+- **Why**: Owner/manager wants to see capital cost, last-purchase, and moving-average per product directly on the Sales screen for margin awareness while making sales — but cashiers must NOT see it. One PIN-gated toggle for the whole page.
+- **Behavior**:
+  - Stock / inventory: ALWAYS visible to all roles (no gate). Inline `Stock: X PC` on every Quick card and Order line.
+  - Capital data: hidden by default for everyone. Toolbar button: **"Show Capital"** opens a PIN modal. PIN policy `view_capital_costs` accepts `admin_pin`, `manager_pin`, or `totp` (cashier PIN rejected).
+  - Once unlocked, the same dialog flips to **"Hide Capital"** — one click hides immediately. Refresh / tab close also re-locks (PIN kept in memory only).
+  - Bulk-fetched: 1 round-trip per visible product set (Quick mode auto-fetches missing IDs as the user scrolls/searches; Order mode fetches as cart/lines change).
+- **Backend** (`POST /api/products/cost-details`):
+  - Body: `{ branch_id, product_ids[], pin }`. Returns map of `{effective_cost, last_purchase, moving_average}` per product.
+  - Effective cost = branch override or global fallback.
+  - Last purchase = most recent `purchase` or `transfer_in` movement at this branch (last 30 days).
+  - Moving average = qty-weighted over last 30 days of movements.
+  - PIN re-validated on every call. No long-lived unlock token — minimizes blast radius if a PIN is sniffed.
+- **Frontend** (`UnifiedSalesPage.js`):
+  - Eye / EyeOff toolbar button beside the Quick/Order toggle (only on New Sale tab).
+  - Capital info renders as a 2-line monospace footer on each Quick card (`Cap: ₱X` / `LP: ₱Y · MA: ₱Z`).
+  - On Order mode line items: same data inline under stock as `Stock: 47 PC · Cap ₱X · LP ₱Y · MA ₱Z`.
+- **Tests**: 6 new pytests in `test_cost_details_186.py`. Total suite: 22 passing across the 5 most recent feature iterations (cost reveal, capital change alerts, PIN-gated smart price, global price badge, branch import). Verifies PIN required, invalid PIN rejected, admin + manager PIN both work, branch override beats global, MA calculation correctness, unknown product returns zeros.
+
 ### Capital Change Alerts + PIN-gated Smart Price (2026-04-29) — Complete (Stage 2)
 - **Why**: Owner needs visibility on every capital cost movement from POs / branch transfers (≥₱1) to call vendors and confirm "is this a new price or an error?" Plus, manager/cashier should NOT be able to change retail/wholesale prices without admin authorization.
 - **Backend**:

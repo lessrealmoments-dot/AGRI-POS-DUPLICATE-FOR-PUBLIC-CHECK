@@ -17,7 +17,7 @@ import { UnclosedDaysBanner } from '../components/UnclosedDaysBanner';
 import {
   Search, Plus, Minus, Trash2, ShoppingCart, CreditCard, X, Wifi, WifiOff,
   RefreshCw, FileText, Lock, Zap, ClipboardList, AlertTriangle, Shield, CheckCircle2, Smartphone, Camera, Check,
-  PackageX, ShieldAlert, ChevronDown
+  PackageX, ShieldAlert, ChevronDown, Eye, EyeOff
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -268,6 +268,21 @@ export default function UnifiedSalesPage() {
   // price-reviewed yet — used to show the "Global Price" badge
   // inline on POS line items.
   const [pendingReviewIds, setPendingReviewIds] = useState(new Set());
+
+  // ── Capital cost reveal (PIN-gated) ──────────────────────────────────
+  // capitalShown: when true, every product card / line item shows
+  //   `Stock: X · Cap: ₱Y · LP: ₱Z · MA: ₱A`. When false, only stock is shown.
+  // costMap: { product_id: { effective_cost, last_purchase, moving_average } }
+  // capitalPin: the validated PIN — kept in memory only; refresh = re-PIN.
+  // capitalPinModal: when truthy, shows the unlock PIN dialog.
+  // Default state: hidden for all roles. Admin/manager can re-enter the PIN
+  // to reveal — the ground rule is "showing requires PIN" regardless of role.
+  const [capitalShown, setCapitalShown] = useState(false);
+  const [costMap, setCostMap] = useState({});
+  const [capitalPin, setCapitalPin] = useState('');
+  const [capitalPinModal, setCapitalPinModal] = useState(false);
+  const [capitalPinInput, setCapitalPinInput] = useState('');
+  const [capitalPinSubmitting, setCapitalPinSubmitting] = useState(false);
   
   // Customer
   const [selectedCustomer, setSelectedCustomer] = useState(null);
@@ -345,6 +360,70 @@ export default function UnifiedSalesPage() {
     } catch { /* silent — badge just won't show */ }
   }, [currentBranch]);
   useEffect(() => { refreshPendingReviewIds(); }, [refreshPendingReviewIds]);
+
+  // ── Capital reveal: bulk-fetch costs once unlocked ──────────────────
+  const fetchCostMap = useCallback(async (ids, pin) => {
+    if (!ids?.length || !currentBranch?.id || !pin) return;
+    try {
+      const r = await api.post(`/products/cost-details`, {
+        branch_id: currentBranch.id, product_ids: ids, pin,
+      });
+      setCostMap(prev => ({ ...prev, ...(r.data?.costs || {}) }));
+    } catch (e) {
+      // PIN expired / changed mid-session — re-lock
+      if (e.response?.status === 403) {
+        setCapitalShown(false);
+        setCapitalPin('');
+        toast.error('Capital view re-locked. Click "Show Capital" to enter PIN again.');
+      }
+    }
+  }, [currentBranch]);
+
+  const submitCapitalPin = async () => {
+    if (!capitalPinInput) { toast.error('PIN required'); return; }
+    if (!currentBranch?.id) { toast.error('Pick a branch first'); return; }
+    setCapitalPinSubmitting(true);
+    try {
+      // Validate the PIN by issuing one fetch — if cost-details succeeds the PIN is good.
+      // If there are no products visible yet, send a no-op array of one dummy id; backend
+      // will validate PIN before short-circuiting (check is first thing).
+      await api.post(`/products/cost-details`, {
+        branch_id: currentBranch.id,
+        product_ids: ['__validate__'],
+        pin: capitalPinInput,
+      });
+      setCapitalPin(capitalPinInput);
+      setCapitalShown(true);
+      setCapitalPinModal(false);
+      setCapitalPinInput('');
+      toast.success('Capital visible');
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Invalid PIN');
+    }
+    setCapitalPinSubmitting(false);
+  };
+
+  const hideCapital = () => {
+    setCapitalShown(false);
+    setCapitalPin('');
+    setCostMap({});
+  };
+
+  const requestShowCapital = () => {
+    setCapitalPinInput('');
+    setCapitalPinModal(true);
+  };
+
+  // Fetch cost data for any line item whose product is missing from costMap.
+  // Quick mode handles its own fetch inline (during render); Order mode lines
+  // are fetched here whenever cart/lines change while capital is shown.
+  useEffect(() => {
+    if (!capitalShown || !capitalPin) return;
+    const ids = new Set();
+    lines.forEach(l => l.product_id && !(l.product_id in costMap) && ids.add(l.product_id));
+    cart.forEach(c => c.product_id && !(c.product_id in costMap) && ids.add(c.product_id));
+    if (ids.size) fetchCostMap(Array.from(ids), capitalPin);
+  }, [capitalShown, capitalPin, lines, cart, costMap, fetchCostMap]);
   
   // Credit approval
   const [creditApprovalDialog, setCreditApprovalDialog] = useState(false);
@@ -1560,6 +1639,30 @@ export default function UnifiedSalesPage() {
               </button>
             </div>
           )}
+
+          {/* Show / Hide Capital — PIN-gated for all roles */}
+          {mainTab === 'sale' && (
+            capitalShown ? (
+              <button
+                onClick={hideCapital}
+                data-testid="hide-capital-btn"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200 hover:bg-amber-200 transition-colors"
+                title="Hide capital info on product cards"
+              >
+                <EyeOff size={13} /> Hide Capital
+              </button>
+            ) : (
+              <button
+                onClick={requestShowCapital}
+                data-testid="show-capital-btn"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
+                title="Reveal capital info — admin / manager PIN required"
+              >
+                <Eye size={13} /> Show Capital
+                <Lock size={10} className="opacity-60" />
+              </button>
+            )
+          )}
         </div>
 
         <div className="flex items-center gap-3">
@@ -1960,10 +2063,25 @@ export default function UnifiedSalesPage() {
               </div>
               <ScrollArea className="flex-1">
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-                  {filteredProducts.slice(0, 50).map(p => {
+                  {(() => {
+                    const visible = filteredProducts.slice(0, 50);
+                    // Lazy bulk-fetch: when capital is unlocked, ensure cost
+                    // for every visible product is in costMap.
+                    if (capitalShown && capitalPin && visible.length) {
+                      const missing = visible
+                        .map(p => p.id)
+                        .filter(id => id && !(id in costMap));
+                      if (missing.length) {
+                        // fire-and-forget; will rerender when state lands
+                        fetchCostMap(missing, capitalPin);
+                      }
+                    }
+                    return visible;
+                  })().map(p => {
                     const avail = p.available ?? 0;
                     const isOut = avail <= 0;
                     const isLow = avail > 0 && avail <= (p.reorder_point || 5);
+                    const cost = capitalShown ? costMap[p.id] : null;
                     return (
                       <button
                         key={p.id}
@@ -1989,6 +2107,17 @@ export default function UnifiedSalesPage() {
                             {isOut ? 'Out' : `${avail.toFixed(0)} ${p.unit || ''}`}
                           </span>
                         </div>
+                        {capitalShown && cost && (
+                          <div className="mt-1.5 pt-1.5 border-t border-slate-100 text-[10px] text-slate-500 leading-snug font-mono">
+                            <div>
+                              Cap: <span className="text-slate-700 font-semibold">{formatPHP(cost.effective_cost)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>LP: {cost.last_purchase ? formatPHP(cost.last_purchase) : '—'}</span>
+                              <span>MA: {cost.moving_average ? formatPHP(cost.moving_average) : '—'}</span>
+                            </div>
+                          </div>
+                        )}
                       </button>
                     );
                   })}
@@ -2159,6 +2288,19 @@ export default function UnifiedSalesPage() {
                                     )}
                                   </div>
                                   {line.description && <p className="text-[11px] text-slate-400 truncate">{line.description}</p>}
+                                  {/* Stock — always visible */}
+                                  {line.available !== undefined && line.available !== null && (
+                                    <p className="text-[10px] text-slate-400 mt-0.5">
+                                      Stock: <span className="font-medium text-slate-600">{Number(line.available).toFixed(0)} {line.unit || ''}</span>
+                                      {capitalShown && costMap[line.product_id] && (
+                                        <span className="ml-2 font-mono">
+                                          · Cap <span className="text-slate-700">{formatPHP(costMap[line.product_id].effective_cost)}</span>
+                                          {costMap[line.product_id].last_purchase ? <span className="ml-1.5">· LP {formatPHP(costMap[line.product_id].last_purchase)}</span> : null}
+                                          {costMap[line.product_id].moving_average ? <span className="ml-1.5">· MA {formatPHP(costMap[line.product_id].moving_average)}</span> : null}
+                                        </span>
+                                      )}
+                                    </p>
+                                  )}
                                 </div>
                                 <button
                                   onClick={() => clearLine(i)}
@@ -3374,6 +3516,41 @@ export default function UnifiedSalesPage() {
             <Button variant="destructive" className="flex-1" onClick={closeScannerSession} data-testid="disconnect-scanner-btn">
               Disconnect
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Capital Reveal — PIN-gated unlock */}
+      <Dialog open={capitalPinModal} onOpenChange={(o) => { if (!o) { setCapitalPinModal(false); setCapitalPinInput(''); } }}>
+        <DialogContent className="sm:max-w-sm" data-testid="capital-pin-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Lock size={16} className="text-amber-600" />
+              Show Capital
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-slate-600">
+              Enter an admin or manager PIN (or 6-digit TOTP) to reveal capital cost,
+              last purchase, and moving average on product cards.
+            </p>
+            <Input
+              type="password" autoComplete="off" inputMode="numeric"
+              value={capitalPinInput} onChange={e => setCapitalPinInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') submitCapitalPin(); }}
+              placeholder="Enter PIN or TOTP" className="h-9"
+              autoFocus data-testid="capital-pin-input"
+            />
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" size="sm" onClick={() => { setCapitalPinModal(false); setCapitalPinInput(''); }}>
+                Cancel
+              </Button>
+              <Button size="sm" onClick={submitCapitalPin} disabled={capitalPinSubmitting || !capitalPinInput}
+                className="bg-[#1A4D2E] hover:bg-[#14532d] text-white" data-testid="capital-pin-confirm">
+                {capitalPinSubmitting ? <RefreshCw size={12} className="animate-spin mr-1.5" /> : <Eye size={12} className="mr-1.5" />}
+                Reveal Capital
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
