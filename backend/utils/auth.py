@@ -44,14 +44,50 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     is_super_admin = payload.get("is_super_admin", False)
     org_id = payload.get("org_id")
 
-    # Set org context for tenant isolation (None = super admin = unscoped)
-    set_org_context(None if is_super_admin else org_id)
+    # ── Super-admin tenant impersonation ───────────────────────────────────
+    # If a super-admin has an active "View as Tenant" session (set via
+    # POST /superadmin/impersonate/{org_id}/enter), scope this request to
+    # the target tenant. Auto-expires after 4 hours. Audit-logged.
+    impersonating_org_id = None
+    if is_super_admin:
+        try:
+            from config import _raw_db
+            from datetime import datetime, timezone
+            sess = await _raw_db.impersonation_sessions.find_one(
+                {"super_admin_user_id": payload["user_id"], "active": True},
+                {"_id": 0},
+            )
+            if sess:
+                expires = sess.get("expires_at", "")
+                if expires and expires > datetime.now(timezone.utc).isoformat():
+                    impersonating_org_id = sess.get("target_org_id")
+                else:
+                    # Expired — auto-deactivate
+                    await _raw_db.impersonation_sessions.update_one(
+                        {"id": sess.get("id")},
+                        {"$set": {"active": False, "ended_at": datetime.now(timezone.utc).isoformat(), "ended_reason": "expired"}},
+                    )
+        except Exception:
+            pass  # impersonation table may not exist yet — fall through to super-admin scope
+
+    # Set org context for tenant isolation:
+    #   - impersonating super admin → scope to target org (legitimate cross-tenant support)
+    #   - normal super admin        → None (fail-closed in TenantCollection)
+    #   - regular user              → their own org
+    if impersonating_org_id:
+        set_org_context(impersonating_org_id)
+    else:
+        set_org_context(None if is_super_admin else org_id)
 
     # Find user — login uses no context so this is an unscoped lookup by id
     from config import _raw_db
     user = await _raw_db.users.find_one({"id": payload["user_id"]}, {"_id": 0})
     if not user or not user.get("active", True):
         raise HTTPException(status_code=401, detail="User not found or inactive")
+
+    # Surface impersonation state to routes (read-only — they cannot change it)
+    if impersonating_org_id:
+        user["_impersonating_org_id"] = impersonating_org_id
 
     # Check for delegated module access from JWT payload
     if payload.get("delegations"):

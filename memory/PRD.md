@@ -22,6 +22,26 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### Super-Admin Tenant Impersonation ("View as Tenant") (2026-04-29) — Complete
+- **Why**: After the iter 180 privacy fix, super admin sees nothing tenant-side (correct). To legitimately help a customer (debug pricing, fix data), super admin needs an explicit, audited way in. This is the other half of the privacy story.
+- **Backend** (`routes/superadmin.py`):
+  - `POST /api/superadmin/impersonate/{org_id}/enter` — starts a 4-hour audit-logged session. Inserts into `impersonation_sessions` collection + writes `tenant_impersonation_enter` event to `audit_log`.
+  - `POST /api/superadmin/impersonate/exit` — ends the active session + audit-logs `tenant_impersonation_exit`.
+  - `GET /api/superadmin/impersonate/status` — banner state (active/inactive + remaining time).
+  - All locked to super admin only via `require_super_admin`. Auto-deactivates expired sessions on next read.
+- **Auth flow** (`utils/auth.py:get_current_user`):
+  - On every authenticated request, super admin's active impersonation session is checked. If active → `set_org_context(target_org_id)` → all tenant queries scope to the target. Otherwise → `set_org_context(None)` → fail-closed scoping.
+  - Expired sessions auto-deactivate inline.
+  - User dict gets `_impersonating_org_id` flag for routes that want to know.
+- **Frontend**:
+  - `components/ImpersonationBanner.js` — sticky amber bar across every authenticated page: "👁 Viewing as **JND Store** · 3h 45m left · Exit". Mounted in `App.js` ProtectedRoute. Polls `/status` every 60s for TTL countdown.
+  - Super Admin → Organizations row gets a new amber **eye** button per org (`view-as-org-{id}` testid). Click → POST enter → redirect to `/dashboard` so user is dropped into the tenant view immediately.
+  - Exit button on banner → POST exit → redirect to `/superadmin` to flush stale tenant cache.
+- **Verified**:
+  - End-to-end smoke via curl: super admin enter → `/customers` shows tenant data → exit → empty again.
+  - `pytest tests/test_tenant_impersonation_181.py` 4/4 (round-trip with audit verification, org admin cannot use, unknown org → 404, no-session → active=False).
+  - Full chain across 9 prior iter files = **40/40 pass**. Lint clean.
+
 ### 🚨 CRITICAL — Cross-Tenant Privacy Fix (2026-04-29) — Complete
 - **RCA from live VPS**: Two reports from the super admin —
   1. Universal Find/Scan returned another tenant's invoices (JND Store).

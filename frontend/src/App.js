@@ -44,6 +44,7 @@ import PaySupplierPage from './pages/PaySupplierPage';
 import ImportPage from './pages/ImportPage';
 import ReportsPage from './pages/ReportsPage';
 import PriceScanManager from './components/PriceScanManager';
+import ImpersonationBanner from './components/ImpersonationBanner';
 import ReturnRefundWizard from './pages/ReturnRefundWizard';
 import AuditCenterPage from './pages/AuditCenterPage';
 import TeamPage from './pages/TeamPage';
@@ -81,6 +82,7 @@ function ProtectedRoute({ children }) {
   if (!user) return <Navigate to="/login" replace />;
   return (
     <Layout>
+      <ImpersonationBanner />
       <PriceScanManager />
       {children}
     </Layout>

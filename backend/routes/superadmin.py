@@ -988,3 +988,137 @@ async def multitenant_integrity_sweep(user=Depends(require_super_admin)):
         "total": sum(deleted.values()),
         "swept_at": now_iso(),
     }
+
+
+# ── Tenant Impersonation ("View as Tenant") ──────────────────────────────────
+# Lets a super admin scope their session to a specific tenant for legitimate
+# customer-support / debugging work. Audit-logged on enter, exit, and expiry.
+# Auto-expires after 4 hours so a forgotten session doesn't stay open forever.
+
+IMPERSONATION_TTL_HOURS = 4
+
+
+@router.post("/impersonate/{org_id}/enter")
+async def impersonate_enter(org_id: str, user=Depends(require_super_admin)):
+    """Start an impersonation session — scope subsequent requests to org_id."""
+    org = await _raw_db.organizations.find_one({"id": org_id}, {"_id": 0})
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    # End any pre-existing active session for this super admin (one at a time)
+    await _raw_db.impersonation_sessions.update_many(
+        {"super_admin_user_id": user["id"], "active": True},
+        {"$set": {
+            "active": False,
+            "ended_at": now_iso(),
+            "ended_reason": "superseded_by_new_session",
+        }},
+    )
+
+    from datetime import datetime, timezone, timedelta
+    started_at = datetime.now(timezone.utc)
+    expires_at = (started_at + timedelta(hours=IMPERSONATION_TTL_HOURS)).isoformat()
+    session = {
+        "id": new_id(),
+        "super_admin_user_id": user["id"],
+        "super_admin_email": user.get("email", ""),
+        "target_org_id": org_id,
+        "target_org_name": org.get("name", ""),
+        "started_at": started_at.isoformat(),
+        "expires_at": expires_at,
+        "active": True,
+    }
+    await _raw_db.impersonation_sessions.insert_one(session)
+
+    # Audit trail (raw_db — audit_log is org-scoped but this event spans orgs)
+    await _raw_db.audit_log.insert_one({
+        "id": new_id(),
+        "organization_id": org_id,  # tagged to the tenant being viewed
+        "event_type": "tenant_impersonation_enter",
+        "actor_user_id": user["id"],
+        "actor_email": user.get("email", ""),
+        "actor_role": "super_admin",
+        "target_org_id": org_id,
+        "target_org_name": org.get("name", ""),
+        "session_id": session["id"],
+        "expires_at": expires_at,
+        "created_at": now_iso(),
+    })
+
+    session.pop("_id", None)
+    return {
+        "message": f"Now viewing as {org.get('name', '')}",
+        "session": session,
+    }
+
+
+@router.post("/impersonate/exit")
+async def impersonate_exit(user=Depends(require_super_admin)):
+    """End the active impersonation session — revert to super admin scope."""
+    sess = await _raw_db.impersonation_sessions.find_one(
+        {"super_admin_user_id": user["id"], "active": True}, {"_id": 0}
+    )
+    if not sess:
+        return {"message": "No active impersonation session", "ended": False}
+
+    await _raw_db.impersonation_sessions.update_one(
+        {"id": sess["id"]},
+        {"$set": {
+            "active": False,
+            "ended_at": now_iso(),
+            "ended_reason": "user_exit",
+        }},
+    )
+
+    await _raw_db.audit_log.insert_one({
+        "id": new_id(),
+        "organization_id": sess.get("target_org_id"),
+        "event_type": "tenant_impersonation_exit",
+        "actor_user_id": user["id"],
+        "actor_email": user.get("email", ""),
+        "actor_role": "super_admin",
+        "target_org_id": sess.get("target_org_id"),
+        "target_org_name": sess.get("target_org_name", ""),
+        "session_id": sess["id"],
+        "session_duration_started": sess.get("started_at"),
+        "created_at": now_iso(),
+    })
+
+    return {
+        "message": f"Exited impersonation of {sess.get('target_org_name', '')}",
+        "ended": True,
+        "session_id": sess["id"],
+    }
+
+
+@router.get("/impersonate/status")
+async def impersonate_status(user=Depends(require_super_admin)):
+    """Return the current impersonation session for the banner UI."""
+    sess = await _raw_db.impersonation_sessions.find_one(
+        {"super_admin_user_id": user["id"], "active": True}, {"_id": 0}
+    )
+    if not sess:
+        return {"active": False}
+
+    # Auto-expire if past TTL
+    from datetime import datetime, timezone
+    expires = sess.get("expires_at", "")
+    if expires and expires < datetime.now(timezone.utc).isoformat():
+        await _raw_db.impersonation_sessions.update_one(
+            {"id": sess["id"]},
+            {"$set": {
+                "active": False,
+                "ended_at": now_iso(),
+                "ended_reason": "expired",
+            }},
+        )
+        return {"active": False, "expired": True}
+
+    return {
+        "active": True,
+        "target_org_id": sess.get("target_org_id"),
+        "target_org_name": sess.get("target_org_name", ""),
+        "started_at": sess.get("started_at"),
+        "expires_at": sess.get("expires_at"),
+        "session_id": sess.get("id"),
+    }

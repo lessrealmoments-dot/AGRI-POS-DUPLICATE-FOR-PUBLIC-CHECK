@@ -7,7 +7,7 @@ import {
   CheckCircle, AlertTriangle, XCircle, ChevronDown, ChevronUp,
   Search, TrendingUp, Edit3, Save, X, Plus, Minus, GitBranch,
   CreditCard, Upload, Globe, Phone, Settings,
-  Clock, Layers, Trash2, Star, HardDrive
+  Clock, Layers, Trash2, Star, HardDrive, Eye
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -823,6 +823,21 @@ function OrgRow({ org, expanded, branches, onToggle, onEdit, onDelete, onRefresh
 
         {/* Actions */}
         <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            data-testid={`view-as-org-${org.id}`}
+            onClick={async () => {
+              try {
+                await api.post(`/superadmin/impersonate/${org.id}/enter`);
+                toast.success(`Now viewing as ${org.name}`);
+                window.location.href = '/dashboard';
+              } catch (e) {
+                toast.error(e?.response?.data?.detail || 'Could not enter tenant view');
+              }
+            }}
+            title={`View as ${org.name} (4-hour audit-logged session)`}
+            className="w-8 h-8 rounded-lg bg-amber-500/20 hover:bg-amber-500/40 text-amber-300 hover:text-amber-200 flex items-center justify-center transition-colors">
+            <Eye size={14} />
+          </button>
           <button data-testid={`edit-org-${org.id}`} onClick={onEdit}
             className="w-8 h-8 rounded-lg bg-slate-700/60 hover:bg-slate-600 text-slate-300 hover:text-white flex items-center justify-center transition-colors">
             <Edit3 size={14} />
