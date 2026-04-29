@@ -203,6 +203,12 @@ export default function UnifiedSalesPage() {
   const [jitPinModal, setJitPinModal] = useState({ open: false, items: [], saleData: null });
   const [jitPin, setJitPin] = useState('');
 
+  // ── Pre-invoice signature (credit/partial) ───────────────────────────────
+  // When set, signature dialog opens BEFORE invoice creation. After signing
+  // (or bypass), processSale is called with the captured signature data so
+  // the invoice is created with signature already attached.
+  const [preInvoiceSig, setPreInvoiceSig] = useState(null);
+
   // ── Digital payment ───────────────────────────────────────────────────────
   const [digitalPlatform, setDigitalPlatform] = useState('GCash');
   const [digitalRefNumber, setDigitalRefNumber] = useState('');
@@ -1312,6 +1318,46 @@ export default function UnifiedSalesPage() {
         toast.success(`Approved by ${res.data.manager_name}`);
         setCreditApprovalDialog(false);
         setManagerPin('');
+
+        // ── Pre-invoice signature flow (credit / partial with customer) ───
+        // For credit/partial sales that have a customer attached, capture
+        // signature BEFORE creating the invoice. After signing, processSale
+        // is invoked with signature data so the invoice is born signed.
+        const balanceForCheck = grandTotal - (pendingCreditSale?.partialPayment || 0);
+        const isCreditOrPartial = paymentType === 'credit' || paymentType === 'partial';
+        if (isCreditOrPartial && balanceForCheck > 0 && selectedCustomer?.id) {
+          // Build a draft invoice for the signature dialog
+          const draftItems = mode === 'quick'
+            ? cart.map(c => ({
+                product_name: c.product_name, quantity: c.quantity,
+                rate: c.price, total: c.total, unit: c.unit || ''
+              }))
+            : lines.filter(l => l.product_id).map(l => ({
+                product_name: l.product_name, quantity: l.quantity,
+                rate: l.rate, total: lineTotal(l), unit: l.unit || ''
+              }));
+          setPreInvoiceSig({
+            approvedBy: res.data.manager_name,
+            invoice: {
+              id: '',  // no invoice yet
+              invoice_number: '(pending)',
+              customer_name: selectedCustomer.name,
+              customer_id: selectedCustomer.id,
+              branch_id: currentBranch?.id || '',
+              branch_name: currentBranch?.name || '',
+              items: draftItems,
+              subtotal,
+              discount: overallDiscount,
+              partial_paid: pendingCreditSale?.partialPayment || 0,
+              balance: balanceForCheck,
+              payment_type: paymentType,
+              order_date: header.order_date,
+              credit_type: cropCreditConfig?.type === 'charged_to_crop' ? 'charged_to_crop' : 'by_term',
+            },
+          });
+          return; // wait for sig before posting sale
+        }
+
         await processSale(res.data.manager_name);
       } else {
         toast.error(res.data.detail || 'Invalid PIN / TOTP — check Settings > Security for accepted methods');
@@ -1322,7 +1368,7 @@ export default function UnifiedSalesPage() {
   };
 
   // Process the sale
-  const processSale = async (approvedBy = null, jitOverridePin = null) => {
+  const processSale = async (approvedBy = null, jitOverridePin = null, signatureData = null) => {
     setSaving(true);
     
     const actualPaymentType = pendingCreditSale?.paymentType || paymentType;
@@ -1432,6 +1478,9 @@ export default function UnifiedSalesPage() {
       created_at: new Date().toISOString(),
       jit_retail_prices: jitRetailPrices,
       jit_owner_pin: jitOverridePin || undefined,
+      // Pre-invoice signature (when captured via the new flow)
+      signature: signatureData || undefined,
+      signature_session_id: signatureData?.session_id || undefined,
     };
 
     if (isOnline) {
@@ -1449,7 +1498,10 @@ export default function UnifiedSalesPage() {
         setPendingCreditSale(null);
 
         // ── Customer signature flow (credit / partial only) ──────────────
-        if (balance > 0 && selectedCustomer?.id) {
+        // Skip if we already captured signature pre-invoice (signatureData
+        // was passed). Only open this dialog as a fallback for legacy code
+        // paths or if pre-invoice sig was not captured.
+        if (balance > 0 && selectedCustomer?.id && !signatureData) {
           setSigDialog({
             open: true,
             invoice: {
@@ -1551,7 +1603,7 @@ export default function UnifiedSalesPage() {
         }
         // JIT retail PIN required — show Owner PIN modal then retry
         if (e?.response?.status === 422 && detail?.type === 'jit_retail_pin_required') {
-          setJitPinModal({ open: true, items: detail.items || [], saleData });
+          setJitPinModal({ open: true, items: detail.items || [], saleData, signatureData });
           setSaving(false);
           return;
         }
@@ -2920,6 +2972,20 @@ export default function UnifiedSalesPage() {
         }}
       />
 
+      {/* Pre-invoice signature dialog (credit/partial). Customer signs FIRST,
+          then sale is submitted with signature attached, then RefPrompt opens. */}
+      <RequestSignatureDialog
+        open={!!preInvoiceSig}
+        onOpenChange={(open) => { if (!open) setPreInvoiceSig(null); }}
+        invoice={preInvoiceSig?.invoice}
+        preInvoice={true}
+        onConfirmSale={async (sigData) => {
+          const approver = preInvoiceSig?.approvedBy || null;
+          setPreInvoiceSig(null);
+          await processSale(approver, null, sigData);
+        }}
+      />
+
       <Dialog open={creditApprovalDialog} onOpenChange={setCreditApprovalDialog}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -3710,10 +3776,11 @@ export default function UnifiedSalesPage() {
                 onClick={async () => {
                   if (!jitPin) return;
                   const pinToUse = jitPin;
+                  const sigToReuse = jitPinModal.signatureData || null;
                   setJitPinModal({ open: false, items: [], saleData: null });
                   setJitPin('');
-                  // Re-trigger save with PIN passed inline
-                  setTimeout(() => processSale(null, pinToUse), 30);
+                  // Re-trigger save with PIN passed inline + signature carried over
+                  setTimeout(() => processSale(null, pinToUse, sigToReuse), 30);
                 }}
               >
                 Confirm & Continue Sale

@@ -22,6 +22,23 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ## What's Been Implemented
 
+### Pre-Invoice Signature for Credit/Partial Sales (2026-04-29) — Complete
+- **Why**: User reported credit sale flow was wrong — signature dialog appeared AFTER the invoice was already created (and after the Reference Number prompt). Correct UX: customer signs FIRST, then sale finalizes with signature attached, then RefPrompt opens for printing.
+- **New flow** (Web POS Sales / Sales-New):
+  1. Cart → choose Credit/Partial → Crop Type dialog (term vs charged-to-crop)
+  2. Manager PIN approval
+  3. **Signature Dialog opens (pre-invoice mode)** — QR code for customer phone scan, OR manager-PIN bypass for emergencies
+  4. Customer signs (or manager bypasses) → "Submit Sale" button fires
+  5. POST `/unified-sale` with `signature: {url, signed_at, verification_token, bypass_method, session_id}` payload — invoice is BORN signed
+  6. After invoice success → Reference Number Prompt opens (print receipt with signature on it)
+- **Backend** (`/api/unified-sale`):
+  - Accepts new `signature` block — stores `signature_url`, `signature_signed_at`, `signature_verification_token`, `signature_bypass_method`, `signature_session_id` directly on the invoice document.
+  - After invoice insert, back-links `signature_sessions.linked_record_id → invoice.id` (was previously only Terminal-side; now web POS too).
+- **Frontend**:
+  - `RequestSignatureDialog.js` — new `preInvoice` prop. When true: success button reads "Submit Sale" instead of "Print Receipt"; cancel = cancel sale (cart preserved).
+  - `UnifiedSalesPage.js` — `verifyManagerPin` for credit/partial with customer now opens pre-invoice sig dialog instead of immediately calling `processSale`. Skipped post-invoice sig dialog (legacy fallback only). Signature data is threaded through JIT retail PIN retry path so credit + repack JIT combinations still work.
+- **Tests**: 2 new pytests in `test_pre_invoice_signature_188.py` — verifies signature fields stored on invoice + signature_session back-linked. Cash/walk-in regression covered.
+
 ### Branch-Aware Repack Pricing System (2026-04-29) — Complete
 - **Why**: Repacks were created with **global** capital and prices. Each branch has different parent capital (e.g., Branch 1 = ₱1000/50kg, Branch 2 = ₱1200/50kg), so repack capital and retail must follow per-branch. Owner needed: capital that auto-updates on every PO/transfer; per-branch retail prices; soft red flag at sale when retail missing; bulk pricing module; hard rule that repacks always use retail tier.
 - **Backend**:

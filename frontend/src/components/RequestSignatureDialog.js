@@ -30,6 +30,8 @@ export default function RequestSignatureDialog({
   invoice,            // see UnifiedSalesPage for fields
   onSigned,
   onPrintReceipt,
+  onConfirmSale,      // pre-invoice: called with sig data when user clicks Submit Sale
+  preInvoice = false, // when true, dialog is shown BEFORE invoice creation; "Print" becomes "Submit Sale"
   mode = 'qr',        // 'qr' (web POS) | 'inline' (terminal)
   apiInstance = null, // optional: pass terminal's own axios instance to override AuthContext api
 }) {
@@ -231,14 +233,21 @@ export default function RequestSignatureDialog({
     }
   };
 
-  // ── Print + close ──
+  // ── Print + close (or Submit Sale in preInvoice mode) ──
   const handlePrintAndClose = () => {
-    onPrintReceipt?.({
+    const sigPayload = {
       signature_url: signatureUrl,
       bypass_method: bypassMethod,
       signed_at: lastStatus?.signed_at || lastStatus?.bypassed_at || new Date().toISOString(),
       verification_token: lastStatus?.verification_token || '',
-    });
+      session_id: sessionId,
+    };
+    if (preInvoice) {
+      // Don't print — invoice doesn't exist yet. Caller will create it now.
+      onConfirmSale?.(sigPayload);
+    } else {
+      onPrintReceipt?.(sigPayload);
+    }
     onOpenChange(false);
   };
 
@@ -300,8 +309,8 @@ export default function RequestSignatureDialog({
               />
             )}
 
-            <Button variant="ghost" size="sm" className="w-full text-xs gap-1" onClick={() => onOpenChange(false)}>
-              <X size={12} /> Cancel — sale will proceed without signature
+            <Button variant="ghost" size="sm" className="w-full text-xs gap-1" onClick={() => onOpenChange(false)} data-testid="sig-cancel-btn">
+              <X size={12} /> {preInvoice ? 'Cancel sale' : 'Cancel — sale will proceed without signature'}
             </Button>
           </div>
         )}
@@ -381,10 +390,14 @@ export default function RequestSignatureDialog({
             )}
 
             <Button className="w-full bg-[#1A4D2E] hover:bg-[#14532d] text-white h-10 gap-2" onClick={handlePrintAndClose} data-testid="print-after-sign-btn">
-              <Printer size={14} /> Print Receipt
+              {preInvoice ? (
+                <span className="inline-flex items-center gap-2"><CheckCircle2 size={14} /> Submit Sale</span>
+              ) : (
+                <span className="inline-flex items-center gap-2"><Printer size={14} /> Print Receipt</span>
+              )}
             </Button>
-            <Button variant="ghost" size="sm" className="w-full text-xs" onClick={() => onOpenChange(false)}>
-              Close (skip print)
+            <Button variant="ghost" size="sm" className="w-full text-xs" onClick={() => onOpenChange(false)} data-testid="sig-close-skip-btn">
+              {preInvoice ? 'Cancel sale' : 'Close (skip print)'}
             </Button>
           </div>
         )}
@@ -397,10 +410,14 @@ export default function RequestSignatureDialog({
               <p className="text-[11px] text-amber-700">No signature captured. Manager bypass recorded for audit.</p>
             </div>
             <Button className="w-full bg-[#1A4D2E] hover:bg-[#14532d] text-white h-10 gap-2" onClick={handlePrintAndClose}>
-              <Printer size={14} /> Print Receipt
+              {preInvoice ? (
+                <span className="inline-flex items-center gap-2"><CheckCircle2 size={14} /> Submit Sale</span>
+              ) : (
+                <span className="inline-flex items-center gap-2"><Printer size={14} /> Print Receipt</span>
+              )}
             </Button>
             <Button variant="ghost" size="sm" className="w-full text-xs" onClick={() => onOpenChange(false)}>
-              Close (skip print)
+              {preInvoice ? 'Cancel sale' : 'Close (skip print)'}
             </Button>
           </div>
         )}

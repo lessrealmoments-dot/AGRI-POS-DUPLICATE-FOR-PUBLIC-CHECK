@@ -529,6 +529,18 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
         "stock_releases": [],
     }
 
+    # ── Pre-invoice signature attach (credit/partial) ──────────────────────
+    # If the cashier captured a signature (or manager bypass) BEFORE invoice
+    # creation, attach the signature data here so the printed receipt shows it
+    # and the audit trail is complete from t=0.
+    sig_data = data.get("signature") or {}
+    if sig_data:
+        invoice["signature_url"] = sig_data.get("url") or sig_data.get("signature_url") or None
+        invoice["signature_signed_at"] = sig_data.get("signed_at") or None
+        invoice["signature_verification_token"] = sig_data.get("verification_token") or None
+        invoice["signature_bypass_method"] = sig_data.get("bypass_method") or None
+        invoice["signature_session_id"] = sig_data.get("session_id") or None
+
     # Mark digital/split invoices as needing receipt upload
     if is_digital or is_split:
         invoice["receipt_status"] = "pending"
@@ -604,9 +616,9 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
     invoice.pop("_id", None)
 
     # ── Link pre-commit signature session (Terminal credit/partial flow) ──────
-    # Terminal captures the signature BEFORE creating the invoice (legal sequence).
+    # Terminal/Web captures the signature BEFORE creating the invoice (legal sequence).
     # Now that the invoice exists, back-link the session to it.
-    sig_session_id = data.get("signature_session_id")
+    sig_session_id = data.get("signature_session_id") or sig_data.get("session_id")
     if sig_session_id:
         try:
             await db.signature_sessions.update_one(
