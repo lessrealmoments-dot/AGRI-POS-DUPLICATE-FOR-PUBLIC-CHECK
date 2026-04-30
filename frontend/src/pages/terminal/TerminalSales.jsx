@@ -224,6 +224,10 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   const getPrice = (product) => product.prices?.[activeScheme] ?? 0;
 
   const addToCart = useCallback((product) => {
+    if (product?.disabled_at_branch) {
+      toast.error(`${product.name} is disabled at this branch`, { duration: 2500 });
+      return;
+    }
     const price = product.prices?.[activeScheme] ?? 0;
     setCart(prev => {
       const existing = prev.find(c => c.product_id === product.id);
@@ -885,12 +889,15 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
               const avail = p.available ?? 0;
               const isOut = avail <= 0;
               const isLow = avail > 0 && avail <= (p.reorder_point || 5);
+              const isDisabled = !!p.disabled_at_branch;
               return (
               <button
                 key={p.id}
+                disabled={isDisabled}
                 onClick={() => addToCart(p)}
                 className={`w-full flex items-center justify-between px-3 py-2.5 border-b border-slate-100 last:border-0 text-left ${
-                  isOut ? 'bg-red-50/40' : 'hover:bg-emerald-50'
+                  isDisabled ? 'opacity-50 bg-slate-100/60 cursor-not-allowed'
+                  : isOut ? 'bg-red-50/40' : 'hover:bg-emerald-50'
                 }`}
                 data-testid={`search-result-${p.id}`}
               >
@@ -900,13 +907,19 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
                 </div>
                 <div className="text-right flex-shrink-0 ml-2">
                   <p className="text-sm font-bold text-[#1A4D2E]">{formatPHP(getPrice(p))}</p>
-                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
-                    isOut ? 'bg-red-100 text-red-600' :
-                    isLow ? 'bg-amber-100 text-amber-700' :
-                    'bg-emerald-50 text-emerald-700'
-                  }`}>
-                    {isOut ? 'Out' : `${avail} ${p.unit || ''}`}
-                  </span>
+                  {isDisabled ? (
+                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">
+                      Disabled here
+                    </span>
+                  ) : (
+                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                      isOut ? 'bg-red-100 text-red-600' :
+                      isLow ? 'bg-amber-100 text-amber-700' :
+                      'bg-emerald-50 text-emerald-700'
+                    }`}>
+                      {isOut ? 'Out' : `${avail} ${p.unit || ''}`}
+                    </span>
+                  )}
                 </div>
               </button>
               );

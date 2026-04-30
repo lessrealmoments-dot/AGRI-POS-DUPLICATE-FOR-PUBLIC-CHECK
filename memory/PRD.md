@@ -20,6 +20,48 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ---
 
+## ✅ Completed in Iter 193 — Per-Branch Product Disable
+
+Branch-scoped product visibility shipped. Backend 8/8 tests pass + 25/25 regression. Frontend lint clean.
+
+### Per-Branch Product Disable (2026-04-30) — Complete (Iter 193)
+User-confirmed UX choices: Q1=b (greyed in POS, not hidden), Q2=a (badge in admin list), Q3=a (any qty increase auto-reactivates), Q4 (manager can toggle their branch; managers cannot delete products).
+
+**Backend**
+- New `routes/branch_products.py`:
+  - `POST /api/products/disable-at-branch` — disables a list of products at a branch. Skips any with `inventory.quantity > 0` and reports them per-product. Permission: admin/owner anywhere; manager only on assigned branch.
+  - `POST /api/products/enable-at-branch` — clears the flag in bulk.
+  - `GET /api/products/disabled-at-branch?branch_id=X` — admin view of currently-disabled items + who disabled them.
+- **Lazy auto-reactivation** — instead of touching every `$inc` site (PO/transfer/return/manual), the `/products`, `/sync/pos-data`, and `/products/disabled-at-branch` endpoints run a single `update_many({disabled_at_branch: True, quantity: > 0}, {$set: {disabled_at_branch: false, auto_reactivated_at: now}})` at the top. Self-healing on every read; no risk of missed hooks.
+- `DELETE /api/products/{id}` now rejects role != admin/owner (Managers can only disable-at-branch, not delete).
+- `/sync/pos-data` and `/products` now stamp `disabled_at_branch: bool` per product.
+- Routes registered before `products_router` to avoid `/{product_id}` catch-all.
+
+**Frontend**
+- `ProductsPage.js` — bulk action toolbar gains "Disable at [Branch]" + "Enable at [Branch]" buttons (visible when a specific branch is selected and user is admin/owner OR manager). Delete button hidden for non-admin. Disabled rows render dimmed with an amber "Disabled here" badge.
+- `UnifiedSalesPage.js` — disabled products in the product grid render greyed-out + button-disabled with a "Disabled" pill. addToCart aborts with toast if product is disabled at branch.
+- `SmartProductSearch.js` — disabled products show with "Disabled at branch" badge, dimmed, click does nothing.
+- `terminal/TerminalSales.jsx` — same treatment in the Terminal POS search results.
+- All product list reads include `disabled_at_branch` for the current branch.
+
+**Tests** (`backend/tests/test_branch_disable_193.py`, 8/8 pass):
+- disable with qty=0 succeeds, with qty>0 is skipped (per-product report)
+- enable clears the flag
+- lazy reactivation: stock arrival → next read clears the flag
+- `/sync/pos-data` carries the flag
+- `/products/disabled-at-branch` admin endpoint
+- managers cannot delete products (403); managers can disable at their branch
+- managers cannot disable on a different branch (403)
+
+**Re-deploy:**
+```bash
+cd /var/www/agribooks && git pull origin main \
+  && sudo supervisorctl restart agribooks-backend \
+  && cd frontend && yarn build
+```
+
+---
+
 ## ✅ Completed in Iter 192 — Offline Mode Robustness Overhaul
 
 All 4 phases shipped (see "What's Been Implemented" below). Backend 14/14 tests pass. Frontend not yet tested by automated agent — main agent linted clean + smoke-screenshot OK; recommend a frontend regression run by user or testing agent before next major feature.

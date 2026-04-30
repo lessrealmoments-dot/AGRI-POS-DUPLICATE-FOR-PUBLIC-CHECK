@@ -36,7 +36,7 @@ from routes import (
     import_router, notifications_router, branch_transfers_router, reports_router,
     returns_router, audit_router, uploads_router, verify_router,
     organizations_router, superadmin_router, admin_auth_router,
-    terminal_router, roles_router,
+    terminal_router, roles_router, branch_products_router,
 )
 from routes.backups import router as backups_router
 from routes.internal_invoices import router as internal_invoices_router
@@ -97,6 +97,7 @@ api_router.include_router(users_router)
 
 # Core Business
 api_router.include_router(branches_router)
+api_router.include_router(branch_products_router)
 api_router.include_router(products_router)
 api_router.include_router(customers_router)
 api_router.include_router(inventory_router)

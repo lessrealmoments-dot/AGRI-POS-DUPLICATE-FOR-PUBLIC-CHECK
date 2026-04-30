@@ -9,7 +9,7 @@ import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Package, Plus, Pencil, Trash2, Search, Link2, ChevronRight, Eye, Upload, Download, Zap, X, CheckCircle, XCircle, AlertTriangle, History, RefreshCw, Lock, ScanBarcode, Tag } from 'lucide-react';
+import { Package, Plus, Pencil, Trash2, Search, Link2, ChevronRight, Eye, EyeOff, Upload, Download, Zap, X, CheckCircle, XCircle, AlertTriangle, History, RefreshCw, Lock, ScanBarcode, Tag } from 'lucide-react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { formatPHP } from '../lib/utils';
@@ -489,6 +489,59 @@ export default function ProductsPage() {
     fetchProducts();
   };
 
+  // ── Per-branch disable/enable ─────────────────────────────────────────────
+  // A product can be disabled at a specific branch so it won't show up for
+  // sale there. When stock returns (PO/transfer/return/manual), the product
+  // is automatically re-enabled. Cannot disable a product with stock > 0.
+  const handleBulkDisableAtBranch = async () => {
+    if (!selected.size) return;
+    if (!currentBranch?.id || currentBranch.id === 'all') {
+      toast.error('Select a specific branch to disable products there');
+      return;
+    }
+    if (!window.confirm(`Disable ${selected.size} product(s) at ${currentBranch.name}?\n\nProducts with stock will be skipped. They will auto-reactivate when stock arrives.`)) return;
+    try {
+      const res = await api.post('/products/disable-at-branch', {
+        product_ids: Array.from(selected),
+        branch_id: currentBranch.id,
+      });
+      const d = res.data || {};
+      if (d.disabled_count > 0) toast.success(`Disabled ${d.disabled_count} product(s) at ${currentBranch.name}`);
+      if (d.skipped_with_stock_count > 0) {
+        const names = (d.skipped_with_stock || []).slice(0, 3).map(s => s.product_name).join(', ');
+        const more = d.skipped_with_stock_count > 3 ? ` + ${d.skipped_with_stock_count - 3} more` : '';
+        toast.warning(`Skipped ${d.skipped_with_stock_count} with stock: ${names}${more}`, { duration: 6000 });
+      }
+      setSelected(new Set());
+      fetchProducts();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to disable');
+    }
+  };
+
+  const handleBulkEnableAtBranch = async () => {
+    if (!selected.size) return;
+    if (!currentBranch?.id || currentBranch.id === 'all') {
+      toast.error('Select a specific branch first');
+      return;
+    }
+    try {
+      const res = await api.post('/products/enable-at-branch', {
+        product_ids: Array.from(selected),
+        branch_id: currentBranch.id,
+      });
+      toast.success(`Enabled ${res.data?.enabled_count || 0} product(s) at ${currentBranch.name}`);
+      setSelected(new Set());
+      fetchProducts();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to enable');
+    }
+  };
+
+  const isAdminOrOwner = user?.role === 'admin' || user?.role === 'owner' || user?.is_super_admin;
+  const canToggleBranch = !!currentBranch?.id && currentBranch.id !== 'all'
+    && (isAdminOrOwner || user?.role === 'manager');
+
   const toggleSelect = (id) => setSelected(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
   const toggleAll = () => { if (selected.size === products.length) { setSelected(new Set()); } else { setSelected(new Set(products.map(p => p.id))); } };
 
@@ -568,11 +621,27 @@ export default function ProductsPage() {
 
       {/* Bulk Actions */}
       {selected.size > 0 && (
-        <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2 animate-fadeIn">
-          <span className="text-sm font-medium text-red-700">{selected.size} selected</span>
-          <Button size="sm" variant="destructive" onClick={handleBulkDelete} data-testid="bulk-delete-btn">
-            <Trash2 size={13} className="mr-1" /> Delete Selected
-          </Button>
+        <div className="flex flex-wrap items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 animate-fadeIn">
+          <span className="text-sm font-medium text-slate-700">{selected.size} selected</span>
+          {canToggleBranch && (
+            <>
+              <Button size="sm" variant="outline" onClick={handleBulkDisableAtBranch}
+                data-testid="bulk-disable-branch-btn"
+                className="border-amber-300 text-amber-700 hover:bg-amber-50">
+                <EyeOff size={13} className="mr-1" /> Disable at {currentBranch.name}
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleBulkEnableAtBranch}
+                data-testid="bulk-enable-branch-btn"
+                className="border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+                <Eye size={13} className="mr-1" /> Enable at {currentBranch.name}
+              </Button>
+            </>
+          )}
+          {isAdminOrOwner && (
+            <Button size="sm" variant="destructive" onClick={handleBulkDelete} data-testid="bulk-delete-btn">
+              <Trash2 size={13} className="mr-1" /> Delete Selected
+            </Button>
+          )}
           <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())} className="text-slate-500 text-xs">Clear</Button>
         </div>
       )}
@@ -599,13 +668,19 @@ export default function ProductsPage() {
             </TableHeader>
             <TableBody>
               {products.map(p => (
-                <TableRow key={p.id} className={`table-row-hover ${selected.has(p.id) ? 'bg-blue-50/50' : ''}`}>
+                <TableRow key={p.id} className={`table-row-hover ${selected.has(p.id) ? 'bg-blue-50/50' : ''} ${p.disabled_at_branch ? 'opacity-60 bg-slate-50/40' : ''}`}>
                   <TableCell><input type="checkbox" checked={selected.has(p.id)} onChange={() => toggleSelect(p.id)} className="rounded border-slate-300 cursor-pointer" /></TableCell>
                   <TableCell className="font-mono text-xs">{p.sku}</TableCell>
                   <TableCell>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       {p.is_repack && <span className="w-4 border-l-2 border-b-2 border-slate-300 h-3 inline-block" />}
                       <span className="font-medium">{p.name}</span>
+                      {p.disabled_at_branch && (
+                        <Badge variant="outline" data-testid={`disabled-here-${p.id}`}
+                          className="text-[10px] border-amber-300 text-amber-700 bg-amber-50 gap-1 px-1.5 py-0">
+                          <EyeOff size={9} /> Disabled here
+                        </Badge>
+                      )}
                     </div>
                   </TableCell>
                   <TableCell className="text-slate-500">{p.category}</TableCell>
@@ -648,9 +723,11 @@ export default function ProductsPage() {
                       <Button variant="ghost" size="sm" data-testid={`edit-product-${p.id}`} onClick={() => openEdit(p)}>
                         <Pencil size={14} />
                       </Button>
-                      <Button variant="ghost" size="sm" data-testid={`delete-product-${p.id}`} onClick={() => handleDelete(p.id)} className="text-red-500">
-                        <Trash2 size={14} />
-                      </Button>
+                      {isAdminOrOwner && (
+                        <Button variant="ghost" size="sm" data-testid={`delete-product-${p.id}`} onClick={() => handleDelete(p.id)} className="text-red-500" title="Delete (Admin only)">
+                          <Trash2 size={14} />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

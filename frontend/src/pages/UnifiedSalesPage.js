@@ -908,6 +908,10 @@ export default function UnifiedSalesPage() {
 
   // Quick mode: Add to cart
   const addToCart = (product) => {
+    if (product?.disabled_at_branch) {
+      toast.error(`${product.name} is disabled at this branch and cannot be sold.`);
+      return;
+    }
     const price = getPriceForCustomer(product);
     setCart(prev => {
       const existing = prev.find(c => c.product_id === product.id);
@@ -2222,14 +2226,18 @@ export default function UnifiedSalesPage() {
                     const avail = p.available ?? 0;
                     const isOut = avail <= 0;
                     const isLow = avail > 0 && avail <= (p.reorder_point || 5);
+                    const isDisabled = !!p.disabled_at_branch;
                     const cost = capitalShown ? costMap[p.id] : null;
                     return (
                       <button
                         key={p.id}
                         data-testid={`product-${p.id}`}
+                        disabled={isDisabled}
                         onClick={() => addToCart(p)}
                         className={`text-left p-3 rounded-lg border transition-all ${
-                          isOut
+                          isDisabled
+                            ? 'border-slate-200 bg-slate-100/60 opacity-50 cursor-not-allowed'
+                            : isOut
                             ? 'border-red-200 bg-red-50/40 opacity-70'
                             : isLow
                             ? 'border-amber-200 hover:border-amber-400 hover:bg-amber-50'
@@ -2240,13 +2248,19 @@ export default function UnifiedSalesPage() {
                         <p className="text-xs text-slate-400 truncate">{p.sku}</p>
                         <div className="flex items-center justify-between mt-2">
                           <span className="text-sm font-semibold text-[#1A4D2E]">{formatPHP(getPriceForCustomer(p))}</span>
-                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
-                            isOut ? 'bg-red-100 text-red-600' :
-                            isLow ? 'bg-amber-100 text-amber-700' :
-                            'bg-emerald-50 text-emerald-700'
-                          }`}>
-                            {isOut ? 'Out' : `${avail.toFixed(0)} ${p.unit || ''}`}
-                          </span>
+                          {isDisabled ? (
+                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 flex items-center gap-1">
+                              <EyeOff size={9} /> Disabled
+                            </span>
+                          ) : (
+                            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                              isOut ? 'bg-red-100 text-red-600' :
+                              isLow ? 'bg-amber-100 text-amber-700' :
+                              'bg-emerald-50 text-emerald-700'
+                            }`}>
+                              {isOut ? 'Out' : `${avail.toFixed(0)} ${p.unit || ''}`}
+                            </span>
+                          )}
                         </div>
                         {capitalShown && cost && (
                           <div className="mt-1.5 pt-1.5 border-t border-slate-100 text-[10px] text-slate-500 leading-snug font-mono">

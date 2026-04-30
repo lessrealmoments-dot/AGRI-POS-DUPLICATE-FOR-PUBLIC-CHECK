@@ -115,15 +115,39 @@ async def get_pos_sync_data(user=Depends(get_current_user), branch_id: str = Non
     # because even unchanged products need current stock levels
     all_inv_map = {}
     all_bp_map = {}
+    disabled_at_branch_set = set()
     if is_delta and branch_id:
         # Fetch full inventory + branch prices for enrichment of delta products
         all_inv = await db.inventory.find({"branch_id": branch_id}, {"_id": 0}).to_list(10000)
         all_inv_map = {inv["product_id"]: float(inv.get("quantity", 0)) for inv in all_inv}
+        # Track disabled-at-branch products so the Terminal/POS can grey them
+        disabled_at_branch_set = {
+            inv["product_id"] for inv in all_inv if inv.get("disabled_at_branch")
+        }
         all_bp = await db.branch_prices.find({"branch_id": branch_id}, {"_id": 0}).to_list(10000)
         all_bp_map = {bp["product_id"]: bp for bp in all_bp}
     else:
         all_inv_map = {inv["product_id"]: float(inv.get("quantity", 0)) for inv in inventory}
+        disabled_at_branch_set = {
+            inv["product_id"] for inv in inventory if inv.get("disabled_at_branch")
+        }
         all_bp_map = {bp["product_id"]: bp for bp in branch_prices}
+
+    # Lazy auto-reactivation: clear disabled_at_branch flag wherever stock has
+    # come back. Single bulk update — no per-row hooks needed.
+    if branch_id:
+        try:
+            await db.inventory.update_many(
+                {"branch_id": branch_id, "disabled_at_branch": True, "quantity": {"$gt": 0}},
+                {"$set": {"disabled_at_branch": False, "auto_reactivated_at": now_iso()}},
+            )
+            # Also drop reactivated products from the local set
+            disabled_at_branch_set = {
+                pid for pid in disabled_at_branch_set
+                if all_inv_map.get(pid, 0) <= 0
+            }
+        except Exception:
+            pass
 
     enriched_products = []
     # ── Offline analytics: pre-compute moving_average + last_purchase per product ──
@@ -196,6 +220,8 @@ async def get_pos_sync_data(user=Depends(get_current_user), branch_id: str = Non
         # Lowercase concat used by Terminal search filter — single string compare
         # instead of 3 separate lowercase ops per item per keystroke.
         p["search_blob"] = f"{(p.get('name') or '').lower()}|{(p.get('sku') or '').lower()}|{(p.get('barcode') or '').lower()}"
+        # Branch-scoped disable flag — POS greys these out (cashier sees but can't sell)
+        p["disabled_at_branch"] = p["id"] in disabled_at_branch_set
         ma_lp = ma_lp_map.get(p["id"])
         if ma_lp:
             p["moving_average_cost"] = ma_lp["moving_average"]

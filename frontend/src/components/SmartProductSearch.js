@@ -70,6 +70,10 @@ export default function SmartProductSearch({ onSelect, branchId, onCreateNew }) 
   };
 
   const selectProduct = (product) => {
+    if (product?.disabled_at_branch) {
+      // Block selection — caller's onSelect won't be invoked.
+      return;
+    }
     onSelect(product);
     setQuery('');
     setResults([]);
@@ -110,13 +114,16 @@ export default function SmartProductSearch({ onSelect, branchId, onCreateNew }) 
           className="bg-white border border-slate-200 rounded-lg shadow-xl max-h-[400px] overflow-y-auto"
           data-testid="search-results-dropdown"
         >
-          {results.map((p, i) => (
+          {results.map((p, i) => {
+            const isDisabled = !!p.disabled_at_branch;
+            return (
             <div
               key={p.id}
               data-testid={`search-result-${p.id}`}
               onMouseDown={() => selectProduct(p)}
-              className={`px-3 py-2.5 cursor-pointer border-b border-slate-100 last:border-0 transition-colors ${
-                i === activeIndex ? 'bg-emerald-50 border-l-[3px] border-l-emerald-700' : 'hover:bg-slate-50'
+              className={`px-3 py-2.5 border-b border-slate-100 last:border-0 transition-colors ${
+                isDisabled ? 'opacity-50 bg-slate-50/60 cursor-not-allowed'
+                : (i === activeIndex ? 'bg-emerald-50 border-l-[3px] border-l-emerald-700 cursor-pointer' : 'hover:bg-slate-50 cursor-pointer')
               }`}
             >
               <div className="flex items-center justify-between">
@@ -124,6 +131,11 @@ export default function SmartProductSearch({ onSelect, branchId, onCreateNew }) 
                   <span className="font-medium text-sm truncate">{p.name}</span>
                   <span className="text-[10px] font-mono text-slate-400 shrink-0">{p.sku}</span>
                   {p.is_repack && <Badge className="text-[9px] bg-amber-100 text-amber-700 shrink-0">R</Badge>}
+                  {isDisabled && (
+                    <Badge className="text-[9px] bg-amber-100 text-amber-700 shrink-0 gap-1">
+                      Disabled at branch
+                    </Badge>
+                  )}
                 </div>
                 <span className="text-sm font-bold text-[#1A4D2E] shrink-0 ml-2">{formatPHP(p.prices?.retail)}</span>
               </div>
@@ -167,7 +179,8 @@ export default function SmartProductSearch({ onSelect, branchId, onCreateNew }) 
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
 
           {noResults && query.length >= 2 && (
             <div className="px-3 py-3 border-t border-slate-100">

@@ -76,6 +76,7 @@ async def list_products(
         pipeline += [{"$skip": skip}, {"$limit": limit}]
         products = await db.products.aggregate(pipeline).to_list(limit)
         products = await _enrich_repacks_with_live_capital(products, branch_id)
+        products = await _enrich_with_disabled_at_branch(products, branch_id)
         return {"products": products, "total": total, "skip": skip, "limit": limit}
 
     elif sort_by == "type":
@@ -96,7 +97,38 @@ async def list_products(
     else:
         products = await db.products.find(query, {"_id": 0}).sort(mongo_sort).skip(skip).limit(limit).to_list(limit)
     products = await _enrich_repacks_with_live_capital(products, branch_id)
+    products = await _enrich_with_disabled_at_branch(products, branch_id)
     return {"products": products, "total": total, "skip": skip, "limit": limit}
+
+
+async def _enrich_with_disabled_at_branch(products: list, branch_id: Optional[str]) -> list:
+    """Inject `disabled_at_branch` flag on each product based on the inventory
+    row at the requested branch. Also lazily auto-reactivates rows where stock
+    has come back in — single bulk update, no per-row hooks needed.
+    Skipped when branch_id is not provided.
+    """
+    if not branch_id or not products:
+        return products
+    # Lazy reactivation — clear the flag wherever stock has returned
+    try:
+        await db.inventory.update_many(
+            {"branch_id": branch_id, "disabled_at_branch": True, "quantity": {"$gt": 0}},
+            {"$set": {"disabled_at_branch": False, "auto_reactivated_at": now_iso()}},
+        )
+    except Exception:
+        pass
+    pids = [p["id"] for p in products if p.get("id")]
+    if not pids:
+        return products
+    inv_rows = await db.inventory.find(
+        {"branch_id": branch_id, "product_id": {"$in": pids}},
+        {"_id": 0, "product_id": 1, "disabled_at_branch": 1, "quantity": 1},
+    ).to_list(len(pids))
+    inv_map = {r["product_id"]: r for r in inv_rows}
+    for p in products:
+        row = inv_map.get(p.get("id"), {})
+        p["disabled_at_branch"] = bool(row.get("disabled_at_branch", False))
+    return products
 
 
 def _rank_by_search_relevance(products: list, query: str) -> list:
@@ -1627,7 +1659,15 @@ async def get_capital_history(product_id: str, branch_id: Optional[str] = None, 
 
 @router.delete("/{product_id}")
 async def delete_product(product_id: str, user=Depends(get_current_user), pin: str = ""):
-    """Soft delete a product and its repacks."""
+    """Soft delete a product and its repacks. Admin/Owner only — managers
+    cannot delete products even if they have a generic `products.delete`
+    permission. They should disable-at-branch instead."""
+    role = user.get("role", "")
+    if role not in ("admin", "owner") and not user.get("is_super_admin"):
+        raise HTTPException(
+            status_code=403,
+            detail="Only Admin or Owner can delete products. Managers can disable products at their branch instead.",
+        )
     check_perm(user, "products", "delete")
 
     # PIN enforcement for product deletion
