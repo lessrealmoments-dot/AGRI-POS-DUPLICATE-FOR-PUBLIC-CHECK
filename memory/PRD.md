@@ -20,6 +20,41 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ---
 
+## ✅ Completed in Iter 199 — Late-Encode + SMS Close-Day Scheduler (Feb 2026)
+
+Owner asked for two complementary features: (a) ability to encode forgotten credit sales onto past closed days without amending those closed Z-reports, and (b) an SMS escalation system to prevent forgetting in the first place.
+
+**Backend — Late-Encode** (`routes/sales.py`):
+- New `late_encode: {reason, pin}` body param on POST /api/unified-sale
+- Guardrails: credit/partial only (no cash/digital), 7-day backdate cap, no cross-month (protects VAT), reason ≥10 chars, manager/admin PIN required, max 5/day/branch
+- Tags invoices with `late_encoded`, `late_encoded_at`, `late_encode_reason`, `late_encoded_by_name`, `late_encode_verifier_name`, `late_encode_days_back`
+- New `late_encode_log` audit collection
+- NEW `GET /api/sales/late-encoded-since-close?branch_id=` returns carryover entries for the Close Wizard
+
+**Backend — Close-Day SMS Scheduler** (`routes/close_reminder.py`, NEW ~452 lines):
+- Asyncio background loop (1 tick/min) registered on FastAPI startup
+- 9 stages: 3 PM catch-up (cashier), 6 PM pre-close, 7:30 PM late notice, 8:30 PM status, 9:30 PM escalation, 7 AM/12 PM Day+1, 7 AM/12 PM Day+2+
+- Quiet hours 22:00–07:00 (absolute)
+- Per-branch `close_time_h` setting (default 18 = 6 PM)
+- `close_reminder_log` dedup — one fire per stage/day/recipient
+- Zero-sales suppression on escalation
+- Role-aware recipient resolution (manager==cashier → one SMS)
+- NEW `send_zreport_finalized()` — fires immediately after successful close, summary SMS to manager/owner/auditor with sales/cash/credit/digital/expenses/over-short + late-encode note
+
+**Backend — SMS Templates** (`routes/sms.py`):
+- 8 new DEFAULT_TEMPLATES entries: close_catchup_3pm, close_precheck, close_late_notice, close_status_snapshot, close_escalation, close_overdue_next_day, close_overdue_multi_day, zreport_finalized
+
+**Frontend**:
+- NEW `LateEncodeDialog.js` — appears when a credit sale hits a closed day, collects reason + PIN + renders all guardrails in UI
+- `UnifiedSalesPage.js` — intercepts 403 "already closed" for credit/partial and opens LateEncodeDialog; retries on confirm
+- `CloseWizardPage.js` — NEW `LateEncodedCarryover` section at the top of step 2 listing all late-encoded invoices since last close with amber highlight
+
+**Daily close hook** (`routes/daily_operations.py`): Z-Report Finalized SMS fires via `asyncio.create_task` (non-blocking).
+
+**Tests:** 16 new assertions (late-encode endpoint, guardrails, close_reminder importables, new templates). Total: **86/86 ✅** (16 new + 70 regression).
+
+---
+
 ## ✅ Completed in Iter 198 — Cash Overage Reserve System (Feb 2026)
 
 Owner asked: "where does the extra money from Z-Report go? I want to view total extra money and use it during audits to cover missing inventory value." Built a full Reserve Ledger system that auto-pools daily-close variance and surfaces it for audit-time offset.
