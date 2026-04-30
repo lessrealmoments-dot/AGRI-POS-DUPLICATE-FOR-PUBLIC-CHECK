@@ -20,6 +20,57 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ---
 
+## ✅ Completed in Iter 194 — POS Price Match (Permanent Branch Price Change)
+
+Replaces the old "ad-hoc price edit → save as global" flow with a **competitor-aware Price Match flow** for true accountability. Backend 8/8 + 21/21 regression tests pass. Frontend lint clean. End-to-end verified via testing agent (37/37, 100%).
+
+### POS Price Match (2026-04-30) — Complete (Iter 194)
+User-confirmed UX choices: Q1=A (active scheme + branch only — NOT global), Q2=B (no revert button — yellow badge is the warning), Q3=Per-product discount breakdown on Z-report (units sold, total discount, avg discount/unit), Q4=All reasons EXCEPT vendor-cost (Smart Price Checker handles that).
+
+**Backend**
+- New `routes/price_changes.py`:
+  - `GET /api/price-changes` — filterable list with summary (total_changes, total_drop, total_raise, avg_delta_pct).
+  - `GET /api/price-changes/product/{id}` — per-product price timeline.
+  - `GET /api/price-changes/reasons` — standardized reason vocabulary.
+- `routes/sales.py` — Price Match flow:
+  - Pre-validates `price_changes[]` payload, fetches **server-trusted** `old_price` from branch_prices (fallback to product.prices). Client-supplied old_price stored as `client_old_price_hint` for forensics. Tamper-resistant.
+  - Returns `422 {type: "price_match_pin_required"}` when PIN missing; `403` on invalid PIN.
+  - On approval: upserts `branch_prices.prices[scheme]` for the **active scheme + branch only** (other schemes untouched). Inserts `price_change_log` entry with full attestation (cashier, approver, method, customer, invoice, reason, delta, delta_pct).
+  - Skips legacy `price_override` audit entry when a corresponding `price_changes` row exists — discount audit log stays clean.
+  - Notifies admins via existing notification system (reuses `discount_given` channel with title "Price Match Approved").
+- `routes/verify.py` — added PIN policy action `price_match` (defaults: admin_pin, manager_pin, totp).
+- `routes/daily_operations.py` — `/daily-close-preview` now returns `discount_breakdown` (per-product units/discount/avg) and `price_changes_today` (count + rows) for the Z-report wizard.
+- `main.py` — added price_change_log indexes (date, branch_id, product_id, created_at).
+
+**Frontend**
+- New `components/PriceMatchModal.js` — per-line reason dropdown (Competitor / Bulk-Loyal / Promo / Damaged / Other) + free-text detail + manager/admin/TOTP PIN. Auto-default "competitor_match".
+- `pages/UnifiedSalesPage.js`:
+  - **Yellow warning badges** on cart lines (Quick + Order modes) when `price !== original_price` — both cashier and manager see at a glance.
+  - `computePriceChanges()` collects all edited lines.
+  - `openCheckout()` opens PriceMatchModal first if any changes exist, then proceeds normally on approval.
+  - `processSale()` includes `price_changes` + `price_match_pin` + `price_scheme` + `branch_name` in payload.
+  - Removed old "Save as global price?" dialog.
+- `pages/ReportsPage.js` — new **Price Changes** tab with KPI cards (Total Changes / Drop / Raise / Avg Δ%), filters (date, branch, reason, product search), grouped-by-product view with full event drill-down (cashier, approver, scheme, reason, detail).
+- `pages/CloseWizardPage.js` — Step 7 Z-report preview now shows:
+  - **Discounts Given Today** card: per-product table (units, total disc, avg/unit) + overall discount + transaction count.
+  - **Permanent Price Changes Today** card: list of changes with old → new, scheme, approver.
+
+**Tests**
+- `/app/backend/tests/test_price_match_194.py` (8 baseline tests, all passing).
+- Testing agent added `test_price_match_194_edge.py` (8 edge probes — reasons endpoint, reason filter, delta math, active-scheme isolation, fast discount-only path, close-preview shape, /reports/discount-audit regression, PIN policy).
+
+### Architecture Notes
+- `discount_audit_log` collection: per-line `discount_value` + overall_discount, no PIN required, fast checkout — UNCHANGED.
+- `price_change_log` collection: NEW, dedicated to Price Match events. Schema: {id, product_id, branch_id, scheme, old_price (server-trusted), client_old_price_hint, new_price, delta, delta_pct, reason, reason_detail, invoice_*, customer_*, cashier_*, approver_*, date, created_at, organization_id}.
+- Capital floor (sell-below-cost) unchanged — `has_perm('sales','sell_below_cost')` still gates it; admins bypass by role.
+- Audit hardening (post-test): `old_price` is always read server-side from `branch_prices`/`products.prices[scheme]` — client-supplied value is stored separately as a forensics hint.
+
+### What's NEXT for Sales accountability
+- **(Optional) HTTP endpoint listing PIN_POLICY_ACTIONS** — currently the constant lives in `verify.py` and admin UI infers from defaults. Exposing it would simplify policy customization UI.
+- **(Optional) Surface price-change history on ProductDetailPage** — backend `/price-changes/product/{id}` already returns the timeline; just needs a UI tab.
+
+---
+
 ## ✅ Completed in Iter 193 — Per-Branch Product Disable
 
 Branch-scoped product visibility shipped. Backend 8/8 tests pass + 25/25 regression. Frontend lint clean.

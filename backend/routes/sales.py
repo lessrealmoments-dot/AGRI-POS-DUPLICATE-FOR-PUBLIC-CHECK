@@ -214,23 +214,48 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
     # ── Price Match (permanent branch price change) — pre-validate + PIN ─────
     # Each entry: {product_id, scheme, old_price, new_price, reason, reason_detail?}
     # On approval: upsert branch_prices.prices[scheme] AND write to price_change_log.
+    # IMPORTANT: old_price for the audit log is read SERVER-SIDE from
+    # branch_prices.prices[scheme] (fall back to products.prices[scheme]) — the
+    # client-supplied old_price is treated as a hint only. This prevents a
+    # malicious client from logging a misleading old_price.
     price_changes_in = data.get("price_changes", []) or []
     valid_price_changes = []
     if price_changes_in:
         active_scheme = data.get("price_scheme", "retail")
+        # Bulk-fetch existing branch_prices for this branch+products in one query
+        pm_pids = [str(pc.get("product_id") or "").strip() for pc in price_changes_in if pc.get("product_id")]
+        existing_bp = {}
+        if pm_pids:
+            bp_rows = await db.branch_prices.find(
+                {"product_id": {"$in": pm_pids}, "branch_id": branch_id}, {"_id": 0}
+            ).to_list(len(pm_pids))
+            existing_bp = {bp["product_id"]: bp for bp in bp_rows}
         for pc in price_changes_in:
             pid = (pc.get("product_id") or "").strip()
             if not pid:
                 continue
             try:
-                old_p = float(pc.get("old_price"))
                 new_p = float(pc.get("new_price"))
             except (TypeError, ValueError):
                 continue
-            if new_p <= 0 or new_p == old_p:
+            if new_p <= 0:
                 continue
             prod = products_map.get(pid)
             if not prod:
+                continue
+            scheme = (pc.get("scheme") or active_scheme).strip()
+            # Server-trusted old_price: branch override first, else global
+            bp_doc = existing_bp.get(pid) or {}
+            bp_prices = bp_doc.get("prices") or {}
+            server_old = bp_prices.get(scheme)
+            if server_old is None:
+                server_old = (prod.get("prices") or {}).get(scheme, 0)
+            try:
+                server_old = float(server_old or 0)
+            except (TypeError, ValueError):
+                server_old = 0
+            # No price change if server price already equals new price
+            if server_old > 0 and abs(server_old - new_p) < 0.001:
                 continue
             reason = (pc.get("reason") or "").strip()
             if not reason:
@@ -238,14 +263,14 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
                     status_code=400,
                     detail=f"Price change reason missing for '{prod['name']}'"
                 )
-            scheme = (pc.get("scheme") or active_scheme).strip()
             valid_price_changes.append({
                 "product_id": pid,
                 "product_name": prod["name"],
                 "sku": prod.get("sku", ""),
                 "scheme": scheme,
-                "old_price": old_p,
+                "old_price": server_old,  # server-trusted
                 "new_price": new_p,
+                "client_old_price_hint": float(pc.get("old_price") or 0),
                 "reason": reason,
                 "reason_detail": (pc.get("reason_detail") or "").strip(),
             })
@@ -893,7 +918,8 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
                 "branch_id": branch_id,
                 "branch_name": data.get("branch_name", ""),
                 "scheme": pc["scheme"],
-                "old_price": pc["old_price"],
+                "old_price": pc["old_price"],            # server-trusted
+                "client_old_price_hint": pc.get("client_old_price_hint", 0),  # for forensics
                 "new_price": pc["new_price"],
                 "delta": round(pc["new_price"] - pc["old_price"], 2),
                 "delta_pct": round((pc["new_price"] - pc["old_price"]) / pc["old_price"] * 100, 2)
