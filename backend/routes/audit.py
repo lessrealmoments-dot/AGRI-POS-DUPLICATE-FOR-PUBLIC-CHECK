@@ -334,7 +334,9 @@ async def audit_pulse(
     widget needs — no section drill-downs, no per-invoice detail.
     """
     today = datetime.now(timezone.utc).date()
-    period_from = (today - timedelta(days=max(1, days) - 1)).strftime("%Y-%m-%d")
+    # Clamp days: must be ≥1, capped at 365 to prevent runaway compute windows.
+    days = max(1, min(int(days), 365))
+    period_from = (today - timedelta(days=days - 1)).strftime("%Y-%m-%d")
     period_to = today.strftime("%Y-%m-%d")
 
     full = await compute_audit(

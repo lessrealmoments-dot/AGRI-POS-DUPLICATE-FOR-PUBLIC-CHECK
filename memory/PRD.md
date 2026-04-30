@@ -20,6 +20,21 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ---
 
+## ✅ Completed in Iter 197 — Audit Pulse Dashboard Widget (Feb 2026)
+
+Follow-on to Phase 1 deep analysis: surfaced the new scores on the dashboard so owners see the headline numbers without opening the full Audit Center.
+
+**Backend** (`/app/backend/routes/audit.py`, +70 lines):
+- New `GET /api/audit/pulse?days={7|30|90}&branch_id=…` — lightweight, cached-free snapshot that reuses `compute_audit()` internally and projects down to a compact payload: `health_score/label`, `fraud_risk_score/label`, top 3 risk factors (by points), 6 headline KPIs (margin, void, discount, DSO, DPO, turnover) + trend deltas. `days` clamped to 1–365 to prevent runaway compute windows.
+
+**Frontend**:
+- New `AuditPulseWidget.js` — dual SVG dial (Health green/amber/red · Risk inverse), top 3 red-flag rows, 3-tile mini KPI strip (Margin/Void/DSO), period selector (7/30/90d), click-through to `/audit`.
+- Registered in `DashboardPage.js` for both Owner Consolidated View and Branch/Single View layouts (default grid slots + MIN_H/MIN_W maps updated).
+
+**Tests:** new `/app/backend/tests/test_audit_pulse.py` (9 tests: auth, shape, ranges/labels, top_risk rules, days math, branch scoping, compute-cross-check) all pass. Regression: 38/38 prior audit tests still green. **Total: 47/47 ✅**
+
+---
+
 ## ✅ Completed in Iter 196 — Audit Center Phase 1 Deep Analysis (Feb 2026)
 
 Owner requested a top-to-bottom review of the Audit Center ("analyze the whole site on what should be there, key indicators… deep analysis based on numbers"). Current center was a *checklist* (severity per section → simple average score). Phase 1 adds the ratio/trend/weighted layer a real auditor needs.
