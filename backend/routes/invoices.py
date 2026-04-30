@@ -873,6 +873,15 @@ async def void_invoice(inv_id: str, data: dict, user=Depends(get_current_user)):
         {"$set": {"voided": True, "voided_at": now_iso()}}
     )
 
+    # 4c. Tag discount_audit_log for this invoice (Fix #5)
+    # Ensures Reports → Discount Audit and Audit Center exclude voided discounts
+    # from totals and cashier rankings.
+    await db.discount_audit_log.update_many(
+        {"invoice_number": inv["invoice_number"]},
+        {"$set": {"invoice_voided": True, "invoice_voided_at": now_iso(),
+                  "invoice_voided_by": user.get("full_name", user.get("username", ""))}}
+    )
+
     # 5. Reverse FULL customer AR balance (original balance + any remaining)
     # The customer's balance was incremented by the original credit amount,
     # then decremented by each AR payment. We need to reverse the remaining balance.

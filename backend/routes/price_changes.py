@@ -38,6 +38,7 @@ async def list_price_changes(
     reason: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
+    include_voided: bool = False,
     user=Depends(get_current_user),
 ):
     """
@@ -58,6 +59,8 @@ async def list_price_changes(
         query["product_id"] = product_id
     if reason:
         query["reason"] = reason
+    if not include_voided:
+        query["invoice_voided"] = {"$ne": True}
 
     rows = await db.price_change_log.find(query, {"_id": 0}).sort("created_at", -1).to_list(2000)
 

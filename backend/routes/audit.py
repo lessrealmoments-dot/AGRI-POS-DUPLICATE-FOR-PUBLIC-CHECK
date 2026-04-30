@@ -718,6 +718,10 @@ async def _compute_cash(branch_id: str, date_from: str, date_to: str) -> dict:
         "total_funds": round(current_cashier + safe_balance, 2),
         "discrepancy": discrepancy,
         "discrepancy_type": "over" if discrepancy > 0 else ("short" if discrepancy < 0 else "balanced"),
+        # Wallet movements cross-check (Fix #6) — independent reconciliation
+        "wallet_movements_check": await _wallet_movements_reconciliation(
+            branch_id, date_from, date_to, starting_float, current_cashier
+        ),
         "expense_breakdown": [{"category": r["_id"] or "Other", "total": round(r["total"], 2), "count": r["count"]} for r in exp_breakdown],
         "severity": sev,
         "formula": "Starting Float + Cash Sales + Partial Cash + Split Cash + Cash AR + Net Fund Transfers - Cashier Expenses = Expected Cash",
@@ -736,8 +740,59 @@ async def _compute_cash(branch_id: str, date_from: str, date_to: str) -> dict:
     }
 
 
+async def _wallet_movements_reconciliation(branch_id: str, date_from: str, date_to: str,
+                                           starting_float: float, current_cashier: float) -> dict:
+    """
+    Independent cross-check of cashier cash using wallet_movements (Fix #6).
+
+    Sums all cashier wallet_movements in the period and verifies:
+        starting_float + sum(wallet_movements) ≈ current_cashier_balance
+
+    If this agrees, the computed cash formula in _compute_cash has no drift.
+    If NOT, something (sale/void/expense) changed the cashier wallet without
+    a matching movement log — an integrity issue.
+    """
+    cashier_wallet = await db.fund_wallets.find_one(
+        {"branch_id": branch_id, "type": "cashier", "active": True}, {"_id": 0, "id": 1}
+    )
+    if not cashier_wallet:
+        return {"supported": False, "reason": "no_cashier_wallet"}
+
+    # Sum wallet_movements for cashier in period
+    agg = await db.wallet_movements.aggregate([
+        {"$match": {
+            "wallet_id": cashier_wallet["id"],
+            "created_at": {"$gte": f"{date_from}T00:00:00", "$lte": f"{date_to}T23:59:59.999"},
+        }},
+        {"$group": {"_id": None, "net": {"$sum": "$amount"}, "count": {"$sum": 1}}}
+    ]).to_list(1)
+    wallet_net = round(agg[0]["net"] if agg else 0, 2)
+    movement_count = agg[0]["count"] if agg else 0
+
+    expected_from_movements = round(starting_float + wallet_net, 2)
+    variance = round(current_cashier - expected_from_movements, 2)
+    reconciled = abs(variance) < 1.00
+
+    return {
+        "supported": True,
+        "starting_float": round(starting_float, 2),
+        "net_wallet_movements": wallet_net,
+        "movement_count": movement_count,
+        "expected_from_movements": expected_from_movements,
+        "current_cashier_balance": round(current_cashier, 2),
+        "variance": variance,
+        "reconciled": reconciled,
+        "note": "Compares wallet_movements ledger to actual cashier balance. Variance > ₱1 indicates an unlogged change.",
+    }
+
+
+
 async def _compute_sales(branch_id: str, date_from: str, date_to: str) -> dict:
-    """Sales audit: totals, overrides, voided/edited transactions."""
+    """Sales audit: totals, overrides, voided/edited transactions.
+    Reconciliation (Fix #3): also returns freight, overall_discount, and
+    sum-of-line-totals so auditors can verify:
+        grand_total_sales == sum_line_totals + freight - overall_discount
+    (within rounding). Any variance flags an integrity issue."""
     # Total invoices in period
     inv_r = await db.invoices.aggregate([
         {"$match": {"branch_id": branch_id, "order_date": {"$gte": date_from, "$lte": date_to},
@@ -748,11 +803,30 @@ async def _compute_sales(branch_id: str, date_from: str, date_to: str) -> dict:
             "count": {"$sum": 1},
             "total_paid": {"$sum": "$amount_paid"},
             "total_balance": {"$sum": "$balance"},
+            "freight": {"$sum": "$freight"},
+            "overall_discount": {"$sum": "$overall_discount"},
         }}
     ]).to_list(10)
 
     by_type = {r["_id"] or "cash": {"total": round(r["total"], 2), "count": r["count"]} for r in inv_r}
     grand_total_sales = round(sum(v["total"] for v in by_type.values()), 2)
+    total_freight = round(sum(r.get("freight", 0) or 0 for r in inv_r), 2)
+    total_overall_disc = round(sum(r.get("overall_discount", 0) or 0 for r in inv_r), 2)
+
+    # Cross-check: sum of sales_log line_totals (non-voided) should equal
+    # grand_total_sales - freight + overall_discount.
+    sl_sum_r = await db.sales_log.aggregate([
+        {"$match": {"branch_id": branch_id, "date": {"$gte": date_from, "$lte": date_to},
+                    "voided": {"$ne": True}}},
+        {"$group": {"_id": None, "total": {"$sum": "$line_total"}}}
+    ]).to_list(1)
+    sum_line_totals = round(sl_sum_r[0]["total"], 2) if sl_sum_r else 0.0
+
+    # Expected from invoice side: sum_line_totals should ≈ grand_total - freight + overall_discount
+    expected_line_totals = round(grand_total_sales - total_freight + total_overall_disc, 2)
+    variance = round(sum_line_totals - expected_line_totals, 2)
+    # Allow tiny rounding noise (centavo drift acceptable)
+    reconciled = abs(variance) < 1.00
 
     # Decompose partial into cash_received + credit_balance for clarity
     partial_cash_received = 0
@@ -778,7 +852,7 @@ async def _compute_sales(branch_id: str, date_from: str, date_to: str) -> dict:
     below_cost_count = 0
 
     total_txns = sum(v["count"] for v in by_type.values())
-    sev = "warning" if (voided > 0 or len(edited_r) > 0) else "ok"
+    sev = "warning" if (voided > 0 or len(edited_r) > 0 or not reconciled) else "ok"
 
     return {
         "grand_total_sales": grand_total_sales,
@@ -789,6 +863,17 @@ async def _compute_sales(branch_id: str, date_from: str, date_to: str) -> dict:
         "voided_count": voided,
         "edited_invoices": edited_r[:20],
         "edited_count": len(edited_r),
+        # Reconciliation breakdown (Fix #3) — so owner can see all three views agree
+        "reconciliation": {
+            "grand_total_invoices": grand_total_sales,       # from invoices (Reports view)
+            "sum_line_totals": sum_line_totals,              # from sales_log (Z-report view)
+            "total_freight": total_freight,
+            "total_overall_discount": total_overall_disc,
+            "expected_line_totals": expected_line_totals,    # = grand - freight + disc
+            "variance": variance,
+            "reconciled": reconciled,
+            "formula": "grand_total = sum_line_totals + freight - overall_discount",
+        },
         "severity": sev,
     }
 
@@ -1035,7 +1120,9 @@ async def _compute_activity(branch_id: str, date_from: str, date_to: str) -> dic
     discount_query = {"date": {"$gte": date_from, "$lte": date_to}}
     if branch_id:
         discount_query["branch_id"] = branch_id
-    discount_logs = await db.discount_audit_log.find(discount_query, {"_id": 0}).to_list(500)
+    discount_logs = await db.discount_audit_log.find(
+        {**discount_query, "invoice_voided": {"$ne": True}}, {"_id": 0}
+    ).to_list(500)
 
     total_discount_amount = round(sum(d.get("total_discount", 0) for d in discount_logs), 2)
     total_price_override = round(sum(d.get("total_price_override_diff", 0) for d in discount_logs), 2)
@@ -1069,7 +1156,9 @@ async def _compute_activity(branch_id: str, date_from: str, date_to: str) -> dic
     price_change_query = {"date": {"$gte": date_from, "$lte": date_to}}
     if branch_id:
         price_change_query["branch_id"] = branch_id
-    price_change_logs = await db.price_change_log.find(price_change_query, {"_id": 0}).to_list(500)
+    price_change_logs = await db.price_change_log.find(
+        {**price_change_query, "invoice_voided": {"$ne": True}}, {"_id": 0}
+    ).to_list(500)
     price_change_count = len(price_change_logs)
     total_price_drop = round(sum(
         (pc.get("old_price", 0) - pc.get("new_price", 0))

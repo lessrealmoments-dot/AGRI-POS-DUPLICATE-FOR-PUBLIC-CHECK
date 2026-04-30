@@ -177,6 +177,110 @@ async def create_return(data: dict, user=Depends(get_current_user)):
             "loss_value": round(item_loss_value, 2) if inventory_action == "pullout" else 0,
         })
 
+    # ── Credit customer AR reduction (Fix #1) ───────────────────────────────
+    # If the customer is on credit, the return reduces their Accounts Receivable.
+    # Semantics:
+    #   total_return_value = retail value of goods returned (sum of refund_price × qty)
+    #   cash_refunded      = refund_amount (cash given back now)
+    #   credit_applied     = max(0, total_return_value - cash_refunded)
+    # `credit_applied` is subtracted from:
+    #   (a) customer.balance (AR ledger)
+    #   (b) original invoice.balance (if invoice_number provided) — applied to newest
+    #       open invoice for that customer, falling back if the linked invoice is paid/voided
+    customer_id = data.get("customer_id")
+    customer_type = (data.get("customer_type") or "walkin").lower()
+    credit_applied = 0.0
+    credit_applied_to_invoices = []
+    if customer_type == "credit" and customer_id:
+        credit_applied = round(max(0, total_refund_retail - refund_amount), 2)
+        if credit_applied > 0:
+            # Resolve the target customer
+            cust = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+            if cust:
+                # Try to apply to the linked invoice first, then to the oldest open invoice
+                remaining_to_apply = credit_applied
+                target_invs = []
+                linked_inv_num = (data.get("invoice_number") or "").strip()
+                if linked_inv_num:
+                    linked = await db.invoices.find_one(
+                        {"invoice_number": linked_inv_num, "balance": {"$gt": 0},
+                         "status": {"$nin": ["voided", "paid"]}},
+                        {"_id": 0, "id": 1, "invoice_number": 1, "balance": 1}
+                    )
+                    if linked:
+                        target_invs.append(linked)
+                # Fall back to oldest open invoices for this customer
+                fallback = await db.invoices.find(
+                    {"customer_id": customer_id, "balance": {"$gt": 0},
+                     "status": {"$nin": ["voided", "paid"]}},
+                    {"_id": 0, "id": 1, "invoice_number": 1, "balance": 1}
+                ).sort("order_date", 1).to_list(50)
+                for f in fallback:
+                    if not any(t["id"] == f["id"] for t in target_invs):
+                        target_invs.append(f)
+
+                for tgt in target_invs:
+                    if remaining_to_apply <= 0:
+                        break
+                    apply = round(min(remaining_to_apply, float(tgt["balance"])), 2)
+                    if apply <= 0:
+                        continue
+                    new_bal = round(float(tgt["balance"]) - apply, 2)
+                    new_status = "paid" if new_bal <= 0.005 else "partial"
+                    await db.invoices.update_one(
+                        {"id": tgt["id"]},
+                        {"$inc": {"balance": -apply, "amount_paid": apply},
+                         "$set": {"status": new_status, "updated_at": now_iso()},
+                         "$push": {"payments": {
+                             "id": new_id(),
+                             "amount": apply,
+                             "method": "Return Credit",
+                             "fund_source": "return_credit",
+                             "reference": rma_number,
+                             "date": return_date,
+                             "recorded_by": user["id"],
+                             "recorded_by_name": user.get("full_name", user.get("username", "")),
+                             "created_at": now_iso(),
+                             "note": f"Credit applied from return {rma_number}",
+                         }}}
+                    )
+                    credit_applied_to_invoices.append({
+                        "invoice_id": tgt["id"],
+                        "invoice_number": tgt["invoice_number"],
+                        "amount": apply,
+                    })
+                    remaining_to_apply -= apply
+
+                # Reduce the customer's overall balance by the amount actually applied
+                applied_total = round(credit_applied - max(0, remaining_to_apply), 2)
+                if applied_total > 0:
+                    await db.customers.update_one(
+                        {"id": customer_id},
+                        {"$inc": {"balance": -applied_total}}
+                    )
+                # If remaining_to_apply > 0, customer has an overpayment
+                # (returned more retail value than they owed) — log it.
+                if remaining_to_apply > 0.005:
+                    await db.notifications.insert_one({
+                        "id": new_id(),
+                        "type": "return_overcredit",
+                        "title": "Customer return exceeded AR balance",
+                        "message": (
+                            f"Customer {cust.get('name','')} returned ₱{credit_applied:.2f} worth of goods "
+                            f"but only ₱{applied_total:.2f} could be applied to their open AR. "
+                            f"Excess ₱{remaining_to_apply:.2f} — consider a cash refund or credit memo."
+                        ),
+                        "branch_id": branch_id,
+                        "metadata": {"rma_number": rma_number, "excess": round(remaining_to_apply, 2)},
+                        "target_user_ids": [
+                            a["id"] for a in await db.users.find(
+                                {"role": "admin", "active": True}, {"_id": 0, "id": 1}
+                            ).to_list(50)
+                        ],
+                        "read_by": [],
+                        "created_at": now_iso(),
+                    })
+
     # ── Record refund as expense ────────────────────────────────────────────
     if refund_amount > 0:
         ref_text = f"Customer Return Refund — {rma_number} — {data.get('customer_name', 'Walk-in')} — {data.get('reason', '')}"
@@ -255,6 +359,7 @@ async def create_return(data: dict, user=Depends(get_current_user)):
         "branch_id": branch_id,
         "return_date": return_date,
         "customer_name": data.get("customer_name", "Walk-in"),
+        "customer_id": data.get("customer_id", ""),
         "customer_type": data.get("customer_type", "walkin"),
         "reason": data.get("reason", ""),
         "invoice_number": data.get("invoice_number", ""),
@@ -265,6 +370,8 @@ async def create_return(data: dict, user=Depends(get_current_user)):
         "fund_source": fund_source if refund_amount > 0 else "",
         "total_loss_value": round(total_loss_value, 2),
         "has_pullout": len(pulled_out_items) > 0,
+        "credit_applied": round(credit_applied, 2),
+        "credit_applied_to_invoices": credit_applied_to_invoices,
         "status": "completed",
         "processed_by": user["id"],
         "processed_by_name": user.get("full_name", user["username"]),
@@ -358,6 +465,41 @@ async def void_return(return_id: str, data: dict, user=Depends(get_current_user)
             {"$set": {"voided": True, "voided_at": now_iso(), "void_reason": reason,
                       "voided_by": user.get("full_name", user["username"])}}
         )
+
+    # Reverse credit applied to customer AR (Fix #1)
+    credit_applied = float(ret.get("credit_applied", 0) or 0)
+    applied_invs = ret.get("credit_applied_to_invoices", []) or []
+    if credit_applied > 0 and ret.get("customer_id"):
+        # Re-increase each invoice balance that was reduced
+        for inv_entry in applied_invs:
+            amt = float(inv_entry.get("amount", 0) or 0)
+            if amt <= 0:
+                continue
+            # Remove the specific Return Credit payment row and re-inc balance
+            await db.invoices.update_one(
+                {"id": inv_entry["invoice_id"]},
+                {"$inc": {"balance": amt, "amount_paid": -amt},
+                 "$set": {"updated_at": now_iso()},
+                 "$pull": {"payments": {"reference": ret["rma_number"], "fund_source": "return_credit"}}}
+            )
+            # Recompute status after re-inc
+            inv_now = await db.invoices.find_one(
+                {"id": inv_entry["invoice_id"]},
+                {"_id": 0, "balance": 1, "amount_paid": 1, "grand_total": 1}
+            )
+            if inv_now:
+                new_status = "paid" if float(inv_now.get("balance", 0)) <= 0.005 \
+                    else "partial" if float(inv_now.get("amount_paid", 0)) > 0 else "open"
+                await db.invoices.update_one(
+                    {"id": inv_entry["invoice_id"]}, {"$set": {"status": new_status}}
+                )
+        # Re-increase customer balance
+        applied_total = round(sum(float(i.get("amount", 0)) for i in applied_invs), 2)
+        if applied_total > 0:
+            await db.customers.update_one(
+                {"id": ret["customer_id"]},
+                {"$inc": {"balance": applied_total}}
+            )
 
     await db.returns.update_one(
         {"id": return_id},

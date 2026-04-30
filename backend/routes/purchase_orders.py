@@ -66,7 +66,13 @@ async def _apply_po_inventory(po: dict, user: dict, capital_choices: dict = None
             )
 
             # Step 3: Calculate moving average — BRANCH-SPECIFIC
-            branch_acq_query = {"product_id": pid, "type": {"$in": ["purchase", "transfer_in"]}, "quantity_change": {"$gt": 0}}
+            # Excludes rows flagged as `reversed: True` (set by PO Reopen) — Fix #4
+            branch_acq_query = {
+                "product_id": pid,
+                "type": {"$in": ["purchase", "transfer_in"]},
+                "quantity_change": {"$gt": 0},
+                "reversed": {"$ne": True},
+            }
             if branch_id:
                 branch_acq_query["branch_id"] = branch_id
             all_acquisitions = await db.movements.find(
@@ -1720,6 +1726,14 @@ async def reopen_purchase_order(po_id: str, data: dict = None, user=Depends(get_
     grand_total = float(po.get("grand_total", po.get("subtotal", 0)))
 
     # ── 1. Reverse inventory ─────────────────────────────────────────────────
+    # Also mark the original 'purchase' movement(s) for this PO as reversed so
+    # the moving-average calculation on re-receive does NOT double-count them
+    # (Fix #4). The po_reopen row itself is added below for the audit trail.
+    await db.movements.update_many(
+        {"reference_id": po["id"], "type": "purchase"},
+        {"$set": {"reversed": True, "reversed_at": now_iso(),
+                  "reversed_by_event": "po_reopen"}}
+    )
     for item in po.get("items", []):
         pid = item.get("product_id", "")
         if not pid:

@@ -279,6 +279,7 @@ async def discount_audit_report(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     group_by: Optional[str] = "customer",  # customer | cashier | detail
+    include_voided: bool = False,
     user=Depends(get_current_user),
 ):
     """
@@ -295,6 +296,11 @@ async def discount_audit_report(
     query = {"date": {"$gte": d_from, "$lte": d_to}}
     if branch_id:
         query["branch_id"] = branch_id
+    # Exclude voided-invoice entries from totals/rankings (Fix #5).
+    # Callers that need voided entries for forensic review can pass
+    # include_voided=true.
+    if not include_voided:
+        query["invoice_voided"] = {"$ne": True}
 
     logs = await db.discount_audit_log.find(query, {"_id": 0}).sort("date", -1).to_list(2000)
 
@@ -413,12 +419,63 @@ async def product_profit_report(
                     "total_revenue": 0.0,
                     "total_cost": 0.0,
                     "transactions": 0,
+                    "returned_qty": 0,
+                    "returned_revenue": 0.0,
+                    "returned_cost": 0.0,
                 }
 
             product_map[pid]["total_qty"] += qty
             product_map[pid]["total_revenue"] = round(product_map[pid]["total_revenue"] + revenue, 2)
             product_map[pid]["total_cost"] = round(product_map[pid]["total_cost"] + total_cost, 2)
             product_map[pid]["transactions"] += 1
+
+    # ── Net out returns (Fix #2) ─────────────────────────────────────────────
+    # Return semantics:
+    #   - Shelf return: goods back in stock → subtract BOTH revenue and cost
+    #     (no net effect on profit; neutralises the original sale portion)
+    #   - Pullout return: goods destroyed → subtract revenue only; cost STAYS
+    #     because the inventory is gone (real loss, real COGS)
+    ret_query = {
+        "return_date": {"$gte": date_from, "$lte": date_to},
+        "voided": {"$ne": True},
+    }
+    ret_query = apply_branch_filter(ret_query, branch_filter)
+    returns = await db.returns.find(
+        ret_query, {"_id": 0, "items": 1, "rma_number": 1, "return_date": 1}
+    ).to_list(2000)
+    for ret in returns:
+        for item in ret.get("items", []):
+            pid = item.get("product_id") or item.get("product_name", "unknown")
+            qty = float(item.get("quantity", 0))
+            refund_price = float(item.get("refund_price", 0))
+            cost_per_unit = float(item.get("cost_price", 0))
+            inventory_action = item.get("inventory_action", "shelf")
+            rev_back = round(refund_price * qty, 2)
+            cost_back = round(cost_per_unit * qty, 2)
+            if pid not in product_map:
+                product_map[pid] = {
+                    "product_id": pid,
+                    "product_name": item.get("product_name", "Unknown"),
+                    "category": item.get("category", ""),
+                    "is_repack": item.get("is_repack", False),
+                    "total_qty": 0,
+                    "total_revenue": 0.0,
+                    "total_cost": 0.0,
+                    "transactions": 0,
+                    "returned_qty": 0,
+                    "returned_revenue": 0.0,
+                    "returned_cost": 0.0,
+                }
+            product_map[pid]["total_qty"] -= qty
+            product_map[pid]["total_revenue"] = round(product_map[pid]["total_revenue"] - rev_back, 2)
+            product_map[pid]["returned_qty"] += qty
+            product_map[pid]["returned_revenue"] = round(product_map[pid]["returned_revenue"] + rev_back, 2)
+            if inventory_action == "shelf":
+                # Goods back on shelf — cost reversed
+                product_map[pid]["total_cost"] = round(product_map[pid]["total_cost"] - cost_back, 2)
+            else:
+                # Pullout: cost stays (real COGS loss), captured as returned_cost
+                product_map[pid]["returned_cost"] = round(product_map[pid]["returned_cost"] + cost_back, 2)
 
     # Calculate profit and margin
     rows = []

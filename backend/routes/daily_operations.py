@@ -189,7 +189,7 @@ async def _get_discount_breakdown(branch_id: str, date: str) -> dict:
       [{product_name, units_sold, total_discount, avg_discount_per_unit}]
     Plus totals for the closing wizard.
     """
-    q = {"date": date}
+    q = {"date": date, "invoice_voided": {"$ne": True}}
     if branch_id:
         q["branch_id"] = branch_id
     logs = await db.discount_audit_log.find(q, {"_id": 0}).to_list(2000)
@@ -240,7 +240,7 @@ async def _get_discount_breakdown(branch_id: str, date: str) -> dict:
 
 async def _get_price_changes_today(branch_id: str, date: str) -> dict:
     """Return summary of all permanent price changes (Price Match) for the day."""
-    q = {"date": date}
+    q = {"date": date, "invoice_voided": {"$ne": True}}
     if branch_id:
         q["branch_id"] = branch_id
     rows = await db.price_change_log.find(
