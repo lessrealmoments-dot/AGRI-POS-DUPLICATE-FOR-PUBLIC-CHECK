@@ -31,7 +31,7 @@ import requests
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 API = os.environ.get(
-    "API_URL", "https://offline-robust.preview.emergentagent.com"
+    "API_URL", "https://price-match-pos.preview.emergentagent.com"
 ).rstrip("/") + "/api"
 EMAIL = os.environ.get("TEST_EMAIL", "janmarkeahig@gmail.com")
 PASSWORD = os.environ.get("TEST_PASSWORD", "Aa@58798546521325")

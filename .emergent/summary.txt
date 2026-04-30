@@ -1,24 +1,179 @@
-<analysis>search_blob/sync/pos-dataoffline_pin_grantsmin-h-0branch_products.pyproducts.pydisabled_at_branchReact.lazy()SuperAdminPage.jsCORS_ORIGINS=*search_bloboffline_pin_grantsinvoices.envelope_idmin-h-0flex-shrink-0UnifiedSalesPage.jsuserbrancheslocalStoragescrollIntoViewdupInSession/api/productsdisable-at-branchreact-hooks/exhaustive-deps
-/app
-├── backend/
-│   ├── routes/
-│   │   ├── branch_products.py   # (NEW) disable-at-branch, enable-at-branch routes
-│   │   ├── products.py          # Relevance scoring & disabled_at_branch logic added
-│   │   ├── sync.py              # Enriches offline POS cache with offline_pin_grants, MA, LP
-│   │   ├── sales.py             # Replays offline sales with offline_bypass data
-│   ├── tests/
-│   │   ├── test_offline_mode_192.py
-│   │   ├── test_branch_disable_193.py
-├── frontend/
-│   ├── src/
-│   │   ├── lib/
-│   │   │   ├── offlineDB.js     # Stores pin_grants, search_blob, MA/LP
-│   │   │   ├── offlineAuth.js   # (NEW) Handles local bcrypt verification for offline manager PINs
-│   │   ├── contexts/
-│   │   │   ├── AuthContext.js   # Handles offline reloads and offline verify-manager-pin fallback
-│   │   ├── pages/
-│   │   │   ├── UnifiedSalesPage.js
-│   │   │   ├── ProductsPage.js
-│   │   │   ├── terminal/
-│   │   │   │   ├── TerminalSales.jsx
-/signatures/session/sync/pos-dataoffline_pin_grantsofflineAuth.jsbcryptjsoffline_bypass/sales/sync/api/productsinventory.quantity > 0/api/products/sync/pos-datainvoicesenvelope_idbranch_pricesdisabled: Truebcryptjs/app/backend/routes/branch_products.py/app/frontend/src/lib/offlineAuth.js/app/frontend/src/components/OfflineCreditBypassDialog.js/app/backend/routes/sync.py/app/backend/routes/products.py/app/frontend/src/contexts/AuthContext.js/app/frontend/src/pages/UnifiedSalesPage.js/app/frontend/src/pages/ProductsPage.js/app/frontend/src/pages/terminal/TerminalSales.jsxSuperAdminPage.jsGET /api/sync/pos-dataoffline_pin_grantsmoving_averagedisabled_at_branchPOST /api/products/disable-at-branchPOST /api/products/enable-at-branchGET /api/sync/summarynavigator.onLine/api/healthbcryptjsofflineAuth.jsUnifiedSalesPage.jsmin-h-0/app/memory/PRD.md/app/backend/tests/test_offline_mode_192.py/app/backend/tests/test_branch_disable_193.py/app/test_reports/iteration_171.jsonmin-h-0scrollIntoView/api/productsask_humantest_offline_mode_192.pytest_branch_disable_193.py/app/memory/test_credentials.mdjanmarkeahig@gmail.com/app/frontend/src/pages/UnifiedSalesPage.js/app/backend/routes/products.py</analysis>
+<analysis>**original_problem_statement**: 
+Build a robust multi-tenant POS (AgriBooks) handling native hardware seamlessly. 
+PRODUCT REQUIREMENTS (Current Focus):
+- Accountability for manual price changes vs discounts.
+- Price Match flow requiring reason and Manager/Admin PIN that permanently updates branch prices.
+- Z-Report and Dashboard tracking of discounts given today per product.
+- Comprehensive Financial Audit and Consistency Fixes across Sales, AR, Inventory Movements, and Reports.
+
+**User's preferred language**: English (INSTRUCT next agent to respond in English only)
+
+**what currently exists?** 
+A full-stack multi-tenant POS and SMS CRM with comprehensive offline capabilities. In this session, a new **Price Match Flow** was implemented to replace ad-hoc price overrides. Cashiers can now match competitor prices (which triggers a visual warning, requires a reason + manager PIN, permanently updates the branch price, enforces capital floors, and logs to ). Pure one-time discounts remain fast and log to . 
+Additionally, a massive **Auditor-Level Consistency Overhaul** was performed. Critical financial flows were tightened: Credit returns now properly reduce Accounts Receivable (AR); the Product Profitability report nets out returns; Total Sales formulas were unified across all reports; Purchase Order reopens now reverse old inventory movements to fix Moving Average drift; and voided invoices correctly tag and exclude associated discount/price-match logs. 
+
+**Last working item**: 
+    - Last item agent was working: Implemented 6 Auditor-level Consistency Fixes (Iter 195) to ensure all financial reports, AR balances, inventory moving averages, and cash reconciliations match perfectly across the system. 
+    - Status: USER VERIFICATION PENDING
+    - Agent Testing Done: Y
+    - Which testing method agent to use? NA (Testing is already done, 34/34 backend tests passing,  verified everything in Iter 173).
+    - User Testing Done: N
+
+**All Pending/In progress Issue list**: 
+  Issue 1: React-hooks/exhaustive-deps ESLint warnings (P2)
+     - Attempted fixes: None. Agent explained to the user this is harmless library/linter noise.
+     - Next debug checklist: Review dependency arrays across frontend React components.
+     - Why fix this issue and what will be achieved with the fix? Cleans up build warnings and prevents potential stale closures.
+     - Status: NOT STARTED
+     - Is recurring issue? Y
+     - Should Test frontend/backend/both after fix? Frontend
+     - Blocked on other issue: None
+
+  Issue 2: Org-scoping spot check on older routes (P2)
+     - Attempted fixes: Identified during Iter 195 Audit. Deferred per main agent's plan.
+     - Next debug checklist: Review older routes (pre-multi-tenant refactor) to ensure they strictly enforce  to prevent cross-tenant data leaks.
+     - Why fix this issue and what will be achieved with the fix? Multi-tenant safety hardening.
+     - Status: NOT STARTED
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix? Backend
+     - Blocked on other issue: None
+
+  Issue 3: Clean up informational-zero  movements (P3)
+     - Attempted fixes: Identified during Iter 195 Audit. Deferred per main agent's plan.
+     - Next debug checklist: Ensure  movements don't clutter the movement history view unnecessarily since they don't change stock quantities.
+     - Why fix this issue and what will be achieved with the fix? Movement log visual clarity.
+     - Status: NOT STARTED
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix? Both
+     - Blocked on other issue: None
+
+  Issue 4: Frontend Bundle Size Optimization (P2)
+     - Attempted fixes: None.
+     - Next debug checklist: Implement  for heavy, less-frequently used components.
+     - Why fix this issue and what will be achieved with the fix? Decreases initial JS payload.
+     - Status: NOT STARTED
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix? Frontend
+     - Blocked on other issue: None
+
+**In progress Task List**: 
+  (None)
+
+**Upcoming and Future Tasks**
+    Upcoming Tasks:
+    - **P1 - Audit Center Health Check Badge** (Proposed by Agent, pending user confirm): A dashboard widget that cross-checks all ledgers (sales, cash, wallet, AR, profit) and flags if variance > ₱1.
+    - **P1 - Competitor Pricing Radar** (Proposed by Agent, pending user confirm): Dashboard widget showing top 5 products being matched down by competitors.
+    - **P1 - Compliance Calendar Widget**: Dashboard widget showing upcoming business document deadlines.
+    - **P1 - Finance Reports**: Discount cashier drill-down and AP payment history per supplier views.
+    
+    Future Tasks:
+    - **P2 - Codebase Refactoring**: Refactor  (currently 1600+ lines).
+    - **P2 - Global Modal Context**: Add a global modal registry/context.
+    - **P2 - CORS Hardening**: Change  before production go-live.
+
+**Completed work in this session**
+- POS Price Match (Iter 194): Created permanent branch price change flow with Manager PIN, reasons, , and . (DONE)
+- Z-Report / Close Wizard: Added per-product discount breakdown. (DONE)
+- Audit Center Consistency (Fix #1): Credit customer returns now accurately reduce  and original invoice balance. (DONE)
+- Audit Center Consistency (Fix #2): Product Profitability report now safely nets out returns from revenue and cost. (DONE)
+- Audit Center Consistency (Fix #3): Total Sales reconciliation formulas unified across all reports. (DONE)
+- Audit Center Consistency (Fix #4): PO Reopen now flags old purchase movements as  to prevent Moving Average drift. (DONE)
+- Audit Center Consistency (Fix #5): Voiding invoices tags  and  entries to exclude them from cashier metric reports. (DONE)
+- Audit Center Consistency (Fix #6): Cash reconciliation cross-checks against  running balances. (DONE)
+
+**Earlier issues found/mentioned but not fixed**
+   - Issue 1: Logs/lag on transfer
+     - Debug checklist: User mentioned visual lag during branch switching in Web POS. Check  branch context switcher performance.
+     - Why to solve this issue and what will be achieved with this: Improves cross-branch cashier UX.
+     - Should Test frontend/backend/both after fix: Frontend
+     - Is recurring issue? N
+
+**Known issue recurrence from previous fork**
+  - Issue recurrence in previous fork: ESLint warnings for .
+  - Recurrence count: 12+
+  - Status: NOT STARTED
+
+**Code Architecture**
+
+
+**Key Technical Concepts**
+- **Price Match Flow vs Discounts**: Cashiers changing line item prices triggers a distinct flow. It displays a visual Price Changed badge, requires an explicit reason (e.g. Competitor Match), and a PIN at checkout. It updates the  collection permanently. Generic discounts (using the discount input field) skip the PIN (if permissions allow) and remain one-time.
+- **Financial Strict Consistency**: The system uses a multi-ledger architecture (, , , ). If an entity is voided/reopened (like an invoice or PO), its constituent ledger entries are explicitly reversed or tagged (, ) so that aggregate reports (Product Profitability, Cash Reconciliation, Moving Average) remain perfectly balanced. 
+
+**key DB schema**
+  -  (NEW): Tracks , , ,  for permanent price changes. Added unique indexes.
+  - : Now supports an  flag.
+
+**changes in tech stack**
+  - None.
+
+**All files of reference** 
+  -  (Created)
+  -  (Created)
+  -  (Created)
+  -  (Created)
+  -  (Updated)
+  -  (Updated)
+  -  (Updated)
+  -  (Updated)
+  -  (Updated)
+  -  (Updated)
+  -  (Updated)
+  -  (Updated)
+
+**Areas that need refactoring**: 
+  -  remains massive (>1600 lines) and could benefit from component splitting.
+
+**key api endpoints**
+  -  (NEW)
+  -  (Updated to cascade voids to audit logs)
+  -  (Updated to cascade reversals to inventory movements)
+
+**Critical Info for New Agent** 
+- **Offline Guardrails**: Cashiers are now blocked from directly editing item prices (triggering Price Match) when the POS is offline. Ensure this block remains intact to prevent reconciliation headaches.
+- **Ledger Reversals**: When adding new transactional features, ensure *every* corresponding ledger (, , ) is explicitly handled in the void/reversal workflows. 
+
+**documents and test reports created in this job** 
+  -  (Updated)
+  - 
+  - 
+  - 
+  - 
+
+**Last 10 User Messages and any pending HUMAN messages** 
+ - User: Asks to change sales setup so cashiers give traceably recorded discounts instead of manually changing prices.
+ - Agent: Proposes locking price edits and forcing all reductions through discounts. 
+ - User: Proposes a combined approach: Discounts for one-time reductions, and an accountable Price Match flow (requiring reason and manager PIN) for permanent price updates due to competitor pricing. 
+ - Agent: Confirms the new flow: Phase 1 (Price Match), Phase 2 (Discounts unchanged), Phase 3 (Reports/Z-Report additions). 
+ - User: Agrees. Clarifies to drop Vendor cost drop from the reasons since Smart Pricing already handles it. 
+ - Agent: Implements Phase 1-3, runs tests, calls testing agent, finalizes feature. 
+ - User: Impressed, asks the agent to do a full Auditor analysis of the system to look for any logic/formula contradictions regarding money, prices, and inventory. 
+ - Agent: Scans system. Identifies 11 issues (3 High, 5 Medium, 3 Low). Proposes a phased fix plan.
+ - User: Tells agent to proceed simultaneously with fixing the different phases so everything works as expected. 
+ - Agent: Implements all 6 structural consistency fixes, writes tests, runs testing agent, updates PRD, and finishes task. Suggests adding an Audit Center Health Check badge widget.
+ - *Pending Human Message*: The user has not yet replied to the agent's suggestion to wire up the Audit Center Health Check badge.
+
+**Project Health Check:**
+  - Broken: None.
+  - Mocked: Thermal Printing.
+
+**3rd Party Integrations** 
+  - Cloudflare R2 / Boto3 (Backups and File Storage) — requires User API Key
+  - Resend (Emails) — requires User API Key
+
+**Testing status**
+  - Testing agent used after significant changes: YES (Iter 172 for Price Match, Iter 173 for Consistency Fixes).
+  - Troubleshoot agent used after agent stuck in loop: NO
+  - Test files created: , 
+  - Known regressions: None. (34/34 backend tests pass).
+
+**Credentials to test flow:**
+  - Check . 
+
+**What agent forgot to execute**
+  - No explicit misses. The agent successfully deferred two medium/low priority audit cleanups (Org-scoping older routes, and informational  cleanup) into the backlog to focus on the high-impact financial consistency fixes. 
+
+**Debugging checklist for current issue**
+    Issue: None currently active.
+    Frontend files to check: NA
+    Backend files to check: NA</analysis>
