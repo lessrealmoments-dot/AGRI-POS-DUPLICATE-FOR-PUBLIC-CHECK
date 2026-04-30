@@ -29,7 +29,12 @@ async def list_products(
       grouped — parents A-Z, each parent's repacks immediately below (tree order)
     """
     query = {"active": True}
-    if search:
+    # When a search term is provided we score-rank results so the most
+    # relevant matches surface first instead of "alphabetical contains".
+    # Order: name == query > name starts-with > word starts-with >
+    #        sku/barcode contains > name contains. (See _score_match below.)
+    search_active = bool(search and search.strip())
+    if search_active:
         query["$or"] = [
             {"name": {"$regex": search, "$options": "i"}},
             {"sku": {"$regex": search, "$options": "i"}},
@@ -79,9 +84,67 @@ async def list_products(
         mongo_sort = [("name", 1)]  # default: alphabetical
 
     total = await db.products.count_documents(query)
-    products = await db.products.find(query, {"_id": 0}).sort(mongo_sort).skip(skip).limit(limit).to_list(limit)
+    if search_active:
+        # Pull a wider candidate pool, rerank by relevance, then trim to limit.
+        # Cap at 200 to keep the in-memory rerank cheap.
+        pool_size = max(limit * 4, 50)
+        pool_size = min(pool_size, 200)
+        products = await db.products.find(query, {"_id": 0}).sort(mongo_sort).limit(pool_size).to_list(pool_size)
+        products = _rank_by_search_relevance(products, search.strip())
+        # Apply skip/limit AFTER reranking
+        products = products[skip: skip + limit]
+    else:
+        products = await db.products.find(query, {"_id": 0}).sort(mongo_sort).skip(skip).limit(limit).to_list(limit)
     products = await _enrich_repacks_with_live_capital(products, branch_id)
     return {"products": products, "total": total, "skip": skip, "limit": limit}
+
+
+def _rank_by_search_relevance(products: list, query: str) -> list:
+    """Score-rank products by how strongly they match the query.
+
+    Higher score = more relevant. Tie-breaker: alphabetical name.
+
+    Heuristic (purely positional, no fuzzy matching):
+      120 — name OR sku OR barcode is exactly the query
+      100 — name starts with the query (prefix match)
+       90 — sku starts with the query
+       80 — any word in name starts with the query (e.g. "promix" in
+            "STARTER PLUS - PROMIX 50KG" → token boundary)
+       50 — sku contains the query
+       40 — barcode contains the query
+       20 — name contains the query (worst — pure substring)
+       10 — token start match late in the string (deprioritises long names)
+    """
+    q = (query or "").lower().strip()
+    if not q:
+        return products
+
+    def score(p):
+        name = (p.get("name") or "").lower()
+        sku = (p.get("sku") or "").lower()
+        barcode = (p.get("barcode") or "").lower()
+        s = 0
+        if name == q or sku == q or barcode == q:
+            s = max(s, 120)
+        if name.startswith(q):
+            s = max(s, 100)
+        if sku and sku.startswith(q):
+            s = max(s, 90)
+        # Token-boundary match in the name
+        if q in name:
+            tokens = name.replace("-", " ").replace("/", " ").split()
+            if any(t.startswith(q) for t in tokens):
+                s = max(s, 80)
+            else:
+                s = max(s, 20)
+        if sku and q in sku:
+            s = max(s, 50)
+        if barcode and q in barcode:
+            s = max(s, 40)
+        return s
+
+    # Sort by (-score, name) so most relevant first, alphabetical within ties
+    return sorted(products, key=lambda p: (-score(p), (p.get("name") or "").lower()))
 
 
 async def _enrich_repacks_with_live_capital(products: list, branch_id: Optional[str]) -> list:
