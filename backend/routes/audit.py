@@ -305,7 +305,10 @@ async def compute_audit(
         )
         # attach delta summary
         result["kpis"]["trend"] = _compute_trend_deltas(result["kpis"], result["kpis_prev"])
-    except Exception:
+    except ValueError as ex:
+        # Bad date string — not a real error, just skip trend comparison
+        import logging
+        logging.getLogger(__name__).warning("Audit kpis_prev date-parse skipped: %s", ex)
         result["kpis_prev"] = None
 
     # ── Weighted Health + Fraud Risk scores ──────────────────────────────
@@ -1805,7 +1808,18 @@ def _compute_scores(result: dict) -> dict:
     }
 
     def sev_score(sev: Optional[str]) -> int:
-        return 100 if sev == "ok" else (60 if sev == "warning" else 20)
+        # Unknown/missing severity defaults to 'warning' so new sections without
+        # proper severity wiring surface as needing review instead of silently
+        # scoring perfect.
+        if sev == "ok":
+            return 100
+        if sev == "critical":
+            return 20
+        if sev in (None, "", "info"):
+            import logging
+            logging.getLogger(__name__).debug("Audit section missing severity — defaulting to 60")
+            return 60
+        return 60  # warning or any other value
 
     # If inventory not available, redistribute its weight across the rest.
     inv_avail = bool(result.get("inventory", {}).get("available"))

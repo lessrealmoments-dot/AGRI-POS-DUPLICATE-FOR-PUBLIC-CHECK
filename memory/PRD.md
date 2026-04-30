@@ -20,6 +20,28 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ---
 
+## ✅ Completed in Iter 196 — Audit Center Phase 1 Deep Analysis (Feb 2026)
+
+Owner requested a top-to-bottom review of the Audit Center ("analyze the whole site on what should be there, key indicators… deep analysis based on numbers"). Current center was a *checklist* (severity per section → simple average score). Phase 1 adds the ratio/trend/weighted layer a real auditor needs.
+
+**Backend** (`/app/backend/routes/audit.py`, +320 lines):
+- `_compute_kpis()` — new cross-cutting ratios: gross_margin_pct, void_rate_pct, edit_rate_pct, discount_rate_pct, DSO (AR days), DPO (AP days), annualised inventory turnover, payment_mix_pct, plus underlying revenue/cogs/gross_profit/total_ar/total_ap/inventory_value.
+- `_compute_trend_deltas()` — auto-compares against previous equal-length period, returns deltas per ratio.
+- `_compute_scores()` — two independent 0-100 scores:
+  - **Health Score** (weighted: cash 20, inventory 15, AR 10, AP 10, sales 10, returns 5, transfers 10, unverified 10, digital 5, activity 5; inventory weight redistributed proportionally when not available) with label Excellent/Good/Needs Review/Poor.
+  - **Fraud Risk Score** (composite: void rate ≤25 pts, discount rate ≤15, edit rate ≤15, off-hours ≤10, corrections ≤10, PIN security ≤15, price-match volume ≤10; capped at 100) with label Low/Elevated/High/Critical and a per-factor `risk_breakdown` array.
+- `/api/audit/compute` now returns `kpis`, `kpis_prev`, `kpis.trend`, `scores`.
+
+**Frontend** (`/app/frontend/src/pages/AuditCenterPage.js`):
+- New `KpiRibbon` component above section tiles — six tiles (Margin, Void, Discount, DSO, DPO, Turnover) with color-coded trend arrows vs previous period + payment mix strip.
+- New `RiskBreakdownCard` — per-factor contribution bars with caps.
+- Header now shows dual scores: Health (existing green/amber/red) **and** Fraud Risk (inverse color scale) with labels.
+- Print report extended with KPI table + Fraud Risk Breakdown table.
+
+**Tests:** `/app/backend/tests/test_audit_deep_analysis_phase1.py` (19 new assertions) + 19 regression tests = **38/38 passing**.
+
+---
+
 ## ✅ Completed in Iter 195 — Audit-Driven Consistency Fixes
 
 Based on the owner's request for a full system audit from an accountant's perspective, I reviewed the entire codebase phase-by-phase (money movement, inventory, price, audit trail, reversals, multi-tenant, offline). Found 11 issues; fixed the top 6 critical + 1 bonus (offline capital cache pre-existing bug).
