@@ -317,6 +317,68 @@ async def compute_audit(
     return result
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+#  AUDIT PULSE — condensed dashboard payload for the Audit Pulse widget.
+#  Reuses compute_audit and projects down to a small, fast payload.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/pulse")
+async def audit_pulse(
+    branch_id: Optional[str] = None,
+    days: int = 30,
+    user=Depends(get_current_user),
+):
+    """
+    Lightweight snapshot of Health + Fraud Risk for the last `days` days,
+    optimised for the Dashboard "Audit Pulse" widget. Returns only what the
+    widget needs — no section drill-downs, no per-invoice detail.
+    """
+    today = datetime.now(timezone.utc).date()
+    period_from = (today - timedelta(days=max(1, days) - 1)).strftime("%Y-%m-%d")
+    period_to = today.strftime("%Y-%m-%d")
+
+    full = await compute_audit(
+        branch_id=branch_id,
+        period_from=period_from,
+        period_to=period_to,
+        audit_type="partial",
+        user=user,
+    )
+
+    scores = full.get("scores") or {}
+    kpis = full.get("kpis") or {}
+
+    # Top 3 risk factors by points (only those with >0 points)
+    top_risks = [r for r in (scores.get("risk_breakdown") or []) if (r.get("points") or 0) > 0]
+    top_risks.sort(key=lambda r: r.get("points", 0), reverse=True)
+    top_risks = top_risks[:3]
+
+    return {
+        "period_from": period_from,
+        "period_to": period_to,
+        "days": days,
+        "branch_id": branch_id or full.get("branch_id"),
+        "health_score": scores.get("health_score"),
+        "health_label": scores.get("health_label"),
+        "fraud_risk_score": scores.get("fraud_risk_score"),
+        "fraud_risk_label": scores.get("fraud_risk_label"),
+        "top_risk_factors": top_risks,
+        "kpis": {
+            "revenue": kpis.get("revenue"),
+            "gross_margin_pct": kpis.get("gross_margin_pct"),
+            "void_rate_pct": kpis.get("void_rate_pct"),
+            "discount_rate_pct": kpis.get("discount_rate_pct"),
+            "dso_days": kpis.get("dso_days"),
+            "dpo_days": kpis.get("dpo_days"),
+            "inventory_turnover": kpis.get("inventory_turnover"),
+            "total_txns": kpis.get("total_txns"),
+            "voided_count": kpis.get("voided_count"),
+            "trend": kpis.get("trend"),
+        },
+        "computed_at": full.get("computed_at"),
+    }
+
+
 # ── Section helpers ────────────────────────────────────────────────────────
 
 async def _compute_security(period_from: str, period_to: str) -> dict:

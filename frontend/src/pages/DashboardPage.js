@@ -26,6 +26,7 @@ import SalesTrendsWidget from '../components/dashboard/SalesTrendsWidget';
 import BranchComparisonWidget from '../components/dashboard/BranchComparisonWidget';
 import AccountsPayableWidget from '../components/dashboard/AccountsPayableWidget';
 import InternalProfitWidget from '../components/dashboard/InternalProfitWidget';
+import AuditPulseWidget from '../components/dashboard/AuditPulseWidget';
 
 const LAYOUT_KEY = 'agribooks_dashboard_layout';
 
@@ -35,14 +36,14 @@ const MIN_H_MAP = {
   'pending-reviews': 4, branches: 7, payables: 4, alerts: 4,
   'top-revenue': 4, 'internal-profit': 6, 'cash-position': 5,
   'ar-overview': 5, 'credits-today': 5, 'ar-payments': 5,
-  'top-products': 4, 'recent-sales': 4,
+  'top-products': 4, 'recent-sales': 4, 'audit-pulse': 7,
 };
 const MIN_W_MAP = {
   kpis: 6, 'sales-trends': 4, ap: 3, 'branch-comparison': 3,
   'pending-reviews': 4, branches: 6, payables: 3, alerts: 3,
   'top-revenue': 3, 'internal-profit': 4, 'cash-position': 3,
   'ar-overview': 4, 'credits-today': 3, 'ar-payments': 3,
-  'top-products': 3, 'recent-sales': 3,
+  'top-products': 3, 'recent-sales': 3, 'audit-pulse': 3,
 };
 
 // Validates a saved layout — resets to defaults if any widget is smaller than minH
@@ -157,25 +158,27 @@ const OWNER_DEFAULT_LAYOUT = {
     { i: 'kpis', x: 0, y: 0, w: 12, h: 3, static: true, minH: 3, minW: 6 },
     { i: 'sales-trends', x: 0, y: 3, w: 8, h: 8, minH: 5, minW: 4 },
     { i: 'ap', x: 8, y: 3, w: 4, h: 8, minH: 5, minW: 3 },
-    { i: 'branch-comparison', x: 0, y: 11, w: 6, h: 8, minH: 5, minW: 3 },
-    { i: 'pending-reviews', x: 6, y: 11, w: 6, h: 8, minH: 4, minW: 4 },
-    { i: 'branches', x: 0, y: 19, w: 12, h: 9, static: true, minH: 7, minW: 6 },
-    { i: 'payables', x: 0, y: 28, w: 4, h: 7, minH: 4, minW: 3 },
-    { i: 'alerts', x: 4, y: 28, w: 4, h: 7, minH: 4, minW: 3 },
-    { i: 'top-revenue', x: 8, y: 28, w: 4, h: 7, minH: 4, minW: 3 },
-    { i: 'internal-profit', x: 0, y: 35, w: 6, h: 10, minH: 6, minW: 4 },
+    { i: 'audit-pulse', x: 0, y: 11, w: 4, h: 9, minH: 7, minW: 3 },
+    { i: 'branch-comparison', x: 4, y: 11, w: 4, h: 9, minH: 5, minW: 3 },
+    { i: 'pending-reviews', x: 8, y: 11, w: 4, h: 9, minH: 4, minW: 4 },
+    { i: 'branches', x: 0, y: 20, w: 12, h: 9, static: true, minH: 7, minW: 6 },
+    { i: 'payables', x: 0, y: 29, w: 4, h: 7, minH: 4, minW: 3 },
+    { i: 'alerts', x: 4, y: 29, w: 4, h: 7, minH: 4, minW: 3 },
+    { i: 'top-revenue', x: 8, y: 29, w: 4, h: 7, minH: 4, minW: 3 },
+    { i: 'internal-profit', x: 0, y: 36, w: 6, h: 10, minH: 6, minW: 4 },
   ],
   md: [
     { i: 'kpis', x: 0, y: 0, w: 10, h: 3, static: true, minH: 3, minW: 6 },
     { i: 'sales-trends', x: 0, y: 3, w: 10, h: 8, minH: 5, minW: 4 },
-    { i: 'ap', x: 0, y: 11, w: 5, h: 8, minH: 5, minW: 3 },
-    { i: 'branch-comparison', x: 5, y: 11, w: 5, h: 8, minH: 5, minW: 3 },
-    { i: 'pending-reviews', x: 0, y: 19, w: 10, h: 6, minH: 4, minW: 4 },
-    { i: 'branches', x: 0, y: 25, w: 10, h: 12, static: true, minH: 7, minW: 6 },
-    { i: 'payables', x: 0, y: 37, w: 5, h: 7, minH: 4, minW: 3 },
-    { i: 'alerts', x: 5, y: 37, w: 5, h: 7, minH: 4, minW: 3 },
-    { i: 'top-revenue', x: 0, y: 44, w: 10, h: 6, minH: 4, minW: 3 },
-    { i: 'internal-profit', x: 0, y: 50, w: 10, h: 10, minH: 6, minW: 4 },
+    { i: 'audit-pulse', x: 0, y: 11, w: 5, h: 9, minH: 7, minW: 3 },
+    { i: 'ap', x: 5, y: 11, w: 5, h: 9, minH: 5, minW: 3 },
+    { i: 'branch-comparison', x: 0, y: 20, w: 5, h: 8, minH: 5, minW: 3 },
+    { i: 'pending-reviews', x: 5, y: 20, w: 5, h: 8, minH: 4, minW: 4 },
+    { i: 'branches', x: 0, y: 28, w: 10, h: 12, static: true, minH: 7, minW: 6 },
+    { i: 'payables', x: 0, y: 40, w: 5, h: 7, minH: 4, minW: 3 },
+    { i: 'alerts', x: 5, y: 40, w: 5, h: 7, minH: 4, minW: 3 },
+    { i: 'top-revenue', x: 0, y: 47, w: 10, h: 6, minH: 4, minW: 3 },
+    { i: 'internal-profit', x: 0, y: 53, w: 10, h: 10, minH: 6, minW: 4 },
   ],
 };
 
@@ -186,25 +189,27 @@ const BRANCH_DEFAULT_LAYOUT = {
     { i: 'cash-position', x: 8, y: 3, w: 4, h: 8, minH: 5, minW: 3 },
     { i: 'ar-overview', x: 0, y: 11, w: 8, h: 7, minH: 5, minW: 4 },
     { i: 'ap', x: 8, y: 11, w: 4, h: 7, minH: 5, minW: 3 },
-    { i: 'pending-reviews', x: 0, y: 18, w: 12, h: 5, minH: 4, minW: 4 },
-    { i: 'credits-today', x: 0, y: 23, w: 6, h: 7, minH: 5, minW: 3 },
-    { i: 'ar-payments', x: 6, y: 23, w: 6, h: 7, minH: 5, minW: 3 },
-    { i: 'payables', x: 0, y: 30, w: 4, h: 7, minH: 4, minW: 3 },
-    { i: 'top-products', x: 4, y: 30, w: 4, h: 7, minH: 4, minW: 3 },
-    { i: 'recent-sales', x: 8, y: 30, w: 4, h: 7, minH: 4, minW: 3 },
+    { i: 'audit-pulse', x: 0, y: 18, w: 4, h: 9, minH: 7, minW: 3 },
+    { i: 'pending-reviews', x: 4, y: 18, w: 8, h: 9, minH: 4, minW: 4 },
+    { i: 'credits-today', x: 0, y: 27, w: 6, h: 7, minH: 5, minW: 3 },
+    { i: 'ar-payments', x: 6, y: 27, w: 6, h: 7, minH: 5, minW: 3 },
+    { i: 'payables', x: 0, y: 34, w: 4, h: 7, minH: 4, minW: 3 },
+    { i: 'top-products', x: 4, y: 34, w: 4, h: 7, minH: 4, minW: 3 },
+    { i: 'recent-sales', x: 8, y: 34, w: 4, h: 7, minH: 4, minW: 3 },
   ],
   md: [
     { i: 'kpis', x: 0, y: 0, w: 10, h: 4, static: true, minH: 3, minW: 6 },
     { i: 'sales-trends', x: 0, y: 4, w: 10, h: 8, minH: 5, minW: 4 },
     { i: 'cash-position', x: 0, y: 12, w: 5, h: 7, minH: 5, minW: 3 },
     { i: 'ap', x: 5, y: 12, w: 5, h: 7, minH: 5, minW: 3 },
-    { i: 'ar-overview', x: 0, y: 19, w: 10, h: 7, minH: 5, minW: 4 },
-    { i: 'pending-reviews', x: 0, y: 26, w: 10, h: 5, minH: 4, minW: 4 },
-    { i: 'credits-today', x: 0, y: 31, w: 5, h: 7, minH: 5, minW: 3 },
-    { i: 'ar-payments', x: 5, y: 31, w: 5, h: 7, minH: 5, minW: 3 },
-    { i: 'payables', x: 0, y: 38, w: 5, h: 7, minH: 4, minW: 3 },
-    { i: 'top-products', x: 5, y: 38, w: 5, h: 7, minH: 4, minW: 3 },
-    { i: 'recent-sales', x: 0, y: 45, w: 10, h: 6, minH: 4, minW: 3 },
+    { i: 'audit-pulse', x: 0, y: 19, w: 5, h: 9, minH: 7, minW: 3 },
+    { i: 'ar-overview', x: 5, y: 19, w: 5, h: 9, minH: 5, minW: 4 },
+    { i: 'pending-reviews', x: 0, y: 28, w: 10, h: 5, minH: 4, minW: 4 },
+    { i: 'credits-today', x: 0, y: 33, w: 5, h: 7, minH: 5, minW: 3 },
+    { i: 'ar-payments', x: 5, y: 33, w: 5, h: 7, minH: 5, minW: 3 },
+    { i: 'payables', x: 0, y: 40, w: 5, h: 7, minH: 4, minW: 3 },
+    { i: 'top-products', x: 5, y: 40, w: 5, h: 7, minH: 4, minW: 3 },
+    { i: 'recent-sales', x: 0, y: 47, w: 10, h: 6, minH: 4, minW: 3 },
   ],
 };
 
@@ -433,6 +438,7 @@ export default function DashboardPage() {
         </Card>
       ),
       'internal-profit': <InternalProfitWidget />,
+      'audit-pulse': <AuditPulseWidget branchId={null} />,
     };
 
     return (
@@ -557,6 +563,7 @@ export default function DashboardPage() {
       </Card>
     ),
     'ap': <AccountsPayableWidget branchId={selectedBranchId} />,
+    'audit-pulse': <AuditPulseWidget branchId={selectedBranchId !== 'all' ? selectedBranchId : null} />,
     'pending-reviews': (
       <Card className="border-slate-200 h-full">
         <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold flex items-center gap-2"><FileCheck size={14} className="text-amber-600" /> Receipts Awaiting Review</CardTitle></CardHeader>

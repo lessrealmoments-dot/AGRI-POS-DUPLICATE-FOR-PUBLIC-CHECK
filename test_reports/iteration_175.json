@@ -1,0 +1,36 @@
+{
+  "summary": "Backend-only testing for the NEW GET /api/audit/pulse endpoint (Audit Pulse dashboard widget). Created /app/backend/tests/test_audit_pulse.py with 9 tests covering auth, payload shape, score ranges/labels, top_risk_factors rules, days={7,30,90} window math, branch_id scoping, and a sanity cross-check that pulse.health_score / pulse.fraud_risk_score / pulse.top_risk_factors match /api/audit/compute for the same period+branch. All 9 new tests PASS. Regression: all 38 pre-existing audit tests (test_audit_deep_analysis_phase1.py + test_audit_center_93.py + test_audit_center_clickable_96.py) still PASS — /api/audit/compute is unchanged.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_audit_pulse.py",
+    "/app/test_reports/pytest/pytest_audit_pulse.xml",
+    "/app/test_reports/pytest/pytest_audit_regression_175.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "/app/backend/routes/audit.py is 1980 lines (grew by ~76 lines with /pulse) — still exceeds the 700-line guideline carried over from iter 174. Splitting into routes/audit/{sessions,compute,pulse,scores}.py is now more urgent.",
+    "audit_pulse() accepts days as unbounded int and coerces with max(1, days) but has no upper bound — a user passing ?days=100000 will force compute_audit() to scan a huge window. Suggest clamping to e.g. min(days, 365).",
+    "days=0 becomes a 1-day window due to max(1, days) — OK, but days<0 also silently becomes 1. Consider returning 422 for days < 1 for explicit API contract."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_audit_pulse.py"
+  ],
+  "success_rate": {
+    "backend": "100% (9/9 new + 38/38 regression = 47/47)",
+    "frontend": "not tested (backend-only request)"
+  },
+  "test_credentials": "Regression org admin: test_org_admin@regression.local / RegressionPass!2026 (auto-seeded via /app/backend/tests/_org_test_helpers.py). Branches auto-picked from GET /api/branches.",
+  "seed_data_creation": "None. Pulse endpoint is read-only; no fixtures or side-effects created.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Pulse endpoint fully validated end-to-end. Test file: /app/backend/tests/test_audit_pulse.py. Verified: (1) 401/403 without bearer; (2) default days=30 produces period_from = today-29d, period_to = today (UTC); (3) days=7 and days=90 also produce correct inclusive windows; (4) branch_id param flows through to response.branch_id; (5) top_risk_factors always <=3, sorted by points DESC, only includes points>0 with {factor,value,points,max}; (6) pulse.health_score == compute.scores.health_score and pulse.fraud_risk_score == compute.scores.fraud_risk_score (same partial-audit, same window, same branch). Regression: 38/38 existing audit tests still pass. To rerun: REACT_APP_BACKEND_URL=$(grep REACT_APP_BACKEND_URL /app/frontend/.env | cut -d= -f2) pytest backend/tests/test_audit_pulse.py backend/tests/test_audit_deep_analysis_phase1.py backend/tests/test_audit_center_93.py backend/tests/test_audit_center_clickable_96.py -v",
+  "rca of the issue": "N/A — no defects found. The /pulse wrapper is a correct projection of compute_audit(): score fields are passed through verbatim, top_risk_factors is sorted+filtered+capped exactly as specified, and the UTC date-window math (today - (days-1) .. today) is inclusive and matches what compute_audit() computes for the same inputs."
+}
