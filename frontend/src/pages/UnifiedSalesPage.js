@@ -33,6 +33,7 @@ import { invalidateBalanceCache } from '../components/CustomerBalanceBadge';
 import PrintEngine from '../lib/PrintEngine';
 import GlobalPriceBadge from '../components/GlobalPriceBadge';
 import PriceMatchModal from '../components/PriceMatchModal';
+import LateEncodeDialog from '../components/LateEncodeDialog';
 
 // ── Insufficient Stock Override Modal ────────────────────────────────────────
 function InsufficientStockModal({ open, insufficientItems, onOverride, onCancel, onGoPO }) {
@@ -203,6 +204,7 @@ export default function UnifiedSalesPage() {
 
   // ── JIT repack retail PIN modal ──────────────────────────────────────────
   const [jitPinModal, setJitPinModal] = useState({ open: false, items: [], saleData: null });
+  const [lateEncodeDialog, setLateEncodeDialog] = useState({ open: false, saleData: null, signatureData: null });
   const [jitPin, setJitPin] = useState('');
 
   // ── Pre-invoice signature (credit/partial) ───────────────────────────────
@@ -1700,6 +1702,14 @@ export default function UnifiedSalesPage() {
         // JIT retail PIN required — show Owner PIN modal then retry
         if (e?.response?.status === 422 && detail?.type === 'jit_retail_pin_required') {
           setJitPinModal({ open: true, items: detail.items || [], saleData, signatureData });
+          setSaving(false);
+          return;
+        }
+        // Closed-day: offer Late-Encode flow for credit / partial sales
+        if (e?.response?.status === 403 && typeof detail === 'string'
+            && detail.includes('already closed')
+            && ['credit', 'partial'].includes((saleData.payment_type || '').toLowerCase())) {
+          setLateEncodeDialog({ open: true, saleData, signatureData });
           setSaving(false);
           return;
         }
@@ -3918,6 +3928,39 @@ export default function UnifiedSalesPage() {
           setPriceMatchModal(false);
           // Re-trigger checkout — with priceMatchApproved set the modal is skipped.
           setTimeout(() => openCheckout(), 30);
+        }}
+      />
+
+      {/* Late-Encode for Closed Days — credit/partial only */}
+      <LateEncodeDialog
+        open={lateEncodeDialog.open}
+        orderDate={lateEncodeDialog.saleData?.order_date}
+        paymentType={lateEncodeDialog.saleData?.payment_type}
+        onClose={() => setLateEncodeDialog({ open: false, saleData: null, signatureData: null })}
+        onConfirm={async ({ reason, pin }) => {
+          const retryData = {
+            ...lateEncodeDialog.saleData,
+            late_encode: { reason, pin },
+          };
+          try {
+            const res = await api.post('/unified-sale', retryData);
+            const invoiceNum = res.data.invoice_number || res.data.sale_number;
+            invalidateBalanceCache();
+            toast.success(`⚠ Late-encoded for ${retryData.order_date} — Invoice ${invoiceNum}`);
+            setRefPrompt({
+              open: true, number: invoiceNum,
+              title: retryData.customer_name || 'Walk-in',
+              invoiceData: { ...retryData, ...res.data, invoice_number: invoiceNum, late_encoded: true },
+            });
+            clearCart();
+            setCheckoutDialog(false);
+            setPendingCreditSale(null);
+            setLateEncodeDialog({ open: false, saleData: null, signatureData: null });
+          } catch (err) {
+            const msg = err?.response?.data?.detail || 'Late-encode failed';
+            toast.error(msg);
+            setLateEncodeDialog({ open: false, saleData: null, signatureData: null });
+          }
         }}
       />
 

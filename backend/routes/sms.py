@@ -286,6 +286,114 @@ DEFAULT_TEMPLATES = [
         "trigger": "scheduled",
         "active": True,
     },
+    # ── Close-Day Reminders & Z-Report Finalized ─────────────────────────────
+    {
+        "key": "close_catchup_3pm",
+        "name": "Close Day — Mid-Afternoon Catch-Up (3 PM)",
+        "body": (
+            "AgriBooks Mid-Day Snapshot\n<branch_name> - <date>\n\n"
+            "Encoded so far: <sales_count> sales (P<sales_total>), "
+            "<credit_count> credits (P<credit_total>), <expense_count> expenses.\n"
+            "Cash expected: P<cash_expected>.\n\n"
+            "Any credit slips or receipts still pending? Encode before close. "
+            "You have <hours_to_close>hrs left."
+        ),
+        "placeholders": ["branch_name", "date", "sales_count", "sales_total",
+                         "credit_count", "credit_total", "expense_count",
+                         "cash_expected", "hours_to_close"],
+        "trigger": "scheduled", "active": True,
+    },
+    {
+        "key": "close_precheck",
+        "name": "Close Day — Pre-Close Ping",
+        "body": (
+            "AgriBooks: Time to close <branch_name>.\n"
+            "Today (<date>): <sales_count> sales, P<cash_expected> cash expected, "
+            "<pending_credits> pending credits. "
+            "Open Close Wizard when ready."
+        ),
+        "placeholders": ["branch_name", "date", "sales_count", "cash_expected",
+                         "pending_credits"],
+        "trigger": "scheduled", "active": True,
+    },
+    {
+        "key": "close_late_notice",
+        "name": "Close Day — Late Notice",
+        "body": (
+            "AgriBooks: <branch_name> close is overdue by ~<hours_overdue>h. "
+            "Please finalize <date>. "
+            "Tomorrow's sales will be blocked until yesterday closes."
+        ),
+        "placeholders": ["branch_name", "date", "hours_overdue"],
+        "trigger": "scheduled", "active": True,
+    },
+    {
+        "key": "close_status_snapshot",
+        "name": "Close Day — Status Snapshot",
+        "body": (
+            "Status: <branch_name> still OPEN for <date>.\n"
+            "Sales: <sales_count> (P<sales_total>)\n"
+            "Credits: <credit_count> (P<credit_total>)\n"
+            "Expenses: <expense_count> (P<expense_total>)\n"
+            "Cash expected: P<cash_expected>\n"
+            "Pending credits: <pending_credits>"
+        ),
+        "placeholders": ["branch_name", "date", "sales_count", "sales_total",
+                         "credit_count", "credit_total", "expense_count",
+                         "expense_total", "cash_expected", "pending_credits"],
+        "trigger": "scheduled", "active": True,
+    },
+    {
+        "key": "close_escalation",
+        "name": "Close Day — Hard Escalation",
+        "body": (
+            "URGENT: <branch_name> has NOT closed <date>. "
+            "Tomorrow's sales will be BLOCKED until this resolves. "
+            "Please close immediately."
+        ),
+        "placeholders": ["branch_name", "date"],
+        "trigger": "scheduled", "active": True,
+    },
+    {
+        "key": "close_overdue_next_day",
+        "name": "Close Day — Overdue Next Morning",
+        "body": (
+            "<branch_name> did NOT close <date>. Today's sales are currently BLOCKED. "
+            "Please finalize <date> before opening for business."
+        ),
+        "placeholders": ["branch_name", "date"],
+        "trigger": "scheduled", "active": True,
+    },
+    {
+        "key": "close_overdue_multi_day",
+        "name": "Close Day — Multi-Day Overdue",
+        "body": (
+            "URGENT: <branch_name> is <days_overdue> days overdue on closing "
+            "<date>. Sales BLOCKED until resolved. Needs owner attention."
+        ),
+        "placeholders": ["branch_name", "date", "days_overdue"],
+        "trigger": "scheduled", "active": True,
+    },
+    {
+        "key": "zreport_finalized",
+        "name": "Z-Report Finalized",
+        "body": (
+            "<branch_name> closed <date> at <closed_time>.\n"
+            "Sales: P<sales_total> (<sales_count> txns)\n"
+            "Cash: P<cash_total> / Credit: P<credit_total> / Digital: P<digital_total>\n"
+            "AR encoded: <credit_count> (P<credit_total>)\n"
+            "Expenses: <expense_count> (P<expense_total>)\n"
+            "Cash drawer: P<cash_actual> vs P<cash_expected> (<over_short>)\n"
+            "<late_encode_note>"
+            "Closed by: <closer_name>"
+        ),
+        "placeholders": ["branch_name", "date", "closed_time", "sales_total",
+                         "sales_count", "cash_total", "credit_total",
+                         "digital_total", "credit_count", "expense_count",
+                         "expense_total", "cash_actual", "cash_expected",
+                         "over_short", "late_encode_note", "closer_name"],
+        "trigger": "auto", "active": True,
+    },
 ]
 
 

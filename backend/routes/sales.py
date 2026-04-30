@@ -33,19 +33,91 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
     # Ensure org context for super admin
     await ensure_org_context(branch_id=branch_id)
 
-    # ── Closed-day guard ─────────────────────────────────────────────────────
+    # ── Closed-day guard (with Late-Encode escape valve) ─────────────────────
     # Block sales encoding on days that have already been formally closed.
     # A closed day's Z-report is final — new sales there would be invisible.
+    # EXCEPT: credit / partial sales can be late-encoded with manager PIN +
+    # reason — those flow into the NEXT open day's Z-report as a clearly-
+    # tagged carryover line (the closed Z-report itself stays untouched).
     order_date = data.get("order_date", now_iso()[:10])
+    late_encode = data.get("late_encode") or {}
     closed_day = await db.daily_closings.find_one(
         {"branch_id": branch_id, "date": order_date, "status": "closed"},
         {"_id": 0, "date": 1}
     )
     if closed_day:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Cannot encode sales for {order_date} — this day is already closed. Sales on closed days won't appear in Z-reports."
-        )
+        # Determine payment type early so we can check if late-encode applies
+        _ptype_check = (data.get("payment_type") or "").lower()
+        _fsrc_check = (data.get("fund_source") or "").lower()
+        is_credit_or_partial = _ptype_check in ("credit", "partial")
+
+        if not late_encode:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Cannot encode sales for {order_date} — this day is already closed. For forgotten credit sales, use the 'Encode for past date' flow."
+            )
+
+        # Late-encode path — validate hard constraints
+        if not is_credit_or_partial or _fsrc_check == "digital":
+            raise HTTPException(
+                status_code=403,
+                detail="Late-encode is only permitted for credit / partial sales. Cash and digital transactions cannot be backdated to a closed day."
+            )
+
+        # 7-day backdate cap
+        from datetime import date as _date
+        try:
+            _order_d = datetime.strptime(order_date, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid order_date")
+        days_back = (_date.today() - _order_d).days
+        if days_back > 7:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Late-encode limited to the last 7 days ({days_back} days back requested). For older entries, use a journal adjustment with your accountant."
+            )
+        if days_back < 0:
+            raise HTTPException(status_code=400, detail="Cannot late-encode a future date.")
+
+        # Cross-month block — protects VAT filings
+        if _order_d.month != _date.today().month or _order_d.year != _date.today().year:
+            raise HTTPException(
+                status_code=403,
+                detail="Late-encode cannot cross a month boundary (protects VAT filing integrity). Use a journal adjustment instead."
+            )
+
+        # Reason required, min 10 chars
+        le_reason = (late_encode.get("reason") or "").strip()
+        if len(le_reason) < 10:
+            raise HTTPException(status_code=400, detail="Late-encode reason must be at least 10 characters.")
+
+        # Manager / admin PIN required
+        le_pin = str(late_encode.get("pin", ""))
+        if not le_pin:
+            raise HTTPException(status_code=400, detail="Manager PIN is required for late-encode.")
+        from routes.verify import verify_pin_for_action
+        le_verifier = await verify_pin_for_action(le_pin, "transaction_verify", branch_id=branch_id)
+        if not le_verifier:
+            raise HTTPException(status_code=403, detail="Invalid PIN — manager or admin required for late-encode.")
+
+        # Daily cap — max 5 late-encodes per branch per day
+        today_str = _date.today().strftime("%Y-%m-%d")
+        todays_count = await db.invoices.count_documents({
+            "branch_id": branch_id, "late_encoded": True,
+            "late_encoded_at": {"$gte": f"{today_str}T00:00:00", "$lt": f"{today_str}T23:59:59"},
+        })
+        if todays_count >= 5:
+            raise HTTPException(
+                status_code=403,
+                detail="Daily late-encode limit reached (5/day). If this is routine, restructure your workflow — the system is telling you something."
+            )
+
+        # Stash context for downstream tagging
+        data["_late_encode_ctx"] = {
+            "reason": le_reason,
+            "verifier": le_verifier,
+            "days_back": days_back,
+        }
 
     # ── Floor-date guard ──────────────────────────────────────────────────────
     # Block sales on dates before the system's first operational day for this
@@ -692,6 +764,37 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
             elif fund_source == "cashier":
                 await update_cashier_wallet(branch_id, amount_paid, f"Sale payment {inv_number}")
     
+    # Tag late-encoded invoices so UI / audits / Z-report carryover can filter.
+    _le_ctx = data.get("_late_encode_ctx")
+    if _le_ctx:
+        invoice["late_encoded"] = True
+        invoice["late_encoded_at"] = now_iso()
+        invoice["late_encode_reason"] = _le_ctx["reason"]
+        invoice["late_encoded_by"] = user.get("id")
+        invoice["late_encoded_by_name"] = user.get("full_name") or user.get("username")
+        invoice["late_encode_verifier_id"] = _le_ctx["verifier"].get("verifier_id", "")
+        invoice["late_encode_verifier_name"] = _le_ctx["verifier"].get("verifier_name", "")
+        invoice["late_encode_days_back"] = _le_ctx["days_back"]
+        # Also write a dedicated audit-trail row
+        await db.late_encode_log.insert_one({
+            "id": new_id(),
+            "branch_id": branch_id,
+            "invoice_id": invoice["id"],
+            "invoice_number": invoice.get("invoice_number"),
+            "original_date": order_date,
+            "encoded_at": invoice["late_encoded_at"],
+            "grand_total": invoice.get("grand_total"),
+            "payment_type": invoice.get("payment_type"),
+            "customer_id": invoice.get("customer_id"),
+            "customer_name": invoice.get("customer_name"),
+            "reason": _le_ctx["reason"],
+            "encoded_by": user.get("id"),
+            "encoded_by_name": user.get("full_name") or user.get("username"),
+            "verifier_id": _le_ctx["verifier"].get("verifier_id", ""),
+            "verifier_name": _le_ctx["verifier"].get("verifier_name", ""),
+            "days_back": _le_ctx["days_back"],
+        })
+
     # Race-safe insert: if a parallel retry already inserted (idempotency_key
     # unique index trips), return the previously-saved invoice instead of 500.
     try:
@@ -1063,3 +1166,48 @@ async def get_pending_receipt_uploads(user=Depends(get_current_user)):
         {"_id": 0, "id": 1, "invoice_number": 1, "grand_total": 1, "fund_source": 1, "digital_platform": 1}
     ).sort("created_at", -1).to_list(10)
     return invoices
+
+
+
+@router.get("/sales/late-encoded-since-close")
+async def late_encoded_since_close(
+    branch_id: str,
+    user=Depends(get_current_user),
+):
+    """
+    List every late-encoded invoice that has been created since the last close
+    for this branch. Powers the Close Wizard's 'Late-Encoded Credits' carryover
+    section — these invoices are dated to prior closed days but appear on the
+    CURRENT open Z-report for transparency.
+    """
+    if not branch_id:
+        raise HTTPException(status_code=400, detail="branch_id is required")
+
+    last_close = await db.daily_closings.find_one(
+        {"branch_id": branch_id, "status": "closed"},
+        {"_id": 0, "closed_at": 1, "date": 1},
+        sort=[("closed_at", -1)],
+    )
+    cutoff = (last_close or {}).get("closed_at")
+
+    q = {"branch_id": branch_id, "late_encoded": True, "status": {"$ne": "voided"}}
+    if cutoff:
+        q["late_encoded_at"] = {"$gt": cutoff}
+
+    rows = await db.invoices.find(
+        q,
+        {
+            "_id": 0, "id": 1, "invoice_number": 1, "order_date": 1,
+            "late_encoded_at": 1, "late_encode_reason": 1,
+            "late_encoded_by_name": 1, "late_encode_verifier_name": 1,
+            "late_encode_days_back": 1, "customer_name": 1, "payment_type": 1,
+            "grand_total": 1, "balance": 1,
+        },
+    ).sort("late_encoded_at", 1).to_list(200)
+
+    return {
+        "last_close_at": cutoff,
+        "entries": rows,
+        "count": len(rows),
+        "total_amount": round(sum(r.get("grand_total", 0) or 0 for r in rows), 2),
+    }

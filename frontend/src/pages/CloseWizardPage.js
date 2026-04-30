@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth, api } from '../contexts/AuthContext';
 import { formatPHP } from '../lib/utils';
@@ -1039,6 +1039,7 @@ export default function CloseWizardPage() {
           {/* ── STEP 2: Customer Credits ── */}
           {step === 2 && (
             <div className="space-y-3">
+              <LateEncodedCarryover branchId={currentBranch?.id} />
               <div className="flex items-center justify-between mb-1">
                 <p className="text-sm text-slate-500">Credit invoices with per-order breakdown and payment status.</p>
                 <Button size="sm" variant="outline" onClick={() => window.open('/sales-new', '_blank')}>
@@ -2479,6 +2480,73 @@ export default function CloseWizardPage() {
         onOpenChange={setStmtOpen}
         customer={stmtCustomer}
       />
+    </div>
+  );
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  LateEncodedCarryover
+//  Appears at the top of step 2 (Customer Credits) in the Close Wizard.
+//  Lists every late-encoded invoice created since the last close for the
+//  current branch — these are credits dated to prior closed days that now
+//  appear on TODAY's Z-report as a clearly-tagged carryover.
+// ─────────────────────────────────────────────────────────────────────────────
+function LateEncodedCarryover({ branchId }) {
+  const [data, setData] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!branchId) return;
+    let cancel = false;
+    setLoading(true);
+    api.get('/sales/late-encoded-since-close', { params: { branch_id: branchId } })
+      .then(res => { if (!cancel) setData(res.data); })
+      .catch(() => {})
+      .finally(() => { if (!cancel) setLoading(false); });
+    return () => { cancel = true; };
+  }, [branchId]);
+
+  if (loading || !data || data.count === 0) return null;
+
+  return (
+    <div className="rounded-lg border-2 border-amber-300 bg-amber-50 overflow-hidden" data-testid="late-encoded-carryover">
+      <div className="px-4 py-2.5 bg-amber-100 border-b border-amber-200 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-amber-700">⚠</span>
+          <p className="text-sm font-bold text-amber-900">
+            Late-Encoded Credits Since Last Close ({data.count})
+          </p>
+        </div>
+        <p className="text-sm font-mono font-bold text-amber-900">{formatPHP(data.total_amount)}</p>
+      </div>
+      <div className="px-4 py-2 text-[11px] text-amber-800 bg-amber-50 border-b border-amber-200">
+        These credits were posted after their original sale date's close. The original Z-reports stay sealed —
+        they are included in TODAY's Z-report as a separate carryover line.
+      </div>
+      <div className="divide-y divide-amber-100">
+        {data.entries.map((e, i) => (
+          <div key={e.id || i} className="px-4 py-2 flex items-start gap-3 text-xs">
+            <span className="inline-block px-1.5 py-0.5 rounded bg-amber-200 text-amber-900 text-[9px] font-bold uppercase tracking-wider shrink-0">LATE ENCODE</span>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-slate-800">{e.invoice_number}</span>
+                <span className="text-slate-500">· {e.customer_name || 'Walk-in'}</span>
+                <span className="text-[10px] text-amber-700">
+                  originally {e.order_date} ({e.late_encode_days_back}d back)
+                </span>
+              </div>
+              {e.late_encode_reason && (
+                <p className="text-[10px] text-slate-500 mt-0.5 italic">"{e.late_encode_reason}"</p>
+              )}
+              <p className="text-[9px] text-slate-400 mt-0.5">
+                by {e.late_encoded_by_name} · verified {e.late_encode_verifier_name}
+              </p>
+            </div>
+            <p className="font-mono font-bold text-amber-700 shrink-0">{formatPHP(e.grand_total || 0)}</p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

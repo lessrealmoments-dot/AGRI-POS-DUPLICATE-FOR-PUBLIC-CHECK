@@ -56,6 +56,7 @@ from routes.app_downloads import router as app_downloads_router
 from routes.crop_credits import router as crop_credits_router
 from routes.signatures import router as signatures_router
 from routes.overage_reserve import router as overage_reserve_router
+from routes.close_reminder import start_scheduler_on_startup as _start_close_reminder
 
 # =============================================================================
 # APP SETUP
@@ -65,6 +66,11 @@ app = FastAPI(
     description="Multi-branch Inventory, POS & Accounting System",
     version="3.0"
 )
+
+# Kick off the close-reminder background scheduler (fires once per minute and
+# dispatches SMS per branch based on close_time_h + stage schedule)
+_start_close_reminder(app)
+
 
 # ── Global exception handler: catch ALL unhandled errors with real messages ──
 from fastapi.requests import Request

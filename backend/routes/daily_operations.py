@@ -1402,6 +1402,15 @@ async def close_day(data: dict, user=Depends(get_current_user)):
         import logging
         logging.getLogger(__name__).error("Reserve hook failed for daily close: %s", _reserve_err)
 
+    # Z-Report Finalized SMS — fire-and-forget
+    try:
+        from routes.close_reminder import send_zreport_finalized
+        import asyncio as _asyncio
+        _asyncio.create_task(send_zreport_finalized(close_record, user=user))
+    except Exception as _zr_err:
+        import logging
+        logging.getLogger(__name__).error("Z-report SMS hook failed: %s", _zr_err)
+
     # Update cashier wallet to new float
     if wallet:
         await db.fund_wallets.update_one({"id": wallet["id"]}, {"$set": {"balance": cash_to_drawer}})
