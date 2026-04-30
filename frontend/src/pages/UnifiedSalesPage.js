@@ -32,6 +32,7 @@ import RequestSignatureDialog from '../components/RequestSignatureDialog';
 import { invalidateBalanceCache } from '../components/CustomerBalanceBadge';
 import PrintEngine from '../lib/PrintEngine';
 import GlobalPriceBadge from '../components/GlobalPriceBadge';
+import PriceMatchModal from '../components/PriceMatchModal';
 
 // ── Insufficient Stock Override Modal ────────────────────────────────────────
 function InsufficientStockModal({ open, insufficientItems, onOverride, onCancel, onGoPO }) {
@@ -346,6 +347,18 @@ export default function UnifiedSalesPage() {
   // Price save dialog
   const [priceSaveDialog, setPriceSaveDialog] = useState(false);
   const [pendingPriceChange, setPendingPriceChange] = useState(null);
+
+  // ── Price Match flow (replaces ad-hoc "save as global price" dialog) ──────
+  // When a cashier edits a line's price, the line is flagged with a yellow
+  // badge and `original_price`/`original_rate` is preserved. At checkout, if
+  // any line has `price !== original_price`, we open the PriceMatchModal to
+  // collect a reason + manager PIN. The data is then sent to /unified-sale
+  // which persists the new price to branch_prices and writes price_change_log.
+  const [priceMatchModal, setPriceMatchModal] = useState(false);
+  const [priceMatchSubmitting, setPriceMatchSubmitting] = useState(false);
+  const [priceMatchError, setPriceMatchError] = useState('');
+  // Approved payload, set after the modal is confirmed: { price_changes, pin }
+  const [priceMatchApproved, setPriceMatchApproved] = useState(null);
   
   // Checkout
   const [checkoutDialog, setCheckoutDialog] = useState(false);
@@ -967,6 +980,9 @@ export default function UnifiedSalesPage() {
     setCustEdits({ phone: '', address: '', shipping_address: '' });
     setCustEdited(false);
     setHeader(h => ({ ...h, shipping_address: '', location: '', mod: '', check_number: '', req_ship_date: '', notes: '', customer_po: '' }));
+    // Reset Price Match approval — next sale must re-authorize if it has price edits
+    setPriceMatchApproved(null);
+    setPriceMatchError('');
   };
 
   // Apply a scheme change: updates activeScheme and reprices all open cart/line items
@@ -1029,46 +1045,51 @@ export default function UnifiedSalesPage() {
     setLines(newLines);
   };
 
-  const triggerPriceSaveDialog = (productId, productName, oldPrice, newPrice) => {
-    if (!productId || newPrice === oldPrice || newPrice <= 0) return;
-    // Use activeScheme — this respects any override the user has applied this sale
-    const schemeName = schemes.find(s => s.key === activeScheme)?.name || activeScheme;
-    setPendingPriceChange({ product_id: productId, product_name: productName, old_price: oldPrice, new_price: newPrice, scheme_key: activeScheme, scheme_name: schemeName });
-    setPriceSaveDialog(true);
-  };
-
-  const dismissPriceSaveDialog = () => {
-    if (pendingPriceChange) {
-      // Update originals so dialog doesn't retrigger on next blur
-      setLines(lines.map(l => l.product_id === pendingPriceChange.product_id
-        ? { ...l, original_rate: pendingPriceChange.new_price } : l
-      ));
-      setCart(cart.map(c => c.product_id === pendingPriceChange.product_id
-        ? { ...c, original_price: pendingPriceChange.new_price } : c
-      ));
-    }
-    setPriceSaveDialog(false);
-    setPendingPriceChange(null);
-  };
-
-  const savePriceToScheme = async () => {
-    if (!pendingPriceChange) return;
-    try {
-      await api.put(`/products/${pendingPriceChange.product_id}/update-price`, {
-        scheme: pendingPriceChange.scheme_key,
-        price: pendingPriceChange.new_price,
+  // Compute price-changed lines from cart (Quick) and lines (Order).
+  // Returns: [{ product_id, product_name, old_price, new_price, scheme }]
+  const computePriceChanges = useCallback(() => {
+    const changes = [];
+    if (mode === 'quick') {
+      cart.forEach(c => {
+        const op = parseFloat(c.original_price);
+        const np = parseFloat(c.price);
+        if (op > 0 && np > 0 && Math.abs(np - op) > 0.001 && !c.is_repack) {
+          changes.push({
+            product_id: c.product_id,
+            product_name: c.product_name,
+            old_price: op,
+            new_price: np,
+            scheme: activeScheme,
+          });
+        }
       });
-      toast.success(`${pendingPriceChange.scheme_name} price updated to ₱${pendingPriceChange.new_price.toFixed(2)}`);
-    } catch (e) {
-      toast.error(e.response?.data?.detail || 'Failed to save price');
+    } else {
+      lines.forEach(l => {
+        if (!l.product_id) return;
+        const op = parseFloat(l.original_rate);
+        const np = parseFloat(l.rate);
+        if (op > 0 && np > 0 && Math.abs(np - op) > 0.001 && !l.is_repack) {
+          changes.push({
+            product_id: l.product_id,
+            product_name: l.product_name,
+            old_price: op,
+            new_price: np,
+            scheme: activeScheme,
+          });
+        }
+      });
     }
-    dismissPriceSaveDialog();
-  };
+    return changes;
+  }, [mode, cart, lines, activeScheme]);
 
-  const handleRateBlur = (line) => {
-    if (line.product_id && line.rate !== line.original_rate) {
-      triggerPriceSaveDialog(line.product_id, line.product_name, line.original_rate, line.rate);
-    }
+  // Legacy: kept as no-op so existing references compile. The new flow uses
+  // PriceMatchModal at checkout time instead of an ad-hoc save dialog.
+  const triggerPriceSaveDialog = () => {};
+  const dismissPriceSaveDialog = () => { setPriceSaveDialog(false); setPendingPriceChange(null); };
+  const savePriceToScheme = async () => { dismissPriceSaveDialog(); };
+
+  const handleRateBlur = () => {
+    /* no-op — Price Match flow runs at checkout (see openCheckout). */
   };
 
   // Order mode: Handle lines
@@ -1241,6 +1262,16 @@ export default function UnifiedSalesPage() {
     setAmountTendered(grandTotal);
     setPartialPayment(0);
     setReleaseMode('full');
+
+    // ── Price Match: if any line has an edited price, capture reason+PIN
+    // BEFORE checkout. We hold the result in priceMatchApproved and feed it
+    // into processSale as `price_changes` + `price_match_pin`.
+    const pendingPriceChanges = computePriceChanges();
+    if (pendingPriceChanges.length > 0 && !priceMatchApproved) {
+      setPriceMatchError('');
+      setPriceMatchModal(true);
+      return;
+    }
 
     // If customer info was edited, ask whether to save first
     if (selectedCustomer && custEdited) {
@@ -1519,6 +1550,12 @@ export default function UnifiedSalesPage() {
       created_at: new Date().toISOString(),
       jit_retail_prices: jitRetailPrices,
       jit_owner_pin: jitOverridePin || undefined,
+      // Price Match — permanent branch price changes triggered from the cart.
+      // Backend persists to branch_prices and writes to price_change_log.
+      price_changes: priceMatchApproved?.price_changes,
+      price_match_pin: priceMatchApproved?.pin,
+      price_scheme: activeScheme,
+      branch_name: currentBranch?.name || '',
       // Pre-invoice signature (when captured via the new flow)
       signature: signatureData || undefined,
       signature_session_id: signatureData?.session_id || undefined,
@@ -2341,22 +2378,27 @@ export default function UnifiedSalesPage() {
                               type="number"
                               className={`w-24 h-7 text-sm text-right px-2 border rounded focus:outline-none focus:ring-1 focus:ring-[#1A4D2E]/30 ${
                                 item.price <= 0 ? 'border-amber-400 bg-amber-50 text-amber-700'
+                                : !item.is_repack && parseFloat(item.original_price) > 0 && Math.abs(item.price - item.original_price) > 0.001 ? 'border-amber-500 bg-amber-50 text-amber-800 font-semibold'
                                 : canViewCost && (item.effective_capital || item.cost_price) > 0 && item.price < (item.effective_capital || item.cost_price) ? 'border-red-300 bg-red-50 text-red-600'
                                 : 'border-slate-200'
                               }`}
                               value={item.price}
                               onChange={e => updateCartPrice(item.product_id, e.target.value)}
-                              onBlur={() => {
-                                const ci = cart.find(c => c.product_id === item.product_id);
-                                if (ci) triggerPriceSaveDialog(ci.product_id, ci.product_name, ci.original_price ?? ci.price, ci.price);
-                              }}
                               onFocus={e => e.target.select()}
                               min="0" step="0.01"
                               readOnly={!canDiscount}
-                              title={!canDiscount ? 'No permission to change prices' : ''}
+                              title={!canDiscount ? 'No permission to change prices' : 'Edit to trigger Price Match (manager PIN required at checkout)'}
                             />
                             <span className="text-xs font-semibold text-[#1A4D2E] text-right flex-1">{formatPHP(item.total)}</span>
                           </div>
+                          {!item.is_repack && parseFloat(item.original_price) > 0 && Math.abs(item.price - item.original_price) > 0.001 && (
+                            <p className="text-[10px] text-amber-700 flex items-center gap-1 font-medium" data-testid={`price-match-flag-${item.product_id}`}>
+                              <AlertTriangle size={9}/> Price changed
+                              <span className="line-through opacity-70">{formatPHP(item.original_price)}</span>
+                              <span>→ {formatPHP(item.price)}</span>
+                              <span className="text-slate-500 italic">(manager PIN required at checkout)</span>
+                            </p>
+                          )}
                           {item.price <= 0 && (
                             <p className="text-[10px] text-amber-600 flex items-center gap-1"><AlertTriangle size={9}/> Set price before checkout</p>
                           )}
@@ -2531,15 +2573,24 @@ export default function UnifiedSalesPage() {
                                 type="number"
                                 className={`h-8 text-right w-24 ${
                                   line.product_id && line.rate <= 0 ? 'border-amber-400 bg-amber-50'
+                                  : line.product_id && !line.is_repack && parseFloat(line.original_rate) > 0 && Math.abs(line.rate - line.original_rate) > 0.001 ? 'border-amber-500 bg-amber-50 text-amber-800 font-semibold'
                                   : canViewCost && line.product_id && (line.effective_capital || line.cost_price) > 0 && line.rate > 0 && line.rate < (line.effective_capital || line.cost_price) ? 'border-red-300 bg-red-50 text-red-700'
                                   : ''
                                 }`}
                                 value={line.rate}
                                 onChange={e => updateLine(i, 'rate', parseFloat(e.target.value) || 0)}
-                                onBlur={() => handleRateBlur(lines[i])}
                                 readOnly={!canDiscount}
-                                title={!canDiscount ? 'No permission to change prices' : ''}
+                                title={!canDiscount ? 'No permission to change prices' : 'Edit to trigger Price Match (manager PIN required at checkout)'}
                               />
+                              {/* Price Match flag for changed rate */}
+                              {line.product_id && !line.is_repack && parseFloat(line.original_rate) > 0 && Math.abs(line.rate - line.original_rate) > 0.001 && (
+                                <p className="text-[10px] text-amber-700 flex items-center gap-1 font-medium mt-0.5"
+                                  data-testid={`order-price-match-flag-${line.product_id}`}>
+                                  <AlertTriangle size={9}/>
+                                  <span className="line-through opacity-70">{formatPHP(line.original_rate)}</span>
+                                  <span>→ {formatPHP(line.rate)}</span>
+                                </p>
+                              )}
                               {/* Capital reference — shown when a product is selected */}
                               {canViewCost && line.product_id && (line.moving_average_cost > 0 || line.last_purchase_cost > 0) && (
                                 <div className="flex flex-col gap-0.5 mt-0.5">
@@ -3205,42 +3256,7 @@ export default function UnifiedSalesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Price Save Dialog */}
-      <Dialog open={priceSaveDialog} onOpenChange={(o) => { if (!o) dismissPriceSaveDialog(); }}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle style={{ fontFamily: 'Manrope' }}>Save Price Change?</DialogTitle>
-            <DialogDescription>Choose whether to update the price scheme permanently</DialogDescription>
-          </DialogHeader>
-          {pendingPriceChange && (
-            <div className="space-y-4">
-              <div className="bg-slate-50 rounded-lg p-3 space-y-1">
-                <p className="font-medium text-sm">{pendingPriceChange.product_name}</p>
-                <div className="flex items-center gap-3 text-sm">
-                  <span className="text-slate-400 line-through">{formatPHP(pendingPriceChange.old_price)}</span>
-                  <span className="text-[#1A4D2E] font-bold">{formatPHP(pendingPriceChange.new_price)}</span>
-                  <Badge variant="outline" className="capitalize text-[10px]">{pendingPriceChange.scheme_name}</Badge>
-                </div>
-              </div>
-              <p className="text-sm text-slate-600">
-                Save <strong>{formatPHP(pendingPriceChange.new_price)}</strong> as the new <strong>{pendingPriceChange.scheme_name}</strong> price for this product?
-              </p>
-              <div className="flex gap-2">
-                <Button variant="outline" className="flex-1" onClick={dismissPriceSaveDialog}>
-                  No, this sale only
-                </Button>
-                <Button
-                  data-testid="save-price-to-scheme"
-                  className="flex-1 bg-[#1A4D2E] hover:bg-[#14532d] text-white"
-                  onClick={savePriceToScheme}
-                >
-                  Yes, update price
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      {/* Price Save Dialog removed — replaced by PriceMatchModal at checkout */}
 
       {/* Scheme Save Dialog */}
       <Dialog open={schemeSaveDialog} onOpenChange={(o) => { if (!o) { setSchemeSaveDialog(false); setPendingSchemeChange(null); } }}>
@@ -3863,6 +3879,32 @@ export default function UnifiedSalesPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ── Price Match Modal ─────────────────────────────────────────── */}
+      <PriceMatchModal
+        open={priceMatchModal}
+        priceChanges={computePriceChanges()}
+        schemeName={schemes.find(s => s.key === activeScheme)?.name || activeScheme}
+        branchName={currentBranch?.name || ''}
+        submitting={priceMatchSubmitting}
+        error={priceMatchError}
+        onCancel={() => {
+          if (priceMatchSubmitting) return;
+          setPriceMatchModal(false);
+          setPriceMatchError('');
+        }}
+        onConfirm={async ({ price_changes, pin }) => {
+          // Save approved payload — the next openCheckout call will skip this
+          // modal because priceMatchApproved is now non-null.
+          setPriceMatchSubmitting(true);
+          setPriceMatchError('');
+          setPriceMatchApproved({ price_changes, pin });
+          setPriceMatchSubmitting(false);
+          setPriceMatchModal(false);
+          // Re-trigger checkout — with priceMatchApproved set the modal is skipped.
+          setTimeout(() => openCheckout(), 30);
+        }}
+      />
 
     </div>
   );

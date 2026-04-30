@@ -211,6 +211,62 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
                 )
                 jit_persisted.append(v)
 
+    # ── Price Match (permanent branch price change) — pre-validate + PIN ─────
+    # Each entry: {product_id, scheme, old_price, new_price, reason, reason_detail?}
+    # On approval: upsert branch_prices.prices[scheme] AND write to price_change_log.
+    price_changes_in = data.get("price_changes", []) or []
+    valid_price_changes = []
+    if price_changes_in:
+        active_scheme = data.get("price_scheme", "retail")
+        for pc in price_changes_in:
+            pid = (pc.get("product_id") or "").strip()
+            if not pid:
+                continue
+            try:
+                old_p = float(pc.get("old_price"))
+                new_p = float(pc.get("new_price"))
+            except (TypeError, ValueError):
+                continue
+            if new_p <= 0 or new_p == old_p:
+                continue
+            prod = products_map.get(pid)
+            if not prod:
+                continue
+            reason = (pc.get("reason") or "").strip()
+            if not reason:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Price change reason missing for '{prod['name']}'"
+                )
+            scheme = (pc.get("scheme") or active_scheme).strip()
+            valid_price_changes.append({
+                "product_id": pid,
+                "product_name": prod["name"],
+                "sku": prod.get("sku", ""),
+                "scheme": scheme,
+                "old_price": old_p,
+                "new_price": new_p,
+                "reason": reason,
+                "reason_detail": (pc.get("reason_detail") or "").strip(),
+            })
+        if valid_price_changes:
+            pm_pin = (data.get("price_match_pin") or "").strip()
+            if not pm_pin:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "type": "price_match_pin_required",
+                        "items": valid_price_changes,
+                        "message": f"Manager / Admin PIN required to approve {len(valid_price_changes)} price change(s).",
+                    }
+                )
+            from routes.verify import verify_pin_for_action
+            pm_verifier = await verify_pin_for_action(pm_pin, "price_match", branch_id=branch_id)
+            if not pm_verifier:
+                raise HTTPException(status_code=403, detail="Invalid PIN — price match not authorized")
+            # stash verifier on payload for later persistence
+            data["_price_match_verifier"] = pm_verifier
+
     # Process items and compute totals
     sale_items = []
     subtotal = 0
@@ -304,7 +360,10 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
         
         # Track discount/price override data for audit log
         scheme_price = product.get("prices", {}).get(data.get("price_scheme", "retail"), rate)
-        if disc_amt > 0 or rate != scheme_price:
+        # If this product has a Price Match entry, the rate change is logged
+        # in price_change_log instead — do NOT also log it as a price_override.
+        has_price_match = any(pc["product_id"] == item["product_id"] for pc in valid_price_changes)
+        if disc_amt > 0 or (rate != scheme_price and not has_price_match):
             discount_audit_entries.append({
                 "product_id": item["product_id"],
                 "product_name": product["name"],
@@ -792,6 +851,102 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
                 },
                 organization_id=user.get("organization_id"),
             )
+
+    # ── Price Match (Permanent Branch Price Change) — persist & log ──────────
+    if valid_price_changes:
+        pm_verifier = data.get("_price_match_verifier") or {}
+        approver_name = pm_verifier.get("verifier_name") or pm_verifier.get("full_name") or pm_verifier.get("username") or ""
+        approver_method = pm_verifier.get("method", "")
+        approver_id = pm_verifier.get("verifier_id") or pm_verifier.get("id") or ""
+        for pc in valid_price_changes:
+            # Upsert branch_prices for this product/branch — ONLY this scheme
+            existing = await db.branch_prices.find_one(
+                {"product_id": pc["product_id"], "branch_id": branch_id}, {"_id": 0}
+            )
+            merged_prices = (existing or {}).get("prices", {}) or {}
+            merged_prices[pc["scheme"]] = pc["new_price"]
+            await db.branch_prices.update_one(
+                {"product_id": pc["product_id"], "branch_id": branch_id},
+                {
+                    "$set": {
+                        "prices": merged_prices,
+                        "updated_at": now_iso(),
+                        "updated_by_id": user["id"],
+                        "updated_by_name": user.get("full_name", user.get("username", "")),
+                        "source": "pos_price_match",
+                    },
+                    "$setOnInsert": {
+                        "id": new_id(),
+                        "product_id": pc["product_id"],
+                        "branch_id": branch_id,
+                        "created_at": now_iso(),
+                    },
+                },
+                upsert=True,
+            )
+            # Audit log entry
+            await db.price_change_log.insert_one({
+                "id": new_id(),
+                "product_id": pc["product_id"],
+                "product_name": pc["product_name"],
+                "sku": pc.get("sku", ""),
+                "branch_id": branch_id,
+                "branch_name": data.get("branch_name", ""),
+                "scheme": pc["scheme"],
+                "old_price": pc["old_price"],
+                "new_price": pc["new_price"],
+                "delta": round(pc["new_price"] - pc["old_price"], 2),
+                "delta_pct": round((pc["new_price"] - pc["old_price"]) / pc["old_price"] * 100, 2)
+                              if pc["old_price"] > 0 else 0,
+                "reason": pc["reason"],
+                "reason_detail": pc.get("reason_detail", ""),
+                "invoice_id": invoice["id"],
+                "invoice_number": inv_number,
+                "customer_id": data.get("customer_id"),
+                "customer_name": customer_name,
+                "cashier_id": user["id"],
+                "cashier_name": user.get("full_name", user.get("username", "")),
+                "approver_id": approver_id,
+                "approver_name": approver_name,
+                "approver_method": approver_method,
+                "date": log_date,
+                "created_at": now_iso(),
+                "organization_id": user.get("organization_id"),
+            })
+
+        # ── Notify admins of price match events ─────────────────────────────
+        try:
+            from routes.notifications import create_notification
+            admins_pm = await db.users.find({"role": "admin", "active": True}, {"_id": 0, "id": 1}).to_list(50)
+            admin_ids_pm = [a["id"] for a in admins_pm]
+            if admin_ids_pm:
+                items_summary = "; ".join(
+                    f"{pc['product_name']}: ₱{pc['old_price']:.2f}→₱{pc['new_price']:.2f}"
+                    for pc in valid_price_changes[:3]
+                )
+                if len(valid_price_changes) > 3:
+                    items_summary += f" +{len(valid_price_changes)-3} more"
+                await create_notification(
+                    type_key="discount_given",
+                    title=f"Price Match Approved — {inv_number}",
+                    message=(
+                        f"{user.get('full_name', user.get('username', ''))} matched price on "
+                        f"{len(valid_price_changes)} product(s) — approved by {approver_name}. {items_summary}"
+                    ),
+                    target_user_ids=admin_ids_pm,
+                    branch_id=branch_id,
+                    branch_name=data.get("branch_name", ""),
+                    metadata={
+                        "invoice_id": invoice["id"],
+                        "invoice_number": inv_number,
+                        "approver_name": approver_name,
+                        "items": valid_price_changes,
+                    },
+                    organization_id=user.get("organization_id"),
+                )
+        except Exception as nerr:
+            import logging
+            logging.getLogger("notifications").error(f"price-match notification failed: {nerr}", exc_info=True)
 
     # ── Auto-create incident tickets for negative-stock overrides ─────────────
     if override_verifier and insufficient_items:

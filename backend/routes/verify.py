@@ -184,6 +184,7 @@ PIN_POLICY_ACTIONS = [
     {"key": "void_return",            "label": "Void Return",                     "module": "Sales",             "defaults": ["admin_pin", "manager_pin", "totp"]},
     {"key": "invoice_edit",           "label": "Edit Posted Invoice",             "module": "Sales",             "defaults": ["admin_pin", "manager_pin", "totp"]},
     {"key": "pos_discount",           "label": "POS Discount / Price Override",   "module": "Sales",             "defaults": ["admin_pin", "manager_pin", "totp"]},
+    {"key": "price_match",            "label": "POS Price Match (Permanent Branch Price Change)", "module": "Sales", "defaults": ["admin_pin", "manager_pin", "totp"]},
     # Fund Management
     {"key": "fund_transfer_cashier_safe", "label": "Cashier / Safe Transfer",     "module": "Fund Management",   "defaults": ["admin_pin", "manager_pin", "totp"]},
     {"key": "fund_transfer_safe_bank",    "label": "Safe to Bank Deposit",        "module": "Fund Management",   "defaults": ["admin_pin", "totp"]},

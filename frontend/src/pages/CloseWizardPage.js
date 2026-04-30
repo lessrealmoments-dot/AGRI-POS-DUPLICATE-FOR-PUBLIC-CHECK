@@ -1657,6 +1657,84 @@ export default function CloseWizardPage() {
                 </div>
               </div>
 
+              {/* Z-Report: Discount Breakdown by Product */}
+              {(preview?.discount_breakdown?.products?.length > 0 || (preview?.discount_breakdown?.total_overall_discount || 0) > 0) && (
+                <div className="rounded-xl border border-slate-200 overflow-hidden" data-testid="z-discount-breakdown">
+                  <div className="px-4 py-2 bg-rose-50 text-xs font-bold uppercase tracking-wider text-rose-700 flex items-center justify-between">
+                    <span><Percent size={12} className="inline mr-1" /> Discounts Given Today</span>
+                    <span className="font-mono">{formatPHP(preview?.discount_breakdown?.total_discount || 0)}</span>
+                  </div>
+                  <div className="p-3 space-y-2">
+                    {(preview?.discount_breakdown?.products || []).length > 0 && (
+                      <div className="overflow-hidden border border-rose-100 rounded">
+                        <table className="w-full text-xs">
+                          <thead className="bg-rose-50/60">
+                            <tr>
+                              <th className="text-left px-2 py-1.5 text-rose-700 font-medium">Product</th>
+                              <th className="text-right px-2 py-1.5 text-rose-700 font-medium w-20">Units</th>
+                              <th className="text-right px-2 py-1.5 text-rose-700 font-medium w-28">Total Disc.</th>
+                              <th className="text-right px-2 py-1.5 text-rose-700 font-medium w-28">Avg / Unit</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(preview.discount_breakdown.products || []).map((p, i) => (
+                              <tr key={i} className="border-t border-rose-50">
+                                <td className="px-2 py-1 text-slate-700">{p.product_name}</td>
+                                <td className="px-2 py-1 text-right font-mono">{p.units_sold}</td>
+                                <td className="px-2 py-1 text-right font-mono text-rose-600">{formatPHP(p.total_discount)}</td>
+                                <td className="px-2 py-1 text-right font-mono text-rose-500">{formatPHP(p.avg_discount_per_unit)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    {(preview?.discount_breakdown?.total_overall_discount || 0) > 0 && (
+                      <div className="text-xs text-rose-700 flex items-center justify-between bg-rose-50 px-2 py-1 rounded">
+                        <span>Overall (invoice-level) discounts</span>
+                        <span className="font-mono">{formatPHP(preview.discount_breakdown.total_overall_discount)}</span>
+                      </div>
+                    )}
+                    <p className="text-[10px] text-slate-500 italic">
+                      {preview?.discount_breakdown?.transaction_count || 0} transaction(s) had discounts. Tracked in Reports → Discounts.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Z-Report: Price Changes Today */}
+              {(preview?.price_changes_today?.count || 0) > 0 && (
+                <div className="rounded-xl border border-slate-200 overflow-hidden" data-testid="z-price-changes">
+                  <div className="px-4 py-2 bg-amber-50 text-xs font-bold uppercase tracking-wider text-amber-700 flex items-center justify-between">
+                    <span>Permanent Price Changes Today</span>
+                    <span className="font-mono">{preview.price_changes_today.count} change(s)</span>
+                  </div>
+                  <div className="p-3 space-y-1 text-xs">
+                    {(preview.price_changes_today.rows || []).map((r, i) => (
+                      <div key={i} className="flex items-center justify-between border-b border-amber-50 last:border-0 py-1">
+                        <div className="min-w-0 flex-1">
+                          <span className="font-medium text-slate-700">{r.product_name}</span>
+                          <span className="ml-2 text-[10px] text-slate-400">{r.invoice_number}</span>
+                        </div>
+                        <div className="font-mono w-44 text-right">
+                          <span className="line-through text-slate-400">{formatPHP(r.old_price)}</span>
+                          {' → '}
+                          <span className={`font-semibold ${r.new_price < r.old_price ? 'text-red-600' : 'text-emerald-600'}`}>
+                            {formatPHP(r.new_price)}
+                          </span>
+                        </div>
+                        <div className="w-32 text-right text-[10px] text-slate-500">
+                          {r.approver_name && `OK ${r.approver_name}`}
+                        </div>
+                      </div>
+                    ))}
+                    <p className="text-[10px] text-slate-500 italic pt-1">
+                      Tracked in Reports → Price Changes.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Z-Report: AR Cash Payments — Detailed */}
               {(preview?.ar_payments || []).length > 0 && (
                 <div className="rounded-xl border border-indigo-200 overflow-hidden">

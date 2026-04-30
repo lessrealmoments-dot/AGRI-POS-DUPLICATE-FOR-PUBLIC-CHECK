@@ -35,6 +35,7 @@ from .admin_auth import router as admin_auth_router
 from .terminal import router as terminal_router
 from .roles import router as roles_router
 from .branch_products import router as branch_products_router
+from .price_changes import router as price_changes_router
 
 __all__ = [
     'auth_router', 'branches_router', 'users_router', 'products_router',
@@ -46,4 +47,5 @@ __all__ = [
     'returns_router', 'audit_router', 'uploads_router', 'verify_router',
     'organizations_router', 'superadmin_router', 'admin_auth_router',
     'terminal_router', 'roles_router', 'branch_products_router',
+    'price_changes_router',
 ]

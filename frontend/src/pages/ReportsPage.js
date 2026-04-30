@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import {
   BarChart3, ChevronDown, ChevronRight, Printer,
-  TrendingUp, AlertCircle, DollarSign, Calendar, RefreshCw, Filter, UserCheck, AlertTriangle, Percent, TrendingDown
+  TrendingUp, AlertCircle, DollarSign, Calendar, RefreshCw, Filter, UserCheck, AlertTriangle, Percent, TrendingDown, Tag
 } from 'lucide-react';
 import { toast } from 'sonner';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
@@ -1380,6 +1380,211 @@ function ProductProfitReport({ branches, selectedBranchId, canExport }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  PRICE CHANGE REPORT — permanent branch price changes from POS Price Match
+// ─────────────────────────────────────────────────────────────────────────────
+const PRICE_REASON_LABELS = {
+  competitor_match: 'Competitor price match',
+  loyal_customer: 'Bulk / Loyal customer',
+  promotional_offer: 'Promotional offer',
+  old_stock_clearance: 'Damaged / Old stock clearance',
+  other: 'Other',
+};
+
+function PriceChangeReport({ branches, selectedBranchId }) {
+  const [branchId, setBranchId] = useState(selectedBranchId || '');
+  const [dateFrom, setDateFrom] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); });
+  const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [reason, setReason] = useState('all');
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [productFilter, setProductFilter] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = { date_from: dateFrom, date_to: dateTo };
+      if (branchId) params.branch_id = branchId;
+      if (reason && reason !== 'all') params.reason = reason;
+      const res = await api.get('/price-changes', { params });
+      setData(res.data);
+    } catch { toast.error('Failed to load price change report'); }
+    setLoading(false);
+  }, [dateFrom, dateTo, branchId, reason]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const filteredRows = (data?.rows || []).filter(r => {
+    if (!productFilter) return true;
+    const q = productFilter.toLowerCase();
+    return (r.product_name || '').toLowerCase().includes(q) || (r.sku || '').toLowerCase().includes(q);
+  });
+
+  // Group by product for the rollup view
+  const grouped = {};
+  filteredRows.forEach(r => {
+    const k = r.product_id || r.product_name;
+    if (!grouped[k]) {
+      grouped[k] = {
+        product_id: r.product_id,
+        product_name: r.product_name,
+        sku: r.sku,
+        events: [],
+      };
+    }
+    grouped[k].events.push(r);
+  });
+
+  return (
+    <div className="space-y-4" data-testid="price-change-tab">
+      <Card className="border-slate-200">
+        <CardContent className="p-3">
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <label className="text-[10px] text-slate-500 uppercase font-medium">From</label>
+              <Input type="date" className="h-8 w-36 text-sm" value={dateFrom} onChange={e => setDateFrom(e.target.value)} data-testid="pc-date-from" />
+            </div>
+            <div>
+              <label className="text-[10px] text-slate-500 uppercase font-medium">To</label>
+              <Input type="date" className="h-8 w-36 text-sm" value={dateTo} onChange={e => setDateTo(e.target.value)} data-testid="pc-date-to" />
+            </div>
+            <div>
+              <label className="text-[10px] text-slate-500 uppercase font-medium">Branch</label>
+              <Select value={branchId || 'all'} onValueChange={v => setBranchId(v === 'all' ? '' : v)}>
+                <SelectTrigger className="h-8 w-40 text-sm" data-testid="pc-branch-filter"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Branches</SelectItem>
+                  {(branches || []).map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-[10px] text-slate-500 uppercase font-medium">Reason</label>
+              <Select value={reason} onValueChange={setReason}>
+                <SelectTrigger className="h-8 w-44 text-sm" data-testid="pc-reason-filter"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All reasons</SelectItem>
+                  {Object.entries(PRICE_REASON_LABELS).map(([k, v]) =>
+                    <SelectItem key={k} value={k}>{v}</SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-[10px] text-slate-500 uppercase font-medium">Product</label>
+              <Input
+                placeholder="Search product / SKU…"
+                className="h-8 w-44 text-sm"
+                value={productFilter}
+                onChange={e => setProductFilter(e.target.value)}
+                data-testid="pc-product-filter"
+              />
+            </div>
+            <Button variant="outline" size="sm" className="h-8" onClick={load} disabled={loading} data-testid="pc-refresh-btn">
+              <RefreshCw size={13} className={loading ? 'animate-spin mr-1' : 'mr-1'} /> Refresh
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {data?.summary && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <KpiCard label="Total Changes" value={data.summary.total_changes} accent="slate" />
+          <KpiCard label="Total Drop (₱)" value={formatPHP(data.summary.total_drop_amount)} accent="red" />
+          <KpiCard label="Total Raise (₱)" value={formatPHP(data.summary.total_raise_amount)} accent="emerald" />
+          <KpiCard label="Avg ∆ %" value={`${data.summary.average_delta_pct}%`} accent={data.summary.average_delta_pct < 0 ? 'red' : 'emerald'} />
+        </div>
+      )}
+
+      <Card className="border-slate-200">
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-slate-50">
+                <TableHead className="w-8"></TableHead>
+                <TableHead>Product</TableHead>
+                <TableHead className="text-right">Events</TableHead>
+                <TableHead className="text-right">Latest Old</TableHead>
+                <TableHead className="text-right">Latest New</TableHead>
+                <TableHead>Latest Reason</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {Object.values(grouped).length === 0 && (
+                <TableRow><TableCell colSpan={6} className="text-center text-slate-400 py-8">No price changes in this period</TableCell></TableRow>
+              )}
+              {Object.values(grouped).map((g, idx) => {
+                const latest = g.events[0]; // already sorted desc by created_at on backend
+                return (
+                  <Collapsible key={idx} asChild>
+                    <Fragment>
+                      <CollapsibleTrigger asChild>
+                        <TableRow className="cursor-pointer hover:bg-slate-50">
+                          <TableCell><ChevronRight size={14} /></TableCell>
+                          <TableCell>
+                            <div className="font-medium">{g.product_name}</div>
+                            {g.sku && <div className="text-[11px] text-slate-400">{g.sku}</div>}
+                          </TableCell>
+                          <TableCell className="text-right">{g.events.length}</TableCell>
+                          <TableCell className="text-right font-mono text-slate-500">{formatPHP(latest.old_price)}</TableCell>
+                          <TableCell className={`text-right font-mono font-semibold ${latest.new_price < latest.old_price ? 'text-red-600' : 'text-emerald-600'}`}>
+                            {formatPHP(latest.new_price)}
+                          </TableCell>
+                          <TableCell className="text-xs">{PRICE_REASON_LABELS[latest.reason] || latest.reason}</TableCell>
+                        </TableRow>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent asChild>
+                        <TableRow>
+                          <TableCell colSpan={6} className="bg-slate-50 px-8 py-2">
+                            <div className="space-y-1 text-xs">
+                              {g.events.map((e, i) => (
+                                <div key={i} className="flex items-center justify-between border-b border-slate-200 last:border-0 py-1">
+                                  <div className="flex-1">
+                                    <span className="text-slate-500">{e.date}</span>
+                                    <span className="ml-2 text-slate-700">{e.cashier_name}</span>
+                                    <span className="ml-2 text-slate-400">→ {e.invoice_number}</span>
+                                    {e.customer_name && e.customer_name !== 'Walk-in' && (
+                                      <span className="ml-2 italic text-slate-500">{e.customer_name}</span>
+                                    )}
+                                  </div>
+                                  <div className="font-mono text-right w-44">
+                                    <span className="line-through text-slate-400">{formatPHP(e.old_price)}</span>
+                                    {' → '}
+                                    <span className={`font-semibold ${e.new_price < e.old_price ? 'text-red-600' : 'text-emerald-600'}`}>
+                                      {formatPHP(e.new_price)}
+                                    </span>
+                                  </div>
+                                  <div className="w-44 text-right">
+                                    <Badge variant="outline" className="text-[10px]">{e.scheme}</Badge>
+                                    <span className="ml-2 text-slate-600">{PRICE_REASON_LABELS[e.reason] || e.reason}</span>
+                                  </div>
+                                  <div className="w-32 text-right text-slate-500 text-[11px]">
+                                    {e.approver_name && `OK by ${e.approver_name}`}
+                                  </div>
+                                </div>
+                              ))}
+                              {g.events.some(e => e.reason_detail) && (
+                                <div className="pt-2 mt-2 border-t border-slate-200 text-[11px] text-slate-500">
+                                  Notes: {g.events.filter(e => e.reason_detail).map(e => `${e.date}: ${e.reason_detail}`).join(' · ')}
+                                </div>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      </CollapsibleContent>
+                    </Fragment>
+                  </Collapsible>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  MAIN PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 export default function ReportsPage() {
@@ -1417,6 +1622,9 @@ export default function ReportsPage() {
           <TabsTrigger value="discounts" data-testid="tab-discounts" className="text-sm">
             <Percent size={14} className="mr-1.5" /> Discounts
           </TabsTrigger>
+          <TabsTrigger value="price-changes" data-testid="tab-price-changes" className="text-sm">
+            <Tag size={14} className="mr-1.5" /> Price Changes
+          </TabsTrigger>
           {canViewProfit && (
             <TabsTrigger value="profit" data-testid="tab-profit" className="text-sm">
               <TrendingDown size={14} className="mr-1.5" /> Profit
@@ -1442,6 +1650,10 @@ export default function ReportsPage() {
 
         <TabsContent value="discounts">
           <DiscountAuditReport branches={branches || []} selectedBranchId={selectedBranchId} />
+        </TabsContent>
+
+        <TabsContent value="price-changes">
+          <PriceChangeReport branches={branches || []} selectedBranchId={selectedBranchId} />
         </TabsContent>
 
         {canViewProfit && (

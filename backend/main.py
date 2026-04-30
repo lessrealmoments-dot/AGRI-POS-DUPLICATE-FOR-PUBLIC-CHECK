@@ -37,6 +37,7 @@ from routes import (
     returns_router, audit_router, uploads_router, verify_router,
     organizations_router, superadmin_router, admin_auth_router,
     terminal_router, roles_router, branch_products_router,
+    price_changes_router,
 )
 from routes.backups import router as backups_router
 from routes.internal_invoices import router as internal_invoices_router
@@ -126,6 +127,7 @@ api_router.include_router(count_sheets_router)
 
 # Branch-specific Pricing
 api_router.include_router(branch_prices_router)
+api_router.include_router(price_changes_router)
 
 # Branch Transfers (inter-branch supply orders)
 api_router.include_router(branch_transfers_router)
@@ -408,6 +410,10 @@ async def startup():
     await _raw_db.movements.create_index([("product_id", 1), ("branch_id", 1)])
     await _raw_db.movements.create_index("created_at")
     await _raw_db.branch_prices.create_index([("product_id", 1), ("branch_id", 1)], unique=True)
+    await _raw_db.price_change_log.create_index("date")
+    await _raw_db.price_change_log.create_index("branch_id")
+    await _raw_db.price_change_log.create_index("product_id")
+    await _raw_db.price_change_log.create_index("created_at")
     await _raw_db.notifications.create_index("created_at")
     await _raw_db.notifications.create_index("target_user_ids")
     logger.info("Database indexes created")

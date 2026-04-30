@@ -182,6 +182,74 @@ async def _get_negative_stock_summary(branch_id: str) -> dict:
     return {"count": len(items), "items": items}
 
 
+async def _get_discount_breakdown(branch_id: str, date: str) -> dict:
+    """
+    Return per-product discount breakdown for the day.
+    Aggregates `discount_audit_log` entries on the given date+branch into:
+      [{product_name, units_sold, total_discount, avg_discount_per_unit}]
+    Plus totals for the closing wizard.
+    """
+    q = {"date": date}
+    if branch_id:
+        q["branch_id"] = branch_id
+    logs = await db.discount_audit_log.find(q, {"_id": 0}).to_list(2000)
+    by_product = {}
+    overall_disc_total = 0.0
+    txn_count = 0
+    for log in logs:
+        txn_count += 1
+        for item in log.get("items", []):
+            t = item.get("type", "")
+            if t == "overall_discount":
+                overall_disc_total += float(item.get("discount_amount", 0) or 0)
+                continue
+            disc_amt = float(item.get("discount_amount", 0) or 0)
+            if disc_amt <= 0:
+                continue
+            pid = item.get("product_id") or item.get("product_name", "Unknown")
+            if pid not in by_product:
+                by_product[pid] = {
+                    "product_id": item.get("product_id"),
+                    "product_name": item.get("product_name", "Unknown"),
+                    "units_sold": 0,
+                    "total_discount": 0,
+                }
+            by_product[pid]["units_sold"] += float(item.get("quantity", 0) or 0)
+            by_product[pid]["total_discount"] += disc_amt
+    products_list = []
+    for v in by_product.values():
+        units = v["units_sold"] or 0
+        total = round(v["total_discount"], 2)
+        products_list.append({
+            "product_id": v["product_id"],
+            "product_name": v["product_name"],
+            "units_sold": round(units, 2),
+            "total_discount": total,
+            "avg_discount_per_unit": round(total / units, 2) if units > 0 else 0,
+        })
+    products_list.sort(key=lambda x: x["total_discount"], reverse=True)
+    line_disc_total = round(sum(p["total_discount"] for p in products_list), 2)
+    return {
+        "products": products_list,
+        "total_line_discounts": line_disc_total,
+        "total_overall_discount": round(overall_disc_total, 2),
+        "total_discount": round(line_disc_total + overall_disc_total, 2),
+        "transaction_count": txn_count,
+    }
+
+
+async def _get_price_changes_today(branch_id: str, date: str) -> dict:
+    """Return summary of all permanent price changes (Price Match) for the day."""
+    q = {"date": date}
+    if branch_id:
+        q["branch_id"] = branch_id
+    rows = await db.price_change_log.find(
+        q, {"_id": 0, "product_name": 1, "old_price": 1, "new_price": 1, "scheme": 1,
+            "reason": 1, "approver_name": 1, "cashier_name": 1, "invoice_number": 1}
+    ).sort("created_at", 1).to_list(500)
+    return {"count": len(rows), "rows": rows}
+
+
 @router.get("/daily-close-preview")
 async def get_daily_close_preview(
     user=Depends(get_current_user),
@@ -494,6 +562,10 @@ async def get_daily_close_preview(
         "pending_stock_releases": await _get_pending_releases_summary(branch_id),
         # ── Negative stock warning ───────────────────────────────────────────
         "negative_stock": await _get_negative_stock_summary(branch_id),
+        # ── Discount breakdown by product (today) ──────────────────────────
+        "discount_breakdown": await _get_discount_breakdown(branch_id, date),
+        # ── Price change events today (Price Match) ─────────────────────────
+        "price_changes_today": await _get_price_changes_today(branch_id, date),
     }
 
 
