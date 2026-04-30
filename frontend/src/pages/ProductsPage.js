@@ -146,6 +146,8 @@ export default function ProductsPage() {
   const selectParent = (rowId, p) => {
     const capital = computeCapital(p, 1, 0);
     const hasRepack = repackParentIds.has(p.id);
+    // Detect: same parent already used by another row in this session
+    const dupRow = qrRows.find(r => r.id !== rowId && r.parent?.id === p.id);
     updateRow(rowId, {
       parent: p, parentSearch: p.name, parentMatches: [],
       activeSearchIndex: -1,
@@ -153,13 +155,16 @@ export default function ProductsPage() {
       unitsPerParent: 1, addOnCost: 0, capital,
       retailPrice: '', retailError: null, rowError: null,
       hasRepack,
+      dupInSession: !!dupRow,
     });
     // Auto-focus and select the repack name input so user can type immediately
     setTimeout(() => {
       const nameInput = document.querySelector(`[data-testid="qr-name-${rowId}"]`);
       if (nameInput) { nameInput.focus(); nameInput.select(); }
     }, 80);
-    if (hasRepack) {
+    if (dupRow) {
+      toast.warning(`"${p.name}" is already in this batch (above). Make sure you intended a second variant.`, { duration: 5000 });
+    } else if (hasRepack) {
       toast.warning(`"${p.name}" already has a repack. You can still create another (e.g. a different size).`);
     }
   };
@@ -172,10 +177,21 @@ export default function ProductsPage() {
     }
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      updateRow(row.id, { activeSearchIndex: Math.min((row.activeSearchIndex ?? -1) + 1, matches.length - 1) });
+      const next = Math.min((row.activeSearchIndex ?? -1) + 1, matches.length - 1);
+      updateRow(row.id, { activeSearchIndex: next });
+      // Scroll the active item into view inside the dropdown panel
+      requestAnimationFrame(() => {
+        const el = document.querySelector(`[data-qr-option="${row.id}-${next}"]`);
+        if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+      });
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      updateRow(row.id, { activeSearchIndex: Math.max((row.activeSearchIndex ?? 0) - 1, 0) });
+      const next = Math.max((row.activeSearchIndex ?? 0) - 1, 0);
+      updateRow(row.id, { activeSearchIndex: next });
+      requestAnimationFrame(() => {
+        const el = document.querySelector(`[data-qr-option="${row.id}-${next}"]`);
+        if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+      });
     } else if (e.key === 'Enter') {
       e.preventDefault();
       const idx = row.activeSearchIndex ?? -1;
@@ -1050,6 +1066,9 @@ export default function ProductsPage() {
                   <tbody>
                     {qrRows.map((row) => {
                       const hasErr = !!row.rowError;
+                      // Live-derived duplicate flag: true if any OTHER row has the
+                      // same parent id. Recomputes automatically when rows change.
+                      const dupInSession = !!(row.parent?.id && qrRows.some(r => r.id !== row.id && r.parent?.id === row.parent.id));
                       return (
                         <tr key={row.id} className={`border-b border-slate-100 transition-colors ${hasErr ? 'bg-red-50' : 'hover:bg-slate-50/50'}`}>
 
@@ -1057,14 +1076,23 @@ export default function ProductsPage() {
                           <td className="px-2 py-1.5" style={{minWidth:'220px'}}>
                             {row.parent ? (
                               <div>
-                                <div className={`flex items-center gap-1.5 h-8 px-2 rounded border ${hasErr && !row.parent ? 'border-red-400' : 'border-emerald-300 bg-emerald-50'}`}>
-                                  <span className="text-sm text-emerald-800 truncate flex-1 font-medium">{row.parent.name}</span>
-                                  <button onClick={() => updateRow(row.id, { parent: null, parentSearch: '', capital: 0, repackName: '', retailPrice: '', retailError: null, hasRepack: false })}
+                                <div className={`flex items-center gap-1.5 h-8 px-2 rounded border ${
+                                  hasErr && !row.parent ? 'border-red-400'
+                                  : dupInSession ? 'border-orange-400 bg-orange-50'
+                                  : 'border-emerald-300 bg-emerald-50'
+                                }`}>
+                                  <span className={`text-sm truncate flex-1 font-medium ${dupInSession ? 'text-orange-800' : 'text-emerald-800'}`}>{row.parent.name}</span>
+                                  <button onClick={() => updateRow(row.id, { parent: null, parentSearch: '', capital: 0, repackName: '', retailPrice: '', retailError: null, hasRepack: false, dupInSession: false })}
                                     className="text-slate-400 hover:text-red-500 shrink-0">
                                     <X size={12} />
                                   </button>
                                 </div>
-                                {row.hasRepack && (
+                                {dupInSession && (
+                                  <p className="text-[10px] text-orange-600 mt-0.5 flex items-center gap-1 leading-none font-semibold">
+                                    <AlertTriangle size={10} /> Duplicate parent in this batch
+                                  </p>
+                                )}
+                                {!dupInSession && row.hasRepack && (
                                   <p className="text-[10px] text-amber-600 mt-0.5 flex items-center gap-1 leading-none">
                                     <AlertTriangle size={10} /> Already has a repack
                                   </p>
@@ -1086,6 +1114,10 @@ export default function ProductsPage() {
                                   const inputEl = dropdownRefs.current[row.id];
                                   if (!inputEl) return null;
                                   const rect = inputEl.getBoundingClientRect();
+                                  // Compute set of parent ids already used in OTHER rows
+                                  const usedParentIds = new Set(
+                                    qrRows.filter(r => r.id !== row.id && r.parent?.id).map(r => r.parent.id)
+                                  );
                                   return createPortal(
                                     <div
                                       style={{
@@ -1097,24 +1129,35 @@ export default function ProductsPage() {
                                       }}
                                       className="bg-white border border-slate-200 rounded-lg shadow-xl max-h-44 overflow-y-auto"
                                     >
-                                      {row.parentMatches.map((p, idx) => (
-                                        <button key={p.id} onMouseDown={() => selectParent(row.id, p)}
-                                          className={`w-full text-left px-3 py-2 border-b border-slate-100 last:border-0 transition-colors ${
-                                            idx === row.activeSearchIndex
-                                              ? 'bg-emerald-50 border-l-[3px] border-l-emerald-700'
-                                              : 'hover:bg-slate-50'
-                                          }`}>
-                                          <div className="font-medium text-sm truncate flex items-center gap-1.5">
-                                            {p.name}
-                                            {repackParentIds.has(p.id) && (
-                                              <span className="text-[10px] text-amber-600 font-normal flex items-center gap-0.5 shrink-0">
-                                                <AlertTriangle size={9} /> has repack
-                                              </span>
-                                            )}
-                                          </div>
-                                          <div className="text-xs text-slate-400">{p.unit} · Cost ₱{p.cost_price}</div>
-                                        </button>
-                                      ))}
+                                      {row.parentMatches.map((p, idx) => {
+                                        const inBatch = usedParentIds.has(p.id);
+                                        return (
+                                          <button
+                                            key={p.id}
+                                            data-qr-option={`${row.id}-${idx}`}
+                                            onMouseDown={() => selectParent(row.id, p)}
+                                            className={`w-full text-left px-3 py-2 border-b border-slate-100 last:border-0 transition-colors ${
+                                              idx === row.activeSearchIndex
+                                                ? 'bg-emerald-50 border-l-[3px] border-l-emerald-700'
+                                                : 'hover:bg-slate-50'
+                                            }`}>
+                                            <div className="font-medium text-sm truncate flex items-center gap-1.5">
+                                              {p.name}
+                                              {inBatch && (
+                                                <span className="text-[10px] text-orange-600 font-semibold flex items-center gap-0.5 shrink-0 bg-orange-50 px-1 py-0.5 rounded">
+                                                  <AlertTriangle size={9} /> in this batch
+                                                </span>
+                                              )}
+                                              {!inBatch && repackParentIds.has(p.id) && (
+                                                <span className="text-[10px] text-amber-600 font-normal flex items-center gap-0.5 shrink-0">
+                                                  <AlertTriangle size={9} /> has repack
+                                                </span>
+                                              )}
+                                            </div>
+                                            <div className="text-xs text-slate-400">{p.unit} · Cost ₱{p.cost_price}</div>
+                                          </button>
+                                        );
+                                      })}
                                       <div className="px-3 py-1 bg-slate-50 border-t text-[10px] text-slate-400 flex gap-3">
                                         <span>↑↓ navigate</span><span>Enter to select</span><span>Esc to close</span>
                                       </div>
