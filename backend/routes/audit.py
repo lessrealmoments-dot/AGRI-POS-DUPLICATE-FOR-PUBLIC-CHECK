@@ -323,7 +323,12 @@ async def compute_audit(
                 "reserve_balance": await _current_balance(b_id, "reserve"),
                 "deficit_balance": await _current_balance(b_id, "deficit"),
             }
-    except Exception:
+        else:
+            # Branchless org-wide compute — explicit null contract
+            result["reserve"] = None
+    except Exception as ex:
+        import logging
+        logging.getLogger(__name__).warning("Reserve snapshot in audit/compute failed: %s", ex)
         result["reserve"] = None
 
     return result

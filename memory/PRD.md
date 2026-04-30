@@ -20,6 +20,29 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ---
 
+## ✅ Completed in Iter 198 — Cash Overage Reserve System (Feb 2026)
+
+Owner asked: "where does the extra money from Z-Report go? I want to view total extra money and use it during audits to cover missing inventory value." Built a full Reserve Ledger system that auto-pools daily-close variance and surfaces it for audit-time offset.
+
+**Backend** (`/app/backend/routes/overage_reserve.py`, NEW ~430 lines):
+- `GET /api/reserve/summary` — per-branch + org rollup of reserve and shortage-deficit pools (multi-tenant scoped to user.organization_id with defense-in-depth filter).
+- `GET /api/reserve/ledger` — paginated ledger w/ filters (branch, pool=reserve|deficit, type).
+- `POST /api/reserve/apply` — debit reserve to offset audit findings (PIN required; validates audit_session_id ownership + branch match).
+- `POST /api/reserve/net-shortage` — paired debit on both pools when owner approves netting.
+- `POST /api/reserve/claw-back` — reverse a mistaken auto-credit (PIN required).
+- `POST /api/reserve/backfill` — admin-only, idempotent backfill from daily_closings (org-scoped query).
+- Auto-hook in `daily_operations.submit_daily_close` and `submit_batch_close` — every non-zero `over_short` posts a ledger entry on close.
+- `_compute_audit` now returns `reserve` field with current balance for the queried branch.
+
+**Frontend**:
+- `/app/frontend/src/components/audit/ReserveTab.js` (NEW) — full ledger view, balance triplet (Reserve/Deficit/Net), Apply/Net/Claw-back modals, branch picker, admin Backfill button.
+- `/app/frontend/src/components/OverageReserveCard.js` (NEW) — compact summary card placed on the FundManagement (Wallets) page right under the 4 wallet cards. Click → deep-link to `/audit?tab=reserve`.
+- `AuditCenterPage.js` — new "Reserve" tab; deep-link support via `?tab=reserve`; auto-suggest banner during Run Audit results: "Your inventory shortage is ₱X — apply ₱X from your ₱Y Reserve?"
+
+**Tests:** new `/app/backend/tests/test_overage_reserve.py` (23 tests) — endpoints, multi-tenant scoping, ledger consistency, paired netting, claw-back, audit/compute integration. Regression: 47 prior audit tests still pass. **Total: 70/70 ✅**
+
+---
+
 ## ✅ Completed in Iter 197 — Audit Pulse Dashboard Widget (Feb 2026)
 
 Follow-on to Phase 1 deep analysis: surfaced the new scores on the dashboard so owners see the headline numbers without opening the full Audit Center.

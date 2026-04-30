@@ -148,7 +148,12 @@ async def reserve_summary(
     org_id = user.get("organization_id")
     if org_id:
         branch_query["organization_id"] = org_id
-    branches = await db.branches.find(branch_query, {"_id": 0, "id": 1, "name": 1}).to_list(500)
+    branches = await db.branches.find(
+        branch_query, {"_id": 0, "id": 1, "name": 1, "organization_id": 1}
+    ).to_list(500)
+    # Defense-in-depth: drop any branch whose organization_id mismatches.
+    if org_id:
+        branches = [b for b in branches if not b.get("organization_id") or b["organization_id"] == org_id]
     if user.get("role") != "admin":
         user_branch = user.get("branch_id")
         if user_branch:
@@ -250,6 +255,24 @@ async def apply_reserve(data: dict, user=Depends(get_current_user)):
     verifier = await verify_pin_for_action(pin, "transaction_verify", branch_id=branch_id)
     if not verifier:
         raise HTTPException(status_code=403, detail="Invalid PIN — manager/admin required")
+
+    # Validate audit_session_id ownership before $push (SaaS isolation)
+    if audit_session_id:
+        existing_audit = await db.audits.find_one(
+            {"id": audit_session_id}, {"_id": 0, "branch_id": 1, "organization_id": 1}
+        )
+        if not existing_audit:
+            raise HTTPException(status_code=404, detail="Audit session not found")
+        org_id = user.get("organization_id")
+        if org_id and existing_audit.get("organization_id") and existing_audit["organization_id"] != org_id:
+            raise HTTPException(status_code=403, detail="Audit session belongs to another organization")
+        # Branch sanity — applied amount should match the audit's branch context
+        audit_branch = existing_audit.get("branch_id")
+        if audit_branch and audit_branch != branch_id:
+            raise HTTPException(
+                status_code=400,
+                detail="audit_session_id branch does not match supplied branch_id",
+            )
 
     balance = await _current_balance(branch_id, "reserve")
     if amount > balance + 0.01:
@@ -409,11 +432,31 @@ async def backfill_from_closings(data: Optional[dict] = None, user=Depends(get_c
 
     data = data or {}
     branch_id = data.get("branch_id")
+    org_id = user.get("organization_id")
+
+    # Closings query is org-scoped first to prevent cross-tenant ledger writes.
     query = {"status": "closed", "over_short": {"$ne": 0}}
+    if org_id:
+        # daily_closings carries organization_id when produced by the close
+        # endpoints; legacy rows without it are filtered via branch lookup below.
+        query["$or"] = [{"organization_id": org_id}, {"organization_id": {"$exists": False}}]
     if branch_id:
+        # Verify branch belongs to caller's org
+        if org_id:
+            br = await db.branches.find_one({"id": branch_id}, {"_id": 0, "organization_id": 1})
+            if br and br.get("organization_id") and br["organization_id"] != org_id:
+                raise HTTPException(status_code=403, detail="Branch belongs to another organization")
         query["branch_id"] = branch_id
 
     closings = await db.daily_closings.find(query, {"_id": 0}).sort("date", 1).to_list(5000)
+
+    # Defence-in-depth: drop legacy rows whose branch lives in another org.
+    if org_id and not branch_id:
+        allowed = {b["id"] for b in await db.branches.find(
+            {"organization_id": org_id}, {"_id": 0, "id": 1}
+        ).to_list(500)}
+        closings = [c for c in closings if c.get("branch_id") in allowed]
+
     created = 0
     for c in closings:
         res = await record_daily_close_variance(c, user=user)
