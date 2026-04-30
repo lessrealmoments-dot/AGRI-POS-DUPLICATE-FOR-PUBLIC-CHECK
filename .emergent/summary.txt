@@ -1,137 +1,130 @@
-<analysis>**original_problem_statement**: 
-Build a robust multi-tenant POS (AgriBooks) handling native hardware seamlessly. 
-PRODUCT REQUIREMENTS (Current Focus):
-- Accountability for manual price changes vs discounts.
-- Price Match flow requiring reason and Manager/Admin PIN that permanently updates branch prices.
-- Z-Report and Dashboard tracking of discounts given today per product.
-- Comprehensive Financial Audit and Consistency Fixes across Sales, AR, Inventory Movements, and Reports.
+<analysis>Here is the handover summary for the next agent:
+
+<handoff summary>
+**original_problem_statement**: 
+PRODUCT REQUIREMENTS: 
+1. Build an Audit Pulse dashboard widget and deep analysis layer (Health & Fraud Risk scores) in the Audit Center.
+2. Build a Cash Overage Reserve system to pool Z-Report extra money (overages) and apply it to missing inventory/shrinkage.
+3. Fix a delta-sync display bug where the Offline Indicator showed 0 products despite the IndexedDB cache being full.
+4. Implement a Late-Encode flow for credits on closed days (carrying them over to the next Z-Report) without altering closed Z-reports.
+5. Create an SMS Close-Day Scheduler (APScheduler) to remind cashiers/managers/owners to close the day at configurable intervals.
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
 **what currently exists?** 
-A full-stack multi-tenant POS and SMS CRM with comprehensive offline capabilities. In this session, a new **Price Match Flow** was implemented to replace ad-hoc price overrides. Cashiers can now match competitor prices (which triggers a visual warning, requires a reason + manager PIN, permanently updates the branch price, enforces capital floors, and logs to ). Pure one-time discounts remain fast and log to . 
-Additionally, a massive **Auditor-Level Consistency Overhaul** was performed. Critical financial flows were tightened: Credit returns now properly reduce Accounts Receivable (AR); the Product Profitability report nets out returns; Total Sales formulas were unified across all reports; Purchase Order reopens now reverse old inventory movements to fix Moving Average drift; and voided invoices correctly tag and exclude associated discount/price-match logs. 
+A robust multi-tenant POS and SMS CRM. In this session, significant operational workflows were added. The **Audit Center** now computes Health (0-100) and Fraud Risk (0-100) scores, viewable via the new **Audit Pulse** dashboard widget. A **Cash Overage Reserve** system was implemented to automatically pool daily cash overages to offset inventory variances. The offline sync logic was fixed so the POS correctly displays cached counts. For batch-credit processing, a **Late-Encode Flow** was added allowing cashiers to backdate credit/partial sales into closed days (with Manager PIN), pushing the totals transparently into a Late Encoded carryover section on the *next* open Z-Report. Finally, an **SMS Scheduler** was wired up to send pre-close pings, escalation notices for overdue closes, and a final Z-Report Summary SMS to owners upon a successful close.
 
 **Last working item**: 
-    - Last item agent was working: Implemented 6 Auditor-level Consistency Fixes (Iter 195) to ensure all financial reports, AR balances, inventory moving averages, and cash reconciliations match perfectly across the system. 
+    - Last item agent was working: Fixing the SMS escalation templates (removing false claims that Sales are BLOCKED if a day is unclosed) and adding the Order Date picker to the Quick Mode view in . 
     - Status: USER VERIFICATION PENDING
     - Agent Testing Done: Y
-    - Which testing method agent to use? NA (Testing is already done, 34/34 backend tests passing,  verified everything in Iter 173).
+    - Which testing method agent to use? NA (Testing is already done, 86/86 backend tests passing).
     - User Testing Done: N
 
 **All Pending/In progress Issue list**: 
-  Issue 1: React-hooks/exhaustive-deps ESLint warnings (P2)
-     - Attempted fixes: None. Agent explained to the user this is harmless library/linter noise.
+  Issue 1: Seed new SMS templates on Production (P1)
+     - Attempted fixes: Templates added in code (). 
+     - Next debug checklist: The user must trigger the auto-seed on their live server by either hitting the SMS settings page or deleting the old templates in MongoDB (, , etc.) so the new text can populate.
+     - Why fix this issue and what will be achieved with the fix? Ensures the new, accurate SMS wording is actually sent out.
+     - Status: USER VERIFICATION PENDING
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix? Backend
+     - Blocked on other issue: None
+
+  Issue 2: React-hooks/exhaustive-deps ESLint warnings (P2)
+     - Attempted fixes: None. Pre-existing harmless linter noise.
      - Next debug checklist: Review dependency arrays across frontend React components.
-     - Why fix this issue and what will be achieved with the fix? Cleans up build warnings and prevents potential stale closures.
      - Status: NOT STARTED
      - Is recurring issue? Y
      - Should Test frontend/backend/both after fix? Frontend
      - Blocked on other issue: None
 
-  Issue 2: Org-scoping spot check on older routes (P2)
-     - Attempted fixes: Identified during Iter 195 Audit. Deferred per main agent's plan.
-     - Next debug checklist: Review older routes (pre-multi-tenant refactor) to ensure they strictly enforce  to prevent cross-tenant data leaks.
-     - Why fix this issue and what will be achieved with the fix? Multi-tenant safety hardening.
+  Issue 3: Org-scoping spot check on older routes (P2)
+     - Attempted fixes: Deferred from a previous audit.
+     - Next debug checklist: Review older routes (pre-multi-tenant refactor) to ensure they strictly enforce .
      - Status: NOT STARTED
      - Is recurring issue? N
      - Should Test frontend/backend/both after fix? Backend
-     - Blocked on other issue: None
-
-  Issue 3: Clean up informational-zero  movements (P3)
-     - Attempted fixes: Identified during Iter 195 Audit. Deferred per main agent's plan.
-     - Next debug checklist: Ensure  movements don't clutter the movement history view unnecessarily since they don't change stock quantities.
-     - Why fix this issue and what will be achieved with the fix? Movement log visual clarity.
-     - Status: NOT STARTED
-     - Is recurring issue? N
-     - Should Test frontend/backend/both after fix? Both
-     - Blocked on other issue: None
-
-  Issue 4: Frontend Bundle Size Optimization (P2)
-     - Attempted fixes: None.
-     - Next debug checklist: Implement  for heavy, less-frequently used components.
-     - Why fix this issue and what will be achieved with the fix? Decreases initial JS payload.
-     - Status: NOT STARTED
-     - Is recurring issue? N
-     - Should Test frontend/backend/both after fix? Frontend
-     - Blocked on other issue: None
 
 **In progress Task List**: 
   (None)
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
-    - **P1 - Audit Center Health Check Badge** (Proposed by Agent, pending user confirm): A dashboard widget that cross-checks all ledgers (sales, cash, wallet, AR, profit) and flags if variance > ₱1.
-    - **P1 - Competitor Pricing Radar** (Proposed by Agent, pending user confirm): Dashboard widget showing top 5 products being matched down by competitors.
-    - **P1 - Compliance Calendar Widget**: Dashboard widget showing upcoming business document deadlines.
-    - **P1 - Finance Reports**: Discount cashier drill-down and AP payment history per supplier views.
-    
+    - **P1 - Pre-Migration Variance Report PDF Generator**: (Proposed by Agent) A tool for the user to upload their old system's expected stock CSV, compare it against AgriBooks physical counts, and generate a signed PDF archive document without polluting the live system's inventory logs.
+    - **P1 - SMS Close Reminder Settings UI**: (Proposed by Agent) Add a UI in the Settings page to toggle each SMS reminder stage on/off and configure the per-branch close time (currently managed via DB updates).
+    - **P2 - Reassign closing duty shortcut**: (Proposed by Agent) A one-tap link in the overdue SMS alerts for the owner to pick a different user to close the day from their phone.
+
     Future Tasks:
     - **P2 - Codebase Refactoring**: Refactor  (currently 1600+ lines).
     - **P2 - Global Modal Context**: Add a global modal registry/context.
     - **P2 - CORS Hardening**: Change  before production go-live.
 
 **Completed work in this session**
-- POS Price Match (Iter 194): Created permanent branch price change flow with Manager PIN, reasons, , and . (DONE)
-- Z-Report / Close Wizard: Added per-product discount breakdown. (DONE)
-- Audit Center Consistency (Fix #1): Credit customer returns now accurately reduce  and original invoice balance. (DONE)
-- Audit Center Consistency (Fix #2): Product Profitability report now safely nets out returns from revenue and cost. (DONE)
-- Audit Center Consistency (Fix #3): Total Sales reconciliation formulas unified across all reports. (DONE)
-- Audit Center Consistency (Fix #4): PO Reopen now flags old purchase movements as  to prevent Moving Average drift. (DONE)
-- Audit Center Consistency (Fix #5): Voiding invoices tags  and  entries to exclude them from cashier metric reports. (DONE)
-- Audit Center Consistency (Fix #6): Cash reconciliation cross-checks against  running balances. (DONE)
+- Audit Center Phase 1 Deep Analysis: Health & Fraud Risk scores () (DONE)
+- Audit Pulse Dashboard Widget () (DONE)
+- Cash Overage Reserve System: (, auto-pooling in ) (DONE)
+- Offline Sync Delta Bug Fix: Added  to accurately display IndexedDB product counts after delta syncs (DONE)
+- Late-Encode Flow: Allow credit/partial sales on closed days with Manager PIN, creating carryovers on the next Z-report (, ) (DONE)
+- SMS Close-Day Scheduler:  loop running every minute to trigger close reminders and Z-report summaries () (DONE)
+- SMS Wording & Quick Mode Date Picker Fix: Removed false blocked threats from SMS and added date picker to Quick Mode () (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-   - Issue 1: Logs/lag on transfer
-     - Debug checklist: User mentioned visual lag during branch switching in Web POS. Check  branch context switcher performance.
-     - Why to solve this issue and what will be achieved with this: Improves cross-branch cashier UX.
-     - Should Test frontend/backend/both after fix: Frontend
-     - Is recurring issue? N
+   - None.
 
 **Known issue recurrence from previous fork**
   - Issue recurrence in previous fork: ESLint warnings for .
-  - Recurrence count: 12+
+  - Recurrence count: 13+
   - Status: NOT STARTED
 
 **Code Architecture**
-
+close_reminderlate_encodeover_shortgetCacheCounts()
 
 **Key Technical Concepts**
-- **Price Match Flow vs Discounts**: Cashiers changing line item prices triggers a distinct flow. It displays a visual Price Changed badge, requires an explicit reason (e.g. Competitor Match), and a PIN at checkout. It updates the  collection permanently. Generic discounts (using the discount input field) skip the PIN (if permissions allow) and remain one-time.
-- **Financial Strict Consistency**: The system uses a multi-ledger architecture (, , , ). If an entity is voided/reopened (like an invoice or PO), its constituent ledger entries are explicitly reversed or tagged (, ) so that aggregate reports (Product Profitability, Cash Reconciliation, Moving Average) remain perfectly balanced. 
+- **Late Encode Flow:** Cash sales on closed days are strictly blocked. Credit/Partial sales can be backdated to a closed day. Instead of amending the sealed Z-report, the invoice is tagged  and lands on the *next open* Z-report as a carryover, ensuring chronological integrity for the auditor.
+- **Overage Reserve:** Extra money from the daily drawer count (positive ) is automatically credited to the branch's . During an audit, this pool can be used to mathematically offset inventory shrinkage.
+- **Background SMS Scheduler:** Uses  inside FastAPI (). It runs every minute, checking branch close times and dispatching escalating SMS notifications (3 PM catchup, 6 PM ping, 7:30 PM overdue, etc.).
 
 **key DB schema**
-  -  (NEW): Tracks , , ,  for permanent price changes. Added unique indexes.
-  - : Now supports an  flag.
+  -  (NEW): Tracks backdated credit encoding (invoice ID, reason, verifier).
+  -  (NEW): Tracks reserve additions (from Z-reports) and deductions (audit applications).
+  - : Unmodified, but acts as the trigger for the APScheduler SMS hooks.
 
 **changes in tech stack**
-  - None.
+  - Uses  (already installed in requirements) for background Python tasks within FastAPI.
 
 **All files of reference** 
   -  (Created)
   -  (Created)
   -  (Created)
   -  (Created)
+  -  (Created)
+  -  (Created)
+  - , ,  (Created)
   -  (Updated)
   -  (Updated)
   -  (Updated)
   -  (Updated)
   -  (Updated)
-  -  (Updated)
-  -  (Updated)
-  -  (Updated)
+  - , , ,  (Updated)
+  - ,  (Updated)
 
 **Areas that need refactoring**: 
-  -  remains massive (>1600 lines) and could benefit from component splitting.
+  -  remains massive (>1600 lines). 
+  - SMS Settings UI should be built to prevent direct DB configuration for the Close Reminders.
 
 **key api endpoints**
   -  (NEW)
-  -  (Updated to cascade voids to audit logs)
-  -  (Updated to cascade reversals to inventory movements)
+  -  (NEW)
+  -  (NEW)
+  -  (NEW)
+  -  (Updated to handle  bypass logic)
 
 **Critical Info for New Agent** 
-- **Offline Guardrails**: Cashiers are now blocked from directly editing item prices (triggering Price Match) when the POS is offline. Ensure this block remains intact to prevent reconciliation headaches.
-- **Ledger Reversals**: When adding new transactional features, ensure *every* corresponding ledger (, , ) is explicitly handled in the void/reversal workflows. 
+- **Deployment Instructions:** The user deploys this code to a live VPS. The frontend uses yarn run v1.22.22
+info Visit https://yarnpkg.com/en/docs/cli/run for documentation about this command. and is served via Nginx. The backend runs on a system Python via supervisor, which triggers PEP-668 warnings for . Guide the user correctly on deployments (usually , backend restart, frontend build).
+- **Background Jobs:** The SMS close reminder runs in an APScheduler thread attached to the FastAPI app lifecycle. If modifying this, ensure the scheduler initializes safely on startup.
+- **Data Philosophy:** The user occasionally tries to bend the system for convenience (e.g. pushing bad data in, faking backdates). The agent successfully implemented Accountant-approved paths (Carryovers, distinct Reserve ledgers) instead of corrupting the ledger. Continue enforcing strict ledger immutability.
 
 **documents and test reports created in this job** 
   -  (Updated)
@@ -141,17 +134,17 @@ Additionally, a massive **Auditor-Level Consistency Overhaul** was performed. Cr
   - 
 
 **Last 10 User Messages and any pending HUMAN messages** 
- - User: Asks to change sales setup so cashiers give traceably recorded discounts instead of manually changing prices.
- - Agent: Proposes locking price edits and forcing all reductions through discounts. 
- - User: Proposes a combined approach: Discounts for one-time reductions, and an accountable Price Match flow (requiring reason and manager PIN) for permanent price updates due to competitor pricing. 
- - Agent: Confirms the new flow: Phase 1 (Price Match), Phase 2 (Discounts unchanged), Phase 3 (Reports/Z-Report additions). 
- - User: Agrees. Clarifies to drop Vendor cost drop from the reasons since Smart Pricing already handles it. 
- - Agent: Implements Phase 1-3, runs tests, calls testing agent, finalizes feature. 
- - User: Impressed, asks the agent to do a full Auditor analysis of the system to look for any logic/formula contradictions regarding money, prices, and inventory. 
- - Agent: Scans system. Identifies 11 issues (3 High, 5 Medium, 3 Low). Proposes a phased fix plan.
- - User: Tells agent to proceed simultaneously with fixing the different phases so everything works as expected. 
- - Agent: Implements all 6 structural consistency fixes, writes tests, runs testing agent, updates PRD, and finishes task. Suggests adding an Audit Center Health Check badge widget.
- - *Pending Human Message*: The user has not yet replied to the agent's suggestion to wire up the Audit Center Health Check badge.
+ - User: Asks for advice on migration—whether to push expected inventory from the old system first, or just start fresh with the countsheet.
+ - Agent: Recommends starting fresh to avoid garbage-in-garbage-out, and exporting the pre-migration variance externally as a PDF.
+ - User: Agrees, then asks about blocking sales on closed days, noting they batch credits weekly and get blocked.
+ - Agent: Explains closed-day blocking. Proposes A) Late-Encode with carryover, B) SMS Close-Day Escalation, or C) a Credit Capture Inbox.
+ - User: Likes Late-Encode, but proposes SMS Escalation so the owner gets alerted if the day isn't closed.
+ - Agent: Agrees to build both A (Late-Encode) and B (SMS close-reminders). Proposes a schedule.
+ - User: Refines schedule (3 PM catch-up for cashier, 5 PM for manager/owner, etc.).
+ - Agent: Tweaks to relative times, dedupes roles (if Manager = Cashier), implements both backend and frontend, and runs tests (iteration 177). 
+ - User: Points out the SMS templates wrongly threaten that Sales are BLOCKED if a day is unclosed, asks to reframe it purely as owner accountability. Also notes the date picker is missing in  Quick Mode.
+ - Agent: Fixes the SMS wording in the templates, exposes the Order Date picker in Quick mode, lints, runs tests, and explains how to redeploy.
+ - *Pending Human Message*: The user has not yet verified the final changes on their live server.
 
 **Project Health Check:**
   - Broken: None.
@@ -162,18 +155,19 @@ Additionally, a massive **Auditor-Level Consistency Overhaul** was performed. Cr
   - Resend (Emails) — requires User API Key
 
 **Testing status**
-  - Testing agent used after significant changes: YES (Iter 172 for Price Match, Iter 173 for Consistency Fixes).
+  - Testing agent used after significant changes: YES (Iterations 174, 175, 176, 177).
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: , 
-  - Known regressions: None. (34/34 backend tests pass).
+  - Test files created: , , 
+  - Known regressions: None. (86/86 backend tests pass).
 
 **Credentials to test flow:**
   - Check . 
 
 **What agent forgot to execute**
-  - No explicit misses. The agent successfully deferred two medium/low priority audit cleanups (Org-scoping older routes, and informational  cleanup) into the backlog to focus on the high-impact financial consistency fixes. 
+  - Nothing. The agent successfully addressed the user's workflow needs and caught the offline delta-sync UI issue correctly.
 
 **Debugging checklist for current issue**
-    Issue: None currently active.
-    Frontend files to check: NA
-    Backend files to check: NA</analysis>
+    Issue: None currently active. Verification pending for SMS wording and Quick Mode date picker.
+    Frontend files to check:  (verify date picker behaves correctly).
+    Backend files to check:  (verify templates).
+</handoff summary></analysis>

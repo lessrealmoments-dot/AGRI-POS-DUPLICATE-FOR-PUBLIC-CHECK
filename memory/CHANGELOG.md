@@ -1,5 +1,21 @@
 # AgriBooks Changelog
 
+
+## Apr 30, 2026 — "Send Sample SMS" for Collection Notification Recipients
+- New backend endpoint `POST /api/sms/send-sample-recipients` — queues a tagged
+  `[SAMPLE]` SMS to every configured recipient (Owner, Admin, Manager/Auditor
+  fallback, and each branch-specific Manager/Auditor). De-dupes by phone,
+  resolves branch names server-side, requires `settings.edit`.
+- `MessagesPage.js` — added "Send Sample SMS" button next to "Save Recipients"
+  with a preview dialog listing every recipient (role + branch + phone) and the
+  sample message body before dispatch. Uses current UI state so unsaved edits
+  can be tested.
+- Template key `sample_recipient_test` used for queue tracking; routes through
+  the same gateway as live notifications.
+- Verified: curl 2/2 recipients queued, empty payload returns 400, dedup
+  correctly collapses duplicate phones.
+
+
 ## Mar 31, 2026 — SMS Messages Moved to Main App (Admin-Only)
 - **MessagesPage.js** created at `/messages` route — admin-only, 5 tabs:
   - Message Queue (Pending/Sent/Failed/Skipped filters with counts)

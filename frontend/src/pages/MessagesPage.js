@@ -8,11 +8,13 @@ import { Badge } from '../components/ui/badge';
 import { Card, CardContent } from '../components/ui/card';
 import { Separator } from '../components/ui/separator';
 import { ScrollArea } from '../components/ui/scroll-area';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import {
   MessageSquare, Send, Clock, AlertTriangle, SkipForward,
   RefreshCw, Users, Filter, Edit3, Check, X, Search,
   Megaphone, Loader2, Settings, CheckCircle2, XCircle,
-  ChevronDown, ChevronUp, Phone, FileText, UserPlus, Activity, Wifi
+  ChevronDown, ChevronUp, Phone, FileText, UserPlus, Activity, Wifi,
+  BellRing
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -147,6 +149,8 @@ export default function MessagesPage() {
     owner_phone: '', manager_phone: '', admin_phone: '', auditor_phone: '', branch_phones: {}
   });
   const [savingRecipients, setSavingRecipients] = useState(false);
+  const [sampleOpen, setSampleOpen] = useState(false);
+  const [sendingSample, setSendingSample] = useState(false);
 
   // Gateway log state
   const [gatewayLogs, setGatewayLogs] = useState([]);
@@ -1446,18 +1450,29 @@ export default function MessagesPage() {
                 </div>
               )}
 
-              <button data-testid="save-recipients-btn" disabled={savingRecipients}
-                onClick={async () => {
-                  setSavingRecipients(true);
-                  try {
-                    await api.put('/settings/collection-recipients', collectionRecipients);
-                    toast.success('Collection recipients saved');
-                  } catch { toast.error('Failed to save'); }
-                  setSavingRecipients(false);
-                }}
-                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs rounded-lg font-medium transition-colors disabled:opacity-50">
-                {savingRecipients ? 'Saving...' : 'Save Recipients'}
-              </button>
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <button data-testid="save-recipients-btn" disabled={savingRecipients}
+                  onClick={async () => {
+                    setSavingRecipients(true);
+                    try {
+                      await api.put('/settings/collection-recipients', collectionRecipients);
+                      toast.success('Collection recipients saved');
+                    } catch { toast.error('Failed to save'); }
+                    setSavingRecipients(false);
+                  }}
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs rounded-lg font-medium transition-colors disabled:opacity-50">
+                  {savingRecipients ? 'Saving...' : 'Save Recipients'}
+                </button>
+                <button data-testid="send-sample-recipients-btn"
+                  onClick={() => setSampleOpen(true)}
+                  className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs rounded-lg font-medium transition-colors inline-flex items-center gap-1.5">
+                  <BellRing className="w-3.5 h-3.5 text-amber-600" />
+                  Send Sample SMS
+                </button>
+                <p className="text-[11px] text-slate-400 ml-auto">
+                  Sample goes through the same SMS queue as live notifications.
+                </p>
+              </div>
             </CardContent>
           </Card>
 
@@ -1596,6 +1611,115 @@ export default function MessagesPage() {
           </div>
         </div>
       )}
+
+      {/* ═══ Sample SMS Preview Dialog ═══ */}
+      <Dialog open={sampleOpen} onOpenChange={setSampleOpen}>
+        <DialogContent className="max-w-lg" data-testid="sample-sms-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <BellRing className="w-4 h-4 text-amber-600" />
+              Send Sample SMS to Recipients
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              One short SMS will be queued for each configured number below.
+              Messages are tagged <strong>[SAMPLE]</strong> so recipients know it is a test.
+            </DialogDescription>
+          </DialogHeader>
+
+          {(() => {
+            const r = collectionRecipients || {};
+            const rows = [];
+            const pushRow = (phone, role, branchName) => {
+              const p = (phone || '').trim();
+              if (!p) return;
+              rows.push({ phone: p, role, branchName });
+            };
+            pushRow(r.owner_phone,   'Owner',   '');
+            pushRow(r.admin_phone,   'Admin',   '');
+            pushRow(r.manager_phone, 'Manager (Global Fallback)', '');
+            pushRow(r.auditor_phone, 'Auditor (Global Fallback)', '');
+            const bp = r.branch_phones || {};
+            (branches || []).forEach(br => {
+              const row = bp[br.id] || {};
+              pushRow(row.manager_phone, 'Manager', br.name);
+              pushRow(row.auditor_phone, 'Auditor', br.name);
+            });
+            // De-dupe by phone (first occurrence wins)
+            const seen = new Set();
+            const unique = rows.filter(x => {
+              if (seen.has(x.phone)) return false;
+              seen.add(x.phone);
+              return true;
+            });
+
+            if (unique.length === 0) {
+              return (
+                <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+                  No recipient phone numbers configured yet. Fill in at least one number above, then try again.
+                </div>
+              );
+            }
+            return (
+              <>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 max-h-64 overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="text-[10px] text-slate-500 uppercase tracking-wide">
+                      <tr>
+                        <th className="text-left px-3 py-2">Role</th>
+                        <th className="text-left px-3 py-2">Branch</th>
+                        <th className="text-left px-3 py-2">Phone</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200">
+                      {unique.map((x, i) => (
+                        <tr key={i} data-testid={`sample-row-${i}`} className="bg-white">
+                          <td className="px-3 py-2 font-medium text-slate-700">{x.role}</td>
+                          <td className="px-3 py-2 text-slate-500">{x.branchName || 'All Branches'}</td>
+                          <td className="px-3 py-2 font-mono text-slate-800">{x.phone}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="mt-3 p-3 bg-slate-900 text-slate-100 rounded-lg text-[11px] leading-relaxed font-mono">
+                  <p className="text-slate-400 mb-1 text-[10px] uppercase tracking-wide">Sample message preview</p>
+                  [SAMPLE] Hi &lt;Role&gt;, ito ay test SMS mula sa &lt;Company&gt; — &lt;Branch&gt;. Kumpirmado na tama ang naka-configure na numero upang makatanggap ng Collection notifications. Walang aksyon na kailangan. Sent by: {user?.full_name || user?.email || '—'}.
+                </div>
+                <div className="flex items-center justify-end gap-2 pt-3">
+                  <button
+                    data-testid="sample-cancel-btn"
+                    onClick={() => setSampleOpen(false)}
+                    className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50">
+                    Cancel
+                  </button>
+                  <button
+                    data-testid="sample-confirm-btn"
+                    disabled={sendingSample}
+                    onClick={async () => {
+                      setSendingSample(true);
+                      try {
+                        const res = await api.post('/sms/send-sample-recipients', collectionRecipients);
+                        const n = res.data?.queued || 0;
+                        toast.success(`Queued ${n} sample SMS — check the Queue tab to track delivery.`);
+                        setSampleOpen(false);
+                        loadQueue();
+                        loadStats();
+                      } catch (err) {
+                        toast.error(err?.response?.data?.detail || 'Failed to queue sample SMS');
+                      }
+                      setSendingSample(false);
+                    }}
+                    className="px-4 py-1.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-xs rounded-lg font-medium inline-flex items-center gap-1.5">
+                    {sendingSample
+                      ? (<><Loader2 className="w-3.5 h-3.5 animate-spin" /> Queueing…</>)
+                      : (<><Send className="w-3.5 h-3.5" /> Send {unique.length} Sample {unique.length === 1 ? 'SMS' : 'SMSes'}</>)}
+                  </button>
+                </div>
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

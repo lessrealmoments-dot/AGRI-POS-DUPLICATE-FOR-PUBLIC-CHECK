@@ -921,6 +921,88 @@ async def send_manual_sms(data: dict, user=Depends(get_current_user)):
     return queued[0] if len(queued) == 1 else {"queued": len(queued), "phones": phones_to_send}
 
 
+# ── Sample SMS for Collection Notification Recipients ──────────────────────
+@router.post("/send-sample-recipients")
+async def send_sample_collection_recipients(data: dict, user=Depends(get_current_user)):
+    """Queue a short, clearly-tagged SAMPLE SMS to every configured Collection
+    Notification Recipient (Owner, Admin, Manager/Auditor fallback and each
+    branch-specific Manager/Auditor). Body is supplied by the client to allow
+    testing unsaved edits — the backend resolves branch names and de-dupes
+    phones to avoid double-sends.
+    """
+    check_perm(user, "settings", "edit")
+    recipients = data or {}
+
+    company_name = await _resolve_company_name()
+    sender = user.get("full_name") or user.get("email", "")
+    organization_id = user.get("organization_id", "")
+
+    # Build (phone, role_label, branch_id, branch_name) entries
+    entries = []
+    entries.append((recipients.get("owner_phone"),   "Owner",   "", ""))
+    entries.append((recipients.get("admin_phone"),   "Admin",   "", ""))
+    entries.append((recipients.get("manager_phone"), "Manager (Global Fallback)", "", ""))
+    entries.append((recipients.get("auditor_phone"), "Auditor (Global Fallback)", "", ""))
+
+    branch_phones = recipients.get("branch_phones") or {}
+    for br_id, phones in branch_phones.items():
+        br_doc = await db.branches.find_one({"id": br_id}, {"_id": 0, "name": 1})
+        br_name = (br_doc or {}).get("name", "") if br_doc else ""
+        entries.append(((phones or {}).get("manager_phone"), "Manager", br_id, br_name))
+        entries.append(((phones or {}).get("auditor_phone"), "Auditor", br_id, br_name))
+
+    # Normalize, de-dupe by phone (first role wins)
+    seen = set()
+    cleaned = []
+    for phone, role, br_id, br_name in entries:
+        p = (phone or "").strip()
+        if not p or p in seen:
+            continue
+        seen.add(p)
+        cleaned.append((p, role, br_id, br_name))
+
+    if not cleaned:
+        raise HTTPException(
+            status_code=400,
+            detail="No recipient phone numbers configured. Add at least one phone before sending a sample."
+        )
+
+    queued = []
+    for phone, role, br_id, br_name in cleaned:
+        scope = f" — {br_name}" if br_name else " — All Branches"
+        body = (
+            f"[SAMPLE] Hi {role}, ito ay test SMS mula sa {company_name or 'AgriBooks'}{scope}. "
+            f"Kumpirmado na tama ang naka-configure na numero upang makatanggap ng "
+            f"Collection notifications. Walang aksyon na kailangan. "
+            f"Sent by: {sender}."
+        )
+        doc = {
+            "id": new_id(),
+            "organization_id": organization_id,
+            "template_key": "sample_recipient_test",
+            "customer_id": "",
+            "customer_name": f"{role}{(' - ' + br_name) if br_name else ''}",
+            "phone": phone,
+            "message": body,
+            "status": "pending",
+            "trigger": "manual",
+            "trigger_ref": "sample_recipient_test",
+            "dedup_key": "",
+            "branch_id": br_id,
+            "branch_name": br_name,
+            "sent_by_name": sender,
+            "created_at": now_iso(),
+            "sent_at": None,
+            "failed_at": None,
+            "error": None,
+            "retry_count": 0,
+        }
+        await db.sms_queue.insert_one(doc)
+        queued.append({"phone": phone, "role": role, "branch_name": br_name})
+
+    return {"queued": len(queued), "recipients": queued}
+
+
 @router.post("/blast")
 async def send_promo_blast(data: dict, user=Depends(get_current_user)):
     """Send a promotional message to multiple customers.
