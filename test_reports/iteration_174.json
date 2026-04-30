@@ -1,0 +1,36 @@
+{
+  "summary": "Backend-only regression for Phase 1 deep-analysis additions to /api/audit/compute. Verified new kpis, kpis_prev, kpis.trend and scores (health_score, fraud_risk_score, risk_breakdown, section_scores) fields, plus regression that all pre-existing audit sections remain intact. 19 new assertions in test_audit_deep_analysis_phase1.py + 19 existing audit-center tests (test_audit_center_93.py + test_audit_center_clickable_96.py) all PASS.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_audit_deep_analysis_phase1.py",
+    "/app/test_reports/pytest/pytest_audit_phase1_deep.xml",
+    "/app/test_reports/pytest/pytest_audit_regression_phase1.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "/app/backend/routes/audit.py is 1904 lines — exceeds 700-line guideline. Recommend splitting into /app/backend/routes/audit/{sessions,compute,kpis,scores}.py modules as follow-up.",
+    "_compute_scores relies on section severity strings ('ok','warning','critical','info') — adding a new section without a matching severity key would silently be ignored. Suggest defaulting missing severity → 'info' with a log warning.",
+    "kpis_prev silently becomes None if date parsing fails (bare except). Narrow to ValueError and log a warning so backend regressions surface; currently any exception (incl. DB error) hides the issue."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_audit_deep_analysis_phase1.py"
+  ],
+  "success_rate": {
+    "backend": "100% (38/38)",
+    "frontend": "not tested (backend-only request)"
+  },
+  "test_credentials": "Regression org admin: test_org_admin@regression.local / RegressionPass!2026 (auto-seeded via /app/backend/tests/_org_test_helpers.py). Branch auto-picked from GET /api/branches.",
+  "seed_data_creation": "No new seed data. Audit sessions created by TestAuditSessionsCrud are cleaned up via DELETE in the same test.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase 1 deep-analysis backend additions verified end-to-end. New test file /app/backend/tests/test_audit_deep_analysis_phase1.py covers: (1) KPI ribbon fields + gross-margin/void-rate formula cross-checks, (2) kpis_prev + trend deltas, (3) health_score + fraud_risk_score range/label, (4) risk_breakdown 7-factor structure & per-factor caps (Void 25, Discount 15, Edit 15, Off-hours 10, Corrections 10, Security 15, PriceMatch 10 = 100), (5) section_scores weights sum to ~100 with inventory redistribution verified on partial audit (cash→21.7, ar/sales/returns/transfers/unverified/payables→11.7, digital/activity/returns→6.7). Existing 12-test test_audit_center_93.py + 7-test test_audit_center_clickable_96.py suites still pass — no pre-existing field was removed. To rerun: REACT_APP_BACKEND_URL=https://price-match-pos.preview.emergentagent.com pytest backend/tests/test_audit_deep_analysis_phase1.py backend/tests/test_audit_center_93.py backend/tests/test_audit_center_clickable_96.py -v.",
+  "rca of the issue": "N/A — no defects found. Assertions also cross-check the documented formulas (gross_margin = (rev-cogs)/rev*100, void_rate = voided/total_txns*100, fraud_risk = sum(points) capped at 100, section weight redistribution when inventory unavailable), all matched within 0.5 tolerance."
+}

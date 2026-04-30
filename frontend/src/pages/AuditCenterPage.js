@@ -470,6 +470,173 @@ function StatRow({ label, value, highlight, sub }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  KPI Ribbon — Phase 1 deep analysis
+//  Shows 6 cross-cutting ratios with trend deltas vs previous period.
+// ─────────────────────────────────────────────────────────────────────────────
+function KpiTile({ label, value, deltaPct, deltaAbs, hint, goodDirection = 'down', suffix = '' }) {
+  // goodDirection: 'down' means lower value is better (e.g. DSO, void rate)
+  //                'up' means higher is better (e.g. margin, turnover)
+  const hasDelta = deltaPct != null || deltaAbs != null;
+  const raw = deltaAbs != null ? deltaAbs : deltaPct;
+  const zero = raw === 0;
+  const up = (raw || 0) > 0;
+  const isGood = zero ? null : (goodDirection === 'up' ? up : !up);
+  const arrow = zero ? '—' : up ? '▲' : '▼';
+  const color = zero ? 'text-slate-400' : isGood ? 'text-emerald-600' : 'text-red-500';
+  const deltaText = deltaAbs != null
+    ? `${arrow} ${Math.abs(deltaAbs).toFixed(deltaAbs % 1 === 0 ? 0 : 2)}${suffix}`
+    : deltaPct != null
+      ? `${arrow} ${Math.abs(deltaPct).toFixed(1)}%`
+      : '';
+  return (
+    <div className="p-3 rounded-xl border border-slate-200 bg-white">
+      <p className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">{label}</p>
+      <p className="text-xl font-bold text-slate-800 font-mono mt-0.5">{value}</p>
+      <div className="flex items-center justify-between mt-1">
+        {hasDelta ? (
+          <span className={`text-[10px] font-semibold ${color}`}>{deltaText} <span className="text-slate-400 font-normal">vs prev</span></span>
+        ) : <span className="text-[10px] text-slate-400">— no prior data</span>}
+      </div>
+      {hint && <p className="text-[9px] text-slate-400 mt-0.5 leading-tight">{hint}</p>}
+    </div>
+  );
+}
+
+function KpiRibbon({ kpis, prev }) {
+  const php = (n) => '₱' + Math.abs(parseFloat(n) || 0).toLocaleString('en-PH', { maximumFractionDigits: 0 });
+  const trend = kpis.trend || {};
+  const hasPrev = prev && (prev.revenue > 0 || prev.total_txns > 0);
+
+  return (
+    <Card className="border-slate-200" data-testid="audit-kpi-ribbon">
+      <CardContent className="p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="w-7 h-7 rounded-lg bg-[#1A4D2E]/10 flex items-center justify-center">
+            <TrendingUp size={14} className="text-[#1A4D2E]" />
+          </div>
+          <div>
+            <p className="font-bold text-sm text-slate-800" style={{ fontFamily: 'Manrope' }}>Key Performance Ratios</p>
+            <p className="text-[10px] text-slate-500">
+              {hasPrev ? 'Trend deltas compare this period vs previous equal-length period' : 'No prior period data yet — run again next month to unlock trend comparison'}
+            </p>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+          <KpiTile
+            label="Gross Margin"
+            value={`${(kpis.gross_margin_pct || 0).toFixed(1)}%`}
+            deltaAbs={hasPrev ? trend.gross_margin_pct : null}
+            suffix="pp"
+            goodDirection="up"
+            hint={`Profit: ${php(kpis.gross_profit)}`}
+          />
+          <KpiTile
+            label="Void Rate"
+            value={`${(kpis.void_rate_pct || 0).toFixed(1)}%`}
+            deltaAbs={hasPrev ? trend.void_rate_pct : null}
+            suffix="pp"
+            goodDirection="down"
+            hint={`${kpis.voided_count || 0} of ${kpis.total_txns || 0} txns`}
+          />
+          <KpiTile
+            label="Discount Rate"
+            value={`${(kpis.discount_rate_pct || 0).toFixed(1)}%`}
+            deltaAbs={hasPrev ? trend.discount_rate_pct : null}
+            suffix="pp"
+            goodDirection="down"
+            hint={`${php(kpis.total_discount)} given`}
+          />
+          <KpiTile
+            label="DSO (AR days)"
+            value={`${(kpis.dso_days || 0).toFixed(0)}d`}
+            deltaAbs={hasPrev ? trend.dso_days : null}
+            suffix="d"
+            goodDirection="down"
+            hint={`${php(kpis.total_ar)} outstanding`}
+          />
+          <KpiTile
+            label="DPO (AP days)"
+            value={`${(kpis.dpo_days || 0).toFixed(0)}d`}
+            deltaAbs={hasPrev ? trend.dpo_days : null}
+            suffix="d"
+            goodDirection="up"
+            hint={`${php(kpis.total_ap)} outstanding`}
+          />
+          <KpiTile
+            label="Inv. Turnover"
+            value={`${(kpis.inventory_turnover || 0).toFixed(1)}x`}
+            deltaAbs={hasPrev ? trend.inventory_turnover : null}
+            suffix="x"
+            goodDirection="up"
+            hint={`${php(kpis.inventory_value)} on hand`}
+          />
+        </div>
+        {kpis.payment_mix_pct && (
+          <div className="mt-3 pt-3 border-t border-slate-100">
+            <p className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-1.5">Payment Mix</p>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
+              {Object.entries(kpis.payment_mix_pct).filter(([, v]) => v > 0).map(([k, v]) => (
+                <span key={k} className="text-slate-600">
+                  <span className="capitalize font-medium">{k}</span>:
+                  <span className="font-mono ml-1 text-slate-800">{v}%</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function RiskBreakdownCard({ scores }) {
+  const risk = scores.fraud_risk_score || 0;
+  const tone = risk <= 20 ? 'emerald' : risk <= 50 ? 'amber' : risk <= 75 ? 'orange' : 'red';
+  const borderClass = { emerald: 'border-emerald-200', amber: 'border-amber-200', orange: 'border-orange-200', red: 'border-red-200' }[tone];
+  const bgClass = { emerald: 'bg-emerald-50', amber: 'bg-amber-50', orange: 'bg-orange-50', red: 'bg-red-50' }[tone];
+  const iconClass = { emerald: 'text-emerald-600', amber: 'text-amber-600', orange: 'text-orange-600', red: 'text-red-600' }[tone];
+  return (
+    <Card className={`border-2 ${borderClass} ${bgClass}`} data-testid="audit-risk-breakdown">
+      <CardContent className="p-4">
+        <div className="flex items-center gap-2 mb-2.5">
+          <div className={`w-7 h-7 rounded-lg bg-white flex items-center justify-center`}>
+            <AlertTriangle size={14} className={iconClass} />
+          </div>
+          <div>
+            <p className="font-bold text-sm text-slate-800" style={{ fontFamily: 'Manrope' }}>
+              Fraud Risk Breakdown · {scores.fraud_risk_label}
+            </p>
+            <p className="text-[10px] text-slate-500">Why your risk score is {risk}/100 — each factor below adds points up to its cap.</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          {(scores.risk_breakdown || []).map((r, i) => {
+            const pct = r.max > 0 ? (r.points / r.max) * 100 : 0;
+            const hot = pct >= 75;
+            return (
+              <div key={i} className="p-2 rounded-lg bg-white border border-slate-200">
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] text-slate-500 font-medium">{r.factor}</p>
+                  <span className={`text-[10px] font-bold font-mono ${hot ? 'text-red-600' : pct > 0 ? 'text-amber-600' : 'text-slate-400'}`}>
+                    {r.points}/{r.max}
+                  </span>
+                </div>
+                <p className="text-sm font-semibold text-slate-800 mt-0.5">{r.value}</p>
+                <div className="w-full bg-slate-100 rounded-full h-1 mt-1 overflow-hidden">
+                  <div className={`h-1 ${hot ? 'bg-red-500' : pct > 0 ? 'bg-amber-500' : 'bg-slate-200'}`} style={{ width: `${Math.min(100, pct)}%` }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  Main Audit Center Page
 // ─────────────────────────────────────────────────────────────────────────────
 export default function AuditCenterPage() {
@@ -727,6 +894,9 @@ export default function AuditCenterPage() {
 
   const computeOverallScore = (data) => {
     if (!data) return null;
+    // Prefer backend weighted score (Phase 1 deep analysis)
+    if (data.scores?.health_score != null) return data.scores.health_score;
+    // Fallback: simple average of section severities
     const sections = ['cash', 'sales', 'ar', 'payables', 'transfers', 'returns', 'activity', 'digital', 'unverified'];
     if (data.inventory?.available) sections.push('inventory');
     const scores = sections.map(s => {
@@ -784,8 +954,34 @@ export default function AuditCenterPage() {
     </style></head><body>
     <h1>AgriBooks — Audit Report</h1>
     <div class="meta">Branch: ${branch} · Period: ${periodFrom} to ${periodTo} · Type: ${auditType} · Auditor: ${user?.username}</div>
-    <div>Overall Score: <span class="score">${score}/100</span></div>
-    <br/>
+    <div style="display:flex;gap:40px;margin-bottom:14px;">
+      <div><div style="font-size:10px;color:#666">Health Score (${auditData.scores?.health_label || ''})</div><span class="score">${score}/100</span></div>
+      ${auditData.scores?.fraud_risk_score != null ? `
+      <div><div style="font-size:10px;color:#666">Fraud Risk (${auditData.scores?.fraud_risk_label || ''})</div>
+      <span style="font-size:28px;font-weight:bold;color:${auditData.scores.fraud_risk_score <= 20 ? '#15803d' : auditData.scores.fraud_risk_score <= 50 ? '#d97706' : '#dc2626'}">${auditData.scores.fraud_risk_score}/100</span></div>` : ''}
+    </div>
+    ${auditData.kpis ? `
+    <h3 style="margin:14px 0 6px 0;color:#1A4D2E;">Key Performance Ratios</h3>
+    <table>
+      <thead><tr><th>KPI</th><th>Current</th><th>vs Previous Period</th></tr></thead>
+      <tbody>
+        <tr><td>Gross Margin</td><td>${(auditData.kpis.gross_margin_pct || 0).toFixed(1)}% (Profit: ${php(auditData.kpis.gross_profit)})</td><td>${auditData.kpis.trend?.gross_margin_pct != null ? `${auditData.kpis.trend.gross_margin_pct > 0 ? '+' : ''}${auditData.kpis.trend.gross_margin_pct} pp` : '—'}</td></tr>
+        <tr><td>Void Rate</td><td>${(auditData.kpis.void_rate_pct || 0).toFixed(1)}% (${auditData.kpis.voided_count} / ${auditData.kpis.total_txns} txns)</td><td>${auditData.kpis.trend?.void_rate_pct != null ? `${auditData.kpis.trend.void_rate_pct > 0 ? '+' : ''}${auditData.kpis.trend.void_rate_pct} pp` : '—'}</td></tr>
+        <tr><td>Discount Rate</td><td>${(auditData.kpis.discount_rate_pct || 0).toFixed(1)}% (${php(auditData.kpis.total_discount)})</td><td>${auditData.kpis.trend?.discount_rate_pct != null ? `${auditData.kpis.trend.discount_rate_pct > 0 ? '+' : ''}${auditData.kpis.trend.discount_rate_pct} pp` : '—'}</td></tr>
+        <tr><td>DSO (AR days)</td><td>${(auditData.kpis.dso_days || 0).toFixed(0)}d (${php(auditData.kpis.total_ar)} outstanding)</td><td>${auditData.kpis.trend?.dso_days != null ? `${auditData.kpis.trend.dso_days > 0 ? '+' : ''}${auditData.kpis.trend.dso_days} d` : '—'}</td></tr>
+        <tr><td>DPO (AP days)</td><td>${(auditData.kpis.dpo_days || 0).toFixed(0)}d (${php(auditData.kpis.total_ap)} outstanding)</td><td>${auditData.kpis.trend?.dpo_days != null ? `${auditData.kpis.trend.dpo_days > 0 ? '+' : ''}${auditData.kpis.trend.dpo_days} d` : '—'}</td></tr>
+        <tr><td>Inventory Turnover</td><td>${(auditData.kpis.inventory_turnover || 0).toFixed(1)}× annualised (${php(auditData.kpis.inventory_value)} on hand)</td><td>${auditData.kpis.trend?.inventory_turnover != null ? `${auditData.kpis.trend.inventory_turnover > 0 ? '+' : ''}${auditData.kpis.trend.inventory_turnover}×` : '—'}</td></tr>
+      </tbody>
+    </table>` : ''}
+    ${auditData.scores?.risk_breakdown?.length ? `
+    <h3 style="margin:14px 0 6px 0;color:#1A4D2E;">Fraud Risk Breakdown</h3>
+    <table>
+      <thead><tr><th>Factor</th><th>Value</th><th>Points</th></tr></thead>
+      <tbody>
+        ${auditData.scores.risk_breakdown.map(r => `<tr><td>${r.factor}</td><td>${r.value}</td><td>${r.points} / ${r.max}</td></tr>`).join('')}
+      </tbody>
+    </table>` : ''}
+    <h3 style="margin:14px 0 6px 0;color:#1A4D2E;">Section Status</h3>
     <table>
       <thead><tr><th>Section</th><th>Status</th><th>Key Finding</th></tr></thead>
       <tbody>
@@ -834,9 +1030,29 @@ export default function AuditCenterPage() {
           </div>
         </div>
         {auditData && (
-          <div className="text-center">
-            <p className={`text-4xl font-bold font-mono ${scoreColor}`}>{overallScore}/100</p>
-            <p className="text-xs text-slate-500 mt-0.5">Overall Audit Score</p>
+          <div className="flex items-center gap-5" data-testid="audit-dual-score">
+            <div className="text-center">
+              <p className={`text-4xl font-bold font-mono ${scoreColor}`}>{overallScore}/100</p>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Health Score
+                {auditData.scores?.health_label && (
+                  <span className="ml-1 font-semibold text-slate-700">· {auditData.scores.health_label}</span>
+                )}
+              </p>
+            </div>
+            {auditData.scores?.fraud_risk_score != null && (() => {
+              const risk = auditData.scores.fraud_risk_score;
+              const riskColor = risk <= 20 ? 'text-emerald-600' : risk <= 50 ? 'text-amber-600' : risk <= 75 ? 'text-orange-600' : 'text-red-600';
+              return (
+                <div className="text-center pl-5 border-l border-slate-200">
+                  <p className={`text-4xl font-bold font-mono ${riskColor}`}>{risk}/100</p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Fraud Risk
+                    <span className="ml-1 font-semibold text-slate-700">· {auditData.scores.fraud_risk_label}</span>
+                  </p>
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>
@@ -944,6 +1160,14 @@ export default function AuditCenterPage() {
           {/* Results */}
           {auditData && (
             <div className="space-y-3">
+              {/* ── KPI Ribbon (Phase 1 deep analysis) ───────────────────── */}
+              {auditData.kpis && <KpiRibbon kpis={auditData.kpis} prev={auditData.kpis_prev} />}
+
+              {/* ── Fraud Risk breakdown (only if risk > 0) ─────────────── */}
+              {auditData.scores?.risk_breakdown && auditData.scores.fraud_risk_score > 0 && (
+                <RiskBreakdownCard scores={auditData.scores} />
+              )}
+
               {/* Score summary */}
               <div className="grid grid-cols-4 md:grid-cols-9 gap-2">
                 {[

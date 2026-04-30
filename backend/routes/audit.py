@@ -290,6 +290,27 @@ async def compute_audit(
     # ── Section: Unverified Items ─────────────────────────────────────────
     result["unverified"] = await _compute_unverified(b_id, period_from, period_to)
 
+    # ── Section: KPI Ribbon + Trend (Phase 1 deep analysis) ───────────────
+    result["kpis"] = await _compute_kpis(b_id, period_from, period_to, result)
+
+    # Previous period of equal length — for trend deltas
+    try:
+        pf = datetime.strptime(period_from, "%Y-%m-%d").date()
+        pt = datetime.strptime(period_to, "%Y-%m-%d").date()
+        span = (pt - pf).days + 1  # inclusive
+        prev_to = pf - timedelta(days=1)
+        prev_from = prev_to - timedelta(days=span - 1)
+        result["kpis_prev"] = await _compute_kpis(
+            b_id, prev_from.strftime("%Y-%m-%d"), prev_to.strftime("%Y-%m-%d"), None
+        )
+        # attach delta summary
+        result["kpis"]["trend"] = _compute_trend_deltas(result["kpis"], result["kpis_prev"])
+    except Exception:
+        result["kpis_prev"] = None
+
+    # ── Weighted Health + Fraud Risk scores ──────────────────────────────
+    result["scores"] = _compute_scores(result)
+
     return result
 
 
@@ -1552,4 +1573,331 @@ async def get_transfer_variances(
             "open_incident_tickets": open_tickets,
             "total_unresolved_loss": round(total_unresolved_loss, 2),
         }
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  PHASE 1 DEEP ANALYSIS — KPI ratios, trend deltas, weighted scores
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _compute_kpis(branch_id: str, date_from: str, date_to: str,
+                        audit_result: Optional[dict]) -> dict:
+    """
+    Compute the six cross-cutting financial KPIs that a real auditor looks at.
+    These are ratios (not counts), so they stay comparable across branches and
+    periods. `audit_result` (if present) lets us reuse already-computed numbers
+    to avoid re-aggregating; when computing a prior period we pass None and
+    aggregate freshly.
+    """
+
+    # ── Revenue + COGS (for gross margin) ─────────────────────────────────
+    inv_query = {
+        "branch_id": branch_id,
+        "order_date": {"$gte": date_from, "$lte": date_to},
+        "status": {"$ne": "voided"},
+        "sale_type": {"$nin": ["interest_charge", "penalty_charge"]},
+    }
+    invoices = await db.invoices.find(
+        inv_query, {"_id": 0, "items": 1, "grand_total": 1, "payment_type": 1, "fund_source": 1}
+    ).to_list(5000)
+
+    revenue = 0.0
+    cogs = 0.0
+    for inv in invoices:
+        for item in inv.get("items", []):
+            qty = float(item.get("quantity", 0) or 0)
+            revenue += float(item.get("total", 0) or 0)
+            cogs += float(item.get("cost_price", 0) or 0) * qty
+
+    # Net out returns (same rules as Product Profitability report)
+    returns = await db.returns.find(
+        {"branch_id": branch_id, "return_date": {"$gte": date_from, "$lte": date_to},
+         "voided": {"$ne": True}},
+        {"_id": 0, "items": 1}
+    ).to_list(2000)
+    for ret in returns:
+        for item in ret.get("items", []):
+            qty = float(item.get("quantity", 0) or 0)
+            rev_back = float(item.get("refund_price", 0) or 0) * qty
+            cost_back = float(item.get("cost_price", 0) or 0) * qty
+            revenue -= rev_back
+            if item.get("inventory_action", "shelf") == "shelf":
+                cogs -= cost_back
+            # pullout: cost stays (real loss)
+
+    gross_profit = round(revenue - cogs, 2)
+    gross_margin_pct = round((gross_profit / revenue) * 100, 2) if revenue > 0 else 0.0
+
+    # ── Void / Edit rates ─────────────────────────────────────────────────
+    total_txns = await db.invoices.count_documents({
+        "branch_id": branch_id, "order_date": {"$gte": date_from, "$lte": date_to},
+    })
+    voided = await db.invoices.count_documents({
+        "branch_id": branch_id, "order_date": {"$gte": date_from, "$lte": date_to},
+        "status": "voided",
+    })
+    edits = await db.invoice_edits.count_documents({
+        "edited_at": {"$gte": f"{date_from}T00:00:00", "$lte": f"{date_to}T23:59:59"},
+    })
+    void_rate_pct = round((voided / total_txns) * 100, 2) if total_txns > 0 else 0.0
+    edit_rate_pct = round((edits / total_txns) * 100, 2) if total_txns > 0 else 0.0
+
+    # ── Discount rate ─────────────────────────────────────────────────────
+    discount_r = await db.discount_audit_log.aggregate([
+        {"$match": {"branch_id": branch_id, "date": {"$gte": date_from, "$lte": date_to},
+                    "invoice_voided": {"$ne": True}}},
+        {"$group": {"_id": None, "total": {"$sum": "$total_discount"}}}
+    ]).to_list(1)
+    total_discount = round(discount_r[0]["total"], 2) if discount_r else 0.0
+    # Gross sales = revenue + discount (approximate pre-discount revenue)
+    gross_sales = revenue + total_discount
+    discount_rate_pct = round((total_discount / gross_sales) * 100, 2) if gross_sales > 0 else 0.0
+
+    # ── DSO (Days Sales Outstanding) ──────────────────────────────────────
+    # Outstanding AR / (credit-qualifying sales per day)
+    # We use revenue-in-period (non-voided) as the daily sales denominator.
+    try:
+        pf = datetime.strptime(date_from, "%Y-%m-%d").date()
+        pt = datetime.strptime(date_to, "%Y-%m-%d").date()
+        days_in_period = max((pt - pf).days + 1, 1)
+    except Exception:
+        days_in_period = 30
+
+    open_ar_r = await db.invoices.aggregate([
+        {"$match": {"branch_id": branch_id, "balance": {"$gt": 0},
+                    "status": {"$nin": ["voided", "paid"]}, "customer_id": {"$ne": None}}},
+        {"$group": {"_id": None, "total": {"$sum": "$balance"}}}
+    ]).to_list(1)
+    total_ar = round(open_ar_r[0]["total"], 2) if open_ar_r else 0.0
+    daily_sales = revenue / days_in_period if revenue > 0 else 0.0
+    dso_days = round(total_ar / daily_sales, 1) if daily_sales > 0 else 0.0
+
+    # ── DPO (Days Payable Outstanding) ────────────────────────────────────
+    open_ap_r = await db.purchase_orders.aggregate([
+        {"$match": {"branch_id": branch_id,
+                    "payment_status": {"$in": ["unpaid", "partial"]},
+                    "status": {"$ne": "cancelled"}}},
+        {"$group": {"_id": None,
+                    "total": {"$sum": {"$ifNull": ["$balance", "$grand_total"]}}}}
+    ]).to_list(1)
+    total_ap = round(open_ap_r[0]["total"], 2) if open_ap_r else 0.0
+
+    # Purchases in period (for DPO denominator)
+    purchases_r = await db.purchase_orders.aggregate([
+        {"$match": {"branch_id": branch_id,
+                    "purchase_date": {"$gte": date_from, "$lte": date_to},
+                    "status": {"$ne": "cancelled"}}},
+        {"$group": {"_id": None,
+                    "total": {"$sum": {"$ifNull": ["$grand_total", "$subtotal"]}}}}
+    ]).to_list(1)
+    purchases = round(purchases_r[0]["total"], 2) if purchases_r else 0.0
+    daily_purchases = purchases / days_in_period if purchases > 0 else 0.0
+    dpo_days = round(total_ap / daily_purchases, 1) if daily_purchases > 0 else 0.0
+
+    # ── Inventory turnover (annualised) ───────────────────────────────────
+    # Approximation: current inventory capital value at branch.
+    inv_val_r = await db.branch_inventory.aggregate([
+        {"$match": {"branch_id": branch_id}},
+        {"$group": {"_id": None,
+                    "total": {"$sum": {"$multiply": ["$quantity", "$moving_avg_cost"]}}}}
+    ]).to_list(1)
+    inventory_value = round(inv_val_r[0]["total"], 2) if inv_val_r and inv_val_r[0]["total"] else 0.0
+    # turnover = cogs / inventory_value (per period). Annualise to per-year.
+    period_turnover = (cogs / inventory_value) if inventory_value > 0 else 0.0
+    annualised_turnover = round(period_turnover * (365 / days_in_period), 2) if days_in_period > 0 else 0.0
+
+    # ── Payment mix % ─────────────────────────────────────────────────────
+    by_type = {"cash": 0.0, "credit": 0.0, "partial": 0.0, "digital": 0.0, "split": 0.0}
+    for inv in invoices:
+        ptype = inv.get("payment_type") or "cash"
+        fsource = inv.get("fund_source") or ""
+        total = float(inv.get("grand_total", 0) or 0)
+        if fsource == "digital":
+            by_type["digital"] += total
+        elif fsource == "split":
+            by_type["split"] += total
+        elif ptype in by_type:
+            by_type[ptype] += total
+        else:
+            by_type["cash"] += total
+    mix_total = sum(by_type.values()) or 1.0
+    payment_mix_pct = {k: round((v / mix_total) * 100, 1) for k, v in by_type.items()}
+
+    return {
+        "revenue": round(revenue, 2),
+        "cogs": round(cogs, 2),
+        "gross_profit": gross_profit,
+        "gross_margin_pct": gross_margin_pct,
+        "void_rate_pct": void_rate_pct,
+        "voided_count": voided,
+        "edit_rate_pct": edit_rate_pct,
+        "edit_count": edits,
+        "total_txns": total_txns,
+        "discount_rate_pct": discount_rate_pct,
+        "total_discount": total_discount,
+        "dso_days": dso_days,
+        "total_ar": total_ar,
+        "dpo_days": dpo_days,
+        "total_ap": total_ap,
+        "purchases_in_period": purchases,
+        "inventory_turnover": annualised_turnover,
+        "inventory_value": inventory_value,
+        "payment_mix_pct": payment_mix_pct,
+        "days_in_period": days_in_period,
+    }
+
+
+def _compute_trend_deltas(current: dict, prev: dict) -> dict:
+    """
+    Compare current period KPIs vs previous period of equal length.
+    Returns % change per KPI (positive = up, negative = down).
+    """
+    if not prev:
+        return {}
+
+    def delta(k: str) -> Optional[float]:
+        cur = current.get(k, 0) or 0
+        prv = prev.get(k, 0) or 0
+        if prv == 0:
+            # can't compute % change vs zero — flag as "new" with raw delta
+            return None if cur == 0 else 100.0
+        return round(((cur - prv) / abs(prv)) * 100, 1)
+
+    return {
+        "revenue": delta("revenue"),
+        "gross_margin_pct": round((current.get("gross_margin_pct", 0) - prev.get("gross_margin_pct", 0)), 2),
+        "void_rate_pct": round((current.get("void_rate_pct", 0) - prev.get("void_rate_pct", 0)), 2),
+        "discount_rate_pct": round((current.get("discount_rate_pct", 0) - prev.get("discount_rate_pct", 0)), 2),
+        "dso_days": round((current.get("dso_days", 0) - prev.get("dso_days", 0)), 1),
+        "dpo_days": round((current.get("dpo_days", 0) - prev.get("dpo_days", 0)), 1),
+        "inventory_turnover": round((current.get("inventory_turnover", 0) - prev.get("inventory_turnover", 0)), 2),
+    }
+
+
+def _compute_scores(result: dict) -> dict:
+    """
+    Two scores, each 0–100:
+
+      HEALTH SCORE — Is the business well-run? (ratios + reconciliations)
+        Weights: cash 20 · inventory 15 · AR 10 · AP 10 · sales 10 · returns 5
+                 transfers 10 · unverified 10 · digital 5 · activity 5
+        Section severity: ok=100, warning=60, critical=20
+        Only applies the inventory weight when a full audit ran; otherwise
+        the inventory weight is redistributed proportionally.
+
+      FRAUD RISK SCORE — Pattern-based red flags (0 = clean, 100 = dangerous)
+        Composed from: void rate, edit rate, discount rate, off-hours count,
+        inventory corrections, security flags, price-match activity.
+        Each factor contributes up to its cap; totals are clipped to 0–100.
+    """
+    # ── HEALTH SCORE ──────────────────────────────────────────────────────
+    weights = {
+        "cash":        0.20,
+        "inventory":   0.15,
+        "ar":          0.10,
+        "payables":    0.10,
+        "sales":       0.10,
+        "returns":     0.05,
+        "transfers":   0.10,
+        "unverified":  0.10,
+        "digital":     0.05,
+        "activity":    0.05,
+    }
+
+    def sev_score(sev: Optional[str]) -> int:
+        return 100 if sev == "ok" else (60 if sev == "warning" else 20)
+
+    # If inventory not available, redistribute its weight across the rest.
+    inv_avail = bool(result.get("inventory", {}).get("available"))
+    if not inv_avail:
+        w = weights.copy()
+        inv_w = w.pop("inventory")
+        boost = inv_w / len(w)
+        w = {k: v + boost for k, v in w.items()}
+    else:
+        w = weights
+
+    health_total = 0.0
+    section_scores = {}
+    for key, weight in w.items():
+        sev = (result.get(key) or {}).get("severity")
+        s = sev_score(sev)
+        section_scores[key] = {"severity": sev or "ok", "score": s, "weight": round(weight * 100, 1)}
+        health_total += s * weight
+    health_score = round(health_total)
+
+    # ── FRAUD RISK SCORE ──────────────────────────────────────────────────
+    # Caps out at 100. Each "cost" is additive up to its max.
+    kpis = result.get("kpis") or {}
+    activity = result.get("activity") or {}
+    security = result.get("security") or {}
+
+    risk = 0.0
+    risk_breakdown = []
+
+    # Void rate >2% = bad, >5% = critical. Max 25 pts.
+    vr = kpis.get("void_rate_pct", 0) or 0
+    vr_pts = min(25, max(0, (vr - 1.0) * 5))  # 1% = 0pt, 2% = 5pts, 6% = 25pts
+    risk += vr_pts
+    risk_breakdown.append({"factor": "Void rate", "value": f"{vr}%", "points": round(vr_pts, 1), "max": 25})
+
+    # Discount rate >5% mild, >10% critical. Max 15 pts.
+    dr = kpis.get("discount_rate_pct", 0) or 0
+    dr_pts = min(15, max(0, (dr - 3.0) * 2))
+    risk += dr_pts
+    risk_breakdown.append({"factor": "Discount rate", "value": f"{dr}%", "points": round(dr_pts, 1), "max": 15})
+
+    # Edit rate >1% mild, >3% critical. Max 15 pts.
+    er = kpis.get("edit_rate_pct", 0) or 0
+    er_pts = min(15, max(0, (er - 0.5) * 6))
+    risk += er_pts
+    risk_breakdown.append({"factor": "Invoice edit rate", "value": f"{er}%", "points": round(er_pts, 1), "max": 15})
+
+    # Off-hours transactions. Each = 1 pt, max 10 pts.
+    oh = activity.get("off_hours_count", 0) or 0
+    oh_pts = min(10, oh)
+    risk += oh_pts
+    risk_breakdown.append({"factor": "Off-hours transactions", "value": str(oh), "points": oh_pts, "max": 10})
+
+    # Inventory corrections, up to 10 pts.
+    ic = activity.get("inventory_corrections_count", 0) or 0
+    ic_pts = min(10, ic * 1.5)
+    risk += ic_pts
+    risk_breakdown.append({"factor": "Inventory corrections", "value": str(ic), "points": round(ic_pts, 1), "max": 10})
+
+    # Security flags (PIN brute-force) — HIGH weighs a lot. Max 15 pts.
+    hi = security.get("high_severity", 0) or 0
+    md = security.get("medium_severity", 0) or 0
+    sec_pts = min(15, hi * 5 + md * 2)
+    risk += sec_pts
+    risk_breakdown.append({"factor": "PIN brute-force alerts", "value": f"{hi}H / {md}M", "points": sec_pts, "max": 15})
+
+    # Price-match volume — legitimate but watched. Max 10 pts.
+    pm = activity.get("price_change_count", 0) or 0
+    pm_pts = min(10, pm * 0.5)
+    risk += pm_pts
+    risk_breakdown.append({"factor": "Price-match volume", "value": str(pm), "points": round(pm_pts, 1), "max": 10})
+
+    fraud_risk = min(100, round(risk))
+
+    # Labels
+    def health_label(s):
+        if s >= 85: return "Excellent"
+        if s >= 70: return "Good"
+        if s >= 50: return "Needs Review"
+        return "Poor"
+
+    def risk_label(s):
+        if s <= 20: return "Low"
+        if s <= 50: return "Elevated"
+        if s <= 75: return "High"
+        return "Critical"
+
+    return {
+        "health_score": health_score,
+        "health_label": health_label(health_score),
+        "fraud_risk_score": fraud_risk,
+        "fraud_risk_label": risk_label(fraud_risk),
+        "section_scores": section_scores,
+        "risk_breakdown": risk_breakdown,
     }
