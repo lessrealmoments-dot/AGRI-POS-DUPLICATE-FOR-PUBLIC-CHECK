@@ -160,17 +160,21 @@ async def get_pos_sync_data(user=Depends(get_current_user), branch_id: str = Non
             mv_pipeline = [
                 {"$match": {
                     "branch_id": branch_id,
-                    "movement_type": {"$in": ["purchase", "transfer_in"]},
+                    "type": {"$in": ["purchase", "transfer_in"]},
                     "created_at": {"$gte": thirty_days_ago},
+                    "reversed": {"$ne": True},  # Exclude reversed movements (Fix #4)
                 }},
                 # Sort newest-first so $first picks the latest record per product
                 # (replaces non-deterministic $last accumulator).
                 {"$sort": {"created_at": -1}},
                 {"$group": {
                     "_id": "$product_id",
-                    "total_qty": {"$sum": {"$abs": "$quantity"}},
-                    "total_cost": {"$sum": {"$multiply": [{"$abs": "$quantity"}, {"$ifNull": ["$cost_price", 0]}]}},
-                    "last_cost": {"$first": {"$ifNull": ["$cost_price", 0]}},
+                    "total_qty": {"$sum": {"$abs": "$quantity_change"}},
+                    "total_cost": {"$sum": {"$multiply": [
+                        {"$abs": "$quantity_change"},
+                        {"$ifNull": ["$price_at_time", 0]}
+                    ]}},
+                    "last_cost": {"$first": {"$ifNull": ["$price_at_time", 0]}},
                     "last_date": {"$first": "$created_at"},
                 }},
             ]

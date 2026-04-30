@@ -20,6 +20,53 @@ Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-b
 
 ---
 
+## ✅ Completed in Iter 195 — Audit-Driven Consistency Fixes
+
+Based on the owner's request for a full system audit from an accountant's perspective, I reviewed the entire codebase phase-by-phase (money movement, inventory, price, audit trail, reversals, multi-tenant, offline). Found 11 issues; fixed the top 6 critical + 1 bonus (offline capital cache pre-existing bug).
+
+**Fix #1 — Credit return reduces AR** (`returns.py`)
+Credit customer returns now offset Accounts Receivable. `credit_applied = total_return_value - cash_refunded` → subtracted from both `customer.balance` and newest open `invoice.balance`. Over-credit case notifies admin. `void_return` reverses all of it.
+
+**Fix #2 — Product Profitability nets returns** (`reports.py`)
+Shelf return: revenue AND cost both reversed. Pullout return: revenue only (cost stays as real COGS loss). New `returned_qty`, `returned_revenue`, `returned_cost` fields.
+
+**Fix #3 — Sales reconciliation block** (`audit.py`)
+`_compute_sales` returns a `reconciliation` dict proving `grand_total == sum_line_totals + freight - overall_discount`. Variance > ₱1 flags warning.
+
+**Fix #4 — PO Reopen moving-avg isolation** (`purchase_orders.py`, `branch_transfers.py`, `sync.py`)
+Original purchase movements now tagged `reversed=True`. All 4 moving-average consumers filter these out. Found + fixed pre-existing sync.py bug (`movement_type` → `type`, wrong field names) — offline capital cache was silently empty.
+
+**Fix #5 — Void invoice cleans up discount/price logs** (`invoices.py`, `reports.py`, `audit.py`, `daily_operations.py`, `price_changes.py`)
+Invoice void tags `discount_audit_log.invoice_voided=True`. All reports filter by default; `include_voided=true` for forensic view.
+
+**Fix #6 — Cash wallet_movements cross-check** (`audit.py`)
+New `_wallet_movements_reconciliation` helper independently verifies `starting_float + net_movements ≈ current_balance`.
+
+**Tests**
+- 9 new tests in `/app/backend/tests/test_consistency_195.py`
+- All 34 cross-iteration tests passing (9 iter 195 + 13 iter 194 + 4 iter 192 + 8 iter 193)
+- Testing agent validated end-to-end via public HTTP (100%, 37 scenarios)
+
+### Deferred (low risk)
+- **Fix #7** Org-scoping sweep on older routes (needs dedicated audit pass)
+- **Fix #8** Pullout movement cleanup (cosmetic)
+- **Fix #9–11** Dead code, lint, PIN_POLICY_ACTIONS endpoint
+
+### Auditor's Takeaway (post-fix)
+Every view now agrees on the same numbers for the same period:
+
+| View | Source | Reconciled? |
+|---|---|---|
+| Reports → Sales | invoices.grand_total | ✓ |
+| Z-Report | sales_log.line_total | ✓ |
+| Audit Center → Sales | dual-source + reconciliation block | ✓ |
+| Product Profitability | invoices.items net of returns | ✓ (Fix #2) |
+| Cash | formula + wallet_movements dual-check | ✓ (Fix #6) |
+| Discount / Price Change reports | minus voided | ✓ (Fix #5) |
+| Customer AR | customer.balance + invoice.balance | ✓ (Fix #1) |
+
+---
+
 ## ✅ Completed in Iter 194 — POS Price Match (Permanent Branch Price Change)
 
 Replaces the old "ad-hoc price edit → save as global" flow with a **competitor-aware Price Match flow** for true accountability. Backend 8/8 + 21/21 regression tests pass. Frontend lint clean. End-to-end verified via testing agent (37/37, 100%).

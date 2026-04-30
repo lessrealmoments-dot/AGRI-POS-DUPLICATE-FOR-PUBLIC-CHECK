@@ -18,9 +18,15 @@ router = APIRouter(prefix="/branch-transfers", tags=["Branch Transfers"])
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 async def _get_po_refs(product_id: str, branch_id: str = None):
-    """Get moving average and last purchase cost from acquisition history (POs + transfers), branch-specific."""
+    """Get moving average and last purchase cost from acquisition history (POs + transfers), branch-specific.
+    Excludes reversed movements (e.g. from PO Reopen) — Fix #4."""
     # Use movements collection — includes both 'purchase' and 'transfer_in' with price_at_time
-    acq_query = {"product_id": product_id, "type": {"$in": ["purchase", "transfer_in"]}, "quantity_change": {"$gt": 0}}
+    acq_query = {
+        "product_id": product_id,
+        "type": {"$in": ["purchase", "transfer_in"]},
+        "quantity_change": {"$gt": 0},
+        "reversed": {"$ne": True},
+    }
     if branch_id:
         acq_query["branch_id"] = branch_id
 

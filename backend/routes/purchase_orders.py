@@ -1142,7 +1142,13 @@ async def get_capital_preview(po_id: str, user=Depends(get_current_user)):
                 current_capital = float(bp_doc["cost_price"])
 
         # Historical moving average — BRANCH-SPECIFIC (POs + transfers)
-        acq_query = {"product_id": pid, "type": {"$in": ["purchase", "transfer_in"]}, "quantity_change": {"$gt": 0}}
+        # Excludes reversed movements from PO Reopen (Fix #4)
+        acq_query = {
+            "product_id": pid,
+            "type": {"$in": ["purchase", "transfer_in"]},
+            "quantity_change": {"$gt": 0},
+            "reversed": {"$ne": True},
+        }
         if po_branch_id:
             acq_query["branch_id"] = po_branch_id
         all_acquisitions = await db.movements.find(
