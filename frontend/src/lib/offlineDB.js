@@ -151,6 +151,22 @@ export async function cacheProducts(products) {
   await clearAndPut(STORES.PRODUCTS, products);
 }
 
+/**
+ * Live counts of what's actually in IndexedDB.
+ * Used by syncManager so that `last_sync_counts` reflects the real cache
+ * state, not just what came down in the latest delta payload (which is
+ * usually 0 when nothing changed since the previous sync).
+ */
+export async function getCacheCounts() {
+  const [products, customers, inventory, branch_prices] = await Promise.all([
+    countStore(STORES.PRODUCTS),
+    countStore(STORES.CUSTOMERS),
+    countStore(STORES.INVENTORY),
+    countStore(STORES.BRANCH_PRICES),
+  ]);
+  return { products, customers, inventory, branch_prices };
+}
+
 /** Upsert a single product (for delta sync) */
 export async function putProduct(product) {
   await putOne(STORES.PRODUCTS, product);

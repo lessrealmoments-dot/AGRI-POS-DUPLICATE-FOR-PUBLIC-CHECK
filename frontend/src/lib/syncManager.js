@@ -17,6 +17,7 @@ import {
   getPendingSales, removePendingSale,
   cacheProducts, cacheCustomers, cachePriceSchemes, cacheInventory, cacheBranchPrices,
   setMeta, getMeta, getPendingSaleCount, putProduct,
+  getCacheCounts,
   updateInventoryBatch, mergeCustomers, setOfflineAdminPinHash, setOfflinePinGrants,
 } from './offlineDB';
 
@@ -219,10 +220,12 @@ export async function refreshPOSCache(branchId = null) {
       await setOfflinePinGrants(offline_pin_grants);
     }
     await setMeta('last_sync_counts', {
-      products: products.length,
-      customers: customers.length,
-      inventory: inventory.length,
-      branch_prices: branch_prices.length,
+      // Read live counts from IndexedDB so delta syncs (where the payload is
+      // empty when nothing changed) don't reset the displayed totals to 0.
+      ...(await getCacheCounts()),
+      delta_products: products.length,
+      delta_customers: customers.length,
+      is_delta: !!is_delta,
     });
 
     emit({
