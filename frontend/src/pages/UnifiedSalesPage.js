@@ -2090,6 +2090,40 @@ export default function UnifiedSalesPage() {
                 )}
               </div>
 
+              {/* Sale Date — visible in BOTH Quick and Order modes so cashiers can
+                  easily backdate forgotten credit sales to a past day (triggers
+                  Late-Encode dialog automatically when the day is closed).   */}
+              <div className="w-36">
+                <Label className="text-xs text-[#1A4D2E] font-semibold flex items-center gap-1">
+                  Sale Date
+                  <span className="text-[9px] normal-case font-normal text-slate-400">(reports)</span>
+                </Label>
+                <Input
+                  type="date"
+                  className={`h-9 font-medium ${dateError
+                    ? 'border-red-400 bg-red-50 text-red-700 focus:border-red-500'
+                    : 'border-[#1A4D2E]/40 bg-emerald-50 focus:border-[#1A4D2E] text-[#1A4D2E]'
+                  }`}
+                  value={header.order_date}
+                  min={minAllowedDate}
+                  max={localToday()}
+                  onChange={e => handleEncodingDateChange(e.target.value)}
+                  data-testid="sale-date-input"
+                />
+                {/* Closed-through label — always visible when there's a close history */}
+                {lastCloseDate && !dateError && (
+                  <p className="text-[9px] text-slate-400 mt-0.5 leading-tight">
+                    Closed through {lastCloseDate}
+                  </p>
+                )}
+                {/* Inline error — shown instead of a toast so it can't be missed */}
+                {dateError && (
+                  <p className="text-[9px] text-red-600 font-medium mt-0.5 leading-tight">
+                    {dateError}
+                  </p>
+                )}
+              </div>
+
               {mode === 'order' && (
                 <>
                   <div className="w-32">
@@ -2105,36 +2139,6 @@ export default function UnifiedSalesPage() {
                   <div className="w-28">
                     <Label className="text-xs text-slate-500">Customer PO</Label>
                     <Input className="h-9" value={header.customer_po} onChange={e => setHeader(h => ({ ...h, customer_po: e.target.value }))} />
-                  </div>
-                  <div className="w-36">
-                    <Label className="text-xs text-[#1A4D2E] font-semibold flex items-center gap-1">
-                      Sale Date
-                      <span className="text-[9px] normal-case font-normal text-slate-400">(reports)</span>
-                    </Label>
-                    <Input
-                      type="date"
-                      className={`h-9 font-medium ${dateError
-                        ? 'border-red-400 bg-red-50 text-red-700 focus:border-red-500'
-                        : 'border-[#1A4D2E]/40 bg-emerald-50 focus:border-[#1A4D2E] text-[#1A4D2E]'
-                      }`}
-                      value={header.order_date}
-                      min={minAllowedDate}
-                      max={localToday()}
-                      onChange={e => handleEncodingDateChange(e.target.value)}
-                      data-testid="sale-date-input"
-                    />
-                    {/* Closed-through label — always visible when there's a close history */}
-                    {lastCloseDate && !dateError && (
-                      <p className="text-[9px] text-slate-400 mt-0.5 leading-tight">
-                        Closed through {lastCloseDate}
-                      </p>
-                    )}
-                    {/* Inline error — shown instead of a toast so it can't be missed */}
-                    {dateError && (
-                      <p className="text-[9px] text-red-600 font-medium mt-0.5 leading-tight">
-                        {dateError}
-                      </p>
-                    )}
                   </div>
                 </>
               )}

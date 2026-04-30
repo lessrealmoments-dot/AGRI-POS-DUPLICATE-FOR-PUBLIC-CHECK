@@ -322,7 +322,7 @@ DEFAULT_TEMPLATES = [
         "body": (
             "AgriBooks: <branch_name> close is overdue by ~<hours_overdue>h. "
             "Please finalize <date>. "
-            "Tomorrow's sales will be blocked until yesterday closes."
+            "If you cannot close tonight, inform the owner immediately."
         ),
         "placeholders": ["branch_name", "date", "hours_overdue"],
         "trigger": "scheduled", "active": True,
@@ -348,8 +348,8 @@ DEFAULT_TEMPLATES = [
         "name": "Close Day — Hard Escalation",
         "body": (
             "URGENT: <branch_name> has NOT closed <date>. "
-            "Tomorrow's sales will be BLOCKED until this resolves. "
-            "Please close immediately."
+            "Owner / auditor attention needed. "
+            "If the assigned cashier is unable to close, please reassign or close remotely."
         ),
         "placeholders": ["branch_name", "date"],
         "trigger": "scheduled", "active": True,
@@ -358,8 +358,9 @@ DEFAULT_TEMPLATES = [
         "key": "close_overdue_next_day",
         "name": "Close Day — Overdue Next Morning",
         "body": (
-            "<branch_name> did NOT close <date>. Today's sales are currently BLOCKED. "
-            "Please finalize <date> before opening for business."
+            "<branch_name> did NOT close <date>. "
+            "Owner attention: assigned cashier may have skipped closing duty. "
+            "Please finalize <date> or reassign."
         ),
         "placeholders": ["branch_name", "date"],
         "trigger": "scheduled", "active": True,
@@ -368,8 +369,9 @@ DEFAULT_TEMPLATES = [
         "key": "close_overdue_multi_day",
         "name": "Close Day — Multi-Day Overdue",
         "body": (
-            "URGENT: <branch_name> is <days_overdue> days overdue on closing "
-            "<date>. Sales BLOCKED until resolved. Needs owner attention."
+            "URGENT: <branch_name> is <days_overdue> days overdue on closing <date>. "
+            "Serious accountability issue — owner action required. "
+            "Consider reassigning the closing duty."
         ),
         "placeholders": ["branch_name", "date", "days_overdue"],
         "trigger": "scheduled", "active": True,
