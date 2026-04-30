@@ -596,7 +596,7 @@ _ORG_DATA_COLLECTIONS = [
     "product_categories", "invoice_corrections", "sale_reservations",
     "discount_audit_log", "custom_roles", "journal_entries",
     "incident_tickets", "doc_codes", "qr_action_logs",
-    "internal_invoices",
+    "internal_invoices", "price_change_log",
 ]
 
 # Global (not org_id scoped) collections that also store org-linked data by reference

@@ -931,11 +931,63 @@ async def void_invoice(inv_id: str, data: dict, user=Depends(get_current_user)):
         ],
     })
 
+    # ── Price Match awareness: flag permanent price changes on this voided ──
+    # invoice so admins can review (branch price stays updated even after void).
+    pc_rows = await db.price_change_log.find(
+        {"invoice_id": inv_id}, {"_id": 0, "product_name": 1, "old_price": 1, "new_price": 1, "scheme": 1, "branch_name": 1}
+    ).to_list(50)
+    price_match_warning = None
+    if pc_rows:
+        # Tag the log rows so reports can show "invoice voided"
+        await db.price_change_log.update_many(
+            {"invoice_id": inv_id},
+            {"$set": {"invoice_voided": True, "invoice_voided_at": now_iso(),
+                      "invoice_voided_by": user.get("full_name", user.get("username", ""))}}
+        )
+        # Notify admins — this is a potential abuse vector (fake sale to drop price, then void)
+        try:
+            from routes.notifications import create_notification
+            admins = await db.users.find({"role": "admin", "active": True}, {"_id": 0, "id": 1}).to_list(50)
+            admin_ids = [a["id"] for a in admins]
+            if admin_ids:
+                items_summary = "; ".join(
+                    f"{r['product_name']}: ₱{r['old_price']:.2f}→₱{r['new_price']:.2f}"
+                    for r in pc_rows[:3]
+                )
+                if len(pc_rows) > 3:
+                    items_summary += f" +{len(pc_rows)-3} more"
+                await create_notification(
+                    type_key="below_cost_sale",  # reuse high-severity channel
+                    title=f"Voided invoice had permanent price changes — {inv['invoice_number']}",
+                    message=(
+                        f"Invoice {inv['invoice_number']} was voided but it had {len(pc_rows)} "
+                        f"permanent price change(s) on branch prices. These remain in effect. "
+                        f"Review and revert manually if needed. Items: {items_summary}"
+                    ),
+                    target_user_ids=admin_ids,
+                    branch_id=branch_id,
+                    branch_name=inv.get("branch_name", ""),
+                    metadata={
+                        "invoice_id": inv_id, "invoice_number": inv["invoice_number"],
+                        "price_changes": pc_rows, "voided_by": user.get("full_name", ""),
+                    },
+                    organization_id=user.get("organization_id"),
+                )
+        except Exception as nerr:
+            import logging
+            logging.getLogger("notifications").error(f"void-price-match notif failed: {nerr}", exc_info=True)
+        price_match_warning = {
+            "count": len(pc_rows),
+            "items": pc_rows,
+            "note": "Branch prices remain updated after this void. Review Reports → Price Changes to revert if needed.",
+        }
+
     return {
         "message": "Invoice voided",
         "invoice_number": inv["invoice_number"],
         "authorized_by": authorized_manager.get("full_name", authorized_manager["username"]),
         "original_invoice_date": inv.get("invoice_date", inv.get("order_date", "")),
+        "price_match_warning": price_match_warning,
         "snapshot": {
             "items": inv.get("items", []),
             "customer_id": inv.get("customer_id"),

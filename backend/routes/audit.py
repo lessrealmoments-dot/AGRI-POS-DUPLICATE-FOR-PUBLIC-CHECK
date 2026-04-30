@@ -1065,7 +1065,30 @@ async def _compute_activity(branch_id: str, date_from: str, date_to: str) -> dic
     for tc in top_customers:
         tc["total"] = round(tc["total"], 2)
 
-    flags = len(corrections) + len(edits) + len(off_hours) + discount_count
+    # ── Price Match (permanent branch price changes) activity ─────────────────
+    price_change_query = {"date": {"$gte": date_from, "$lte": date_to}}
+    if branch_id:
+        price_change_query["branch_id"] = branch_id
+    price_change_logs = await db.price_change_log.find(price_change_query, {"_id": 0}).to_list(500)
+    price_change_count = len(price_change_logs)
+    total_price_drop = round(sum(
+        (pc.get("old_price", 0) - pc.get("new_price", 0))
+        for pc in price_change_logs if pc.get("new_price", 0) < pc.get("old_price", 0)
+    ), 2)
+    # Top price-matchers by cashier
+    matcher_counts = {}
+    for pc in price_change_logs:
+        cn = pc.get("cashier_name", "Unknown")
+        if cn not in matcher_counts:
+            matcher_counts[cn] = {"name": cn, "count": 0, "total_drop": 0}
+        matcher_counts[cn]["count"] += 1
+        if pc.get("new_price", 0) < pc.get("old_price", 0):
+            matcher_counts[cn]["total_drop"] += pc["old_price"] - pc["new_price"]
+    top_matchers = sorted(matcher_counts.values(), key=lambda x: x["total_drop"], reverse=True)[:5]
+    for tm in top_matchers:
+        tm["total_drop"] = round(tm["total_drop"], 2)
+
+    flags = len(corrections) + len(edits) + len(off_hours) + discount_count + price_change_count
     sev = "critical" if flags > 10 else ("warning" if flags > 0 else "ok")
 
     return {
@@ -1081,6 +1104,10 @@ async def _compute_activity(branch_id: str, date_from: str, date_to: str) -> dic
         "total_price_override": total_price_override,
         "top_discounters": top_discounters,
         "top_discount_customers": top_customers,
+        # New: POS Price Match activity (permanent branch price changes)
+        "price_change_count": price_change_count,
+        "total_price_drop": total_price_drop,
+        "top_price_matchers": top_matchers,
         "severity": sev,
     }
 

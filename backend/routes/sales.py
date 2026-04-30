@@ -385,14 +385,20 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
         
         # Track discount/price override data for audit log
         scheme_price = product.get("prices", {}).get(data.get("price_scheme", "retail"), rate)
-        # If this product has a Price Match entry, the rate change is logged
-        # in price_change_log instead — do NOT also log it as a price_override.
-        has_price_match = any(pc["product_id"] == item["product_id"] for pc in valid_price_changes)
-        if disc_amt > 0 or (rate != scheme_price and not has_price_match):
+        # If this product has a Price Match entry, treat the MATCHED price as
+        # the effective scheme_price so the discount_audit_log reads cleanly
+        # (e.g. after matching ₱100→₱95 with a ₱5 discount: audit says
+        # original=95, sold=95, discount=5, type=line_discount — NOT a
+        # confused "discount_and_override"). The true price change is already
+        # logged separately in price_change_log.
+        pc_match = next((pc for pc in valid_price_changes if pc["product_id"] == item["product_id"]), None)
+        has_price_match = pc_match is not None
+        effective_scheme_price = pc_match["new_price"] if has_price_match else scheme_price
+        if disc_amt > 0 or (rate != effective_scheme_price and not has_price_match):
             discount_audit_entries.append({
                 "product_id": item["product_id"],
                 "product_name": product["name"],
-                "original_price": scheme_price,
+                "original_price": effective_scheme_price,
                 "sold_price": rate,
                 "discount_type": disc_type,
                 "discount_value": disc_val,
@@ -400,8 +406,8 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
                 "quantity": qty,
                 "net_per_unit": round(line_total / qty, 2) if qty > 0 else 0,
                 "capital": branch_cost,
-                "type": "price_override" if rate != scheme_price and disc_amt == 0
-                    else "line_discount" if disc_amt > 0 and rate == scheme_price
+                "type": "price_override" if rate != effective_scheme_price and disc_amt == 0
+                    else "line_discount" if disc_amt > 0 and rate == effective_scheme_price
                     else "discount_and_override",
             })
         
@@ -879,6 +885,7 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
 
     # ── Price Match (Permanent Branch Price Change) — persist & log ──────────
     if valid_price_changes:
+        from utils.helpers import mark_price_reviewed
         pm_verifier = data.get("_price_match_verifier") or {}
         approver_name = pm_verifier.get("verifier_name") or pm_verifier.get("full_name") or pm_verifier.get("username") or ""
         approver_method = pm_verifier.get("method", "")
@@ -909,6 +916,9 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
                 },
                 upsert=True,
             )
+            # Clear "Global Price" badge — an explicit Price Match counts as
+            # a reviewed price for this branch/product.
+            await mark_price_reviewed(pc["product_id"], branch_id, source="pos_price_match")
             # Audit log entry
             await db.price_change_log.insert_one({
                 "id": new_id(),

@@ -969,6 +969,13 @@ export default function UnifiedSalesPage() {
   };
 
   const updateCartPrice = (productId, newPrice) => {
+    // Price editing triggers Price Match flow (manager PIN at checkout). Since
+    // Price Match requires server-side PIN verification + branch_prices upsert,
+    // it cannot safely run while offline. Block the edit in that case.
+    if (!isOnline) {
+      toast.error('Price editing is disabled while offline. Apply a discount instead, or wait until you are back online to price-match.');
+      return;
+    }
     const price = parseFloat(newPrice) || 0;
     setCart(cart.map(c => c.product_id !== productId ? c : { ...c, price, total: price * c.quantity }));
   };
@@ -1118,6 +1125,14 @@ export default function UnifiedSalesPage() {
   };
 
   const updateLine = (index, field, value) => {
+    // Block price edits while offline — Price Match requires server-side PIN.
+    if (field === 'rate' && !isOnline) {
+      const cur = lines[index];
+      if (cur?.product_id && parseFloat(cur.original_rate) > 0 && Math.abs(parseFloat(value) - cur.original_rate) > 0.001) {
+        toast.error('Price editing is disabled while offline. Apply a discount instead, or wait until you are back online to price-match.');
+        return;
+      }
+    }
     const newLines = [...lines];
     newLines[index] = { ...newLines[index], [field]: value };
     setLines(newLines);

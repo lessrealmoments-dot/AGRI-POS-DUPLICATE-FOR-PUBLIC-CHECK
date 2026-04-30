@@ -69,6 +69,22 @@ User-confirmed UX choices: Q1=A (active scheme + branch only — NOT global), Q2
 - **(Optional) HTTP endpoint listing PIN_POLICY_ACTIONS** — currently the constant lives in `verify.py` and admin UI infers from defaults. Exposing it would simplify policy customization UI.
 - **(Optional) Surface price-change history on ProductDetailPage** — backend `/price-changes/product/{id}` already returns the timeline; just needs a UI tab.
 
+### Iter 194b — Consistency Audit & Safety Fixes (same session)
+After the core Price Match build, did a full audit to ensure no contradiction with existing money/price/inventory flows. Found & fixed:
+
+1. **Discount audit classification fix** — When a line is both matched AND discounted, `discount_audit_log` now reads cleanly: `original_price=matched_price`, `sold_price=matched_price`, `discount_amount=X`, `type=line_discount` (no more confusing `discount_and_override`). The `price_change_log` remains the single source for the price event.
+2. **Server-trusted `old_price`** — `sales.py` now reads `old_price` from `branch_prices` (fallback `products.prices`) server-side, ignoring client-supplied values. Client value stored as `client_old_price_hint` for forensics.
+3. **`mark_price_reviewed` after Price Match** — Clears the "Global Price" badge at the branch because a deliberate Price Match IS an explicit price review.
+4. **Offline edit guard** — Web POS now blocks price editing (`updateCartPrice`, `updateLine(rate)`) when `!isOnline`. Message: "Price editing is disabled while offline. Apply a discount instead, or wait until you are back online to price-match." Safer than caching a price-match PIN offline (offline mode is for resilience, not for permanent audited changes).
+5. **Audit Center surfaces price matches** — `_compute_activity` now returns `price_change_count`, `total_price_drop`, `top_price_matchers` so admins see price-match activity alongside discounts in the Audit Center.
+6. **Voided invoice warning** — When an invoice containing Price Match events is voided, `void_invoice` now: (a) tags related `price_change_log` rows with `invoice_voided=True` + timestamp + voider, (b) fires a high-severity admin notification with the product list, (c) returns `price_match_warning` in the response so UI can surface it. Branch prices are NOT auto-reverted (per spec — real customer may have already bought at the matched price).
+7. **SuperAdmin backup completeness** — `price_change_log` added to the backup collections list so org exports include it.
+8. **Non-collision with Smart Price Checker** — Verified: Smart Price Checker updates `products.prices` (global); Price Match updates `branch_prices.prices` (per-branch, higher precedence). Branch decisions persist across global price changes (by design). No conflict.
+9. **Non-collision with `get_branch_cost()`** — It reads `branch_prices.cost_price` (capital). Price Match updates `branch_prices.prices[scheme]` (sell price). Different fields. No conflict. Capital floor still enforced on matched rate.
+10. **Non-collision with inventory / returns** — Price Match is prices-only; doesn't touch `inventory`, `movements`, `sale_reservations`. Returns use snapshot `item.rate` (matched price) for refund amount and `item.cost_price` for capital — both correct.
+
+Tests extended (13 total, all passing): covers server-trusted old_price, price_reviewed_at stamp, clean audit classification when matched+discounted, voided invoice tagging + warning, Audit Center surfacing.
+
 ---
 
 ## ✅ Completed in Iter 193 — Per-Branch Product Disable

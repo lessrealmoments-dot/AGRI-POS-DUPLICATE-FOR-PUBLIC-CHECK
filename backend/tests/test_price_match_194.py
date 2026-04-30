@@ -240,3 +240,123 @@ def test_daily_close_preview_includes_breakdown(auth, setup):
     assert "discount_breakdown" in body
     assert "price_changes_today" in body
     assert isinstance(body["price_changes_today"].get("rows"), list)
+
+
+# ── Consistency & safety tests (post-audit review) ────────────────────────────
+
+def test_server_trusted_old_price_ignores_client_hint(auth, setup):
+    """Client can't fake old_price — server reads from branch_prices/products.prices."""
+    token, _ = auth
+    db = _db()
+    # Client lies: claims old_price=500 (way higher), new=95.
+    payload = _build_sale(setup, sold_price=95, with_pin=TEST_ORG_ADMIN_PIN)
+    payload["price_changes"][0]["old_price"] = 500  # maliciously inflated
+    r = requests.post(f"{API}/unified-sale", json=payload, headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200, r.text
+    log = db.price_change_log.find_one({"product_id": setup["product_id"], "branch_id": setup["branch_id"]})
+    # Server-trusted old_price is the actual branch/global price (100), NOT 500
+    assert log["old_price"] == 100
+    # Client hint is captured separately for forensics
+    assert log.get("client_old_price_hint") == 500
+
+
+def test_price_match_clears_global_price_badge(auth, setup):
+    """After Price Match, inventory.price_reviewed_at should update
+    (Global Price badge logic reads from this field)."""
+    token, _ = auth
+    db = _db()
+    # Clear any existing reviewed_at to simulate a "stale" state
+    db.inventory.update_one(
+        {"product_id": setup["product_id"], "branch_id": setup["branch_id"]},
+        {"$unset": {"price_reviewed_at": "", "last_price_review_source": ""}}
+    )
+    payload = _build_sale(setup, sold_price=93, with_pin=TEST_ORG_ADMIN_PIN)
+    r = requests.post(f"{API}/unified-sale", json=payload, headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200, r.text
+    inv = db.inventory.find_one({"product_id": setup["product_id"], "branch_id": setup["branch_id"]})
+    assert inv.get("price_reviewed_at"), "price_reviewed_at should be stamped after Price Match"
+    assert inv.get("last_price_review_source") == "pos_price_match"
+
+
+def test_discount_plus_price_match_clean_audit_classification(auth, setup):
+    """When a line is BOTH matched AND discounted, discount_audit_log should
+    read cleanly: original=matched_price (95), sold=95, discount=5,
+    type=line_discount — NOT 'discount_and_override'."""
+    token, _ = auth
+    db = _db()
+    payload = _build_sale(setup, sold_price=95, with_pin=TEST_ORG_ADMIN_PIN)
+    # Add ₱5 discount on top of the ₱95 match
+    payload["items"][0]["discount_type"] = "amount"
+    payload["items"][0]["discount_value"] = 5
+    payload["items"][0]["discount_amount"] = 5
+    payload["items"][0]["total"] = 90
+    payload["subtotal"] = 90
+    payload["grand_total"] = 90
+    payload["amount_paid"] = 90
+    r = requests.post(f"{API}/unified-sale", json=payload, headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200, r.text
+    inv_num = r.json().get("invoice_number")
+    da = db.discount_audit_log.find_one({"invoice_number": inv_num})
+    assert da is not None
+    line_entry = next((it for it in da.get("items", []) if it.get("product_id") == setup["product_id"]), None)
+    assert line_entry is not None
+    assert line_entry["type"] == "line_discount"  # NOT "discount_and_override"
+    assert line_entry["original_price"] == 95      # matched price, NOT 100
+    assert line_entry["sold_price"] == 95
+    assert line_entry["discount_amount"] == 5
+
+
+def test_voided_invoice_flags_price_change_log(auth, setup):
+    """Voiding an invoice with Price Match events tags the log rows with
+    invoice_voided=True and keeps the branch price updated (per spec)."""
+    token, _ = auth
+    db = _db()
+    payload = _build_sale(setup, sold_price=91, with_pin=TEST_ORG_ADMIN_PIN)
+    r = requests.post(f"{API}/unified-sale", json=payload, headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200
+    inv_id = r.json().get("id")
+
+    # Void the invoice
+    void_r = requests.post(
+        f"{API}/invoices/{inv_id}/void",
+        json={"manager_pin": TEST_ORG_ADMIN_PIN, "reason": "test void"},
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert void_r.status_code == 200, void_r.text
+    body = void_r.json()
+    # Should include price_match_warning
+    assert body.get("price_match_warning") is not None
+    assert body["price_match_warning"]["count"] >= 1
+
+    # price_change_log row is tagged
+    log = db.price_change_log.find_one({"invoice_id": inv_id})
+    assert log is not None
+    assert log.get("invoice_voided") is True
+    assert log.get("invoice_voided_by")
+
+    # Branch price stays at 91 (not reverted — per spec, reverts are manual)
+    bp = db.branch_prices.find_one({"product_id": setup["product_id"], "branch_id": setup["branch_id"]})
+    assert bp["prices"]["retail"] == 91
+
+
+def test_audit_center_surfaces_price_match_activity(auth, setup):
+    """Audit Center /api/audit/compute → activity section should now include
+    price_change_count, total_price_drop, and top_price_matchers."""
+    token, _ = auth
+    # Trigger a price change event first
+    payload = _build_sale(setup, sold_price=90, with_pin=TEST_ORG_ADMIN_PIN)
+    requests.post(f"{API}/unified-sale", json=payload, headers={"Authorization": f"Bearer {token}"})
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    r = requests.get(
+        f"{API}/audit/compute",
+        params={"branch_id": setup["branch_id"], "period_from": today, "period_to": today, "audit_type": "partial"},
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    activity = body.get("activity", {})
+    assert "price_change_count" in activity
+    assert "total_price_drop" in activity
+    assert "top_price_matchers" in activity
+    assert activity["price_change_count"] >= 1
