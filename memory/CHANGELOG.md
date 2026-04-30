@@ -1,5 +1,35 @@
 # AgriBooks Changelog
 
+## Apr 30, 2026 — SMS Template Auto-Upgrade + Restore Company Self-Heal
+- **`_ensure_templates` now version-aware** (`routes/sms.py`):
+  - Each seeded template carries a `default_body` snapshot. On every call,
+    templates whose `body == default_body` (i.e. unedited) are auto-upgraded
+    to the latest factory wording. User-customized templates are left alone.
+  - `LEGACY_DEFAULT_BODIES` registry tracks known stale wording (incl. the
+    pre-Apr-2026 `Sales BLOCKED` close-day templates) so legacy docs that
+    pre-date `default_body` can still be safely refreshed.
+  - Triggered automatically on `GET /sms/templates`, `GET /sms/settings`,
+    `POST /sms/templates/backfill`, and the `queue_sms` self-seed path —
+    so existing tenants pick up the corrected wording the next time they
+    open Settings → Messages, with zero manual DB intervention.
+- **`POST /sms/templates/backfill`** now also reports `upgraded` count and
+  per-key list, not just newly-seeded inserts.
+- **Restore Company Info self-heal** (`routes/settings.py`):
+  - When the user's org row is missing (deleted/orphan tenant), the endpoint
+    now recreates the organization as a fresh `<full_name>'s Company` trial
+    with a default branch + SMS templates, instead of returning the cryptic
+    `404 Organization record missing` toast. Returns `{"recreated": true}`.
+  - When the user's JWT carries no `organization_id` at all, the error text
+    now nudges them to log out + log back in to refresh the token.
+  - Frontend (`pages/DashboardPage.js`) shows a friendlier toast and auto-
+    reloads on `recreated:true` so the new tenant context is picked up.
+- New regression tests:
+  - `tests/test_sms_template_upgrade_190.py` (3 tests) — legacy stale upgrade,
+    customized-template-not-clobbered, idempotent re-run.
+  - `tests/test_restore_company_self_heal_190.py` (2 tests) — recreate
+    missing org + idempotent already-set.
+
+
 
 ## Apr 30, 2026 — "Send Sample SMS" for Collection Notification Recipients
 - New backend endpoint `POST /api/sms/send-sample-recipients` — queues a tagged

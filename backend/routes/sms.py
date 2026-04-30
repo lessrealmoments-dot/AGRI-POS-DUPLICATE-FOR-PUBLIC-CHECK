@@ -401,19 +401,116 @@ DEFAULT_TEMPLATES = [
 
 async def _ensure_templates():
     """
-    Upsert default templates — inserts any keys that don't yet exist in the current org.
-    Safe to call repeatedly: never overwrites customized templates, only fills gaps.
-    This handles both fresh installs (count=0) and orgs that existed before new templates were added.
-    """
-    existing_keys = set()
-    async for doc in db.sms_templates.find({}, {"_id": 0, "key": 1}):
-        existing_keys.add(doc["key"])
+    Upsert default templates with version-aware self-healing.
 
-    missing = [t for t in DEFAULT_TEMPLATES if t["key"] not in existing_keys]
+    On every call we do three things, in order:
+      1. Insert any DEFAULT_TEMPLATES that don't yet exist for the current org.
+      2. Backfill the `default_body` snapshot on legacy template docs that
+         were seeded before this field existed — conservatively, only when
+         the current body still matches a known stale default (see
+         LEGACY_DEFAULT_BODIES below). Once `default_body` is set, future
+         upgrades are clean.
+      3. Auto-upgrade any template whose `body == default_body` (i.e. user
+         has not customized the wording) to the latest default_body shipped
+         in code. Customized templates are left untouched — operators keep
+         their edits, and only the unedited "factory" wording gets refreshed.
+
+    Idempotent. Safe to call on startup, on GET /sms/templates, and inside
+    queue_sms self-seed.
+    """
+    # Pull every existing template doc (org-scoped via db wrapper)
+    existing_docs = []
+    async for doc in db.sms_templates.find({}, {"_id": 0}):
+        existing_docs.append(doc)
+    existing_by_key = {d["key"]: d for d in existing_docs}
+
+    # 1️⃣ Insert missing keys with default_body snapshot
+    now = now_iso()
+    missing = [t for t in DEFAULT_TEMPLATES if t["key"] not in existing_by_key]
     if missing:
-        docs = [{**t, "id": new_id(), "created_at": now_iso(), "updated_at": now_iso()}
-                for t in missing]
+        docs = [
+            {**t, "id": new_id(), "default_body": t["body"],
+             "created_at": now, "updated_at": now}
+            for t in missing
+        ]
         await db.sms_templates.insert_many(docs)
+
+    # 2️⃣ + 3️⃣ Backfill default_body and upgrade unedited templates
+    for default in DEFAULT_TEMPLATES:
+        key = default["key"]
+        existing = existing_by_key.get(key)
+        if not existing:
+            continue
+        new_body = default["body"]
+        stored_default = existing.get("default_body")
+        current_body = existing.get("body", "")
+
+        if stored_default is None:
+            # Legacy doc — backfill conservatively. If the current body
+            # matches one of the known stale defaults for this key, we
+            # treat it as "unedited" and upgrade. Otherwise we anchor
+            # default_body to whatever they currently have so future
+            # ships can detect customization correctly.
+            stale_set = LEGACY_DEFAULT_BODIES.get(key, set())
+            if current_body in stale_set or current_body == new_body:
+                await db.sms_templates.update_one(
+                    {"id": existing["id"]},
+                    {"$set": {
+                        "body": new_body,
+                        "default_body": new_body,
+                        "name": default.get("name", existing.get("name", "")),
+                        "placeholders": default.get("placeholders", existing.get("placeholders", [])),
+                        "updated_at": now,
+                    }},
+                )
+            else:
+                # User customized — anchor default_body to their current
+                # body so we never accidentally clobber it later.
+                await db.sms_templates.update_one(
+                    {"id": existing["id"]},
+                    {"$set": {"default_body": current_body, "updated_at": now}},
+                )
+        elif stored_default != new_body and current_body == stored_default:
+            # Unedited template, factory wording changed → upgrade
+            await db.sms_templates.update_one(
+                {"id": existing["id"]},
+                {"$set": {
+                    "body": new_body,
+                    "default_body": new_body,
+                    "name": default.get("name", existing.get("name", "")),
+                    "placeholders": default.get("placeholders", existing.get("placeholders", [])),
+                    "updated_at": now,
+                }},
+            )
+
+
+# Known stale default bodies from previous releases. Used to identify legacy
+# template docs that still carry the OLD wording so we can safely refresh
+# them in step 2 of _ensure_templates. ONLY add bodies that were the literal
+# DEFAULT in code at some point — never user-edited content.
+LEGACY_DEFAULT_BODIES = {
+    "close_late_notice": {
+        # Pre-Apr-2026 wording that falsely threatened "Sales BLOCKED"
+        ("AgriBooks: <branch_name> close is overdue. Sales are BLOCKED until "
+         "you finalize <date>. Open Close Wizard now."),
+        ("AgriBooks: <branch_name> close is overdue by <hours_overdue>h. "
+         "Sales are BLOCKED until you finalize <date>. Open Close Wizard now."),
+    },
+    "close_escalation": {
+        ("URGENT: <branch_name> has NOT closed <date>. Sales are BLOCKED. "
+         "Owner / auditor attention needed."),
+        ("URGENT: <branch_name> has NOT closed <date>. Sales BLOCKED. "
+         "Owner / auditor attention needed."),
+    },
+    "close_overdue_next_day": {
+        ("<branch_name> did NOT close <date>. Sales remain BLOCKED. "
+         "Owner attention required."),
+    },
+    "close_overdue_multi_day": {
+        ("URGENT: <branch_name> is <days_overdue> days overdue on closing <date>. "
+         "Sales BLOCKED. Owner action required."),
+    },
+}
 
 
 # ── Template rendering helper ───────────────────────────────────────────────
@@ -468,6 +565,7 @@ async def queue_sms(
                 # Org has zero templates — seed defaults silently
                 seed_docs = [
                     {**t, "id": new_id(), "organization_id": organization_id,
+                     "default_body": t["body"],
                      "created_at": now_iso(), "updated_at": now_iso()}
                     for t in DEFAULT_TEMPLATES
                 ]
@@ -627,31 +725,59 @@ async def list_sms_queue(
 
 @router.post("/templates/backfill")
 async def backfill_sms_templates(user=Depends(get_current_user)):
-    """Backfill default SMS templates for the current org.
+    """Backfill / refresh default SMS templates for the current org.
 
-    Use case: existing tenants whose org was created BEFORE auto-seeding was
-    added to org-registration. Calling this endpoint will insert any missing
-    default templates without overwriting customizations. Idempotent.
+    Idempotent self-heal endpoint. Combines three actions:
+      • Inserts any missing default templates (e.g. the close-day reminder set
+        for orgs that existed before those templates were added).
+      • Auto-upgrades unedited templates whose factory wording was changed in
+        a later release (tracked via `default_body` snapshot).
+      • Leaves user-customized templates fully intact.
+
+    Returns counts of inserted vs upgraded.
     """
     if user.get("role") not in ("admin", "manager"):
         raise HTTPException(status_code=403, detail="Admin or manager required")
 
-    existing_keys = set()
-    async for doc in db.sms_templates.find({}, {"_id": 0, "key": 1}):
-        existing_keys.add(doc["key"])
+    # Snapshot before to compute deltas
+    before_keys = set()
+    before_bodies = {}
+    async for doc in db.sms_templates.find({}, {"_id": 0, "key": 1, "body": 1}):
+        before_keys.add(doc["key"])
+        before_bodies[doc["key"]] = doc.get("body", "")
 
-    missing = [t for t in DEFAULT_TEMPLATES if t["key"] not in existing_keys]
-    if not missing:
-        return {"seeded": 0, "existing": len(existing_keys), "message": "All default templates already present."}
+    await _ensure_templates()
 
-    docs = [{**t, "id": new_id(), "created_at": now_iso(), "updated_at": now_iso()}
-            for t in missing]
-    await db.sms_templates.insert_many(docs)
+    after_keys = set()
+    after_bodies = {}
+    async for doc in db.sms_templates.find({}, {"_id": 0, "key": 1, "body": 1}):
+        after_keys.add(doc["key"])
+        after_bodies[doc["key"]] = doc.get("body", "")
+
+    seeded_keys = sorted(after_keys - before_keys)
+    upgraded_keys = sorted(
+        k for k in (before_keys & after_keys)
+        if before_bodies.get(k) != after_bodies.get(k)
+    )
+
+    if not seeded_keys and not upgraded_keys:
+        return {
+            "seeded": 0, "upgraded": 0,
+            "existing": len(after_keys),
+            "message": "All default templates are present and up to date."
+        }
+    parts = []
+    if seeded_keys:
+        parts.append(f"Seeded {len(seeded_keys)} new template(s)")
+    if upgraded_keys:
+        parts.append(f"refreshed {len(upgraded_keys)} unedited template(s)")
     return {
-        "seeded": len(missing),
-        "existing": len(existing_keys),
-        "seeded_keys": [t["key"] for t in missing],
-        "message": f"Seeded {len(missing)} missing default template(s).",
+        "seeded": len(seeded_keys),
+        "upgraded": len(upgraded_keys),
+        "existing": len(after_keys),
+        "seeded_keys": seeded_keys,
+        "upgraded_keys": upgraded_keys,
+        "message": ". ".join(parts) + ".",
     }
 
 

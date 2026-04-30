@@ -330,7 +330,11 @@ export default function DashboardPage() {
     setRestoringCompanyInfo(true);
     try {
       const r = await api.post('/settings/restore-company-info');
-      if (r.data?.restored) {
+      if (r.data?.recreated) {
+        toast.success(`Company recreated: ${r.data.value?.name || 'New Company'} — please reload the page.`);
+        setCompanyInfoMissing(false);
+        setTimeout(() => window.location.reload(), 1500);
+      } else if (r.data?.restored) {
         toast.success(`Company info restored: ${r.data.value?.name}`);
         setCompanyInfoMissing(false);
       } else {

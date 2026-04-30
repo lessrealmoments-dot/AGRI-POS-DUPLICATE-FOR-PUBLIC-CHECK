@@ -311,24 +311,117 @@ async def get_company_info_status(user=Depends(get_current_user)):
 async def restore_company_info(user=Depends(get_current_user)):
     """One-tap self-heal: rebuild settings.company_info from the immutable
     `organizations` row. Idempotent; only writes when missing or empty so it
-    never overwrites a user-edited value."""
+    never overwrites a user-edited value.
+
+    Self-heals two failure modes that previously surfaced as toast errors:
+      1. The organization row was deleted from `organizations` (orphan tenant).
+         We treat this as a brand-new company and recreate the org row + a
+         default branch using the user's name/email so the user can keep
+         working without contacting support.
+      2. The user's JWT carries no organization_id. This usually means the
+         account predates multi-tenant auth — we cannot safely auto-create a
+         tenant for them without knowing intent, so we surface a clear
+         instruction (logout + log back in to refresh the token).
+    """
     check_perm(user, "settings", "edit")
-    from config import _raw_db, get_org_context
+    from datetime import datetime, timezone, timedelta
+    from config import _raw_db, get_org_context, set_org_context
+    from utils import new_id
+
     org_id = user.get("organization_id") or get_org_context()
     if not org_id:
-        raise HTTPException(status_code=400, detail="No organization context")
+        raise HTTPException(
+            status_code=400,
+            detail=("Your session has no organization context. Please log out "
+                    "and sign in again to refresh your account, then retry."),
+        )
+
     org = await _raw_db.organizations.find_one({"id": org_id}, {"_id": 0})
+    recreated = False
+
     if not org:
-        raise HTTPException(status_code=404, detail="Organization record missing")
+        # Treat as a deleted/new company — recreate the organization row so
+        # the rest of the self-heal can continue. Name preference order:
+        # existing settings.company_info.name → "<full_name>'s Company" → fallback.
+        existing_settings = await _raw_db.settings.find_one(
+            {"key": "company_info", "organization_id": org_id}, {"_id": 0}
+        )
+        existing_name = ((existing_settings or {}).get("value") or {}).get("name", "").strip()
+        full_name = (user.get("full_name") or "").strip()
+        company_name = (
+            existing_name
+            or (f"{full_name}'s Company" if full_name else "")
+            or (user.get("email", "").split("@")[0].strip() + "'s Company"
+                if user.get("email") else "")
+            or "My Company"
+        )
+
+        from routes.organizations import PLAN_LIMITS  # local import avoids cycle
+        now = now_iso()
+        trial_end = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()
+        new_org = {
+            "id": org_id,
+            "name": company_name,
+            "owner_email": user.get("email", ""),
+            "phone": "",
+            "address": "",
+            "plan": "trial",
+            "subscription_status": "trial",
+            "trial_ends_at": trial_end,
+            "max_branches": PLAN_LIMITS["trial"]["max_branches"],
+            "max_users": PLAN_LIMITS["trial"]["max_users"],
+            "extra_branches": 0,
+            "annual_billing": False,
+            "is_demo": False,
+            "created_at": now,
+            "self_healed_at": now,
+        }
+        await _raw_db.organizations.insert_one(new_org)
+        org = new_org
+        recreated = True
+
+        # Recreate a default branch + seed SMS templates so the rest of the
+        # app works immediately after the heal.
+        set_org_context(org_id)
+        try:
+            existing_branch = await _raw_db.branches.find_one(
+                {"organization_id": org_id}, {"_id": 0, "id": 1}
+            )
+            if not existing_branch:
+                branch_id = new_id()
+                await _raw_db.branches.insert_one({
+                    "id": branch_id,
+                    "name": f"{company_name} - Main Branch",
+                    "address": "",
+                    "phone": "",
+                    "active": True,
+                    "organization_id": org_id,
+                    "created_at": now,
+                })
+                try:
+                    from routes.organizations import provision_branch_wallets
+                    await provision_branch_wallets(branch_id, f"{company_name} - Main Branch")
+                except Exception:
+                    pass  # wallet provisioning is best-effort during heal
+            try:
+                from routes.sms import _ensure_templates
+                await _ensure_templates()
+            except Exception:
+                pass  # template seeding is best-effort during heal
+        finally:
+            set_org_context(None)
+
     existing = await db.settings.find_one({"key": "company_info"}, {"_id": 0})
     existing_name = (existing or {}).get("value", {}).get("name", "").strip()
-    if existing_name:
-        # Already populated — return as-is, don't clobber user edits
+    if existing_name and not recreated:
+        # Already populated and we didn't just rebuild — return as-is so we
+        # never clobber a user-edited value.
         return {"restored": False, "reason": "already_set", "value": existing["value"]}
+
     value = {
         "name": org.get("name", ""),
         "phone": org.get("phone", ""),
-        "email": org.get("email", ""),
+        "email": org.get("email", "") or user.get("email", ""),
         "address": org.get("address", ""),
         "currency": (existing or {}).get("value", {}).get("currency", "PHP"),
         "date_format": (existing or {}).get("value", {}).get("date_format", "MM/DD/YYYY"),
@@ -338,4 +431,4 @@ async def restore_company_info(user=Depends(get_current_user)):
         {"$set": {"key": "company_info", "value": value, "updated_at": now_iso()}},
         upsert=True,
     )
-    return {"restored": True, "value": value}
+    return {"restored": True, "recreated": recreated, "value": value}
