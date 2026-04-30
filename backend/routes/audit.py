@@ -314,6 +314,18 @@ async def compute_audit(
     # ── Weighted Health + Fraud Risk scores ──────────────────────────────
     result["scores"] = _compute_scores(result)
 
+    # ── Overage Reserve snapshot (so AuditCenter can show offset hint) ────
+    try:
+        from routes.overage_reserve import _current_balance
+        if b_id:
+            result["reserve"] = {
+                "branch_id": b_id,
+                "reserve_balance": await _current_balance(b_id, "reserve"),
+                "deficit_balance": await _current_balance(b_id, "deficit"),
+            }
+    except Exception:
+        result["reserve"] = None
+
     return result
 
 

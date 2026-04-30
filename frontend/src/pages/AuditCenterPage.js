@@ -24,6 +24,9 @@ import ExpenseDetailModal from '../components/ExpenseDetailModal';
 import CustomerStatementModal from '../components/CustomerStatementModal';
 import ReceiptGallery from '../components/ReceiptGallery';
 import SignatureVerifyToolbar from '../components/SignatureVerifyToolbar';
+import ReserveTab from '../components/audit/ReserveTab';
+
+import { Wallet } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -646,7 +649,15 @@ export default function AuditCenterPage() {
   const today = new Date().toISOString().slice(0, 10);
   const firstOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
 
-  const [tab, setTab] = useState('run');
+  const [tab, setTab] = useState(() => {
+    // Deep-link support: ?tab=reserve from Wallets page or other entry points
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const t = sp.get('tab');
+      if (t && ['run', 'discrepancies', 'prepare', 'history', 'reserve', 'security'].includes(t)) return t;
+    } catch { /* noop */ }
+    return 'run';
+  });
   const [sessions, setSessions] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
@@ -1078,6 +1089,10 @@ export default function AuditCenterPage() {
             {prepStats && <span className="ml-1.5 bg-emerald-500 text-white text-[10px] rounded-full px-1.5 py-0.5">✓</span>}
           </TabsTrigger>
           <TabsTrigger value="history" data-testid="audit-history-tab"><History size={14} className="mr-1.5" />Audit History</TabsTrigger>
+          <TabsTrigger value="reserve" data-testid="audit-reserve-tab"
+            className="data-[state=active]:bg-emerald-50 data-[state=active]:text-emerald-700">
+            <Wallet size={14} className="mr-1.5" />Reserve
+          </TabsTrigger>
           <TabsTrigger value="security" data-testid="security-flags-tab" className="data-[state=active]:bg-red-50 data-[state=active]:text-red-700">
             <KeyRound size={14} className="mr-1.5" />
             Security Flags
@@ -1244,6 +1259,49 @@ export default function AuditCenterPage() {
                     </CardContent>
                   </Card>
                 ) : null;
+              })()}
+
+              {/* Reserve offset suggestion — when reserve has balance and there's a relevant variance */}
+              {auditData.reserve && auditData.reserve.reserve_balance > 0 && (() => {
+                const invVar = parseFloat(auditData.inventory?.summary?.total_variance_capital) || 0;
+                const cashShort = (auditData.cash?.discrepancy || 0) < 0 ? Math.abs(auditData.cash.discrepancy) : 0;
+                const target = invVar < 0 ? Math.abs(invVar) : (cashShort > 0 ? cashShort : 0);
+                if (target <= 0) return null;
+                const reserve = auditData.reserve.reserve_balance;
+                const suggested = Math.min(reserve, target);
+                const targetLabel = invVar < 0 ? 'inventory variance loss' : 'cash shortage';
+                return (
+                  <Card className="border-2 border-emerald-300 bg-gradient-to-r from-emerald-50 to-sky-50" data-testid="reserve-offset-suggestion">
+                    <CardContent className="p-4">
+                      <div className="flex items-start gap-3">
+                        <div className="w-9 h-9 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0">
+                          <Wallet size={16} className="text-emerald-700" />
+                        </div>
+                        <div className="flex-1">
+                          <p className="font-bold text-sm text-slate-800" style={{ fontFamily: 'Manrope' }}>
+                            Apply Cash Overage Reserve?
+                          </p>
+                          <p className="text-xs text-slate-600 mt-1">
+                            Your {targetLabel} is <span className="font-bold">{formatPHP(target)}</span>.
+                            You have <span className="font-bold text-emerald-700">{formatPHP(reserve)}</span> in your reserve pool.
+                            Apply <span className="font-bold">{formatPHP(suggested)}</span> from the reserve to offset this loss?
+                          </p>
+                          <div className="flex gap-2 mt-3">
+                            <Button size="sm" onClick={() => setTab('reserve')}
+                              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                              data-testid="reserve-offset-go">
+                              <ArrowRight size={13} className="mr-1.5" /> Go to Reserve to Apply
+                            </Button>
+                            <Button size="sm" variant="ghost" className="text-slate-500"
+                              onClick={() => setAuditData(d => ({ ...d, reserve: { ...d.reserve, _dismissed: true } }))}>
+                              Skip for now
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
               })()}
 
               {/* Section 2: Cash */}
@@ -2221,6 +2279,11 @@ export default function AuditCenterPage() {
               })}
             </div>
           )}
+        </TabsContent>
+
+        {/* ── RESERVE TAB ──────────────────────────────────────────────── */}
+        <TabsContent value="reserve" className="mt-4">
+          <ReserveTab branchId={auditBranchId} />
         </TabsContent>
 
         {/* Security Flags Tab */}

@@ -55,6 +55,7 @@ from routes.invoice_corrections import router as invoice_corrections_router
 from routes.app_downloads import router as app_downloads_router
 from routes.crop_credits import router as crop_credits_router
 from routes.signatures import router as signatures_router
+from routes.overage_reserve import router as overage_reserve_router
 
 # =============================================================================
 # APP SETUP
@@ -212,6 +213,9 @@ api_router.include_router(crop_credits_router)
 
 # Digital Signatures
 api_router.include_router(signatures_router)
+
+# Overage Reserve (Cash Over/Short pool + audit offset)
+api_router.include_router(overage_reserve_router)
 
 # =============================================================================
 # WEBSOCKET ROUTES (must be on app directly with /api prefix)

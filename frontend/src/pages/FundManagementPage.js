@@ -19,6 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import FundTransferDialog from '../components/FundTransferDialog';
+import OverageReserveCard from '../components/OverageReserveCard';
 import {
   Banknote, Lock, Smartphone, Building2, RefreshCw, ArrowRight,
   ArrowRightLeft, Shield, EyeOff, History, AlertTriangle
@@ -218,6 +219,9 @@ export default function FundManagementPage() {
           );
         })}
       </div>
+
+      {/* Overage Reserve summary — read-only badge into the Audit Center */}
+      <OverageReserveCard branchId={branchId} />
 
       {/* Movements panel */}
       {selectedWallet && (

@@ -1,0 +1,60 @@
+{
+  "summary": "Backend-only testing of the new Overage Reserve Ledger system (6 endpoints + daily-close hook + audit/compute integration). Created /app/backend/tests/test_overage_reserve.py with 23 tests across 7 classes covering: summary endpoint multi-tenant scoping, ledger pagination/filters/schema, balance_after running consistency, backfill idempotency, apply_audit (PIN/validation/overdraw guards), net-shortage paired entries with cap enforcement, claw-back reversal+double-reverse rejection, and the new 'reserve' field on /api/audit/compute (branched + branchless org-wide). All 23 new tests PASS. Regression: all 47 prior audit tests (test_audit_pulse 9, test_audit_deep_analysis_phase1 19, test_audit_center_93 12, test_audit_center_clickable_96 7) still PASS — 70/70 combined.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "/api/audit/compute",
+        "issue": "When called without branch_id (org-wide), result['reserve'] is silently never set (falls through the `if b_id:` block; the surrounding try/except only sets None on exception). The spec wording says 'returns null', and the response currently OMITS the key entirely rather than returning null:None. Frontend defensive .get('reserve') still works, but contract is implicit. Suggest adding `else: result['reserve'] = None` for explicit API contract."
+      },
+      {
+        "endpoint": "/api/reserve/apply",
+        "issue": "Linkage to audit_session_id pushes onto audits.reserve_applications via $push but doesn't verify the audit doc exists nor that the user has access to it. A user could pass any audit_session_id (even another org's) and trigger a $push on that audit. Recommend an existence + organization_id check before the update_one."
+      },
+      {
+        "endpoint": "/api/reserve/summary",
+        "issue": "Non-admin path (line 152-157) only filters branches by user.branch_id — works correctly only because the upstream branch_query already has organization_id scope. If a future refactor removes that scope, non-admins could enumerate branches in other orgs that happen to match their branch_id. Defense-in-depth: also assert branch.organization_id == user.organization_id in the post-filter."
+      },
+      {
+        "endpoint": "/api/reserve/backfill",
+        "issue": "Walks db.daily_closings without filtering by user.organization_id. An admin from Org A running backfill will scan all closings system-wide (then write entries into branches that may not be theirs, indirectly via record_daily_close_variance). The branches collection lookup inside record_daily_close_variance does NOT verify org membership. For SaaS isolation, restrict the closings query to {organization_id: user.organization_id} when present."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_overage_reserve.py",
+    "/app/test_reports/pytest/pytest_overage_reserve_176.xml",
+    "/app/test_reports/pytest/pytest_audit_regression_176.xml"
+  ],
+  "action_items": [
+    "[Optional] Make /api/audit/compute always set result['reserve'] = None for branchless calls (explicit API contract).",
+    "[Security] Validate audit_session_id ownership before $push on /api/reserve/apply.",
+    "[Security] Scope /api/reserve/backfill closings query by user.organization_id.",
+    "[Defense-in-depth] In /api/reserve/summary non-admin branch, also assert branch.organization_id == user.organization_id."
+  ],
+  "critical_code_review_comments": [
+    "overage_reserve.py is 423 lines — well-sized and self-contained. Good.",
+    "Idempotency of record_daily_close_variance is keyed on (source_id, type=auto_credit) — correct, but if a daily_close is re-keyed (e.g., voided + re-created with same id), the second run would be a no-op. Owners should be told to issue an explicit claw-back rather than rely on backfill re-running.",
+    "_post_entry uses non-atomic read-then-write for balance_after — a concurrent insert on the same (branch, pool) can race and produce identical balance_after values. Low probability under normal POS load, but consider a sequence collection or a session.with_transaction() block for hot branches.",
+    "amount sign convention: positive for credits, negative for debits — the doc-string at top of module documents this clearly. Tests verify -amount for apply_audit/net_shortage/claw_back. Good.",
+    "/api/audit/compute integration line 317-327: try/except Exception swallows all errors and silently sets reserve=None — consider logging the exception so silent failures are visible in logs."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_overage_reserve.py"
+  ],
+  "success_rate": {
+    "backend": "100% (23/23 new + 47/47 regression = 70/70)",
+    "frontend": "not tested (backend-only request)"
+  },
+  "test_credentials": "Regression org admin: test_org_admin@regression.local / RegressionPass!2026 (auto-seeded). Manager PIN: 521325, Owner PIN: 913712. Branches auto-picked from the org admin's organization_id.",
+  "seed_data_creation": "Per-test-module: 3 daily_closings rows (over_short=+50, -30, 0) inserted into the test org admin's first active branch with _test_tag prefix. Backfill creates 2 ledger entries (skips the zero one). Apply/net/claw-back tests reuse those balances. Module-scoped fixture cleans up daily_closings + all source_id-related ledger rows + manual TEST_ entries on teardown. Pre-test cleanup also drops orphan TEST_ rows from prior runs to keep balance_after consistency assertions stable.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Overage Reserve Ledger fully validated. Test file: /app/backend/tests/test_overage_reserve.py. Verified end-to-end: (1) summary multi-tenant filters branches by organization_id (asserted no leak across orgs); (2) ledger schema has all 17 documented fields incl. verifier_*, created_by_*, paired_entry_id; (3) balance_after running consistency holds for both pools after fixture-scoped cleanup; (4) backfill idempotent (second call creates 0); (5) zero over_short closings produce no entry; (6) apply rejects invalid PIN(403)/missing branch(400)/missing reason(400)/invalid applied_to(400)/overdraw(400); (7) apply success debits exact amount, posts negative amount, type=apply_audit; (8) net-shortage requires PIN, capped at min(reserve,deficit), creates paired entries with paired_entry_id linkage; (9) claw-back creates opposite-sign entry, marks original reversed=true, second reversal rejected (400); (10) /api/audit/compute branched response has reserve.{branch_id,reserve_balance,deficit_balance}; branchless returns null/missing. To rerun: REACT_APP_BACKEND_URL=$(grep REACT_APP_BACKEND_URL /app/frontend/.env | cut -d= -f2) API_URL=$REACT_APP_BACKEND_URL pytest backend/tests/test_overage_reserve.py -v",
+  "rca of the issue": "N/A — no defects in the new feature. Initial test run hit a self-inflicted balance_after-consistency failure (50.0 drift) caused by the test fixture's source_id-based cleanup leaving orphan apply_audit/net_shortage/claw_back ledger rows from a prior session. Strengthened the fixture to also delete TEST_*-noted rows and source_id in {'manual','net_shortage'} for the test branch, both pre- and post-yield. The underlying production code is correct: _post_entry computes balance_after = previous + signed_amount atomically per insert. The minor non-atomic-read-then-write race (logged in code review comments) is a separate latent concern, not a defect surfaced by this iteration."
+}

@@ -1393,6 +1393,15 @@ async def close_day(data: dict, user=Depends(get_current_user)):
     await db.daily_closings.insert_one(close_record)
     del close_record["_id"]
 
+    # Overage Reserve auto-hook — pool positive over_short, track negative
+    # as deficit. Idempotent via (source_id, auto_credit).
+    try:
+        from routes.overage_reserve import record_daily_close_variance
+        await record_daily_close_variance(close_record, user=user)
+    except Exception as _reserve_err:
+        import logging
+        logging.getLogger(__name__).error("Reserve hook failed for daily close: %s", _reserve_err)
+
     # Update cashier wallet to new float
     if wallet:
         await db.fund_wallets.update_one({"id": wallet["id"]}, {"$set": {"balance": cash_to_drawer}})
@@ -1711,6 +1720,14 @@ async def batch_close_days(data: dict, user=Depends(get_current_user)):
 
     await db.daily_closings.insert_one(close_record)
     del close_record["_id"]
+
+    # Overage Reserve auto-hook (batch-close path)
+    try:
+        from routes.overage_reserve import record_daily_close_variance
+        await record_daily_close_variance(close_record, user=user)
+    except Exception as _reserve_err:
+        import logging
+        logging.getLogger(__name__).error("Reserve hook failed for batch close: %s", _reserve_err)
 
     # Also insert placeholder records for each individual date so they're marked as closed
     for d in dates:
