@@ -153,10 +153,34 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
         branch_id: previewBranchId,
       });
       const count = r.data?.queued || 0;
+      const resolution = r.data?.resolution || {};
+      const recipients = r.data?.recipients || [];
+      // Build a concise per-role breakdown so admins can see WHY a role
+      // resolved to N recipients (or why it fell back).
+      const lines = [];
+      Object.entries(resolution).forEach(([role, info]) => {
+        const matched = info?.matched_users || 0;
+        const noPhone = info?.users_without_phone || 0;
+        const fb = info?.fallback_used;
+        let bits = [];
+        if (matched) bits.push(`${matched} user${matched === 1 ? '' : 's'}`);
+        if (noPhone) bits.push(`${noPhone} no-phone`);
+        if (fb) bits.push('+fallback');
+        if (!bits.length) bits.push('none');
+        lines.push(`${role}: ${bits.join(', ')}`);
+      });
+      const fbCount = recipients.filter(x => x.fallback).length;
       if (count === 0) {
-        toast.warning('Queued 0 recipients — check that roles have phone numbers in Team.');
+        toast.warning(
+          'Queued 0 recipients. ' + (lines.length ? '(' + lines.join(' · ') + ')' : '')
+          + ' Check Team phone numbers and Collection Recipient fallbacks.'
+        );
       } else {
-        toast.success(`[SAMPLE] queued for ${count} recipient${count === 1 ? '' : 's'}.`);
+        const fbNote = fbCount > 0 ? ` (${fbCount} via Collection-Recipient fallback)` : '';
+        toast.success(
+          `[SAMPLE] queued for ${count} recipient${count === 1 ? '' : 's'}${fbNote}.`
+          + (lines.length ? ' — ' + lines.join(' · ') : '')
+        );
       }
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Test SMS failed');

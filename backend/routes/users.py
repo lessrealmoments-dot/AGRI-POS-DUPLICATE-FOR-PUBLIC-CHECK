@@ -12,6 +12,30 @@ from models import PERMISSION_MODULES, ROLE_PRESETS, DEFAULT_PERMISSIONS, SYSTEM
 router = APIRouter(tags=["Users & Permissions"])
 
 
+def _normalize_branch_ids(raw_ids, legacy_single=None) -> list:
+    """Coerce a branch_ids payload into a clean list of branch UUIDs.
+
+    Accepts:
+      - list of strings (preferred)
+      - None / missing → empty list (falls back to legacy_single if given)
+      - single string → wrapped into a 1-element list
+      - list with empty/None entries → filtered out
+    """
+    out = []
+    if isinstance(raw_ids, list):
+        for b in raw_ids:
+            if isinstance(b, str) and b.strip():
+                if b not in out:
+                    out.append(b)
+    elif isinstance(raw_ids, str) and raw_ids.strip():
+        out.append(raw_ids.strip())
+    # Fold in legacy single value so historical data isn't lost
+    if legacy_single and isinstance(legacy_single, str) and legacy_single.strip():
+        if legacy_single not in out:
+            out.append(legacy_single)
+    return out
+
+
 # ==================== USER MANAGEMENT ====================
 @router.get("/users")
 async def list_users(include_inactive: bool = False, user=Depends(get_current_user)):
@@ -83,7 +107,13 @@ async def create_user(data: dict, user=Depends(get_current_user)):
         "password_hash": hash_password(password),
         "role": role,
         "pin_tier": pin_tier,
+        # Multi-branch assignment: `branch_ids` is the authoritative list
+        # (manager/auditor can be assigned to multiple branches). `branch_id`
+        # is kept as the "primary/home" branch for backward compatibility
+        # with older code paths that read a single value.
         "branch_id": data.get("branch_id"),
+        "branch_ids": _normalize_branch_ids(data.get("branch_ids"), data.get("branch_id")),
+        "is_auditor": bool(data.get("is_auditor", False)),
         "permissions": default_perms,
         "active": True,
         "created_at": now_iso(),
@@ -111,6 +141,19 @@ async def update_user(user_id: str, data: dict, user=Depends(get_current_user)):
         "full_name", "email", "phone", "role", "branch_id", "active",
         "is_auditor", "auditor_pin",
     )}
+
+    # Multi-branch assignment: accept `branch_ids` list explicitly. When
+    # provided, it becomes the source of truth and we keep `branch_id` in
+    # sync with the first entry (for backward compat with older reads).
+    if "branch_ids" in data:
+        normalized = _normalize_branch_ids(data.get("branch_ids"), data.get("branch_id") or update.get("branch_id"))
+        update["branch_ids"] = normalized
+        # Home branch = first entry (or null if unscoped)
+        update["branch_id"] = normalized[0] if normalized else None
+    elif "branch_id" in update:
+        # Legacy single-branch update → reflect into branch_ids list
+        legacy = update["branch_id"]
+        update["branch_ids"] = [legacy] if legacy else []
     
     if "password" in data and data["password"]:
         update["password_hash"] = hash_password(data["password"])

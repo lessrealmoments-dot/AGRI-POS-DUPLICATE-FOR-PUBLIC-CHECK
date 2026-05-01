@@ -1,5 +1,38 @@
 # AgriBooks Changelog
 
+## May 1, 2026 — Close-Reminder Scheduler Fix + Multi-Branch Users + Collection-Recipient Fallback (Iter 198) ⭐ Critical Bug Fix
+
+**Root cause fixed**: the scheduled close-day SMS (3 PM catch-up, precheck, late notice, escalation, day+1/day+2 overdue) **never fired** in production. The background scheduler ran every 60 s, but it used the tenant-scoped `db` proxy without an `_current_org_id` ContextVar set. The proxy fails closed by injecting `organization_id: "__no_org_context__"`, so every query matched zero rows — 0 branches, 0 users, 0 SMS queued, and (because `tick_once` never logged anything when it fired nothing) no log lines to reveal the silent failure. Only the synchronous Z-Report SMS (fired from inside an HTTP request) worked.
+
+### Backend
+- **`routes/close_reminder.py`** — rewired entire scheduler to use `_raw_db` with explicit `organization_id` filters throughout. `tick_once`, `_dispatch_stage`, `_build_branch_snapshot`, `_already_fired`, `_mark_fired`, `_is_branch_closed_on`, `_is_calendar_closed`, `_load_stage_settings`, `diagnose_for_org`, `send_zreport_finalized` all converted. Added per-tick log line when stages fire so production has visibility.
+- **Multi-branch user model**: new `users.branch_ids: list[str]` field. A manager/auditor can now be assigned to multiple branches and receives SMS for all of them. Legacy `users.branch_id` single value is still honored (auto-folded into the list). New helpers `_user_branch_ids()` and `_user_covers_branch()`.
+- **`_resolve_recipients` rewritten**:
+  - Admin role-key maps to `role=admin` users (covers all branches).
+  - Owner role-key aliases to `role=admin` (since there is no separate owner role in the system).
+  - Auditor role-key maps to `is_auditor=True` capability flag — NOT `role=auditor`, which never existed.
+  - Branch scoping honors `branch_ids` list + legacy `branch_id`.
+  - New `include_debug=True` returns per-role `{matched_users, users_without_phone, fallback_used}` for better test-button UX.
+- **Collection-Recipient fallback**: when a role resolves to zero users with phones, the matching phone from Settings → Messages → Collection Notification Recipients (`owner_phone`, `admin_phone`, `manager_phone`, `auditor_phone`) is added as a synthetic recipient, respecting per-branch overrides for manager/auditor. Prevents silent misses when the admin hasn't yet filled in team phone numbers.
+- **`routes/users.py`** — `/api/users` POST and PUT now accept `branch_ids: list[str]`. Payload normalized via new `_normalize_branch_ids()` helper. `branch_id` stays in sync with first entry for backward compat.
+- **`routes/sms.py`** — `/sms/close-reminder/test-stage` response now includes `resolution` (per-role debug breakdown) and `fallback: true/false` on each recipient so admins see exactly why each role resolved to N.
+
+### Frontend
+- **`pages/TeamPage.js`** — Branch field in Edit User dialog is now context-sensitive:
+  - Admin → read-only "All Branches (administrators are unscoped)" label.
+  - Manager / Cashier / Inventory / custom → multi-select checklist of branches. First picked = Home branch. Empty = "All Branches (unscoped)" (legacy fallback) with amber warning.
+  - New "Also has Auditor capability" toggle for manager/cashier/inventory (sets `is_auditor=true`).
+- User rows in the table now show multi-branch assignments: "All Branches" for admins, "N branches — Main Warehouse +1" tooltip for multi-branch, single name for single-branch.
+- **`components/sms/TeamSmsRemindersCard.js`** — Test button toast now shows per-role breakdown (e.g. "admin: 1 user · manager: 0, 2 no-phone, +fallback") and flags fallback recipients explicitly.
+
+### Tests
+- `tests/test_close_reminder_scheduler_fix_198.py` — 5 passing tests covering: tick_once no longer fails-closed with no org context; `_resolve_recipients` honors `branch_ids` list; `is_auditor` capability matches auditor role-key; Collection-Recipient fallback kicks in when no team user matches; `/test-stage` endpoint returns `resolution` debug payload.
+
+### Upgrade notes
+- **No migration required**: existing users keep working via the legacy `branch_id` fallback. When admin edits a user, the multi-branch list is seeded from their current single branch.
+- Admin noise policy unchanged — admin was already only on escalation/day+1/day+2/zreport in `STAGE_DEFAULTS`, which is correct.
+
+
 ## May 1, 2026 — Customer Dedupe Manager + Bulk Delete + No-Blocker Import (Iter 197) ⭐ Critical Bug Fix
 
 **Root cause fixed**: the customer importer previously had THREE silent failure modes where opening-balance invoices were simply dropped — `exact_dupe` rows (same name or phone as an existing customer), `fuzzy` rows left at the default `action=skip`, and `duplicate_within_file` rows. On a re-import of the same file, *every row* fell into `exact_dupe` and **zero** OB invoices were created, which is what the user was seeing.

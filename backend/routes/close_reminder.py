@@ -42,6 +42,45 @@ from utils import now_iso, new_id
 
 sms_log = logging.getLogger("close_reminder")
 
+
+def _user_branch_ids(u: dict) -> list:
+    """Return the list of branches a user is assigned to.
+
+    Multi-branch model (new): `users.branch_ids` is a list of branch UUIDs.
+    A user receives SMS (and can switch into) any branch in that list.
+
+    Legacy model (backward-compatible): `users.branch_id` is a single UUID.
+    If present and not already in `branch_ids`, it's folded in. Empty or
+    missing both → treat as "all branches" (admin-style unscoped).
+    """
+    ids = u.get("branch_ids") or []
+    if not isinstance(ids, list):
+        ids = []
+    ids = [b for b in ids if isinstance(b, str) and b.strip()]
+    legacy = (u.get("branch_id") or "").strip()
+    if legacy and legacy not in ids:
+        ids.append(legacy)
+    return ids
+
+
+def _user_covers_branch(u: dict, branch_id: str) -> bool:
+    """True if this user should receive SMS/data for the given branch.
+
+    Rules:
+      - admin users → cover every branch (global)
+      - users with `is_auditor=True` and no branch list → global auditor
+      - otherwise → must have branch_id in their assigned list, OR no list
+        at all (legacy unscoped user = all branches)
+    """
+    role = (u.get("role") or "").lower()
+    if role == "admin":
+        return True
+    ids = _user_branch_ids(u)
+    if not ids:
+        # No branch assignment at all → treat as "all branches" (legacy)
+        return True
+    return branch_id in ids
+
 # Fallback when a tenant hasn't picked a timezone yet, or when the picked one
 # can't be loaded. Matches the app's historical Philippine default so the
 # behaviour is identical for existing orgs.
@@ -151,10 +190,12 @@ STAGE_DEFAULTS = {s["key"]: {"enabled": True, "recipients": list(s["recipients"]
 async def _load_stage_settings(organization_id: str) -> dict:
     """Return `{stage_key: {enabled: bool, recipients: [...]}, ...}` merged
     with the code defaults. Missing keys inherit defaults so a newly-added
-    stage becomes active automatically for every org without a migration."""
+    stage becomes active automatically for every org without a migration.
+
+    Uses raw db — safe from scheduler background loop and request context."""
     merged = {k: dict(v, recipients=list(v["recipients"])) for k, v in STAGE_DEFAULTS.items()}
     try:
-        async for doc in db.sms_close_stages.find(
+        async for doc in _raw_db.sms_close_stages.find(
             {"organization_id": organization_id}, {"_id": 0, "stage_key": 1,
                                                     "enabled": 1, "recipients": 1},
         ):
@@ -178,58 +219,180 @@ def _in_quiet_hours(local_dt: datetime) -> bool:
 
 
 async def _resolve_recipients(
-    organization_id: str, branch_id: str, role_keys: list
-) -> list:
-    """Resolve role keys to unique users {id, phone, name}. Dedups by phone."""
-    allowed_roles = set()
-    if "cashier" in role_keys:
-        allowed_roles |= {"cashier"}
-    if "manager" in role_keys:
-        allowed_roles |= {"manager"}
-    if "owner" in role_keys or "admin" in role_keys:
-        allowed_roles |= {"admin"}
-    if "auditor" in role_keys:
-        allowed_roles |= {"auditor"}
+    organization_id: str, branch_id: str, role_keys: list,
+    include_debug: bool = False,
+) -> list | tuple:
+    """Resolve role keys to unique users {id, phone, name, role}. Dedups by
+    phone. Uses the RAW (unscoped) db because this is called from both
+    request-scoped code AND the background scheduler tick (which has no
+    org context set). We pass `organization_id` explicitly in the query.
+
+    Role-key → user-role mapping:
+      cashier  → users where role="cashier"
+      manager  → users where role="manager"
+      owner    → users where role="admin" (owner is modeled as admin here)
+      admin    → users where role="admin" (deduped with owner)
+      auditor  → users with is_auditor=True (flag, not role)
+
+    Branch scoping (non-admin only):
+      - honors `branch_ids` list if present (multi-branch assignment)
+      - legacy `branch_id` single value is included automatically
+      - no branch assignment at all → treated as "all branches" (legacy)
+
+    Fallback:
+      When a role resolves to zero users with phone numbers, we read the
+      configured "Collection Notification Recipients" phone for that role
+      (Settings → Messages) and add it as a synthetic recipient so alerts
+      still go out. Per-branch overrides respected.
+
+    Returns list of recipients. If `include_debug=True`, returns
+    `(recipients, debug_by_role)` where debug gives a per-role breakdown
+    suitable for test-button UX.
+    """
+    want_cashier = "cashier" in role_keys
+    want_manager = "manager" in role_keys
+    want_admin = "owner" in role_keys or "admin" in role_keys
+    want_auditor = "auditor" in role_keys
+
+    role_filters = []
+    if want_cashier:
+        role_filters.append("cashier")
+    if want_manager:
+        role_filters.append("manager")
+    if want_admin:
+        role_filters.append("admin")
 
     q: dict = {
-        "$or": [
-            {"organization_id": organization_id},
-            {"organization_id": {"$exists": False}},
-        ],
+        "organization_id": organization_id,
         "active": {"$ne": False},
     }
-    if allowed_roles:
-        q["role"] = {"$in": list(allowed_roles)}
-    # Branch scoping: admins see all branches; others only if match
-    users = await db.users.find(q, {
-        "_id": 0, "id": 1, "role": 1, "branch_id": 1,
-        "full_name": 1, "username": 1, "phone": 1,
+    or_clauses = []
+    if role_filters:
+        or_clauses.append({"role": {"$in": role_filters}})
+    if want_auditor:
+        # Auditor is a capability flag on any user — not a distinct role
+        or_clauses.append({"is_auditor": True})
+    if not or_clauses:
+        return ([], {}) if include_debug else []
+    q["$or"] = or_clauses
+
+    users = await _raw_db.users.find(q, {
+        "_id": 0, "id": 1, "role": 1, "branch_id": 1, "branch_ids": 1,
+        "full_name": 1, "username": 1, "phone": 1, "is_auditor": 1,
     }).to_list(500)
 
-    seen = set()
+    seen_phones = set()
     out = []
+    # Tracks which logical role_keys found a real user — used to decide
+    # whether to fall back to Collection Notification Recipients.
+    matched_by_role: dict[str, list] = {k: [] for k in ("cashier", "manager", "owner", "admin", "auditor")}
+    no_phone_by_role: dict[str, int] = {k: 0 for k in ("cashier", "manager", "owner", "admin", "auditor")}
+
     for u in users:
-        role = u.get("role")
-        if role not in ("admin", "auditor") and u.get("branch_id") not in (branch_id, "", None):
+        role = (u.get("role") or "").lower()
+        is_auditor = bool(u.get("is_auditor"))
+        # Decide which logical keys this user satisfies
+        user_logical = []
+        if want_cashier and role == "cashier":
+            user_logical.append("cashier")
+        if want_manager and role == "manager":
+            user_logical.append("manager")
+        if want_admin and role == "admin":
+            # Prefer "owner" label if caller asked for it, else "admin"
+            user_logical.append("owner" if "owner" in role_keys else "admin")
+        if want_auditor and is_auditor:
+            user_logical.append("auditor")
+        if not user_logical:
             continue
+
+        # Branch scope — admin users cover every branch; others respect
+        # their branch_ids list (+ legacy branch_id). Auditors with no
+        # assignment default to "all branches" so they always get pinged.
+        if not _user_covers_branch(u, branch_id):
+            continue
+
         phone = (u.get("phone") or "").strip()
-        if not phone or phone in seen:
+        if not phone:
+            for k in user_logical:
+                no_phone_by_role[k] = no_phone_by_role.get(k, 0) + 1
             continue
-        seen.add(phone)
+        if phone in seen_phones:
+            # Same human, multiple logical roles — track but don't double-queue
+            for k in user_logical:
+                matched_by_role.setdefault(k, []).append(phone)
+            continue
+        seen_phones.add(phone)
+        for k in user_logical:
+            matched_by_role.setdefault(k, []).append(phone)
         out.append({
             "id": u.get("id"),
             "phone": phone,
             "name": u.get("full_name") or u.get("username") or "team",
-            "role": role,
+            "role": user_logical[0],
         })
+
+    # ── Fallback: Collection Notification Recipients ─────────────────────────
+    # For every requested role that found NO user with a phone, fold in the
+    # admin-configured phone from Settings → Messages → Collection Recipients.
+    # Per-branch overrides for manager/auditor are respected.
+    cc_setting = await _raw_db.system_settings.find_one(
+        {"key": "collection_notification_recipients", "organization_id": organization_id},
+        {"_id": 0},
+    ) or {}
+    branch_override = (cc_setting.get("branch_phones") or {}).get(branch_id, {})
+
+    def _add_fallback(role_label: str, phone_raw: str):
+        phone = (phone_raw or "").strip()
+        if not phone or phone in seen_phones:
+            return False
+        seen_phones.add(phone)
+        out.append({
+            "id": "",
+            "phone": phone,
+            "name": f"{role_label.title()} (fallback)",
+            "role": role_label,
+            "fallback": True,
+        })
+        return True
+
+    fallback_used: dict[str, bool] = {}
+    if want_admin and not matched_by_role.get("admin") and not matched_by_role.get("owner"):
+        key = "owner" if "owner" in role_keys else "admin"
+        used = _add_fallback(key, cc_setting.get("owner_phone") or cc_setting.get("admin_phone"))
+        fallback_used[key] = used
+    if want_manager and not matched_by_role.get("manager"):
+        phone_raw = branch_override.get("manager_phone") or cc_setting.get("manager_phone")
+        fallback_used["manager"] = _add_fallback("manager", phone_raw)
+    if want_auditor and not matched_by_role.get("auditor"):
+        phone_raw = branch_override.get("auditor_phone") or cc_setting.get("auditor_phone")
+        fallback_used["auditor"] = _add_fallback("auditor", phone_raw)
+    # Cashier has no Collection-Recipient field by design (floor staff get
+    # notified via Team phone only — a missing cashier phone is a data
+    # quality problem to surface in the test-button feedback).
+
+    if include_debug:
+        debug = {}
+        for k in ("cashier", "manager", "owner", "admin", "auditor"):
+            if k not in role_keys:
+                continue
+            debug[k] = {
+                "matched_users": len(matched_by_role.get(k, [])),
+                "users_without_phone": no_phone_by_role.get(k, 0),
+                "fallback_used": bool(fallback_used.get(k)),
+            }
+        return out, debug
     return out
 
 
-async def _build_branch_snapshot(branch_id: str, target_date: str) -> dict:
-    """Compile the numbers SMS templates need."""
+async def _build_branch_snapshot(branch_id: str, target_date: str, organization_id: str = "") -> dict:
+    """Compile the numbers SMS templates need. Uses the RAW db with an
+    explicit organization_id so it works from the background scheduler
+    (which has no org context set) AND from request-scoped callers."""
     inv_q = {"branch_id": branch_id, "order_date": target_date,
              "status": {"$ne": "voided"}}
-    invoices = await db.invoices.find(
+    if organization_id:
+        inv_q["organization_id"] = organization_id
+    invoices = await _raw_db.invoices.find(
         inv_q, {"_id": 0, "grand_total": 1, "payment_type": 1, "fund_source": 1,
                 "amount_paid": 1, "balance": 1, "late_encoded": 1}
     ).to_list(2000)
@@ -255,18 +418,21 @@ async def _build_branch_snapshot(branch_id: str, target_date: str) -> dict:
         else:
             cash_total += amt
 
-    expenses = await db.expenses.find(
-        {"branch_id": branch_id, "date": target_date, "status": {"$ne": "voided"}},
-        {"_id": 0, "amount": 1}
+    exp_q = {"branch_id": branch_id, "date": target_date, "status": {"$ne": "voided"}}
+    if organization_id:
+        exp_q["organization_id"] = organization_id
+    expenses = await _raw_db.expenses.find(
+        exp_q, {"_id": 0, "amount": 1}
     ).to_list(500)
     exp_count = len(expenses)
     exp_total = sum(float(e.get("amount", 0) or 0) for e in expenses)
 
     # Pending credit slips (if the Capture Inbox exists; no-op otherwise)
     try:
-        pending_credits = await db.pending_credits.count_documents(
-            {"branch_id": branch_id, "status": "open"}
-        )
+        pc_q: dict = {"branch_id": branch_id, "status": "open"}
+        if organization_id:
+            pc_q["organization_id"] = organization_id
+        pending_credits = await _raw_db.pending_credits.count_documents(pc_q)
     except Exception:
         pending_credits = 0
 
@@ -286,7 +452,7 @@ async def _build_branch_snapshot(branch_id: str, target_date: str) -> dict:
 
 
 async def _already_fired(branch_id: str, date_str: str, stage_key: str, user_id: str) -> bool:
-    doc = await db.close_reminder_log.find_one(
+    doc = await _raw_db.close_reminder_log.find_one(
         {"branch_id": branch_id, "target_date": date_str,
          "stage_key": stage_key, "recipient_user_id": user_id},
         {"_id": 0, "id": 1},
@@ -295,9 +461,10 @@ async def _already_fired(branch_id: str, date_str: str, stage_key: str, user_id:
 
 
 async def _mark_fired(branch_id: str, date_str: str, stage_key: str,
-                      user_id: str, phone: str):
-    await db.close_reminder_log.insert_one({
+                      user_id: str, phone: str, organization_id: str = ""):
+    await _raw_db.close_reminder_log.insert_one({
         "id": new_id(),
+        "organization_id": organization_id,
         "branch_id": branch_id,
         "target_date": date_str,
         "stage_key": stage_key,
@@ -311,8 +478,9 @@ async def _dispatch_stage(branch: dict, target_date_str: str, stage: dict):
     """Evaluate a single stage for a single branch-date and fire SMS if due."""
     from routes.sms import queue_sms
 
+    org_id = branch.get("organization_id", "") or ""
     # Look up snapshot numbers and build variables
-    snapshot = await _build_branch_snapshot(branch["id"], target_date_str)
+    snapshot = await _build_branch_snapshot(branch["id"], target_date_str, org_id)
 
     # Zero-sales suppression on escalation stages (but keep the 22:00 summary)
     escalation_keys = {"close_late_notice", "close_status_snapshot",
@@ -322,15 +490,12 @@ async def _dispatch_stage(branch: dict, target_date_str: str, stage: dict):
             and snapshot["credit_count"] == 0 and snapshot["expense_count"] == 0:
         return
 
-    # Resolve recipients
-    recipients = await _resolve_recipients(
-        branch.get("organization_id", ""), branch["id"], stage["recipients"]
-    )
+    # Resolve recipients (uses _raw_db under the hood — safe from scheduler)
+    recipients = await _resolve_recipients(org_id, branch["id"], stage["recipients"])
     if not recipients:
         return
 
     # Resolve this org's local time for overdue/hours-to-close maths
-    org_id = branch.get("organization_id", "")
     tz_name = await _resolve_org_timezone(org_id)
     local = _local_now_in(tz_name)
 
@@ -361,41 +526,44 @@ async def _dispatch_stage(branch: dict, target_date_str: str, stage: dict):
     }
 
     for r in recipients:
-        if await _already_fired(branch["id"], target_date_str, stage["key"], r["id"]):
+        # Fallback recipients have no user_id — skip the per-user dedup and
+        # use the phone-keyed dedup below so repeated ticks don't re-fire.
+        recipient_key = r.get("id") or f"fallback:{r['phone']}"
+        if await _already_fired(branch["id"], target_date_str, stage["key"], recipient_key):
             continue
         try:
             await queue_sms(
                 template_key=stage["key"],
-                customer_id=r["id"],          # re-using customer_id slot for recipient user id
+                customer_id=r.get("id") or "",
                 customer_name=r["name"],
                 phone=r["phone"],
                 variables=variables,
-                organization_id=branch.get("organization_id", ""),
+                organization_id=org_id,
                 branch_id=branch["id"],
                 branch_name=branch.get("name", ""),
                 trigger="scheduled",
                 trigger_ref=f"close_reminder:{branch['id']}:{target_date_str}:{stage['key']}",
-                dedup_key=f"close_reminder:{branch['id']}:{target_date_str}:{stage['key']}:{r['id']}",
+                dedup_key=f"close_reminder:{branch['id']}:{target_date_str}:{stage['key']}:{recipient_key}",
             )
-            await _mark_fired(branch["id"], target_date_str, stage["key"], r["id"], r["phone"])
+            await _mark_fired(branch["id"], target_date_str, stage["key"], recipient_key, r["phone"], org_id)
         except Exception as e:
             sms_log.error(f"close_reminder dispatch failed: {e}")
 
 
-async def _is_branch_closed_on(branch_id: str, date_str: str) -> bool:
-    doc = await db.daily_closings.find_one(
-        {"branch_id": branch_id, "date": date_str, "status": "closed"},
-        {"_id": 0, "id": 1},
-    )
+async def _is_branch_closed_on(branch_id: str, date_str: str, organization_id: str = "") -> bool:
+    q: dict = {"branch_id": branch_id, "date": date_str, "status": "closed"}
+    if organization_id:
+        q["organization_id"] = organization_id
+    doc = await _raw_db.daily_closings.find_one(q, {"_id": 0, "id": 1})
     return bool(doc)
 
 
-async def _is_calendar_closed(branch_id: str, date_str: str) -> bool:
+async def _is_calendar_closed(branch_id: str, date_str: str, organization_id: str = "") -> bool:
     try:
-        doc = await db.branch_calendar.find_one(
-            {"branch_id": branch_id, "date": date_str, "closed": True},
-            {"_id": 0, "id": 1},
-        )
+        q: dict = {"branch_id": branch_id, "date": date_str, "closed": True}
+        if organization_id:
+            q["organization_id"] = organization_id
+        doc = await _raw_db.branch_calendar.find_one(q, {"_id": 0, "id": 1})
         return bool(doc)
     except Exception:
         return False
@@ -406,14 +574,18 @@ async def tick_once() -> dict:
     Evaluate every active branch against the stage schedule for THAT branch's
     organization local time. Called by the background loop once per minute.
 
+    ⚠ IMPORTANT — uses `_raw_db` with explicit `organization_id` filters,
+    NOT the tenant-scoped `db` proxy. The background scheduler has no
+    `_current_org_id` ContextVar set, so the scoped `db` would fail
+    closed and match zero rows. That was the root cause of the entire
+    "scheduled SMS never fires" bug prior to this fix.
+
     Multi-tenant: each organization can configure its own timezone via
     `organizations.timezone` (or `settings.company_info.timezone` as a
     legacy fallback). Quiet-hour windows, trigger times and target dates are
-    all evaluated in the tenant's local clock, so a Philippine tenant's 3 PM
-    reminder fires at 3 PM Manila time while a US tenant's 3 PM fires at
-    3 PM America/New_York on the same calendar day.
+    all evaluated in the tenant's local clock.
     """
-    branches = await db.branches.find(
+    branches = await _raw_db.branches.find(
         {"active": {"$ne": False}}, {"_id": 0, "id": 1, "name": 1,
                                       "organization_id": 1, "close_time_h": 1}
     ).to_list(500)
@@ -474,15 +646,21 @@ async def tick_once() -> dict:
                 continue
 
             # Skip if branch closed target_date already
-            if await _is_branch_closed_on(br["id"], target_date_str):
+            if await _is_branch_closed_on(br["id"], target_date_str, org_id):
                 continue
             # Skip calendar-closed days
-            if await _is_calendar_closed(br["id"], target_date_str):
+            if await _is_calendar_closed(br["id"], target_date_str, org_id):
                 continue
 
             await _dispatch_stage(br, target_date_str, stage_effective)
             fired += 1
 
+    if fired > 0:
+        sms_log.info(
+            f"close_reminder tick: fired {fired} stage(s) across "
+            f"{len(branches)} branch(es) in {len(tz_cache)} org(s) "
+            f"(skipped {skipped_quiet} in quiet hours)"
+        )
     return {
         "fired_stages": fired,
         "branches": len(branches),
@@ -501,7 +679,7 @@ async def tick_once() -> dict:
 async def diagnose_for_org(org_id: str) -> dict:
     tz_name = await _resolve_org_timezone(org_id)
     local = _local_now_in(tz_name)
-    branches = await db.branches.find(
+    branches = await _raw_db.branches.find(
         {"organization_id": org_id, "active": {"$ne": False}},
         {"_id": 0, "id": 1, "name": 1, "close_time_h": 1},
     ).to_list(500)
@@ -558,14 +736,16 @@ async def send_zreport_finalized(close_record: dict, user: Optional[dict] = None
     from routes.sms import queue_sms
 
     branch_id = close_record.get("branch_id", "")
-    branch = await db.branches.find_one(
+    branch = await _raw_db.branches.find_one(
         {"id": branch_id}, {"_id": 0, "name": 1, "organization_id": 1}
     ) or {}
 
-    snapshot = await _build_branch_snapshot(branch_id, close_record.get("date", ""))
+    org_id = branch.get("organization_id", "")
+    snapshot = await _build_branch_snapshot(branch_id, close_record.get("date", ""), org_id)
 
     # Late-encode note (the owner actively wants to see this)
-    late_invoices = await db.invoices.count_documents({
+    late_invoices = await _raw_db.invoices.count_documents({
+        "organization_id": org_id,
         "branch_id": branch_id, "late_encoded": True, "status": {"$ne": "voided"},
         "late_encoded_at": {"$gte": f"{close_record.get('date', '')}T00:00:00",
                             "$lt":  f"{close_record.get('date', '')}T23:59:59"},

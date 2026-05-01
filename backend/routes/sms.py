@@ -1618,15 +1618,29 @@ async def test_close_reminder_stage(stage_key: str, data: dict = None, user=Depe
             detail="No recipient roles configured for this stage. Pick at least one role, then test.",
         )
 
-    recipients = await _resolve_recipients(org_id, branch_id, role_keys)
+    recipients, debug_by_role = await _resolve_recipients(
+        org_id, branch_id, role_keys, include_debug=True
+    )
     if not recipients:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "No users with phone numbers match the selected roles for this branch. "
-                "Add a phone number to a team member in the Team section, then retry."
-            ),
+        # Build a per-role explanation for the admin — better UX than a
+        # generic "no recipients" toast.
+        why = []
+        for role_key, info in (debug_by_role or {}).items():
+            if info.get("matched_users"):
+                continue
+            if info.get("users_without_phone"):
+                why.append(f"{role_key}: has users but none have a phone")
+            else:
+                why.append(f"{role_key}: no users assigned" if role_key != "auditor"
+                           else f"{role_key}: no user has is_auditor=true")
+        detail = (
+            "No users with phone numbers match the selected roles for this branch, "
+            "and no Collection-Recipient fallback phone is configured. "
+            + ("Issues: " + "; ".join(why) + ". " if why else "")
+            + "Add a phone number to a team member in the Team section, or set a "
+              "Collection Recipient phone under Settings → Messages, then retry."
         )
+        raise HTTPException(status_code=400, detail=detail)
 
     company_name = await _resolve_company_name()
     sender = user.get("full_name") or user.get("email", "")
@@ -1666,6 +1680,7 @@ async def test_close_reminder_stage(stage_key: str, data: dict = None, user=Depe
             "phone": r["phone"],
             "role": r.get("role"),
             "name": r.get("name"),
+            "fallback": bool(r.get("fallback")),
         })
 
     return {
@@ -1675,6 +1690,7 @@ async def test_close_reminder_stage(stage_key: str, data: dict = None, user=Depe
         "branch_name": branch.get("name", ""),
         "queued": len(queued),
         "recipients": queued,
+        "resolution": debug_by_role,
     }
 
 

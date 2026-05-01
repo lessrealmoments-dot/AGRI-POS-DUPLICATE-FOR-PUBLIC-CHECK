@@ -30,7 +30,8 @@ const ROLES = [
 
 const BLANK_FORM = {
   full_name: '', email: '', phone: '', role: 'cashier',
-  branch_id: '', password: '', confirm_password: '', manager_pin: ''
+  branch_id: '', branch_ids: [], is_auditor: false,
+  password: '', confirm_password: '', manager_pin: ''
 };
 
 const MODULE_ICONS = {
@@ -221,7 +222,14 @@ export default function TeamPage() {
     setForm({
       full_name: u.full_name || '', email: u.email || '',
       phone: u.phone || '',
-      role: u.role || 'cashier', branch_id: u.branch_id || '',
+      role: u.role || 'cashier',
+      branch_id: u.branch_id || '',
+      // Seed multi-branch list from `branch_ids`; fall back to the single
+      // legacy `branch_id` so pre-migration users display correctly.
+      branch_ids: Array.isArray(u.branch_ids) && u.branch_ids.length
+        ? u.branch_ids
+        : (u.branch_id ? [u.branch_id] : []),
+      is_auditor: !!u.is_auditor,
       password: '', confirm_password: '', manager_pin: ''
     });
     setUserDialog(true);
@@ -236,12 +244,20 @@ export default function TeamPage() {
     if (form.password && form.password !== form.confirm_password) { toast.error('Passwords do not match'); return; }
     setSaving(true);
     try {
+      // Admin → unscoped (no branch restriction). Other roles respect the
+      // multi-branch list the admin picked. Empty list = "All Branches"
+      // (legacy unscoped), matching the pre-multi-branch behaviour.
+      const isAdminRole = form.role === 'admin';
+      const branch_ids = isAdminRole ? [] : (form.branch_ids || []);
       const payload = {
         full_name: form.full_name,
         email: form.email,
         phone: (form.phone || '').trim(),
         role: form.role,
-        branch_id: form.branch_id || null,
+        // Primary/home branch — first assigned branch, or legacy single
+        branch_id: branch_ids[0] || form.branch_id || null,
+        branch_ids,
+        is_auditor: !!form.is_auditor,
       };
       if (form.password) payload.password = form.password;
       let savedUser;
@@ -503,9 +519,44 @@ export default function TeamPage() {
                           <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ${role.color}`}>{role.label}</span>
                         </td>
                         <td className="px-4 py-3">
-                          <span className="flex items-center gap-1 text-slate-600 text-xs">
-                            <Building2 size={12} /> {getBranchName(u.branch_id)}
-                          </span>
+                          {(() => {
+                            const ids = Array.isArray(u.branch_ids) && u.branch_ids.length
+                              ? u.branch_ids
+                              : (u.branch_id ? [u.branch_id] : []);
+                            if (u.role === 'admin') {
+                              return (
+                                <span className="flex items-center gap-1 text-slate-500 text-xs italic">
+                                  <Building2 size={12} /> All Branches
+                                </span>
+                              );
+                            }
+                            if (ids.length === 0) {
+                              return (
+                                <span className="flex items-center gap-1 text-slate-400 text-xs italic">
+                                  <Building2 size={12} /> All Branches (unscoped)
+                                </span>
+                              );
+                            }
+                            if (ids.length === 1) {
+                              return (
+                                <span className="flex items-center gap-1 text-slate-600 text-xs">
+                                  <Building2 size={12} /> {getBranchName(ids[0])}
+                                </span>
+                              );
+                            }
+                            return (
+                              <span
+                                className="flex items-center gap-1 text-slate-600 text-xs"
+                                title={ids.map(getBranchName).join(', ')}>
+                                <Building2 size={12} />
+                                <span className="font-medium">{ids.length} branches</span>
+                                <span className="text-[10px] text-slate-400">
+                                  — {getBranchName(ids[0])}
+                                  {ids.length > 1 ? ` +${ids.length - 1}` : ''}
+                                </span>
+                              </span>
+                            );
+                          })()}
                         </td>
                         <td className="px-4 py-3">
                           {(u.manager_pin || u.staff_pin)
@@ -819,15 +870,83 @@ export default function TeamPage() {
               </p>
             </div>
             <div>
-              <Label className="text-xs">Branch</Label>
-              <Select value={form.branch_id || 'all'} onValueChange={v => setForm({ ...form, branch_id: v === 'all' ? '' : v })}>
-                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Branches</SelectItem>
-                  {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <Label className="text-xs">
+                {form.role === 'admin' ? 'Branch' : 'Assigned Branches'}
+                {form.role !== 'admin' && (
+                  <span className="text-[10px] font-normal text-slate-400 ml-1">
+                    (can switch between assigned branches — leave empty for All Branches)
+                  </span>
+                )}
+              </Label>
+
+              {form.role === 'admin' ? (
+                <>
+                  <div className="h-9 px-3 py-2 border border-slate-200 rounded-md bg-slate-50 text-sm text-slate-500">
+                    All Branches (administrators are unscoped)
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Administrators automatically cover every branch for SMS
+                    reminders and data access.
+                  </p>
+                </>
+              ) : (
+                <div
+                  data-testid="branch-multiselect"
+                  className="border border-slate-200 rounded-md bg-white max-h-36 overflow-y-auto divide-y divide-slate-100">
+                  {branches.length === 0 && (
+                    <div className="px-3 py-2 text-xs text-slate-400">No branches yet</div>
+                  )}
+                  {branches.map(b => {
+                    const on = (form.branch_ids || []).includes(b.id);
+                    return (
+                      <label
+                        key={b.id}
+                        data-testid={`branch-chip-${b.id}`}
+                        className={`flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer hover:bg-slate-50 ${on ? 'bg-emerald-50' : ''}`}>
+                        <input
+                          type="checkbox"
+                          className="accent-emerald-600"
+                          checked={on}
+                          onChange={() => setForm(f => ({
+                            ...f,
+                            branch_ids: on
+                              ? (f.branch_ids || []).filter(x => x !== b.id)
+                              : [...(f.branch_ids || []), b.id],
+                          }))}
+                        />
+                        <Building2 size={11} className="text-slate-400" />
+                        <span className="flex-1">{b.name}</span>
+                        {on && (form.branch_ids || [])[0] === b.id && (
+                          <span className="text-[9px] font-semibold text-emerald-700 uppercase tracking-wide">Home</span>
+                        )}
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+              {form.role !== 'admin' && (form.branch_ids || []).length === 0 && (
+                <p className="text-[10px] text-amber-600 mt-1">
+                  ⚠ No branches selected — this user will be treated as "All Branches"
+                  (legacy unscoped). Pick specific branches for strict scoping.
+                </p>
+              )}
             </div>
+            {(form.role === 'manager' || form.role === 'cashier' || form.role === 'inventory') && (
+              <div className="flex items-center gap-2 text-xs border border-slate-200 rounded-md p-2 bg-slate-50">
+                <input
+                  type="checkbox"
+                  data-testid="user-is-auditor"
+                  className="accent-purple-600"
+                  checked={!!form.is_auditor}
+                  onChange={e => setForm({ ...form, is_auditor: e.target.checked })}
+                />
+                <span className="flex items-center gap-1 text-slate-700">
+                  <Shield size={12} className="text-purple-500" />
+                  Also has Auditor capability
+                </span>
+                <span className="text-[10px] text-slate-400">(receives audit-scope SMS alerts + can unlock audit views)</span>
+              </div>
+            )}
             <Separator />
             <div className="grid grid-cols-2 gap-3">
               <div>
