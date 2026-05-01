@@ -893,13 +893,36 @@ export default function UnifiedSalesPage() {
     setMode(newMode);
   };
 
-  // Filter products
+  // Filter products — token-based (order-independent) matching.
+  // Splits the query on whitespace/dashes/commas and requires every non-empty
+  // token to appear somewhere in the haystack (name + SKU + barcode). This
+  // makes "Galimax 1 Poultry Feeds - Pilmico" match "Galimax 1 Pilmico -
+  // Poultry Feeds", and "Starter Vital" match "Starter Premium Vital".
+  // Results are ranked: exact-substring hits first, then token-only hits.
   useEffect(() => {
     if (!search) { setFilteredProducts(allProducts); return; }
-    const q = search.toLowerCase();
-    setFilteredProducts(allProducts.filter(p =>
-      p.name.toLowerCase().includes(q) || p.sku?.toLowerCase().includes(q) || (p.barcode && p.barcode.includes(q))
-    ));
+    const q = search.toLowerCase().trim();
+    // Split on whitespace, hyphens, slashes, commas — keep ≥ 1-char tokens.
+    // Single-char tokens like "1" are intentionally allowed because product
+    // names commonly include grade numbers ("Galimax 1", "Starter 2").
+    const tokens = q.split(/[\s\-/,]+/).map(t => t.trim()).filter(Boolean);
+    if (tokens.length === 0) { setFilteredProducts(allProducts); return; }
+
+    const matches = [];
+    for (const p of allProducts) {
+      const name = (p.name || '').toLowerCase();
+      const sku = (p.sku || '').toLowerCase();
+      const barcode = (p.barcode || '').toLowerCase();
+      const haystack = `${name} ${sku} ${barcode}`;
+      // Every token must hit the haystack (AND, order-independent)
+      if (!tokens.every(t => haystack.includes(t))) continue;
+      // Rank: 0 = full phrase substring match, 1 = token-only match.
+      // Tiebreak by name length (shorter = more specific result).
+      const rank = (haystack.includes(q) ? 0 : 1);
+      matches.push({ p, rank, len: name.length });
+    }
+    matches.sort((a, b) => a.rank - b.rank || a.len - b.len);
+    setFilteredProducts(matches.map(m => m.p));
   }, [search, allProducts]);
 
   const filteredCusts = custSearch 

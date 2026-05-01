@@ -1,5 +1,23 @@
 # AgriBooks Changelog
 
+## Apr 30, 2026 — Smart Token-Based Product Search
+- **Frontend Quick-mode product grid** (`pages/UnifiedSalesPage.js`): rewrote
+  the filter to split the query on whitespace / dashes / slashes / commas and
+  require EVERY token to appear in `name + sku + barcode` (order-independent).
+  Results ranked: full-phrase substring hits first, token-only hits next,
+  shorter names breaking ties.
+- **Backend `/api/products/search-detail`** (`routes/products.py`): same
+  token-AND semantics now in the Mongo query itself. Each token compiles to a
+  `regex.escape`'d `$or` over name/SKU/barcode; the tokens are `$and`'d
+  together. Single-token queries keep the simpler shape so existing index
+  usage is unchanged.
+- Examples now matching:
+  - `Galimax 1 Poultry Feeds Pilmico` → `Galimax 1 Pilmico - Poultry Feeds` ✓
+  - `Starter Vital` → `Starter Premium Vital` ✓
+  - `Pilmico Galimax` (reverse) → `Galimax 1 Pilmico - Poultry Feeds` ✓
+- New regression test: `tests/test_product_token_search_190.py` (5 tests).
+
+
 ## Apr 30, 2026 — Per-Recipient Test SMS + SMS Permission Hardening
 - **Per-row "Test" buttons** on `/messages` → Settings → Collection Recipients
   (`pages/MessagesPage.js`). Each phone field (Owner, Admin, Manager-fallback,

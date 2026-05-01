@@ -268,16 +268,54 @@ async def create_product(data: dict, user=Depends(get_current_user)):
 @router.get("/search-detail")
 async def search_products_detail(q: str = "", branch_id: Optional[str] = None, also_branch_id: Optional[str] = None, user=Depends(get_current_user)):
     """Enhanced product search with stock, branch prices, and capital reference data.
-    also_branch_id: optional second branch to include stock levels for (used by Request Stock form)."""
+    also_branch_id: optional second branch to include stock levels for (used by Request Stock form).
+
+    Token-based matching: splits the query on whitespace / dashes / commas and
+    requires EVERY token to match somewhere in name/SKU/barcode (order-
+    independent). So "Galimax 1 Poultry Feeds - Pilmico" still finds
+    "Galimax 1 Pilmico - Poultry Feeds", and "Starter Vital" finds
+    "Starter Premium Vital".
+    """
     if not q or len(q) < 1:
         return []
-    
-    query = {"active": True, "$or": [
-        {"name": {"$regex": q, "$options": "i"}},
-        {"sku": {"$regex": q, "$options": "i"}},
-        {"barcode": {"$regex": q, "$options": "i"}},
-    ]}
-    products = await db.products.find(query, {"_id": 0}).limit(10).to_list(10)
+
+    import re
+    tokens = [t for t in re.split(r"[\s\-/,]+", q.strip()) if t]
+    if not tokens:
+        return []
+
+    def _esc(t: str) -> str:
+        return re.escape(t)
+
+    query = {"active": True}
+    if len(tokens) == 1:
+        # Single token — keep the simpler $or shape (also lets Mongo use
+        # text/regex indexes more cleanly when only one term is needed).
+        query["$or"] = [
+            {"name": {"$regex": _esc(tokens[0]), "$options": "i"}},
+            {"sku": {"$regex": _esc(tokens[0]), "$options": "i"}},
+            {"barcode": {"$regex": _esc(tokens[0]), "$options": "i"}},
+        ]
+    else:
+        query["$and"] = [
+            {"$or": [
+                {"name": {"$regex": _esc(tok), "$options": "i"}},
+                {"sku": {"$regex": _esc(tok), "$options": "i"}},
+                {"barcode": {"$regex": _esc(tok), "$options": "i"}},
+            ]}
+            for tok in tokens
+        ]
+    products = await db.products.find(query, {"_id": 0}).limit(20).to_list(20)
+
+    # Rank: prefer rows where the full phrase appears as a substring (tighter
+    # match) over loose token-only hits. Tiebreak by name length so shorter,
+    # more specific names rank first.
+    full_phrase = q.strip().lower()
+    def _rank(p):
+        haystack = f"{(p.get('name') or '').lower()} {(p.get('sku') or '').lower()} {(p.get('barcode') or '').lower()}"
+        return (0 if full_phrase in haystack else 1, len(p.get("name", "") or ""))
+    products.sort(key=_rank)
+    products = products[:10]
     results = []
     
     for p in products:
