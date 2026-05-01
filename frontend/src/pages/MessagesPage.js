@@ -6,6 +6,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Badge } from '../components/ui/badge';
 import { Card, CardContent } from '../components/ui/card';
+import TeamSmsRemindersCard from '../components/sms/TeamSmsRemindersCard';
 import { Separator } from '../components/ui/separator';
 import { ScrollArea } from '../components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
@@ -1391,6 +1392,9 @@ export default function MessagesPage() {
       {/* ═══ SETTINGS TAB ═══ */}
       {activeTab === 'settings' && (
         <div className="space-y-4 max-w-2xl">
+          {/* Team SMS Reminders — per-stage enable + per-role recipients */}
+          <TeamSmsRemindersCard branches={branches} />
+
           {/* Collection Notification Recipients */}
           <Card className="border-amber-200">
             <CardContent className="p-5 space-y-5">

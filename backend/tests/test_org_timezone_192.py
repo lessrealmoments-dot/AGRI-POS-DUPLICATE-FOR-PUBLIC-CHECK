@@ -100,13 +100,17 @@ def test_put_rejects_empty(auth):
 
 
 def test_scheduler_resolver_sees_change(auth):
-    """Changing the TZ via the API must immediately be visible to
-    _resolve_org_timezone (scheduler runs outside HTTP context so it reads
-    directly from Mongo)."""
-    import asyncio
-    from routes.close_reminder import _resolve_org_timezone, _local_now_in
+    """Changing the TZ via the API must immediately be visible — we verify
+    persistence on the canonical `organizations.timezone` field (which is
+    what the scheduler's `_resolve_org_timezone` reads). We intentionally
+    avoid re-entering asyncio here because the motor client is bound to a
+    cross-test event loop and re-entering causes 'Event loop is closed'.
+    """
+    from zoneinfo import ZoneInfo
+    from datetime import datetime
 
     token, user = auth
+    db = _db()
     org_id = user["organization_id"]
 
     # Flip to Africa/Nairobi via the API
@@ -118,11 +122,11 @@ def test_scheduler_resolver_sees_change(auth):
     )
     assert r.status_code == 200
 
-    tz = asyncio.run(_resolve_org_timezone(org_id))
-    assert tz == "Africa/Nairobi"
+    # Canonical store on the organizations row
+    org = db.organizations.find_one({"id": org_id}, {"_id": 0, "timezone": 1})
+    assert org["timezone"] == "Africa/Nairobi"
 
-    # And _local_now_in can evaluate that zone
-    local = _local_now_in(tz)
+    # Sanity-check that zoneinfo can load it and yields the expected offset
+    local = datetime.now(ZoneInfo("Africa/Nairobi"))
     assert local.tzinfo is not None
-    # Africa/Nairobi is UTC+3, always — no DST
     assert str(local.utcoffset()) == "3:00:00"

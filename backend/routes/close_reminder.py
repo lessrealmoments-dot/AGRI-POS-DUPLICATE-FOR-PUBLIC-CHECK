@@ -139,6 +139,36 @@ QUIET_START = 22  # 10 PM
 QUIET_END = 7     # 7 AM
 
 
+# ── Stage defaults (seed values) ─────────────────────────────────────────────
+# The UI lets each tenant toggle stages on/off and customize per-stage
+# recipients. We seed from this dict the first time a stage is fetched;
+# afterwards the saved values win. Role labels match the five roles the
+# dispatcher dedups against (cashier/manager/owner/admin/auditor).
+STAGE_DEFAULTS = {s["key"]: {"enabled": True, "recipients": list(s["recipients"])}
+                  for s in STAGES}
+
+
+async def _load_stage_settings(organization_id: str) -> dict:
+    """Return `{stage_key: {enabled: bool, recipients: [...]}, ...}` merged
+    with the code defaults. Missing keys inherit defaults so a newly-added
+    stage becomes active automatically for every org without a migration."""
+    merged = {k: dict(v, recipients=list(v["recipients"])) for k, v in STAGE_DEFAULTS.items()}
+    try:
+        async for doc in db.sms_close_stages.find(
+            {"organization_id": organization_id}, {"_id": 0, "stage_key": 1,
+                                                    "enabled": 1, "recipients": 1},
+        ):
+            k = doc.get("stage_key")
+            if k in merged:
+                if "enabled" in doc:
+                    merged[k]["enabled"] = bool(doc["enabled"])
+                if isinstance(doc.get("recipients"), list):
+                    merged[k]["recipients"] = [r for r in doc["recipients"] if isinstance(r, str)]
+    except Exception as e:
+        sms_log.warning(f"_load_stage_settings read failed for {organization_id}: {e}")
+    return merged
+
+
 def _in_quiet_hours(local_dt: datetime) -> bool:
     h = local_dt.hour
     if QUIET_START <= QUIET_END:
@@ -388,8 +418,10 @@ async def tick_once() -> dict:
                                       "organization_id": 1, "close_time_h": 1}
     ).to_list(500)
 
-    # Cache org→tz lookups so we don't hit Mongo once per branch.
+    # Cache org→tz lookups AND org→stage-settings lookups so we don't hit
+    # Mongo once per branch-per-stage when the scheduler ticks.
     tz_cache: dict[str, str] = {}
+    stage_cache: dict[str, dict] = {}
 
     fired = 0
     first_local: Optional[datetime] = None
@@ -398,7 +430,10 @@ async def tick_once() -> dict:
         org_id = br.get("organization_id", "") or ""
         if org_id not in tz_cache:
             tz_cache[org_id] = await _resolve_org_timezone(org_id)
+        if org_id not in stage_cache:
+            stage_cache[org_id] = await _load_stage_settings(org_id)
         tz_name = tz_cache[org_id]
+        stage_settings = stage_cache[org_id]
         local = _local_now_in(tz_name)
         if first_local is None:
             first_local = local
@@ -409,8 +444,18 @@ async def tick_once() -> dict:
         close_h = float(br.get("close_time_h", 18))  # default 6 PM
 
         for stage in STAGES:
+            # Apply per-stage org settings — admin may have disabled this
+            # stage or narrowed the recipient roles from the Team SMS UI.
+            cfg = stage_settings.get(stage["key"], {})
+            if cfg and not cfg.get("enabled", True):
+                continue
+            effective_recipients = cfg.get("recipients") or list(stage["recipients"])
+            if not effective_recipients:
+                continue
+            stage_effective = dict(stage, recipients=effective_recipients)
+
             # Determine the target_date + the local trigger time for this stage
-            day_off = stage.get("day_offset", 0)
+            day_off = stage["day_offset"]
             target_date = (local.date() - timedelta(days=day_off))
             target_date_str = target_date.strftime("%Y-%m-%d")
 
@@ -435,7 +480,7 @@ async def tick_once() -> dict:
             if await _is_calendar_closed(br["id"], target_date_str):
                 continue
 
-            await _dispatch_stage(br, target_date_str, stage)
+            await _dispatch_stage(br, target_date_str, stage_effective)
             fired += 1
 
     return {

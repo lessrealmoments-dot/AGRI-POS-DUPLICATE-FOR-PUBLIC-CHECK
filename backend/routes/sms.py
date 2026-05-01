@@ -1462,6 +1462,116 @@ async def close_reminder_diagnose(user=Depends(get_current_user)):
     return await diagnose_for_org(org_id)
 
 
+# ── Close-Reminder Stage Settings (Team SMS UI) ─────────────────────────────
+# Each org can customise each scheduled-reminder stage independently:
+#   • enabled/disabled toggle
+#   • which roles receive it (subset of cashier/manager/owner/admin/auditor)
+# We expose the curated STAGE_META below so the UI can render a human-
+# readable label + timing description next to each toggle without having
+# to duplicate that metadata on the client.
+
+_STAGE_META = {
+    "close_catchup_3pm":      {"label": "Catch-up ping",         "timing": "3 hours before close (e.g. 3 PM if close is 6 PM)"},
+    "close_precheck":         {"label": "Pre-close check-in",    "timing": "At closing time"},
+    "close_late_notice":      {"label": "Late notice",            "timing": "1.5 h after close"},
+    "close_status_snapshot":  {"label": "Status snapshot",        "timing": "2.5 h after close"},
+    "close_escalation":       {"label": "Escalation alert",       "timing": "3.5 h after close"},
+    "close_overdue_next_day": {"label": "Day +1 overdue (AM)",    "timing": "7 AM the next day"},
+    "close_overdue_multi_day": {"label": "Multi-day overdue",     "timing": "Noon of Day +1 onward"},
+}
+
+_VALID_ROLES = {"cashier", "manager", "owner", "admin", "auditor"}
+
+
+@router.get("/close-reminder/stages")
+async def list_close_reminder_stages(user=Depends(get_current_user)):
+    """Return the current per-stage settings merged with defaults + the
+    metadata the UI needs to render each row (label, timing, order)."""
+    check_perm(user, "settings", "edit")
+    from routes.close_reminder import _load_stage_settings, STAGES
+    org_id = user.get("organization_id") or ""
+    merged = await _load_stage_settings(org_id)
+
+    # Preserve the in-code order (top-down: catchup → precheck → late notice…)
+    # and fold in display metadata so the UI has everything in one payload.
+    seen = set()
+    rows = []
+    for s in STAGES:
+        k = s["key"]
+        if k in seen:
+            continue
+        seen.add(k)
+        meta = _STAGE_META.get(k, {})
+        cfg = merged.get(k, {"enabled": True, "recipients": list(s["recipients"])})
+        rows.append({
+            "stage_key": k,
+            "label": meta.get("label", k),
+            "timing": meta.get("timing", ""),
+            "enabled": bool(cfg.get("enabled", True)),
+            "recipients": list(cfg.get("recipients") or []),
+            "default_recipients": list(s["recipients"]),
+        })
+    return {"stages": rows, "valid_roles": sorted(_VALID_ROLES)}
+
+
+@router.put("/close-reminder/stages/{stage_key}")
+async def update_close_reminder_stage(stage_key: str, data: dict, user=Depends(get_current_user)):
+    """Upsert per-stage settings (enabled + recipients list). Unknown stage
+    keys are rejected; unknown role names inside `recipients` are silently
+    dropped so a forward-compat UI can't pollute the store."""
+    check_perm(user, "settings", "edit")
+    from routes.close_reminder import STAGE_DEFAULTS
+    if stage_key not in STAGE_DEFAULTS:
+        raise HTTPException(status_code=404, detail=f"Unknown stage: {stage_key}")
+    org_id = user.get("organization_id") or ""
+    enabled = bool(data.get("enabled", True))
+    recipients_in = data.get("recipients") or []
+    if not isinstance(recipients_in, list):
+        raise HTTPException(status_code=400, detail="recipients must be a list")
+    recipients = [r for r in recipients_in if r in _VALID_ROLES]
+    await db.sms_close_stages.update_one(
+        {"organization_id": org_id, "stage_key": stage_key},
+        {"$set": {
+            "organization_id": org_id,
+            "stage_key": stage_key,
+            "enabled": enabled,
+            "recipients": recipients,
+            "updated_at": now_iso(),
+        }},
+        upsert=True,
+    )
+    return {"stage_key": stage_key, "enabled": enabled, "recipients": recipients}
+
+
+# ── Per-branch Close Time ───────────────────────────────────────────────────
+
+@router.put("/close-reminder/branch-close-time/{branch_id}")
+async def update_branch_close_time(branch_id: str, data: dict, user=Depends(get_current_user)):
+    """Set a branch's closing time (0–24, fractional allowed). This flows
+    through to the scheduler's per-branch trigger calculations on the next
+    tick — no restart required.
+    """
+    check_perm(user, "settings", "edit")
+    close_time_h = data.get("close_time_h")
+    try:
+        close_time_h = float(close_time_h)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="close_time_h must be a number")
+    if not (0 <= close_time_h <= 24):
+        raise HTTPException(status_code=400, detail="close_time_h must be between 0 and 24")
+    org_id = user.get("organization_id") or ""
+    br = await db.branches.find_one(
+        {"id": branch_id, "organization_id": org_id}, {"_id": 0, "id": 1}
+    )
+    if not br:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    await db.branches.update_one(
+        {"id": branch_id},
+        {"$set": {"close_time_h": close_time_h, "updated_at": now_iso()}},
+    )
+    return {"branch_id": branch_id, "close_time_h": close_time_h}
+
+
 # ── Stats ───────────────────────────────────────────────────────────────────
 
 @router.get("/stats")

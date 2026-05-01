@@ -1,5 +1,37 @@
 # AgriBooks Changelog
 
+## May 1, 2026 — Team SMS Reminders UI (per-stage toggles + per-branch close time)
+- **New `sms_close_stages` collection** (per-org overrides) — each stage of
+  the close-reminder schedule can be independently enabled/disabled and have
+  its recipient roles narrowed. Defaults seed from the in-code `STAGES` list
+  so nothing breaks for existing orgs.
+- **Scheduler (`routes/close_reminder.py`)** now caches and consults
+  per-stage settings on every tick. Disabled stages are skipped; narrowed
+  recipient lists replace the in-code defaults before `_dispatch_stage`.
+- **Backend endpoints**:
+  - `GET  /api/sms/close-reminder/stages` — returns 7 stage rows with
+    `label`, `timing`, `enabled`, `recipients`, `default_recipients` +
+    `valid_roles` list (cashier/manager/owner/admin/auditor).
+  - `PUT  /api/sms/close-reminder/stages/{stage_key}` — admin-only
+    upsert. Unknown stage keys ⇒ 404; unknown roles inside `recipients`
+    are silently dropped.
+  - `PUT  /api/sms/close-reminder/branch-close-time/{branch_id}` — admin
+    sets a branch's `close_time_h` (0–24 float). Flows into the scheduler
+    on the next tick, no restart.
+- **Frontend**: new `components/sms/TeamSmsRemindersCard.js` rendered at
+  the top of the Messages → Settings tab:
+  - Per-branch "Close Time" input (HH:mm) with Save + Preview toggle so the
+    admin picks which branch drives the "Fires at" display.
+  - For each stage: toggle, label, timing hint, 5 role chips (tap to
+    include/exclude), and a computed "Fires at HH:mm" badge derived from
+    the previewed branch's close time.
+  - Optimistic updates so toggles feel instant; reconciles to server echo.
+- **Regression suite**: `tests/test_team_sms_stages_193.py` — 6 tests
+  (defaults return, persist toggle + recipients, unknown stage 404,
+  unknown role dropped, branch close-time validation, scheduler reads
+  disabled stage). All 11 tests in the timezone + stage suites green.
+
+
 ## May 1, 2026 — Per-Tenant Timezone (Multi-Tenant Aware Scheduler)
 - Added **organization-level timezone** setting (`organizations.timezone`
   field, mirrored on `settings.company_info.value.timezone` for legacy
