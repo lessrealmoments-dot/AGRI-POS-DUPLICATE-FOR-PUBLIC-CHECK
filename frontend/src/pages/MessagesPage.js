@@ -151,6 +151,8 @@ export default function MessagesPage() {
   const [savingRecipients, setSavingRecipients] = useState(false);
   const [sampleOpen, setSampleOpen] = useState(false);
   const [sendingSample, setSendingSample] = useState(false);
+  // Tracks per-row "Test" button state — keyed by `${role}:${branchId||''}`
+  const [testingRowKey, setTestingRowKey] = useState(null);
 
   // Gateway log state
   const [gatewayLogs, setGatewayLogs] = useState([]);
@@ -217,6 +219,31 @@ export default function MessagesPage() {
   useEffect(() => { if (activeTab === 'templates') loadTemplates(); }, [activeTab, loadTemplates]);
   useEffect(() => { if (activeTab === 'settings') loadSettings(); }, [activeTab, loadSettings]);
   useEffect(() => { if (activeTab === 'gateway-log') loadGatewayLogs(); }, [activeTab, loadGatewayLogs]);
+
+  // Per-row "Test SMS" handler — used by the small button next to each phone
+  // field on the Settings tab. Sends ONE [SAMPLE] SMS to the given phone with
+  // a role label, so the admin can verify a single number without spamming
+  // the whole recipient list.
+  const sendSingleSample = useCallback(async (phone, role, branchId, branchName) => {
+    const trimmed = (phone || '').trim();
+    if (!trimmed) {
+      toast.error(`No ${role} phone configured`);
+      return;
+    }
+    const rowKey = `${role}:${branchId || ''}`;
+    setTestingRowKey(rowKey);
+    try {
+      await api.post('/sms/send-sample-single', {
+        phone: trimmed, role, branch_id: branchId || '', branch_name: branchName || '',
+      });
+      toast.success(`[SAMPLE] queued to ${role}${branchName ? ` · ${branchName}` : ''} (${trimmed})`);
+      loadQueue();
+      loadStats();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to queue sample');
+    }
+    setTestingRowKey(null);
+  }, [loadQueue, loadStats]);
 
   // Gateway log live polling
   useEffect(() => {
@@ -1382,15 +1409,33 @@ export default function MessagesPage() {
               <div>
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Global — All Branches</p>
                 <div className="grid grid-cols-2 gap-3">
-                  {[{ key: 'owner_phone', label: 'Owner Phone' }, { key: 'admin_phone', label: 'Admin Phone' }].map(({ key, label }) => (
-                    <div key={key}>
-                      <label className="text-xs text-slate-600 font-medium">{label}</label>
-                      <input data-testid={`recipient-${key}`} type="tel" placeholder="09XX XXX XXXX"
-                        value={collectionRecipients[key] || ''}
-                        onChange={e => setCollectionRecipients(r => ({ ...r, [key]: e.target.value }))}
-                        className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
-                    </div>
-                  ))}
+                  {[{ key: 'owner_phone', label: 'Owner Phone', role: 'Owner' }, { key: 'admin_phone', label: 'Admin Phone', role: 'Admin' }].map(({ key, label, role }) => {
+                    const phone = collectionRecipients[key] || '';
+                    const rowKey = `${role}:`;
+                    const testing = testingRowKey === rowKey;
+                    return (
+                      <div key={key}>
+                        <label className="text-xs text-slate-600 font-medium">{label}</label>
+                        <div className="mt-1 flex gap-1.5">
+                          <input data-testid={`recipient-${key}`} type="tel" placeholder="09XX XXX XXXX"
+                            value={phone}
+                            onChange={e => setCollectionRecipients(r => ({ ...r, [key]: e.target.value }))}
+                            className="flex-1 min-w-0 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                          <button
+                            type="button"
+                            data-testid={`test-${key}`}
+                            disabled={!phone.trim() || testing}
+                            onClick={() => sendSingleSample(phone, role, '', '')}
+                            title={phone.trim() ? `Send sample SMS to ${role}` : 'Enter a phone first'}
+                            className="shrink-0 px-2.5 py-2 inline-flex items-center gap-1 text-[11px] font-medium rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                            {testing
+                              ? (<><Loader2 className="w-3 h-3 animate-spin" />…</>)
+                              : (<><BellRing className="w-3 h-3" />Test</>)}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -1399,15 +1444,36 @@ export default function MessagesPage() {
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Global Fallback</p>
                 <p className="text-[10px] text-slate-400 mb-2">Used when no branch-specific phone is set below.</p>
                 <div className="grid grid-cols-2 gap-3">
-                  {[{ key: 'manager_phone', label: 'Manager Phone (fallback)' }, { key: 'auditor_phone', label: 'Auditor Phone (fallback)' }].map(({ key, label }) => (
-                    <div key={key}>
-                      <label className="text-xs text-slate-600 font-medium">{label}</label>
-                      <input data-testid={`recipient-${key}`} type="tel" placeholder="09XX XXX XXXX"
-                        value={collectionRecipients[key] || ''}
-                        onChange={e => setCollectionRecipients(r => ({ ...r, [key]: e.target.value }))}
-                        className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
-                    </div>
-                  ))}
+                  {[
+                    { key: 'manager_phone', label: 'Manager Phone (fallback)', role: 'Manager (Global Fallback)' },
+                    { key: 'auditor_phone', label: 'Auditor Phone (fallback)', role: 'Auditor (Global Fallback)' },
+                  ].map(({ key, label, role }) => {
+                    const phone = collectionRecipients[key] || '';
+                    const rowKey = `${role}:`;
+                    const testing = testingRowKey === rowKey;
+                    return (
+                      <div key={key}>
+                        <label className="text-xs text-slate-600 font-medium">{label}</label>
+                        <div className="mt-1 flex gap-1.5">
+                          <input data-testid={`recipient-${key}`} type="tel" placeholder="09XX XXX XXXX"
+                            value={phone}
+                            onChange={e => setCollectionRecipients(r => ({ ...r, [key]: e.target.value }))}
+                            className="flex-1 min-w-0 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                          <button
+                            type="button"
+                            data-testid={`test-${key}`}
+                            disabled={!phone.trim() || testing}
+                            onClick={() => sendSingleSample(phone, role, '', '')}
+                            title={phone.trim() ? `Send sample SMS to ${role}` : 'Enter a phone first'}
+                            className="shrink-0 px-2.5 py-2 inline-flex items-center gap-1 text-[11px] font-medium rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                            {testing
+                              ? (<><Loader2 className="w-3 h-3 animate-spin" />…</>)
+                              : (<><BellRing className="w-3 h-3" />Test</>)}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -1422,25 +1488,51 @@ export default function MessagesPage() {
                         ...r,
                         branch_phones: { ...r.branch_phones, [br.id]: { ...bp, [field]: val } }
                       }));
+                      const mgrTesting = testingRowKey === `Manager:${br.id}`;
+                      const audTesting = testingRowKey === `Auditor:${br.id}`;
                       return (
                         <div key={br.id} className="border border-slate-200 rounded-lg p-3">
                           <p className="text-xs font-semibold text-slate-700 mb-2">{br.name}</p>
                           <div className="grid grid-cols-2 gap-2">
                             <div>
                               <label className="text-[10px] text-slate-500">Manager Phone</label>
-                              <input type="tel" placeholder="09XX XXX XXXX"
-                                data-testid={`recipient-mgr-${br.id}`}
-                                value={bp.manager_phone || ''}
-                                onChange={e => set('manager_phone', e.target.value)}
-                                className="mt-0.5 w-full border border-slate-200 rounded-md px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                              <div className="mt-0.5 flex gap-1">
+                                <input type="tel" placeholder="09XX XXX XXXX"
+                                  data-testid={`recipient-mgr-${br.id}`}
+                                  value={bp.manager_phone || ''}
+                                  onChange={e => set('manager_phone', e.target.value)}
+                                  className="flex-1 min-w-0 border border-slate-200 rounded-md px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                                <button
+                                  type="button"
+                                  data-testid={`test-mgr-${br.id}`}
+                                  disabled={!(bp.manager_phone || '').trim() || mgrTesting}
+                                  onClick={() => sendSingleSample(bp.manager_phone, 'Manager', br.id, br.name)}
+                                  title={(bp.manager_phone || '').trim() ? `Send sample to ${br.name} Manager` : 'Enter a phone first'}
+                                  className="shrink-0 px-2 py-1 inline-flex items-center gap-1 text-[10px] font-medium rounded-md border border-amber-300 text-amber-700 hover:bg-amber-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                                  {mgrTesting ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <BellRing className="w-2.5 h-2.5" />}
+                                  Test
+                                </button>
+                              </div>
                             </div>
                             <div>
                               <label className="text-[10px] text-slate-500">Auditor Phone</label>
-                              <input type="tel" placeholder="09XX XXX XXXX"
-                                data-testid={`recipient-aud-${br.id}`}
-                                value={bp.auditor_phone || ''}
-                                onChange={e => set('auditor_phone', e.target.value)}
-                                className="mt-0.5 w-full border border-slate-200 rounded-md px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                              <div className="mt-0.5 flex gap-1">
+                                <input type="tel" placeholder="09XX XXX XXXX"
+                                  data-testid={`recipient-aud-${br.id}`}
+                                  value={bp.auditor_phone || ''}
+                                  onChange={e => set('auditor_phone', e.target.value)}
+                                  className="flex-1 min-w-0 border border-slate-200 rounded-md px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                                <button
+                                  type="button"
+                                  data-testid={`test-aud-${br.id}`}
+                                  disabled={!(bp.auditor_phone || '').trim() || audTesting}
+                                  onClick={() => sendSingleSample(bp.auditor_phone, 'Auditor', br.id, br.name)}
+                                  title={(bp.auditor_phone || '').trim() ? `Send sample to ${br.name} Auditor` : 'Enter a phone first'}
+                                  className="shrink-0 px-2 py-1 inline-flex items-center gap-1 text-[10px] font-medium rounded-md border border-amber-300 text-amber-700 hover:bg-amber-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                                  {audTesting ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <BellRing className="w-2.5 h-2.5" />}
+                                  Test
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </div>

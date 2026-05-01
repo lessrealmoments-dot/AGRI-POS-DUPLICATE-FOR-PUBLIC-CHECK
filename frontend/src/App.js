@@ -86,6 +86,27 @@ function ProtectedRoute({ children }) {
   );
 }
 
+function AdminRoute({ children }) {
+  // Admin/owner-only route guard. Bounces non-admins to /dashboard with a
+  // toast hint so a direct URL hit (e.g. cashier pasting /messages into the
+  // address bar) cannot bypass the sidebar's adminOnly visibility filter.
+  const { user, loading } = useAuth();
+  if (loading) return <div className="flex items-center justify-center h-screen bg-[#F5F5F0]"><div className="text-slate-400 text-sm">Loading...</div></div>;
+  if (!user) return <Navigate to="/login" replace />;
+  const role = user.role;
+  const isAdmin = role === 'admin' || role === 'owner' || user.is_super_admin;
+  if (!isAdmin) {
+    return <Navigate to="/dashboard" replace />;
+  }
+  return (
+    <Layout>
+      <ImpersonationBanner />
+      <PriceScanManager />
+      {children}
+    </Layout>
+  );
+}
+
 function AppRoutes() {
   const { user, loading, effectiveBranchId } = useAuth();
   const [setupNeeded, setSetupNeeded] = useState(null);
@@ -195,7 +216,7 @@ function AppRoutes() {
       <Route path="/accounting" element={<ProtectedRoute><AccountingPage /></ProtectedRoute>} />
       <Route path="/journal-entries" element={<ProtectedRoute><JournalEntriesPage /></ProtectedRoute>} />
       <Route path="/documents" element={<ProtectedRoute><DocumentsPage /></ProtectedRoute>} />
-      <Route path="/messages" element={<ProtectedRoute><MessagesPage /></ProtectedRoute>} />
+      <Route path="/messages" element={<AdminRoute><MessagesPage /></AdminRoute>} />
       <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
       <Route path="/team" element={<ProtectedRoute><TeamPage /></ProtectedRoute>} />
       <Route path="/user-permissions" element={<ProtectedRoute><FeatureGate featureKey="granular_permissions"><UserPermissionsPage /></FeatureGate></ProtectedRoute>} />

@@ -1,5 +1,29 @@
 # AgriBooks Changelog
 
+## Apr 30, 2026 — Per-Recipient Test SMS + SMS Permission Hardening
+- **Per-row "Test" buttons** on `/messages` → Settings → Collection Recipients
+  (`pages/MessagesPage.js`). Each phone field (Owner, Admin, Manager-fallback,
+  Auditor-fallback, per-branch Manager, per-branch Auditor) gets its own small
+  amber "Test" button that sends a tagged `[SAMPLE]` SMS to just that number,
+  so admins can verify a single recipient without spamming the whole list.
+- New backend endpoint **`POST /api/sms/send-sample-single`** — admin-only via
+  `settings.edit`, accepts `{phone, role, branch_id?, branch_name?}` and queues
+  one SMS through the same gateway as live notifications.
+- **SMS permission gating tightened** — closed three pre-existing gaps where
+  cashiers/staff could hit sensitive SMS endpoints:
+  - `POST /sms/send` (manual compose) — now requires `customers.edit`
+    (admin/manager only by default; blocks cashier/staff/inventory).
+  - `POST /sms/templates/backfill` — switched from "admin or manager" role
+    check to `settings.edit` (admin-only).
+  - `POST /sms/queue/{id}/retry` — added `settings.edit` (was ungated).
+- **Frontend route guard** — `/messages` is now wrapped in a new `AdminRoute`
+  in `App.js` so a direct URL hit by a cashier/staff bounces to `/dashboard`,
+  not just hidden in the sidebar.
+- New regression test: `tests/test_sms_permission_gating_190.py` — 5 tests
+  covering cashier 403s on `/sms/send`, `/sms/templates/backfill`,
+  `/sms/send-sample-single` plus admin happy-path + empty-phone validation.
+
+
 ## Apr 30, 2026 — SMS Template Auto-Upgrade + Restore Company Self-Heal
 - **`_ensure_templates` now version-aware** (`routes/sms.py`):
   - Each seeded template carries a `default_body` snapshot. On every call,

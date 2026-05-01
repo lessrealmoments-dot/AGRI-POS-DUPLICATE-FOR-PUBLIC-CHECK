@@ -727,6 +727,10 @@ async def list_sms_queue(
 async def backfill_sms_templates(user=Depends(get_current_user)):
     """Backfill / refresh default SMS templates for the current org.
 
+    Admin-only — template wording affects every future automated SMS sent to
+    customers, so changes flow through the same `settings.edit` gate as the
+    other SMS configuration endpoints.
+
     Idempotent self-heal endpoint. Combines three actions:
       • Inserts any missing default templates (e.g. the close-day reminder set
         for orgs that existed before those templates were added).
@@ -736,8 +740,7 @@ async def backfill_sms_templates(user=Depends(get_current_user)):
 
     Returns counts of inserted vs upgraded.
     """
-    if user.get("role") not in ("admin", "manager"):
-        raise HTTPException(status_code=403, detail="Admin or manager required")
+    check_perm(user, "settings", "edit")
 
     # Snapshot before to compute deltas
     before_keys = set()
@@ -918,7 +921,10 @@ async def mark_sms_failed(sms_id: str, data: dict = None, user=Depends(get_curre
 
 @router.post("/queue/{sms_id}/retry")
 async def retry_sms(sms_id: str, user=Depends(get_current_user)):
-    """Re-queue a failed SMS. Resets retry_count so it gets a fresh start."""
+    """Re-queue a failed SMS. Resets retry_count so it gets a fresh start.
+    Admin-only — retrying touches the carrier-billed outbound queue.
+    """
+    check_perm(user, "settings", "edit")
     result = await db.sms_queue.update_one(
         {"id": sms_id, "status": {"$in": ["failed", "failed_permanent"]}},
         {"$set": {
@@ -967,7 +973,13 @@ async def skip_sms(sms_id: str, user=Depends(get_current_user)):
 async def send_manual_sms(data: dict, user=Depends(get_current_user)):
     """Manually compose and queue an SMS to a customer.
     If customer_id is provided, sends to ALL registered phones for that customer.
+
+    Admin/manager-only: composing carrier-billed SMS to customers is sensitive
+    enough to keep out of cashier hands. We check `customers.edit` because that
+    perm is granted to admin and manager but NOT cashier/staff/inventory by
+    default — exactly the boundary we want for outbound customer messaging.
     """
+    check_perm(user, "customers", "edit")
     customer_id   = data.get("customer_id", "")
     customer_name = data.get("customer_name", "")
     message       = data.get("message", "")
@@ -1127,6 +1139,63 @@ async def send_sample_collection_recipients(data: dict, user=Depends(get_current
         queued.append({"phone": phone, "role": role, "branch_name": br_name})
 
     return {"queued": len(queued), "recipients": queued}
+
+
+@router.post("/send-sample-single")
+async def send_sample_single_recipient(data: dict, user=Depends(get_current_user)):
+    """Queue a [SAMPLE] SMS to a single recipient — used by the per-row Test
+    buttons next to each phone field on the Collection Recipients settings.
+
+    Body:
+      { phone: "09xx...", role: "Owner|Admin|Manager|Auditor",
+        branch_id?: "...", branch_name?: "..." }
+
+    Admin-only via `settings.edit` (same gate as the other recipient ops).
+    """
+    check_perm(user, "settings", "edit")
+    phone = (data.get("phone") or "").strip()
+    role = (data.get("role") or "Recipient").strip() or "Recipient"
+    branch_id = data.get("branch_id", "") or ""
+    branch_name = (data.get("branch_name") or "").strip()
+
+    if not phone:
+        raise HTTPException(status_code=400, detail="Phone number is required")
+
+    company_name = await _resolve_company_name()
+    sender = user.get("full_name") or user.get("email", "")
+    organization_id = user.get("organization_id", "")
+
+    scope = f" — {branch_name}" if branch_name else " — All Branches"
+    body = (
+        f"[SAMPLE] Hi {role}, ito ay test SMS mula sa {company_name or 'AgriBooks'}{scope}. "
+        f"Kumpirmado na tama ang naka-configure na numero upang makatanggap ng "
+        f"Collection notifications. Walang aksyon na kailangan. "
+        f"Sent by: {sender}."
+    )
+
+    doc = {
+        "id": new_id(),
+        "organization_id": organization_id,
+        "template_key": "sample_recipient_test",
+        "customer_id": "",
+        "customer_name": f"{role}{(' - ' + branch_name) if branch_name else ''}",
+        "phone": phone,
+        "message": body,
+        "status": "pending",
+        "trigger": "manual",
+        "trigger_ref": "sample_recipient_test_single",
+        "dedup_key": "",
+        "branch_id": branch_id,
+        "branch_name": branch_name,
+        "sent_by_name": sender,
+        "created_at": now_iso(),
+        "sent_at": None,
+        "failed_at": None,
+        "error": None,
+        "retry_count": 0,
+    }
+    await db.sms_queue.insert_one(doc)
+    return {"queued": 1, "phone": phone, "role": role, "branch_name": branch_name}
 
 
 @router.post("/blast")
