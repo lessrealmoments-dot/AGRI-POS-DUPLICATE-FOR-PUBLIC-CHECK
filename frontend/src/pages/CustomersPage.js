@@ -43,7 +43,11 @@ export default function CustomersPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [schemes, setSchemes] = useState([]);
-  const LIMIT = 20;
+  const [pageSize, setPageSize] = useState(() => {
+    const stored = parseInt(localStorage.getItem('customers_page_size') || '20', 10);
+    return [10, 25, 50, 100, 500].includes(stored) ? stored : 20;
+  });
+  const LIMIT = pageSize;
   const [form, setForm] = useState({ name: '', phone: '', email: '', address: '', price_scheme: 'retail', credit_limit: 0, interest_rate: 0 });
 
   // Bulk selection & bulk delete
@@ -76,7 +80,7 @@ export default function CustomersPage() {
       setTotal(res.data.total);
       setSelected(new Set()); // reset selection on page/search change
     } catch { toast.error('Failed to load customers'); }
-  }, [search, page, currentBranch]);
+  }, [search, page, currentBranch, LIMIT]);
 
   useEffect(() => { fetchCustomers(); }, [fetchCustomers]);
   useEffect(() => { api.get('/price-schemes').then(r => setSchemes(r.data)).catch(() => {}); }, []);
@@ -226,6 +230,27 @@ export default function CustomersPage() {
         <div className="relative max-w-sm flex-1">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <Input data-testid="customer-search" value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} placeholder="Search by name or phone..." className="pl-9 h-10" />
+        </div>
+        <div className="flex items-center gap-1.5 text-xs text-slate-600">
+          <span>Show</span>
+          <select
+            data-testid="page-size-select"
+            value={pageSize}
+            onChange={e => {
+              const v = parseInt(e.target.value, 10);
+              setPageSize(v);
+              setPage(0);
+              localStorage.setItem('customers_page_size', String(v));
+            }}
+            className="h-8 border border-slate-200 rounded px-2 bg-white text-slate-700 text-xs focus:outline-none focus:ring-1 focus:ring-[#1A4D2E]"
+          >
+            <option value={10}>10</option>
+            <option value={25}>25</option>
+            <option value={50}>50</option>
+            <option value={100}>100</option>
+            <option value={500}>500 (view all)</option>
+          </select>
+          <span>per page</span>
         </div>
         {canDelete && (
           <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer select-none" data-testid="filter-no-invoice-label">
