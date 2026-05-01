@@ -264,6 +264,17 @@ export function AuthProvider({ children }) {
       // Scope offline DB to this organization
       if (res.data.organization_id) setOfflineOrg(res.data.organization_id);
 
+      // Cache the org's configured timezone so synchronous helpers like
+      // `localToday()` can resolve dates in the tenant's wall-clock time
+      // (critical for multi-tenant: a PH tenant sees 2026-05-01 while a US
+      // tenant still on 2026-04-30 will not drift into each other).
+      try {
+        const tzRes = await api.get('/settings/timezone');
+        if (tzRes.data?.timezone) {
+          localStorage.setItem('agribooks.org_tz', tzRes.data.timezone);
+        }
+      } catch { /* best-effort; falls back to browser-local */ }
+
       let branchList = [];
       try {
         const branchRes = await api.get('/branches');

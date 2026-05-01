@@ -1,5 +1,37 @@
 # AgriBooks Changelog
 
+## May 1, 2026 — Per-Tenant Timezone (Multi-Tenant Aware Scheduler)
+- Added **organization-level timezone** setting (`organizations.timezone`
+  field, mirrored on `settings.company_info.value.timezone` for legacy
+  readers). Default: `Asia/Manila` so existing tenants behave identically.
+- **Close-reminder scheduler now runs per-org local time** instead of a
+  hardcoded `UTC+8` offset. Each branch is evaluated against its
+  organization's wall-clock time, quiet-hours window, and stage trigger
+  times. A Philippine tenant gets their 3 PM catch-up at 3 PM PHT, a US
+  tenant gets theirs at 3 PM America/New_York, etc.
+- New backend endpoints:
+  - `GET /api/settings/timezone` — returns `{timezone, choices[]}` with a
+    curated list of 40 common IANA zones (Asia/Australia/Americas/Europe/
+    Africa + UTC).
+  - `PUT /api/settings/timezone` — admin-only, validated against `zoneinfo`
+    so the scheduler never gets an unloadable string.
+  - `GET /api/sms/close-reminder/diagnose` — admin snapshot of what the
+    scheduler sees right now: current local time, quiet-hours flag, per-
+    branch next stage fire time, and resolved recipient phone count by
+    role. Immediately exposes issues like "all recipient phones empty".
+- Frontend (`pages/SettingsPage.js`) — new **Organization Timezone** card
+  inside Business Info tab: dropdown of IANA zones + live wall-clock
+  preview (updates every 30s) + "Your device is in X" hint if the browser
+  zone differs from the saved org zone.
+- Frontend (`pages/UnifiedSalesPage.js`) — `localToday()` now reads the org
+  TZ cached in `localStorage` (`agribooks.org_tz`, set by AuthContext on
+  `/auth/me`) so the default sale date reflects the tenant's local
+  calendar, not the browser's.
+- New regression suite: `tests/test_org_timezone_192.py` (5 tests)
+  covering GET/PUT persistence, invalid-TZ 400, mirror write, and
+  scheduler resolver picking up changes without restart.
+
+
 ## May 1, 2026 — Product Search Refinement: Short-Numeric Prefix-of-Word
 Tightened the strict pass on both the frontend grid and `/products/search-detail`
 so short numeric tokens no longer leak unrelated products via SKU collisions.

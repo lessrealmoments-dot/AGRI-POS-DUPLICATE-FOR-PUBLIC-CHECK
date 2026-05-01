@@ -28,16 +28,79 @@ import logging
 from datetime import datetime, timedelta, timezone, date as _date
 from typing import Optional
 
-from config import db
+try:
+    # Python 3.9+ ships `zoneinfo` so we don't need pytz. tzdata is vendored
+    # on most Linux distros; if the tenant picks an obscure TZ that isn't
+    # installed locally we catch ZoneInfoNotFoundError below and fall back.
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+except ImportError:  # pragma: no cover
+    ZoneInfo = None  # type: ignore
+    ZoneInfoNotFoundError = Exception  # type: ignore
+
+from config import db, _raw_db, set_org_context
 from utils import now_iso, new_id
 
 sms_log = logging.getLogger("close_reminder")
 
-# Manila is UTC+8; no DST. Used for determining "local now" without pulling pytz.
+# Fallback when a tenant hasn't picked a timezone yet, or when the picked one
+# can't be loaded. Matches the app's historical Philippine default so the
+# behaviour is identical for existing orgs.
+DEFAULT_TIMEZONE = "Asia/Manila"
+
+
+async def _resolve_org_timezone(org_id: str) -> str:
+    """Return the IANA timezone name configured for an organization.
+
+    Resolution order:
+      1. `organizations.timezone` — canonical, set via the Timezone settings UI.
+      2. `settings.company_info.value.timezone` (per-org) — legacy fallback.
+      3. DEFAULT_TIMEZONE (Asia/Manila).
+    """
+    if not org_id:
+        return DEFAULT_TIMEZONE
+    try:
+        org = await _raw_db.organizations.find_one(
+            {"id": org_id}, {"_id": 0, "timezone": 1}
+        )
+        if org and org.get("timezone"):
+            return org["timezone"]
+        ci = await _raw_db.settings.find_one(
+            {"key": "company_info", "organization_id": org_id},
+            {"_id": 0, "value": 1},
+        )
+        tz = (((ci or {}).get("value") or {}).get("timezone") or "").strip()
+        if tz:
+            return tz
+    except Exception as e:
+        sms_log.warning(f"_resolve_org_timezone failed for {org_id}: {e}")
+    return DEFAULT_TIMEZONE
+
+
+def _local_now_in(tz_name: str) -> datetime:
+    """Return the current wall-clock time in the given IANA zone."""
+    if ZoneInfo is None:
+        # Last-resort: assume UTC+8 to preserve legacy behaviour if zoneinfo
+        # somehow isn't available (shouldn't happen on Python 3.9+).
+        return datetime.now(timezone.utc) + timedelta(hours=8)
+    try:
+        return datetime.now(ZoneInfo(tz_name))
+    except (ZoneInfoNotFoundError, Exception):
+        return datetime.now(ZoneInfo(DEFAULT_TIMEZONE))
+
+
+# Kept for backward compatibility with older call sites that still import this.
+# Resolves to Asia/Manila wall-clock time, same as before.
 LOCAL_OFFSET = timedelta(hours=8)
 
 
 def _local_now() -> datetime:
+    """DEPRECATED — use `_local_now_in(tz_name)` with the branch's org TZ
+    instead. Retained for a couple of logging-only callers."""
+    if ZoneInfo is not None:
+        try:
+            return datetime.now(ZoneInfo(DEFAULT_TIMEZONE))
+        except Exception:
+            pass
     return datetime.now(timezone.utc) + LOCAL_OFFSET
 
 
@@ -89,10 +152,14 @@ async def _resolve_recipients(
 ) -> list:
     """Resolve role keys to unique users {id, phone, name}. Dedups by phone."""
     allowed_roles = set()
-    if "cashier" in role_keys: allowed_roles |= {"cashier"}
-    if "manager" in role_keys: allowed_roles |= {"manager"}
-    if "owner" in role_keys or "admin" in role_keys: allowed_roles |= {"admin"}
-    if "auditor" in role_keys: allowed_roles |= {"auditor"}
+    if "cashier" in role_keys:
+        allowed_roles |= {"cashier"}
+    if "manager" in role_keys:
+        allowed_roles |= {"manager"}
+    if "owner" in role_keys or "admin" in role_keys:
+        allowed_roles |= {"admin"}
+    if "auditor" in role_keys:
+        allowed_roles |= {"auditor"}
 
     q: dict = {
         "$or": [
@@ -232,10 +299,15 @@ async def _dispatch_stage(branch: dict, target_date_str: str, stage: dict):
     if not recipients:
         return
 
+    # Resolve this org's local time for overdue/hours-to-close maths
+    org_id = branch.get("organization_id", "")
+    tz_name = await _resolve_org_timezone(org_id)
+    local = _local_now_in(tz_name)
+
     # Compute days overdue for multi-day template
     try:
         tgt = datetime.strptime(target_date_str, "%Y-%m-%d").date()
-        days_overdue = (_local_now().date() - tgt).days
+        days_overdue = (local.date() - tgt).days
     except ValueError:
         days_overdue = 0
 
@@ -246,7 +318,7 @@ async def _dispatch_stage(branch: dict, target_date_str: str, stage: dict):
 
     # Compute hours_to_close for catch-up
     close_time = float(branch.get("close_time_h", 18))  # hours as float
-    now_h = _local_now().hour + _local_now().minute / 60
+    now_h = local.hour + local.minute / 60
     hrs_to_close = round(max(0.0, close_time - now_h), 1)
 
     variables = {
@@ -301,21 +373,39 @@ async def _is_calendar_closed(branch_id: str, date_str: str) -> bool:
 
 async def tick_once() -> dict:
     """
-    Evaluate every active branch against the stage schedule for the current
-    local time. Called by the background loop once per minute.
-    Returns a small stats dict for logging/debugging.
-    """
-    local = _local_now()
-    if _in_quiet_hours(local):
-        return {"skipped": "quiet_hours", "hour": local.hour}
+    Evaluate every active branch against the stage schedule for THAT branch's
+    organization local time. Called by the background loop once per minute.
 
+    Multi-tenant: each organization can configure its own timezone via
+    `organizations.timezone` (or `settings.company_info.timezone` as a
+    legacy fallback). Quiet-hour windows, trigger times and target dates are
+    all evaluated in the tenant's local clock, so a Philippine tenant's 3 PM
+    reminder fires at 3 PM Manila time while a US tenant's 3 PM fires at
+    3 PM America/New_York on the same calendar day.
+    """
     branches = await db.branches.find(
         {"active": {"$ne": False}}, {"_id": 0, "id": 1, "name": 1,
                                       "organization_id": 1, "close_time_h": 1}
     ).to_list(500)
 
+    # Cache org→tz lookups so we don't hit Mongo once per branch.
+    tz_cache: dict[str, str] = {}
+
     fired = 0
+    first_local: Optional[datetime] = None
+    skipped_quiet = 0
     for br in branches:
+        org_id = br.get("organization_id", "") or ""
+        if org_id not in tz_cache:
+            tz_cache[org_id] = await _resolve_org_timezone(org_id)
+        tz_name = tz_cache[org_id]
+        local = _local_now_in(tz_name)
+        if first_local is None:
+            first_local = local
+        if _in_quiet_hours(local):
+            skipped_quiet += 1
+            continue
+
         close_h = float(br.get("close_time_h", 18))  # default 6 PM
 
         for stage in STAGES:
@@ -348,8 +438,69 @@ async def tick_once() -> dict:
             await _dispatch_stage(br, target_date_str, stage)
             fired += 1
 
-    return {"fired_stages": fired, "branches": len(branches),
-            "local_time": local.isoformat()}
+    return {
+        "fired_stages": fired,
+        "branches": len(branches),
+        "skipped_quiet": skipped_quiet,
+        "local_time": first_local.isoformat() if first_local else None,
+        "orgs_scanned": len(tz_cache),
+    }
+
+
+# ── Diagnostics ─────────────────────────────────────────────────────────────
+# Exposed as `GET /api/sms/close-reminder/diagnose` so admins can quickly see
+# exactly what the scheduler thinks about each of their branches right now.
+# Answers questions like "why didn't my 3 PM ping fire?" without digging
+# through logs.
+
+async def diagnose_for_org(org_id: str) -> dict:
+    tz_name = await _resolve_org_timezone(org_id)
+    local = _local_now_in(tz_name)
+    branches = await db.branches.find(
+        {"organization_id": org_id, "active": {"$ne": False}},
+        {"_id": 0, "id": 1, "name": 1, "close_time_h": 1},
+    ).to_list(500)
+
+    def _next_stage(close_h: float):
+        now_h = local.hour + local.minute / 60
+        candidates = []
+        for s in STAGES:
+            if "fixed_hour" in s:
+                th = float(s["fixed_hour"])
+            else:
+                th = close_h + float(s["offset_h"])
+            delta = th - now_h
+            if delta < 0:
+                delta += 24
+            candidates.append((delta, s["key"], round(th, 2)))
+        candidates.sort()
+        return candidates[0] if candidates else (None, None, None)
+
+    branch_info = []
+    for br in branches:
+        close_h = float(br.get("close_time_h", 18))
+        delta, key, at_h = _next_stage(close_h)
+        # Count resolved recipient phones for each role we care about
+        recipients = {}
+        for role in ("cashier", "manager", "owner", "admin", "auditor"):
+            r = await _resolve_recipients(org_id, br["id"], [role])
+            recipients[role] = [x["phone"] for x in r if x.get("phone")]
+        branch_info.append({
+            "id": br["id"], "name": br.get("name", ""),
+            "close_time_h": close_h,
+            "next_stage": key,
+            "fires_at_local_hour": at_h,
+            "in_hours": round(delta, 2),
+            "recipient_phones": recipients,
+        })
+
+    return {
+        "org_id": org_id,
+        "timezone": tz_name,
+        "local_now": local.isoformat(),
+        "quiet_hours": _in_quiet_hours(local),
+        "branches": branch_info,
+    }
 
 
 # ── Z-Report Finalized (fired from close endpoint) ───────────────────────────
@@ -385,9 +536,19 @@ async def send_zreport_finalized(close_record: dict, user: Optional[dict] = None
              (f"-₱{abs(over_short):,.2f} short" if over_short < 0 else "matches")
 
     closed_at = close_record.get("closed_at") or now_iso()
+    # Render closed_time in the tenant's local zone so the SMS reads as they
+    # experience it on the counter — not in UTC or some server-default TZ.
+    tz_name = await _resolve_org_timezone(branch.get("organization_id", ""))
     try:
-        closed_time = datetime.fromisoformat(closed_at.replace("Z", "+00:00")) + LOCAL_OFFSET
-        closed_time_str = closed_time.strftime("%I:%M %p")
+        ts = datetime.fromisoformat(closed_at.replace("Z", "+00:00"))
+        if ZoneInfo is not None:
+            try:
+                ts = ts.astimezone(ZoneInfo(tz_name))
+            except (ZoneInfoNotFoundError, Exception):
+                ts = ts + LOCAL_OFFSET
+        else:
+            ts = ts + LOCAL_OFFSET
+        closed_time_str = ts.strftime("%I:%M %p")
     except Exception:
         closed_time_str = "—"
 

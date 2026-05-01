@@ -179,9 +179,25 @@ const EMPTY_LINE = {
   discount_type: 'amount', discount_value: 0, is_repack: false,
 };
 
-// Returns today's date in YYYY-MM-DD using LOCAL time (not UTC), so it always
-// shows the correct Philippine date regardless of server timezone.
+// Returns today's date in YYYY-MM-DD using the ORG's configured timezone.
+// Falls back to the browser's local date when the org TZ hasn't been loaded
+// yet (e.g. before the settings fetch on app boot). The org TZ is cached in
+// localStorage by the AuthContext under `agribooks.org_tz` so this helper
+// stays synchronous — critical because it runs inside useState initializers.
 const localToday = () => {
+  try {
+    const tz = localStorage.getItem('agribooks.org_tz') || '';
+    if (tz) {
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+      }).formatToParts(new Date());
+      const get = k => parts.find(p => p.type === k)?.value || '';
+      const y = get('year'), m = get('month'), d = get('day');
+      if (y && m && d) return `${y}-${m}-${d}`;
+    }
+  } catch {
+    /* fall through to browser-local */
+  }
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };

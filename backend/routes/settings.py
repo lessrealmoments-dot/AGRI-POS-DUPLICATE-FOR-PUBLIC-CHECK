@@ -432,3 +432,86 @@ async def restore_company_info(user=Depends(get_current_user)):
         upsert=True,
     )
     return {"restored": True, "recreated": recreated, "value": value}
+
+
+# ── Organization Timezone ────────────────────────────────────────────────────
+# Drives the close-reminder scheduler, the "today" date shown in Sales, and
+# any display formatting that needs wall-clock time. Stored on the
+# `organizations` row (canonical) with a fallback mirror inside
+# `settings.company_info.value.timezone` so existing tenants seeded before
+# the field was added continue to work.
+
+_COMMON_TIMEZONES = [
+    "Asia/Manila", "Asia/Singapore", "Asia/Hong_Kong", "Asia/Tokyo",
+    "Asia/Kolkata", "Asia/Dubai", "Asia/Bangkok", "Asia/Jakarta",
+    "Asia/Shanghai", "Asia/Seoul", "Asia/Taipei",
+    "Australia/Sydney", "Australia/Melbourne", "Pacific/Auckland",
+    "America/New_York", "America/Chicago", "America/Denver",
+    "America/Los_Angeles", "America/Phoenix", "America/Anchorage",
+    "America/Halifax", "America/Toronto", "America/Vancouver",
+    "America/Mexico_City", "America/Bogota", "America/Sao_Paulo",
+    "America/Argentina/Buenos_Aires",
+    "Europe/London", "Europe/Paris", "Europe/Berlin", "Europe/Madrid",
+    "Europe/Rome", "Europe/Istanbul", "Europe/Moscow",
+    "Africa/Johannesburg", "Africa/Nairobi", "Africa/Lagos", "Africa/Cairo",
+    "Africa/Casablanca",
+    "UTC",
+]
+
+
+@router.get("/timezone")
+async def get_timezone(user=Depends(get_current_user)):
+    """Return the organization's configured timezone plus the curated list
+    of choices the UI picker renders."""
+    from config import _raw_db
+    org_id = user.get("organization_id") or ""
+    tz = "Asia/Manila"
+    if org_id:
+        org = await _raw_db.organizations.find_one(
+            {"id": org_id}, {"_id": 0, "timezone": 1}
+        )
+        if org and org.get("timezone"):
+            tz = org["timezone"]
+        else:
+            ci = await db.settings.find_one(
+                {"key": "company_info"}, {"_id": 0, "value": 1}
+            )
+            fallback = (((ci or {}).get("value") or {}).get("timezone") or "").strip()
+            if fallback:
+                tz = fallback
+    return {"timezone": tz, "choices": _COMMON_TIMEZONES}
+
+
+@router.put("/timezone")
+async def update_timezone(data: dict, user=Depends(get_current_user)):
+    """Set the organization's timezone. Validated against the IANA database
+    via zoneinfo so the scheduler never gets a string it can't load."""
+    check_perm(user, "settings", "edit")
+    tz = (data.get("timezone") or "").strip()
+    if not tz:
+        from fastapi import HTTPException as HE
+        raise HE(status_code=400, detail="timezone is required")
+    try:
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+        ZoneInfo(tz)
+    except ZoneInfoNotFoundError:
+        from fastapi import HTTPException as HE
+        raise HE(status_code=400, detail=f"Unknown timezone: {tz}")
+    except ImportError:
+        pass  # Python < 3.9 — skip validation, scheduler will fall back
+
+    from config import _raw_db
+    org_id = user.get("organization_id") or ""
+    if not org_id:
+        from fastapi import HTTPException as HE
+        raise HE(status_code=400, detail="No organization context")
+    await _raw_db.organizations.update_one(
+        {"id": org_id}, {"$set": {"timezone": tz, "updated_at": now_iso()}}
+    )
+    # Mirror on company_info too so legacy readers see it
+    await db.settings.update_one(
+        {"key": "company_info"},
+        {"$set": {"value.timezone": tz, "updated_at": now_iso()}},
+        upsert=True,
+    )
+    return {"timezone": tz}

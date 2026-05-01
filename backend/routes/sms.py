@@ -1446,6 +1446,22 @@ async def credit_reminder_blast(data: dict, user=Depends(get_current_user)):
 
 
 
+# ── Close-Reminder Diagnostics ──────────────────────────────────────────────
+
+@router.get("/close-reminder/diagnose")
+async def close_reminder_diagnose(user=Depends(get_current_user)):
+    """Admin-only snapshot of what the close-reminder scheduler sees right
+    now for the current org: timezone, local time, quiet-hours flag, per-
+    branch next-stage fire time, and resolved recipient phones by role.
+
+    Answers "why didn't my 3 PM ping fire?" without grep-ing server logs.
+    """
+    check_perm(user, "settings", "edit")
+    from routes.close_reminder import diagnose_for_org
+    org_id = user.get("organization_id") or ""
+    return await diagnose_for_org(org_id)
+
+
 # ── Stats ───────────────────────────────────────────────────────────────────
 
 @router.get("/stats")

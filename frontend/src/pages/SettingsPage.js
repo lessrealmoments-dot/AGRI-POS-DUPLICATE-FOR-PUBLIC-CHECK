@@ -11,7 +11,7 @@ import { ScrollArea } from '../components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import {
   Settings, Shield, Key, Smartphone, CheckCircle2, XCircle, Lock,
-  RefreshCw, AlertTriangle, ShieldCheck, Eye, EyeOff, User, Building2, Save, Monitor, Trash2, Copy
+  RefreshCw, AlertTriangle, ShieldCheck, Eye, EyeOff, User, Building2, Save, Monitor, Trash2, Copy, Clock
 } from 'lucide-react';
 import ResetCompanyModal from '../components/ResetCompanyModal';
 import { QRCodeSVG } from 'qrcode.react';
@@ -578,6 +578,58 @@ export default function SettingsPage() {
     setSavingBiz(false);
   };
 
+  // ── Organization Timezone ──────────────────────────────────────────────────
+  // Drives the close-reminder SMS scheduler + the default sale date picker.
+  // Changing the TZ takes effect on the next scheduler tick (≤1 minute) and
+  // immediately for the Sales date, no restart required.
+  const [tzValue, setTzValue] = useState('Asia/Manila');
+  const [tzChoices, setTzChoices] = useState([]);
+  const [tzDetected, setTzDetected] = useState('');
+  const [savingTz, setSavingTz] = useState(false);
+
+  const loadTimezone = useCallback(async () => {
+    try {
+      const r = await api.get('/settings/timezone');
+      setTzValue(r.data.timezone || 'Asia/Manila');
+      setTzChoices(r.data.choices || []);
+    } catch {}
+    try {
+      // Browser's resolved IANA zone — used for the "Your device is in X"
+      // hint so the admin can match their organization TZ at a glance.
+      const dev = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (dev) setTzDetected(dev);
+    } catch {}
+  }, []);
+  useEffect(() => { if (isAdmin) loadTimezone(); }, [isAdmin, loadTimezone]);
+
+  const saveTimezone = async () => {
+    setSavingTz(true);
+    try {
+      await api.put('/settings/timezone', { timezone: tzValue });
+      toast.success(`Timezone saved: ${tzValue}`);
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed to save timezone'); }
+    setSavingTz(false);
+  };
+
+  // Preview the wall-clock time in the selected TZ so the admin can sanity-
+  // check their pick right next to the dropdown. Re-renders each minute.
+  const [clockTick, setClockTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setClockTick(x => x + 1), 30000);
+    return () => clearInterval(t);
+  }, []);
+  const tzPreview = (() => {
+    try {
+      // `clockTick` referenced so this re-runs when the interval fires
+      void clockTick;
+      return new Intl.DateTimeFormat('en-US', {
+        timeZone: tzValue,
+        hour: 'numeric', minute: '2-digit', hour12: true,
+        weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
+      }).format(new Date());
+    } catch { return '—'; }
+  })();
+
   return (
     <div className="space-y-6 animate-fadeIn" data-testid="settings-page">
       <div>
@@ -1019,6 +1071,61 @@ export default function SettingsPage() {
                   <Button onClick={saveBizInfo} disabled={savingBiz}
                     className="bg-[#1A4D2E] hover:bg-[#14532d] text-white" data-testid="save-biz-info">
                     <Save size={14} className="mr-1.5" /> {savingBiz ? 'Saving...' : 'Save Business Info'}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* ── Timezone ────────────────────────────────────────────── */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base font-semibold flex items-center gap-2" style={{ fontFamily: 'Manrope' }}>
+                  <Clock size={18} className="text-[#1A4D2E]" /> Organization Timezone
+                </CardTitle>
+                <p className="text-sm text-slate-500">
+                  Drives the SMS close-reminder schedule, the default sale date,
+                  and any wall-clock formatting. Each branch under this
+                  organization uses this timezone.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-3xl">
+                  <div>
+                    <label className="text-xs font-medium text-slate-600">Timezone</label>
+                    <select
+                      data-testid="org-timezone-select"
+                      value={tzValue}
+                      onChange={e => setTzValue(e.target.value)}
+                      className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1A4D2E]/30 bg-white">
+                      {tzChoices.length === 0 && <option value={tzValue}>{tzValue}</option>}
+                      {tzChoices.map(tz => (
+                        <option key={tz} value={tz}>{tz}</option>
+                      ))}
+                    </select>
+                    {tzDetected && tzDetected !== tzValue && (
+                      <p className="mt-1 text-[11px] text-amber-700">
+                        <AlertTriangle size={11} className="inline mr-0.5" />
+                        Your device is in <strong>{tzDetected}</strong> — pick
+                        it from the list if your organization operates there.
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-slate-600">Current time in selected zone</label>
+                    <div data-testid="org-timezone-preview"
+                      className="mt-1 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-lg text-sm font-mono text-emerald-900">
+                      {tzPreview}
+                    </div>
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      Updates every 30s. Scheduler picks up changes within 1 minute.
+                    </p>
+                  </div>
+                </div>
+                <div>
+                  <Button onClick={saveTimezone} disabled={savingTz}
+                    className="bg-[#1A4D2E] hover:bg-[#14532d] text-white"
+                    data-testid="save-org-timezone">
+                    <Save size={14} className="mr-1.5" /> {savingTz ? 'Saving…' : 'Save Timezone'}
                   </Button>
                 </div>
               </CardContent>
