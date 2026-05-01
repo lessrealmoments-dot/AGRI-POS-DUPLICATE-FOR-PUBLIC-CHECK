@@ -15,13 +15,20 @@ Supported actions:
 """
 from fastapi import APIRouter, HTTPException, Request
 from datetime import datetime, timezone, timedelta
-from config import db
+from config import db, _raw_db, set_org_context
 from utils import now_iso, new_id, is_digital_payment, update_cashier_wallet, update_digital_wallet, log_movement
 from utils.security import (
     check_qr_lockout, log_failed_qr_pin_attempt, log_successful_qr_pin_attempt,
 )
 
 router = APIRouter(prefix="/qr-actions", tags=["QR Actions"])
+
+
+_DOC_TYPE_TO_COLLECTION = {
+    "invoice": "invoices",
+    "purchase_order": "purchase_orders",
+    "branch_transfer": "branch_transfer_orders",
+}
 
 
 async def _verify_terminal_session(terminal_id: str, device_id: str = ""):
@@ -78,11 +85,36 @@ async def _verify_staff_jwt(token: str, branch_id: str = "") -> dict:
 
 
 async def _resolve_doc(code: str):
-    """Look up doc_code and return (doc_ref, doc_type, doc_id)."""
+    """Look up doc_code, set tenant context (so downstream `db.*` queries work
+    on these public/no-JWT endpoints), and return (doc_ref, doc_type, doc_id)."""
     code = code.strip().upper()
     doc_ref = await db.doc_codes.find_one({"code": code}, {"_id": 0})
     if not doc_ref:
         raise HTTPException(status_code=404, detail=f"Document code '{code}' not found")
+
+    # Public QR endpoints have no JWT → tenant proxy is fail-closed.
+    # Hydrate org context from the doc_code entry, with a legacy fallback that
+    # reads the referenced document via _raw_db when org_id wasn't stamped.
+    org_id = (doc_ref.get("org_id") or "").strip()
+    if not org_id:
+        coll_name = _DOC_TYPE_TO_COLLECTION.get(doc_ref.get("doc_type", ""))
+        if coll_name:
+            doc = await _raw_db[coll_name].find_one(
+                {"id": doc_ref.get("doc_id", "")},
+                {"_id": 0, "organization_id": 1},
+            )
+            if doc and doc.get("organization_id"):
+                org_id = doc["organization_id"]
+                try:
+                    await _raw_db.doc_codes.update_one(
+                        {"code": code}, {"$set": {"org_id": org_id}}
+                    )
+                except Exception:
+                    pass
+
+    if org_id:
+        set_org_context(org_id)
+
     return doc_ref, doc_ref["doc_type"], doc_ref["doc_id"]
 
 

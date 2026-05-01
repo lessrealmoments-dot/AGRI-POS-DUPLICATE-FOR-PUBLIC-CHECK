@@ -1,5 +1,21 @@
 # AgriBooks Changelog
 
+## Feb 2026 — QR Document Lookup Tenant-Context Bug (Iter 201)
+
+**Bug**: Scanning a sale/PO/transfer QR returned **"Document not found"** / **"Invoice not found"** even though the doc_code and document both existed in Mongo.
+
+**Root cause**: Public QR endpoints (`/api/doc/view/:code`, `/api/doc/lookup`, all `/api/qr-actions/:code/*`) come in **without a JWT**. After iter 180 the multi-tenant `db` proxy fails-closed when no org context is set — so `db.invoices.find_one(...)` returned 0 rows even when the doc existed. The `doc_codes` collection itself isn't tenant-scoped, so the code lookup succeeded; only the downstream `invoices` / `branch_transfer_orders` / `customers` / `branches` / `upload_sessions` reads silently returned nothing.
+
+**Fix**:
+- **`backend/routes/doc_lookup.py`** — new `_resolve_doc_code_with_context()` helper. Looks up the doc_code, calls `set_org_context(doc_ref.org_id)`, and falls back to reading the source document via `_raw_db` to recover the org_id when legacy entries lack it (then backfills the `doc_codes` row). Used by both `view_document_open` (public) and `lookup_document` (PIN-protected).
+- **`backend/routes/qr_actions.py`** — `_resolve_doc()` updated with the same context-hydration logic. Covers `verify_pin`, `release_stocks`, `generate_upload_token`, `receive_payment`, `transfer_receive`.
+- **`frontend/src/pages/UnifiedSalesPage.js:3286`** (collateral bug) — signature print flow was calling `/doc/generate-code` with `doc_type: 'sale'` (an unknown type) which created an unresolvable doc_code. Changed to `'invoice'` so it returns the existing code.
+- **`backend/scripts/backfill_doc_codes_org_id.py`** — one-shot migration: backfilled `org_id` on **84** legacy doc_codes by reading their referenced documents.
+- **`backend/tests/test_qr_doc_view_tenant_context_201.py`** — 3 regression tests (passing): public `/doc/view/:code` resolves invoice w/o auth, `/qr-actions/:code/context` works, unknown code → 404.
+
+**Verified live**: `GET /api/doc/view/M3VYT6P6` now returns the full invoice JSON (was returning `{"detail":"Invoice not found"}` before the fix).
+
+
 ## May 1, 2026 — Layer 2: Branch Switcher UX + Backend Whitelist (Iter 198 cont'd)
 
 A multi-branch manager/auditor can now actively **switch between** their assigned branches inside the app — POS, inventory, reports, close-day all flip to the active branch — while being strictly denied access to any branch they're not assigned to. Per-user `permissions` continue to gate actions independently (a manager assigned to branches 1-3 with `sales.create=false` still cannot sell anywhere).

@@ -3283,7 +3283,7 @@ export default function UnifiedSalesPage() {
             // Fetch fresh QR code for the receipt (best-effort)
             let docCode = '';
             try {
-              const r = await api.post('/doc/generate-code', { doc_type: 'sale', doc_id: inv.id });
+              const r = await api.post('/doc/generate-code', { doc_type: 'invoice', doc_id: inv.id });
               docCode = r.data?.code || '';
             } catch { /* print without QR */ }
             const printData = {

@@ -1,5 +1,14 @@
 # AgriBooks PRD
 
+## Iter 201 (Feb 2026) — QR Document Lookup Fix (Tenant Context Bug) 🔴 P0
+- **Bug**: Sale/PO/Transfer QR codes returned "Document not found" / "Invoice not found" when scanned even though doc_code + document existed in DB.
+- **Root cause**: Public QR endpoints had no JWT, so the multi-tenant fail-closed proxy returned 0 docs from `db.invoices`.
+- **Fix**: After resolving doc_code, set tenant context from `doc_ref.org_id` (with legacy fallback via `_raw_db`); applied to `view_document_open`, `lookup_document`, all `qr-actions/*` handlers.
+- **Collateral**: Fixed `UnifiedSalesPage.js` signature-print path that was calling `/doc/generate-code` with `doc_type: 'sale'` (unknown type → unresolvable QR).
+- **Migration**: 84 legacy doc_codes backfilled with `org_id`.
+- Tested: 3 new regression tests passing; live curl on `/api/doc/view/M3VYT6P6` now returns invoice.
+
+
 ## Latest Iter 197 (May 1, 2026) — Customer Dedupe Manager + Bulk Delete + No-Blocker Import ⭐ Critical Fix
 - **Root-cause fix**: Customer importer previously silently dropped opening-balance invoices in 3 cases (exact name dupe, default "skip" on fuzzy rows, duplicate-within-file). Re-imports created ZERO OBs.
 - **New flow** validated with user: Import = dumb ingest (always new customer + OB invoice). Dedupe = background popup (mirrors PriceScanManager).

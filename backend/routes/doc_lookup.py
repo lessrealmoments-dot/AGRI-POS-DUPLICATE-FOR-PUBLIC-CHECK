@@ -4,10 +4,61 @@ Generates unique document codes for printed receipts and provides
 PIN-protected lookup for scanning QR codes or entering codes manually.
 """
 from fastapi import APIRouter, HTTPException, Depends
-from config import db
+from config import db, _raw_db, set_org_context, get_org_context
 from utils import get_current_user, now_iso, new_id
 import string
 import secrets
+
+
+# ── Tenant-context helper for public QR scan endpoints ──────────────────────
+_DOC_TYPE_TO_COLLECTION = {
+    "invoice": "invoices",
+    "purchase_order": "purchase_orders",
+    "branch_transfer": "branch_transfer_orders",
+}
+
+
+async def _resolve_doc_code_with_context(code: str):
+    """
+    Resolve a doc_code → (doc_ref) AND set the org context for downstream
+    tenant-scoped queries. QR scans hit public endpoints with no JWT, so the
+    fail-closed tenant proxy would otherwise return zero results from
+    `db.invoices`, `db.customers`, etc.
+
+    1. Look up doc_code (collection is NOT tenant-scoped).
+    2. If org_id present on doc_ref → set context directly.
+    3. If org_id missing/empty (legacy data) → fall back to reading the
+       referenced document via _raw_db, derive org_id from it, set context,
+       and backfill the doc_codes entry.
+    """
+    code_norm = (code or "").strip().upper()
+    doc_ref = await db.doc_codes.find_one({"code": code_norm}, {"_id": 0})
+    if not doc_ref:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    org_id = (doc_ref.get("org_id") or "").strip()
+    if not org_id:
+        # Legacy doc_code without org_id — recover from the referenced document.
+        coll_name = _DOC_TYPE_TO_COLLECTION.get(doc_ref.get("doc_type", ""))
+        if coll_name:
+            doc = await _raw_db[coll_name].find_one(
+                {"id": doc_ref.get("doc_id", "")},
+                {"_id": 0, "organization_id": 1},
+            )
+            if doc and doc.get("organization_id"):
+                org_id = doc["organization_id"]
+                # Backfill so future reads are fast.
+                try:
+                    await _raw_db.doc_codes.update_one(
+                        {"code": code_norm}, {"$set": {"org_id": org_id}}
+                    )
+                except Exception:
+                    pass
+
+    if org_id:
+        set_org_context(org_id)
+
+    return doc_ref
 
 router = APIRouter(prefix="/doc", tags=["Document Lookup"])
 
@@ -141,10 +192,8 @@ async def lookup_document(data: dict):
 
     await log_successful_qr_pin_attempt(code, "doc_lookup", "lookup", verifier.get("verifier_name", ""))
 
-    # Find document code
-    doc_ref = await db.doc_codes.find_one({"code": code}, {"_id": 0})
-    if not doc_ref:
-        raise HTTPException(status_code=404, detail="Document not found")
+    # Find document code AND set tenant context (public endpoint — no JWT).
+    doc_ref = await _resolve_doc_code_with_context(code)
 
     doc_type = doc_ref["doc_type"]
     doc_id = doc_ref["doc_id"]
@@ -247,9 +296,9 @@ async def view_document_open(code: str):
     Sensitive data (payment history, attached files, internal notes) excluded.
     """
     code = code.strip().upper()
-    doc_ref = await db.doc_codes.find_one({"code": code}, {"_id": 0})
-    if not doc_ref:
-        raise HTTPException(status_code=404, detail="Document not found")
+    # Tenant-context is set here so downstream `db.invoices`, `db.branches`, etc.
+    # work even though the request has no JWT.
+    doc_ref = await _resolve_doc_code_with_context(code)
 
     doc_type = doc_ref["doc_type"]
     doc_id = doc_ref["doc_id"]
