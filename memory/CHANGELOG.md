@@ -1,5 +1,20 @@
 # AgriBooks Changelog
 
+## Feb 2026 — Per-Branch Close-Day SMS Opt-Out (Iter 201 cont'd)
+
+**Ask**: "Some branches are merely used to transfer stocks, not actual money movement / not credit. Owner handles them personally. If I keep receiving texts for those branches, it becomes noise and I might ignore real alerts."
+
+**Fix** (backend + frontend + regression):
+- **`backend/routes/sms.py`** — new `PUT /api/sms/close-reminder/branch-toggle/:branch_id` endpoint. Body `{disabled: bool}`. PIN-equivalent via `check_perm("settings", "edit")`.
+- **`backend/routes/close_reminder.py`** — `tick_once()` now checks `branch.close_reminder_disabled` as its first per-branch filter and skips the whole branch before looking at any stage. Added `skipped_disabled` counter to the tick summary and to the `close_reminder` log line. `diagnose_for_org()` now surfaces the flag so admins can confirm state in the diagnostics endpoint.
+- **Scope** — only automated stages (approaching-close, overdue, day-after recap) are muted. Z-Report summaries (fired when the user actively closes the day) are NOT muted — the owner opted into that moment by closing.
+- **`frontend/src/components/sms/TeamSmsRemindersCard.js`** — each row in "Branch Closing Times" now has a Mute / Un-mute pill button plus a muted badge on the branch name. The time input + Save button auto-grey out while muted. A small italic hint explains what muting does.
+- **Test** — `backend/tests/test_branch_close_reminder_opt_out_201.py` (3/3 passing):
+  1. HTTP handler flips the flag both ways and persists it
+  2. `tick_once()` skips the muted branch (monkey-patched dispatch verifies ZERO calls for the muted id)
+  3. `diagnose_for_org()` exposes the flag
+
+
 ## Feb 2026 — QR Document Lookup Tenant-Context Bug (Iter 201)
 
 **Bug**: Scanning a sale/PO/transfer QR returned **"Document not found"** / **"Invoice not found"** even though the doc_code and document both existed in Mongo.

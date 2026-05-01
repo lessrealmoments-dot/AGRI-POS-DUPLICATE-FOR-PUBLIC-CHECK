@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
-import { Loader2, BellRing, Clock, CheckCircle2, Send } from 'lucide-react';
+import { Loader2, BellRing, BellOff, Clock, CheckCircle2, Send } from 'lucide-react';
 
 import { api } from '../../contexts/AuthContext';
 import { Card, CardContent } from '../ui/card';
@@ -55,6 +55,10 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
   // `branches` when mounted; local edits stay here until "Save" is clicked.
   const [branchCloseH, setBranchCloseH] = useState({});
   const [savingBranch, setSavingBranch] = useState({});
+  // Per-branch "no close-day SMS" opt-out — keyed by branch id. Kept in
+  // local state so toggling feels instant; mirrored to the server on click.
+  const [branchDisabled, setBranchDisabled] = useState({});
+  const [togglingDisabled, setTogglingDisabled] = useState({});
   // Which branch drives the "Fires at" preview next to each stage row.
   const [previewBranchId, setPreviewBranchId] = useState('');
   // Which stage row is currently firing a test SMS (so we can disable the
@@ -79,13 +83,16 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
     // a 24 h float (e.g. 18.5) into the HH:mm shape the <input type="time">
     // expects — and back on save.
     const next = {};
+    const disabledNext = {};
     (branches || []).forEach(b => {
       const h = Number.isFinite(b.close_time_h) ? b.close_time_h : 18;
       const hh = String(Math.floor(h)).padStart(2, '0');
       const mm = String(Math.round((h - Math.floor(h)) * 60)).padStart(2, '0');
       next[b.id] = `${hh}:${mm}`;
+      disabledNext[b.id] = !!b.close_reminder_disabled;
     });
     setBranchCloseH(next);
+    setBranchDisabled(disabledNext);
     if (!previewBranchId && branches?.[0]?.id) setPreviewBranchId(branches[0].id);
   }, [branches]);
 
@@ -247,23 +254,52 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
               </p>
             </div>
             <div className="space-y-2">
-              {branches.map(br => (
-                <div key={br.id} className="flex flex-wrap items-center gap-2 text-xs">
-                  <span className="flex-1 min-w-[120px] font-medium text-slate-700">{br.name}</span>
+              {branches.map(br => {
+                const isDisabled = !!branchDisabled[br.id];
+                return (
+                <div key={br.id} className={`flex flex-wrap items-center gap-2 text-xs ${isDisabled ? 'opacity-60' : ''}`}>
+                  <span className="flex-1 min-w-[120px] font-medium text-slate-700 flex items-center gap-1.5">
+                    {br.name}
+                    {isDisabled && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500 bg-slate-200 border border-slate-300 px-1.5 py-0.5 rounded"
+                        data-testid={`branch-disabled-pill-${br.id}`}>
+                        <BellOff size={10} /> Muted
+                      </span>
+                    )}
+                  </span>
                   <input
                     type="time"
                     data-testid={`branch-close-time-${br.id}`}
                     value={branchCloseH[br.id] || '18:00'}
+                    disabled={isDisabled}
                     onChange={e => setBranchCloseH(v => ({ ...v, [br.id]: e.target.value }))}
-                    className="border border-slate-200 rounded-md px-2 py-1 text-xs bg-white"
+                    className="border border-slate-200 rounded-md px-2 py-1 text-xs bg-white disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
                   />
                   <button
                     type="button"
                     data-testid={`save-branch-close-${br.id}`}
-                    disabled={savingBranch[br.id]}
+                    disabled={savingBranch[br.id] || isDisabled}
                     onClick={() => saveBranchClose(br.id)}
-                    className="px-2 py-1 text-[11px] font-medium rounded-md border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-40">
+                    className="px-2 py-1 text-[11px] font-medium rounded-md border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-40 disabled:cursor-not-allowed">
                     {savingBranch[br.id] ? '…' : 'Save'}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid={`branch-mute-toggle-${br.id}`}
+                    disabled={!!togglingDisabled[br.id]}
+                    onClick={() => toggleBranchDisabled(br.id)}
+                    title={isDisabled
+                      ? 'Turn close-day SMS back on for this branch'
+                      : 'Mute close-day SMS reminders for this branch (useful for transfer-only / warehouse branches)'}
+                    className={`inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-md border transition-colors disabled:opacity-40 ${
+                      isDisabled
+                        ? 'border-slate-300 text-slate-600 hover:bg-slate-100'
+                        : 'border-amber-300 text-amber-700 hover:bg-amber-50'
+                    }`}>
+                    {togglingDisabled[br.id]
+                      ? <Loader2 size={10} className="animate-spin" />
+                      : isDisabled ? <BellRing size={10} /> : <BellOff size={10} />}
+                    {isDisabled ? 'Un-mute' : 'Mute'}
                   </button>
                   <button
                     type="button"
@@ -277,8 +313,14 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
                     {previewBranchId === br.id ? '◉ Preview' : 'Preview'}
                   </button>
                 </div>
-              ))}
+                );
+              })}
             </div>
+            {Object.values(branchDisabled).some(Boolean) && (
+              <p className="mt-2 text-[10px] text-slate-500 italic">
+                Muted branches are skipped by the close-day scheduler — no "approaching close", "overdue", or "day-after recap" SMS will fire for them. Z-Report summaries (sent when you actively close the day) still go out.
+              </p>
+            )}
           </div>
         )}
 

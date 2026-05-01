@@ -1572,6 +1572,32 @@ async def update_branch_close_time(branch_id: str, data: dict, user=Depends(get_
     return {"branch_id": branch_id, "close_time_h": close_time_h}
 
 
+@router.put("/close-reminder/branch-toggle/{branch_id}")
+async def update_branch_close_reminder_toggle(branch_id: str, data: dict, user=Depends(get_current_user)):
+    """Enable or disable automated close-day SMS reminders for ONE branch.
+
+    When `disabled=true`, the scheduler skips this branch entirely —
+    no "Approaching close", "At close", "Overdue", "Day-after recap"
+    stages fire. Useful for warehouse/transfer-only branches where the
+    owner handles everything manually and doesn't want SMS noise.
+
+    Body: { disabled: bool }
+    """
+    check_perm(user, "settings", "edit")
+    disabled = bool(data.get("disabled"))
+    org_id = user.get("organization_id") or ""
+    br = await db.branches.find_one(
+        {"id": branch_id, "organization_id": org_id}, {"_id": 0, "id": 1}
+    )
+    if not br:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    await db.branches.update_one(
+        {"id": branch_id},
+        {"$set": {"close_reminder_disabled": disabled, "updated_at": now_iso()}},
+    )
+    return {"branch_id": branch_id, "close_reminder_disabled": disabled}
+
+
 @router.post("/close-reminder/test-stage/{stage_key}")
 async def test_close_reminder_stage(stage_key: str, data: dict = None, user=Depends(get_current_user)):
     """Fire a [SAMPLE] SMS for ONE stage immediately to the stage's currently-

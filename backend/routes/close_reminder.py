@@ -587,7 +587,8 @@ async def tick_once() -> dict:
     """
     branches = await _raw_db.branches.find(
         {"active": {"$ne": False}}, {"_id": 0, "id": 1, "name": 1,
-                                      "organization_id": 1, "close_time_h": 1}
+                                      "organization_id": 1, "close_time_h": 1,
+                                      "close_reminder_disabled": 1}
     ).to_list(500)
 
     # Cache org→tz lookups AND org→stage-settings lookups so we don't hit
@@ -598,7 +599,13 @@ async def tick_once() -> dict:
     fired = 0
     first_local: Optional[datetime] = None
     skipped_quiet = 0
+    skipped_disabled = 0
     for br in branches:
+        # Per-branch opt-out — set from the Team SMS card when an owner
+        # marks a warehouse/transfer-only branch as "no close-day SMS".
+        if br.get("close_reminder_disabled"):
+            skipped_disabled += 1
+            continue
         org_id = br.get("organization_id", "") or ""
         if org_id not in tz_cache:
             tz_cache[org_id] = await _resolve_org_timezone(org_id)
@@ -659,12 +666,13 @@ async def tick_once() -> dict:
         sms_log.info(
             f"close_reminder tick: fired {fired} stage(s) across "
             f"{len(branches)} branch(es) in {len(tz_cache)} org(s) "
-            f"(skipped {skipped_quiet} in quiet hours)"
+            f"(skipped {skipped_quiet} in quiet hours, {skipped_disabled} opted-out)"
         )
     return {
         "fired_stages": fired,
         "branches": len(branches),
         "skipped_quiet": skipped_quiet,
+        "skipped_disabled": skipped_disabled,
         "local_time": first_local.isoformat() if first_local else None,
         "orgs_scanned": len(tz_cache),
     }
@@ -681,7 +689,7 @@ async def diagnose_for_org(org_id: str) -> dict:
     local = _local_now_in(tz_name)
     branches = await _raw_db.branches.find(
         {"organization_id": org_id, "active": {"$ne": False}},
-        {"_id": 0, "id": 1, "name": 1, "close_time_h": 1},
+        {"_id": 0, "id": 1, "name": 1, "close_time_h": 1, "close_reminder_disabled": 1},
     ).to_list(500)
 
     def _next_stage(close_h: float):
@@ -711,6 +719,7 @@ async def diagnose_for_org(org_id: str) -> dict:
         branch_info.append({
             "id": br["id"], "name": br.get("name", ""),
             "close_time_h": close_h,
+            "close_reminder_disabled": bool(br.get("close_reminder_disabled")),
             "next_stage": key,
             "fires_at_local_hour": at_h,
             "in_hours": round(delta, 2),

@@ -1,5 +1,13 @@
 # AgriBooks PRD
 
+## Iter 201b (Feb 2026) — Per-Branch Close-Day SMS Opt-Out ✅
+- Owners can mute automated close-day SMS on per-branch basis (warehouse / transfer-only branches).
+- New `branch.close_reminder_disabled` flag, new `PUT /api/sms/close-reminder/branch-toggle/:branch_id` endpoint.
+- Scheduler skips disabled branches; Z-Report summaries (manual close) still fire.
+- UI: Mute/Un-mute pill in Branch Closing Times + muted badge + grey-out on time input.
+- 3/3 regression tests passing.
+
+
 ## Iter 201 (Feb 2026) — QR Document Lookup Fix (Tenant Context Bug) 🔴 P0
 - **Bug**: Sale/PO/Transfer QR codes returned "Document not found" / "Invoice not found" when scanned even though doc_code + document existed in DB.
 - **Root cause**: Public QR endpoints had no JWT, so the multi-tenant fail-closed proxy returned 0 docs from `db.invoices`.
