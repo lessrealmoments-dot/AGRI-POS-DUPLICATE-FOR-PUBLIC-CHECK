@@ -17,7 +17,7 @@ import { UnclosedDaysBanner } from '../components/UnclosedDaysBanner';
 import {
   Search, Plus, Minus, Trash2, ShoppingCart, CreditCard, X, Wifi, WifiOff,
   RefreshCw, FileText, Lock, Zap, ClipboardList, AlertTriangle, Shield, CheckCircle2, Smartphone, Camera, Check,
-  PackageX, ShieldAlert, ChevronDown, Eye, EyeOff
+  PackageX, ShieldAlert, ChevronDown, Eye, EyeOff, User, Package
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -2006,20 +2006,26 @@ export default function UnifiedSalesPage() {
 
       {/* Customer Selection */}
       <div className="px-1 pb-3">
-        <Card className="border-slate-200">
+        <Card className="border-slate-200 border-l-4 border-l-blue-400">
           <CardContent className="p-3">
             <div className="flex flex-wrap items-end gap-4">
               <div className="relative flex-1 min-w-[200px]">
-                <Label className="text-xs text-slate-500">Customer</Label>
-                <Input
-                  data-testid="customer-search"
-                  className="h-9"
-                  value={custSearch}
-                  placeholder="Search customer or type name..."
-                  onChange={e => handleCustInput(e.target.value)}
-                  onFocus={() => { if (custSearch) setCustDropdownOpen(true); }}
-                  onBlur={() => setTimeout(() => setCustDropdownOpen(false), 200)}
-                />
+                <Label className="text-xs font-semibold text-blue-700 flex items-center gap-1.5">
+                  <User size={12} />
+                  Customer <span className="text-[10px] font-normal text-slate-400">(optional · for credit / receipt)</span>
+                </Label>
+                <div className="relative mt-1">
+                  <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-400 pointer-events-none" />
+                  <Input
+                    data-testid="customer-search"
+                    className="h-9 pl-9 bg-blue-50/30 border-blue-200 focus:border-blue-400 focus:ring-blue-200 placeholder:text-blue-300"
+                    value={custSearch}
+                    placeholder="Customer name or phone… (leave blank for Walk-in)"
+                    onChange={e => handleCustInput(e.target.value)}
+                    onFocus={() => { if (custSearch) setCustDropdownOpen(true); }}
+                    onBlur={() => setTimeout(() => setCustDropdownOpen(false), 200)}
+                  />
+                </div>
                 {custDropdownOpen && (
                   <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
                     {filteredCusts.map(c => (
@@ -2261,16 +2267,26 @@ export default function UnifiedSalesPage() {
           <>
             {/* Product Grid */}
             <div className="flex-1 flex flex-col min-w-0">
-              <div className="relative mb-3">
-                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <Input
-                  ref={searchRef}
-                  data-testid="product-search"
-                  className="pl-9 h-10"
-                  placeholder="Search products by name, SKU, or barcode..."
-                  value={search}
-                  onChange={e => setSearch(e.target.value)}
-                />
+              <div className="mb-3">
+                <Label className="text-xs font-semibold text-[#1A4D2E] flex items-center gap-1.5 mb-1">
+                  <Package size={12} />
+                  Product Search <span className="text-[10px] font-normal text-slate-400">(tap a tile or scan a barcode to add to cart)</span>
+                </Label>
+                <div className="relative">
+                  <Package size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#1A4D2E] pointer-events-none" />
+                  <Input
+                    ref={searchRef}
+                    data-testid="product-search"
+                    className="pl-10 h-12 text-base font-medium border-2 border-[#1A4D2E]/30 focus:border-[#1A4D2E] focus:ring-[#1A4D2E]/20 bg-emerald-50/40 placeholder:text-slate-400 placeholder:font-normal"
+                    placeholder="Search products by name, SKU, or barcode…"
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                  />
+                  <kbd className="absolute right-3 top-1/2 -translate-y-1/2 hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-mono text-slate-500 bg-white border border-slate-200 rounded">
+                    <Search size={10} />
+                    Products
+                  </kbd>
+                </div>
               </div>
               <ScrollArea className="flex-1">
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
