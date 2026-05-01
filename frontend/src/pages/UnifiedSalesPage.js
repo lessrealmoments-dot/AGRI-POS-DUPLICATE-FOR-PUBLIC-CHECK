@@ -35,6 +35,39 @@ import GlobalPriceBadge from '../components/GlobalPriceBadge';
 import PriceMatchModal from '../components/PriceMatchModal';
 import LateEncodeDialog from '../components/LateEncodeDialog';
 
+// ── Bounded Levenshtein distance ─────────────────────────────────────────────
+// Returns the edit distance between `a` and `b`, BUT bails out early as soon
+// as the running minimum exceeds `maxDist`. This keeps the typo-tolerant
+// product search fast even when scanning hundreds of candidate words: most
+// pairs short-circuit on the first row and never allocate the full matrix.
+function levenshteinAtMost(a, b, maxDist) {
+  if (a === b) return 0;
+  const la = a.length, lb = b.length;
+  if (Math.abs(la - lb) > maxDist) return maxDist + 1;
+  if (la === 0) return lb;
+  if (lb === 0) return la;
+  // Two-row DP with early-exit on each row.
+  let prev = new Array(lb + 1);
+  let curr = new Array(lb + 1);
+  for (let j = 0; j <= lb; j++) prev[j] = j;
+  for (let i = 1; i <= la; i++) {
+    curr[0] = i;
+    let rowMin = curr[0];
+    for (let j = 1; j <= lb; j++) {
+      const cost = a.charCodeAt(i - 1) === b.charCodeAt(j - 1) ? 0 : 1;
+      curr[j] = Math.min(
+        prev[j] + 1,        // deletion
+        curr[j - 1] + 1,    // insertion
+        prev[j - 1] + cost, // substitution
+      );
+      if (curr[j] < rowMin) rowMin = curr[j];
+    }
+    if (rowMin > maxDist) return maxDist + 1; // early bail-out
+    [prev, curr] = [curr, prev];
+  }
+  return prev[lb];
+}
+
 // ── Insufficient Stock Override Modal ────────────────────────────────────────
 function InsufficientStockModal({ open, insufficientItems, onOverride, onCancel, onGoPO }) {
   const [pin, setPin] = useState('');
@@ -268,6 +301,10 @@ export default function UnifiedSalesPage() {
   const [allProducts, setAllProducts] = useState([]);
   const [filteredProducts, setFilteredProducts] = useState([]);
   const [search, setSearch] = useState('');
+  // Set when the strict search returns 0 results AND the fuzzy fallback
+  // produced suggestions. The UI shows a banner so the user is never
+  // confused about why an unexpected product appears in the grid.
+  const [fuzzyHint, setFuzzyHint] = useState(null);
   const [customers, setCustomers] = useState([]);
   const [schemes, setSchemes] = useState([]);
   const [terms, setTerms] = useState([]);
@@ -893,36 +930,117 @@ export default function UnifiedSalesPage() {
     setMode(newMode);
   };
 
-  // Filter products — token-based (order-independent) matching.
-  // Splits the query on whitespace/dashes/commas and requires every non-empty
-  // token to appear somewhere in the haystack (name + SKU + barcode). This
-  // makes "Galimax 1 Poultry Feeds - Pilmico" match "Galimax 1 Pilmico -
-  // Poultry Feeds", and "Starter Vital" match "Starter Premium Vital".
-  // Results are ranked: exact-substring hits first, then token-only hits.
+  // Filter products — token-based (order-independent) matching with a
+  // guarded typo-tolerant fallback when the strict pass returns 0 hits.
+  //
+  // Strict pass: splits the query on whitespace/dashes/slashes/commas and
+  // requires every non-empty token to appear somewhere in the haystack
+  // (name + SKU + barcode). Order-independent. This makes
+  // "Galimax 1 Poultry Feeds - Pilmico" match "Galimax 1 Pilmico - Poultry
+  // Feeds", and "Starter Vital" match "Starter Premium Vital".
+  //
+  // Fuzzy fallback (only when strict returns 0):
+  //   • Levenshtein distance ≤ 1 for tokens 4–7 chars, ≤ 2 for 8+ chars
+  //   • Pure-numeric tokens ("1", "20kg") and short tokens (<4 chars) MUST
+  //     still match exactly — prevents "Galimax 1" silently matching
+  //     "Galimax 2" or random 3-letter collisions
+  //   • Capped to the first 200 products by name to keep typing snappy
+  // The banner state below tells the UI to surface a "Showing fuzzy matches
+  // for 'X'" hint with a Clear button so the user is never surprised.
   useEffect(() => {
-    if (!search) { setFilteredProducts(allProducts); return; }
+    if (!search) {
+      setFilteredProducts(allProducts);
+      setFuzzyHint(null);
+      return;
+    }
     const q = search.toLowerCase().trim();
-    // Split on whitespace, hyphens, slashes, commas — keep ≥ 1-char tokens.
-    // Single-char tokens like "1" are intentionally allowed because product
-    // names commonly include grade numbers ("Galimax 1", "Starter 2").
     const tokens = q.split(/[\s\-/,]+/).map(t => t.trim()).filter(Boolean);
-    if (tokens.length === 0) { setFilteredProducts(allProducts); return; }
+    if (tokens.length === 0) {
+      setFilteredProducts(allProducts);
+      setFuzzyHint(null);
+      return;
+    }
 
-    const matches = [];
+    // ── Strict pass ──
+    const strict = [];
     for (const p of allProducts) {
       const name = (p.name || '').toLowerCase();
       const sku = (p.sku || '').toLowerCase();
       const barcode = (p.barcode || '').toLowerCase();
       const haystack = `${name} ${sku} ${barcode}`;
-      // Every token must hit the haystack (AND, order-independent)
       if (!tokens.every(t => haystack.includes(t))) continue;
-      // Rank: 0 = full phrase substring match, 1 = token-only match.
-      // Tiebreak by name length (shorter = more specific result).
-      const rank = (haystack.includes(q) ? 0 : 1);
-      matches.push({ p, rank, len: name.length });
+      const rank = haystack.includes(q) ? 0 : 1;
+      strict.push({ p, rank, len: name.length });
     }
-    matches.sort((a, b) => a.rank - b.rank || a.len - b.len);
-    setFilteredProducts(matches.map(m => m.p));
+    if (strict.length > 0) {
+      strict.sort((a, b) => a.rank - b.rank || a.len - b.len);
+      setFilteredProducts(strict.map(m => m.p));
+      setFuzzyHint(null);
+      return;
+    }
+
+    // ── Fuzzy fallback ──
+    // Only "fuzzable" tokens get edit-distance checks. The rest must still
+    // match exactly to keep grade numbers/short codes honest.
+    const fuzzable = tokens.filter(
+      t => t.length >= 4 && !/^[0-9]+$/.test(t) && !/^[0-9]+[a-z]+$/i.test(t),
+    );
+    const exactRequired = tokens.filter(t => !fuzzable.includes(t));
+
+    // If literally no token is fuzzable (e.g. user typed "1 2 3"), give up —
+    // strict empty result stays.
+    if (fuzzable.length === 0) {
+      setFilteredProducts([]);
+      setFuzzyHint(null);
+      return;
+    }
+
+    const allowedDist = (t) => (t.length >= 8 ? 2 : 1);
+    const candidates = allProducts.slice(0, 200);
+
+    const fuzzy = [];
+    for (const p of candidates) {
+      const name = (p.name || '').toLowerCase();
+      const sku = (p.sku || '').toLowerCase();
+      const barcode = (p.barcode || '').toLowerCase();
+      const haystack = `${name} ${sku} ${barcode}`;
+
+      // Every exact-required token still needs a literal hit
+      if (!exactRequired.every(t => haystack.includes(t))) continue;
+
+      // Split haystack into words once per product
+      const words = haystack.split(/[\s\-/,]+/).filter(Boolean);
+
+      // Each fuzzable token must either substring-match the haystack OR be
+      // within `allowedDist(t)` of at least one whole word in the haystack
+      let totalEdits = 0;
+      let matchedAll = true;
+      for (const t of fuzzable) {
+        if (haystack.includes(t)) continue; // exact wins, 0 edits
+        let best = Infinity;
+        const limit = allowedDist(t);
+        for (const w of words) {
+          // Length pre-filter: if word length differs by > limit, skip
+          if (Math.abs(w.length - t.length) > limit) continue;
+          const d = levenshteinAtMost(t, w, limit);
+          if (d < best) best = d;
+          if (best === 0) break;
+        }
+        if (best > limit) { matchedAll = false; break; }
+        totalEdits += best;
+      }
+      if (!matchedAll) continue;
+      fuzzy.push({ p, edits: totalEdits, len: name.length });
+    }
+
+    if (fuzzy.length > 0) {
+      fuzzy.sort((a, b) => a.edits - b.edits || a.len - b.len);
+      setFilteredProducts(fuzzy.slice(0, 50).map(m => m.p));
+      setFuzzyHint({ query: search.trim(), count: fuzzy.length });
+    } else {
+      setFilteredProducts([]);
+      setFuzzyHint(null);
+    }
   }, [search, allProducts]);
 
   const filteredCusts = custSearch 
@@ -2310,6 +2428,24 @@ export default function UnifiedSalesPage() {
                     Products
                   </kbd>
                 </div>
+                {fuzzyHint && (
+                  <div data-testid="fuzzy-hint-banner"
+                    className="mt-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
+                    <AlertTriangle size={14} className="text-amber-600 shrink-0" />
+                    <span className="flex-1">
+                      No exact match for <strong>"{fuzzyHint.query}"</strong> — showing
+                      {' '}{fuzzyHint.count} closest match{fuzzyHint.count === 1 ? '' : 'es'}.
+                      Did you mistype?
+                    </span>
+                    <button
+                      type="button"
+                      data-testid="fuzzy-hint-clear"
+                      onClick={() => setSearch('')}
+                      className="shrink-0 px-2 py-0.5 text-[11px] font-medium text-amber-800 hover:bg-amber-100 rounded transition-colors">
+                      Clear
+                    </button>
+                  </div>
+                )}
               </div>
               <ScrollArea className="flex-1">
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">

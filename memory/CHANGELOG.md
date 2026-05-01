@@ -1,5 +1,28 @@
 # AgriBooks Changelog
 
+## Apr 30, 2026 — Typo-Tolerant Product Search Fallback (Sales Quick Mode)
+- Built on top of the token-AND search shipped earlier today. Strict pass
+  still runs first; the fuzzy fallback only kicks in when strict returns 0.
+- **Guardrails** (so search never goes "all over the place"):
+  - Tokens shorter than 4 chars OR purely numeric ("1", "2", "20kg") MUST
+    match exactly — prevents `Glimax 1` from leaking `Galimax 2` results.
+  - Levenshtein ≤ 1 edit for tokens 4–7 chars, ≤ 2 for tokens 8+ chars.
+  - Candidate pool capped at the first 200 products to keep typing snappy.
+  - Bounded `levenshteinAtMost` helper bails out per-row when the running
+    minimum exceeds `maxDist`, so most pairs short-circuit cheaply.
+- **UI banner** (`fuzzy-hint-banner`): when fuzzy results are shown, an amber
+  banner reads `No exact match for "X" — showing N closest matches. Did you
+  mistype?` with a `Clear` button to reset the search. The user is never
+  surprised by unexpected products in the grid.
+- Verified via REPL simulation:
+  - `Glimax` → finds both Galimax products (1 edit each)
+  - `Stater Vital` → finds Starter Premium Vital (1 edit)
+  - `Galimax 1` → only Galimax 1 (number stays exact, no Galimax 2 leak)
+  - `Glimax 1` → only Galimax 1 (typo recovers, number still exact)
+  - `vit` → Starter Premium Vital (short token uses exact substring path)
+  - `NotInName` → empty (no junk matches)
+
+
 ## Apr 30, 2026 — Smart Token-Based Product Search
 - **Frontend Quick-mode product grid** (`pages/UnifiedSalesPage.js`): rewrote
   the filter to split the query on whitespace / dashes / slashes / commas and
