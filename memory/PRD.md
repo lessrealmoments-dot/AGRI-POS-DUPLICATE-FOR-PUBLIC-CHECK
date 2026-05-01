@@ -1,5 +1,15 @@
 # AgriBooks PRD
 
+## Latest Iter 195 (May 1, 2026) — Test Stage button + Dynamic Price Scheme columns
+- "Test this Stage" button on each Team SMS Reminder row → fires `[SAMPLE]` SMS now
+- Org-wide vs per-branch behaviour clarified with banner (toggles=org-wide, close time=per-branch)
+- Import Center: dynamically renders one column per active price scheme (Retail/Wholesale/Credit/…) — both the column mapper and the downloaded CSV templates
+- Auto-detects file headers like "Credit Price" → maps to Credit scheme
+- New endpoint: `POST /api/sms/close-reminder/test-stage/{stage_key}`
+- Backend templates `/api/import/template/products` and `/api/import/template/branch-stock-and-price` now read `price_schemes` live
+
+---
+
 ## Original Problem Statement
 Build a full-featured POS system called **AgriBooks** with multi-tenant, multi-branch support including sales, purchase orders, inventory, branch transfers, accounting, employee management, and more. Extended with an AgriSmart Terminal (handheld Android + barcode scanner + thermal printer) and a QR-based operational workflow system.
 

@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useAuth, api } from '../contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -14,7 +14,12 @@ import {
 import { toast } from 'sonner';
 
 // ── System field definitions per import type ─────────────────────────────────
-const PRODUCT_FIELDS = [
+// Price-scheme rows (`{key}_price`) are injected dynamically at runtime from
+// /api/price-schemes so any scheme the org adds (Credit, VIP, Distributor…)
+// shows up here without a code change. The arrays below define only the
+// non-price scaffolding; the `useImportFields` hook below stitches them
+// together.
+const PRODUCT_FIELDS_BASE_PRE = [
   { key: 'name',           label: 'Product Name',           required: true  },
   { key: 'sku',            label: 'SKU / Code',             required: false },
   { key: 'unit',           label: 'Unit of Measurement',    required: false },
@@ -22,8 +27,8 @@ const PRODUCT_FIELDS = [
   { key: 'description',    label: 'Description',            required: false },
   { key: 'product_type',   label: 'Product Type',           required: false },
   { key: 'cost_price',     label: 'Cost / Purchase Price',  required: false },
-  { key: 'retail_price',   label: 'Retail Price',           required: false },
-  { key: 'wholesale_price',label: 'Wholesale Price',        required: false },
+];
+const PRODUCT_FIELDS_BASE_POST = [
   { key: 'reorder_point',  label: 'Reorder Point',          required: false },
 ];
 
@@ -32,11 +37,11 @@ const INVENTORY_FIELDS = [
   { key: 'quantity', label: 'Quantity',                                  required: true  },
 ];
 
-const BRANCH_STOCK_PRICE_FIELDS = [
+const BRANCH_STOCK_PRICE_BASE_PRE = [
   { key: 'name',           label: 'Product Name (must match catalog)', required: true  },
   { key: 'cost_price',     label: 'Cost / Capital Price',              required: false },
-  { key: 'retail_price',   label: 'Retail Price',                      required: false },
-  { key: 'wholesale_price',label: 'Wholesale Price',                   required: false },
+];
+const BRANCH_STOCK_PRICE_BASE_POST = [
   { key: 'quantity',       label: 'Quantity (empty = skip, type 0 to zero out)', required: false },
 ];
 
@@ -101,7 +106,53 @@ export default function ImportPage() {
   const [previewData, setPreviewData] = useState(null);        // for branch & customer preview
   const [decisions, setDecisions] = useState({});              // {row: {action, target_id}} for fuzzy customer matches
   const [openingBalanceDate, setOpeningBalanceDate] = useState(new Date().toISOString().slice(0, 10));
+  // Active price schemes (Retail / Wholesale / Credit / …) — drives the
+  // dynamic price columns in the mapper, the preview table, and the CSV
+  // template buttons. Refreshed when the user lands on the page so newly
+  // created schemes show up without a hard refresh.
+  const [priceSchemes, setPriceSchemes] = useState([]);
   const fileRef = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.get('/price-schemes')
+      .then(r => { if (!cancelled) setPriceSchemes(Array.isArray(r.data) ? r.data : []); })
+      .catch(() => { /* non-fatal — falls back to retail/wholesale defaults below */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Build the price-scheme field rows. Order matches the order returned by
+  // the API so the admin sees their schemes in the same order they manage
+  // them in Settings → Price Schemes. We exclude any scheme whose key would
+  // collide with our reserved cost/quantity rows.
+  const schemeFields = useMemo(() => {
+    const reserved = new Set(['cost', 'quantity', 'name', 'sku']);
+    const list = (priceSchemes || []).filter(s => s && s.key && !reserved.has(s.key));
+    // Sensible defaults so the page still works even if /price-schemes
+    // returns an empty list (fresh tenant with no schemes seeded yet).
+    if (list.length === 0) {
+      return [
+        { key: 'retail',    label: 'Retail Price' },
+        { key: 'wholesale', label: 'Wholesale Price' },
+      ].map(s => ({ key: `${s.key}_price`, label: s.label, required: false, schemeKey: s.key, schemeName: s.label.replace(' Price', '') }));
+    }
+    return list.map(s => ({
+      key: `${s.key}_price`,
+      label: `${s.name} Price`,
+      required: false,
+      schemeKey: s.key,
+      schemeName: s.name,
+    }));
+  }, [priceSchemes]);
+
+  const PRODUCT_FIELDS = useMemo(
+    () => [...PRODUCT_FIELDS_BASE_PRE, ...schemeFields, ...PRODUCT_FIELDS_BASE_POST],
+    [schemeFields],
+  );
+  const BRANCH_STOCK_PRICE_FIELDS = useMemo(
+    () => [...BRANCH_STOCK_PRICE_BASE_PRE, ...schemeFields, ...BRANCH_STOCK_PRICE_BASE_POST],
+    [schemeFields],
+  );
 
   const fields =
     importType === 'inventory-seed'      ? INVENTORY_FIELDS
@@ -134,14 +185,57 @@ export default function ImportPage() {
         setMapping(importType === 'inventory-seed' ? QB_INV_MAPPING : QB_MAPPING);
         toast.success('QuickBooks format detected — columns auto-mapped');
       } else {
-        setMapping({});
+        // Best-effort auto-map: match each scheme to a header that contains
+        // the scheme name + "price" (case-insensitive). Lets a column called
+        // "Credit Price" or "credit price" snap to the Credit scheme without
+        // the user touching the dropdown.
+        const auto = {};
+        const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+        const headerNorms = h.map(x => ({ raw: x, n: norm(x) }));
+        const findHeader = (...needles) => {
+          for (const { raw, n } of headerNorms) {
+            if (needles.every(x => n.includes(norm(x)))) return raw;
+          }
+          return null;
+        };
+        // Scheme price columns
+        for (const sf of schemeFields) {
+          const m = findHeader(sf.schemeName, 'price');
+          if (m) auto[sf.key] = m;
+        }
+        // Common non-scheme columns — only set if obvious
+        const tryMap = (key, ...needles) => {
+          if (auto[key]) return;
+          const m = findHeader(...needles);
+          if (m) auto[key] = m;
+        };
+        tryMap('name', 'product', 'name');
+        tryMap('name', 'item', 'name');
+        tryMap('sku', 'sku');
+        tryMap('cost_price', 'cost');
+        tryMap('cost_price', 'capital');
+        tryMap('quantity', 'quantity');
+        tryMap('quantity', 'qty');
+        tryMap('unit', 'unit');
+        tryMap('category', 'category');
+        if (Object.keys(auto).length > 0) {
+          setMapping(auto);
+          const matchedSchemes = schemeFields.filter(sf => auto[sf.key]).map(sf => sf.schemeName);
+          if (matchedSchemes.length > 0) {
+            toast.success(`Auto-mapped ${Object.keys(auto).length} column(s) — including ${matchedSchemes.join(', ')}`);
+          } else {
+            toast.success(`Auto-mapped ${Object.keys(auto).length} column(s)`);
+          }
+        } else {
+          setMapping({});
+        }
       }
       setStep('map');
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Could not read file');
     }
     setLoading(false);
-  }, [importType]);
+  }, [importType, schemeFields]);
 
   const onDrop = (e) => {
     e.preventDefault();
@@ -563,7 +657,25 @@ export default function ImportPage() {
           {/* Column mapper */}
           <Card className="border-slate-200">
             <CardHeader className="py-3 px-5 bg-slate-50 border-b">
-              <CardTitle className="text-sm font-semibold text-slate-600 uppercase tracking-wide">Column Mapping</CardTitle>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <CardTitle className="text-sm font-semibold text-slate-600 uppercase tracking-wide">Column Mapping</CardTitle>
+                {/* Surface which scheme columns the mapper is offering, so
+                    the admin can confirm "yes Credit Price is available"
+                    without scrolling. Only shown when relevant import types. */}
+                {(importType === 'products' || importType === 'products-update' || importType === 'branch-stock-price') && schemeFields.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1 text-[11px] text-slate-500">
+                    <span>Active price schemes:</span>
+                    {schemeFields.map(sf => (
+                      <Badge
+                        key={sf.schemeKey}
+                        data-testid={`scheme-badge-${sf.schemeKey}`}
+                        className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-medium">
+                        {sf.schemeName}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               <Table>
@@ -723,8 +835,11 @@ export default function ImportPage() {
                     <TableRow className="bg-slate-50">
                       <TableHead className="text-xs">Product</TableHead>
                       <TableHead className="text-xs text-right">New Cost</TableHead>
-                      <TableHead className="text-xs text-right">New Retail</TableHead>
-                      <TableHead className="text-xs text-right">New Wholesale</TableHead>
+                      {schemeFields.map(sf => (
+                        <TableHead key={sf.schemeKey} className="text-xs text-right">
+                          New {sf.schemeName}
+                        </TableHead>
+                      ))}
                       <TableHead className="text-xs text-right">New Qty</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -732,10 +847,18 @@ export default function ImportPage() {
                     {previewData.matched.map((m, i) => (
                       <TableRow key={i} className="text-sm">
                         <TableCell className="font-medium">{m.name}<div className="text-[10px] text-slate-400 font-mono">{m.sku}</div></TableCell>
-                        <TableCell className="text-right text-xs">{m.new_cost !== null ? `₱${Number(m.new_cost).toFixed(2)}` : <span className="text-slate-300">—</span>}</TableCell>
-                        <TableCell className="text-right text-xs">{m.new_prices?.retail !== undefined ? `₱${Number(m.new_prices.retail).toFixed(2)}` : <span className="text-slate-300">—</span>}</TableCell>
-                        <TableCell className="text-right text-xs">{m.new_prices?.wholesale !== undefined ? `₱${Number(m.new_prices.wholesale).toFixed(2)}` : <span className="text-slate-300">—</span>}</TableCell>
-                        <TableCell className="text-right text-xs">{m.new_qty !== null ? Number(m.new_qty).toFixed(0) : <span className="text-slate-300">—</span>}</TableCell>
+                        <TableCell className="text-right text-xs">{m.new_cost !== null && m.new_cost !== undefined ? `₱${Number(m.new_cost).toFixed(2)}` : <span className="text-slate-300">—</span>}</TableCell>
+                        {schemeFields.map(sf => {
+                          const val = m.new_prices?.[sf.schemeKey];
+                          return (
+                            <TableCell key={sf.schemeKey} className="text-right text-xs">
+                              {val !== undefined && val !== null
+                                ? `₱${Number(val).toFixed(2)}`
+                                : <span className="text-slate-300">—</span>}
+                            </TableCell>
+                          );
+                        })}
+                        <TableCell className="text-right text-xs">{m.new_qty !== null && m.new_qty !== undefined ? Number(m.new_qty).toFixed(0) : <span className="text-slate-300">—</span>}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

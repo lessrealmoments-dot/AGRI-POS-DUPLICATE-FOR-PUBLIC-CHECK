@@ -796,23 +796,62 @@ async def import_inventory_seed(
 
 @router.get("/template/{template_type}")
 async def download_template(template_type: str, user=Depends(get_current_user)):
-    """Download a CSV template for the specified import type."""
+    """Download a CSV template for the specified import type.
+
+    For product / branch-stock-and-price templates, the price-scheme columns
+    are sourced live from `price_schemes` so a tenant who's added a "Credit"
+    scheme gets a "Credit Price" column in their downloaded template — no
+    code change needed when new schemes are introduced.
+    """
+    # Resolve active price-scheme display columns once. We special-case
+    # cost/quantity (separate columns) and skip any scheme whose key would
+    # collide with non-price reserved columns. Order = API order so the CSV
+    # matches the on-screen mapper.
+    scheme_docs = await db.price_schemes.find(
+        {"active": True}, {"_id": 0, "key": 1, "name": 1}
+    ).to_list(50)
+    reserved = {"cost", "quantity", "name", "sku"}
+    active_schemes = [s for s in (scheme_docs or []) if s.get("key") and s["key"] not in reserved]
+    if not active_schemes:
+        # Fallback for fresh tenants — keeps the template usable.
+        active_schemes = [{"key": "retail", "name": "Retail"},
+                          {"key": "wholesale", "name": "Wholesale"}]
+    scheme_cols = [f"{s['name']} Price" for s in active_schemes]
+
     if template_type == "products":
         headers = ["Product Name", "SKU", "Category", "Unit", "Description", "Type",
-                   "Retail Price", "Wholesale Price", "Cost Price", "Reorder Point"]
+                   *scheme_cols, "Cost Price", "Reorder Point"]
+        # Sample row — derive a plausible example for each scheme so the
+        # admin sees the expected format. Retail >= Wholesale >= Cost is the
+        # convention; new schemes get a placeholder midway.
+        scheme_sample_a = ["1500" if s["key"] == "retail"
+                           else "1350" if s["key"] == "wholesale"
+                           else "1400"
+                           for s in active_schemes]
+        scheme_sample_b = ["250" if s["key"] == "retail"
+                           else "225" if s["key"] == "wholesale"
+                           else "235"
+                           for s in active_schemes]
         sample = [["Sample Product A", "PROD-001", "Feeds", "BAG", "50kg bag", "stockable",
-                   "1500", "1350", "1200", "10"],
+                   *scheme_sample_a, "1200", "10"],
                   ["Sample Product B", "", "Pesticide", "BOTTLE", "", "stockable",
-                   "250", "225", "200", "5"]]
+                   *scheme_sample_b, "200", "5"]]
     elif template_type == "inventory-seed":
         headers = ["Product Name", "Quantity"]
         sample = [["Sample Product A", "50"],
                   ["Sample Product B", "120"]]
     elif template_type == "branch-stock-and-price":
-        headers = ["Product Name", "Cost Price", "Retail Price",
-                   "Wholesale Price", "Quantity"]
-        sample = [["Sample Product A", "1180", "1500", "1350", "40"],
-                  ["Sample Product B", "195", "260", "230", ""]]
+        headers = ["Product Name", "Cost Price", *scheme_cols, "Quantity"]
+        scheme_sample_a = ["1500" if s["key"] == "retail"
+                           else "1350" if s["key"] == "wholesale"
+                           else "1400"
+                           for s in active_schemes]
+        scheme_sample_b = ["260" if s["key"] == "retail"
+                           else "230" if s["key"] == "wholesale"
+                           else "245"
+                           for s in active_schemes]
+        sample = [["Sample Product A", "1180", *scheme_sample_a, "40"],
+                  ["Sample Product B", "195",  *scheme_sample_b, ""]]
     elif template_type == "customers":
         headers = ["Customer Name", "Phone", "Phone 2", "Email", "Address",
                    "Price Scheme", "Credit Limit", "Interest Rate",

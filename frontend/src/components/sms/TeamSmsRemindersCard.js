@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
-import { Loader2, BellRing, Clock, CheckCircle2 } from 'lucide-react';
+import { Loader2, BellRing, Clock, CheckCircle2, Send } from 'lucide-react';
 
 import { api } from '../../contexts/AuthContext';
 import { Card, CardContent } from '../ui/card';
@@ -57,6 +57,9 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
   const [savingBranch, setSavingBranch] = useState({});
   // Which branch drives the "Fires at" preview next to each stage row.
   const [previewBranchId, setPreviewBranchId] = useState('');
+  // Which stage row is currently firing a test SMS (so we can disable the
+  // button + show a spinner without a full-card re-render).
+  const [testing, setTesting] = useState({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -135,6 +138,32 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
     setSavingBranch(s => ({ ...s, [branchId]: false }));
   };
 
+  // Fire a [SAMPLE] SMS for a single stage right now, against the branch
+  // currently selected in the Preview column. Resolves recipients exactly
+  // like the live scheduler does, so admins can verify routing without
+  // waiting for the real trigger time.
+  const testStage = async (stage_key) => {
+    if (!previewBranchId) {
+      toast.error('Pick a branch with "Preview" first so the test knows which team to notify.');
+      return;
+    }
+    setTesting(t => ({ ...t, [stage_key]: true }));
+    try {
+      const r = await api.post(`/sms/close-reminder/test-stage/${stage_key}`, {
+        branch_id: previewBranchId,
+      });
+      const count = r.data?.queued || 0;
+      if (count === 0) {
+        toast.warning('Queued 0 recipients — check that roles have phone numbers in Team.');
+      } else {
+        toast.success(`[SAMPLE] queued for ${count} recipient${count === 1 ? '' : 's'}.`);
+      }
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Test SMS failed');
+    }
+    setTesting(t => ({ ...t, [stage_key]: false }));
+  };
+
   if (loading) {
     return (
       <Card className="border-emerald-200">
@@ -166,6 +195,21 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
             Toggle each reminder stage on/off and pick which of your team
             roles receives it. Times are computed from each branch's close
             time — configure that below.
+          </p>
+        </div>
+
+        {/* Clarifier — these toggles are ORG-wide, not per-branch. The
+            "Preview" button only swaps which branch's close time drives the
+            "Fires at" label. Without this banner, admins were toggling roles
+            after clicking Preview on Branch B and assuming the change was
+            scoped to that branch — it wasn't. */}
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-900 leading-relaxed">
+          <p className="font-semibold mb-0.5">How these settings apply</p>
+          <p>
+            Stage <strong>on/off</strong> and <strong>recipient roles</strong> are saved <strong>once for your whole company</strong> — they
+            apply to every branch. Only the <strong>close time</strong> below
+            is per-branch. The <em>Preview</em> button just swaps which branch's
+            close time drives the "Fires at" preview; it doesn't scope the toggles.
           </p>
         </div>
 
@@ -247,6 +291,23 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
                           <BellRing size={10} />
                           Fires at {fires}
                         </span>
+                      )}
+                      {/* Test button — fires a [SAMPLE] SMS now to whoever is
+                          currently configured for this stage, against the
+                          branch picked in Preview. Hidden when stage is off. */}
+                      {s.enabled && previewBranch && (s.recipients || []).length > 0 && (
+                        <button
+                          type="button"
+                          data-testid={`stage-test-${s.stage_key}`}
+                          disabled={!!testing[s.stage_key]}
+                          onClick={() => testStage(s.stage_key)}
+                          title={`Send a [SAMPLE] SMS now to ${(s.recipients || []).join(', ')} for ${previewBranch.name}`}
+                          className="ml-auto inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-40">
+                          {testing[s.stage_key]
+                            ? <Loader2 size={10} className="animate-spin" />
+                            : <Send size={10} />}
+                          Test
+                        </button>
                       )}
                     </div>
                     <p className="text-[11px] text-slate-500 mt-0.5">{s.timing}</p>

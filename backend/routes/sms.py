@@ -1572,6 +1572,112 @@ async def update_branch_close_time(branch_id: str, data: dict, user=Depends(get_
     return {"branch_id": branch_id, "close_time_h": close_time_h}
 
 
+@router.post("/close-reminder/test-stage/{stage_key}")
+async def test_close_reminder_stage(stage_key: str, data: dict = None, user=Depends(get_current_user)):
+    """Fire a [SAMPLE] SMS for ONE stage immediately to the stage's currently-
+    configured roles, scoped to a specific branch. Lets an admin verify that
+    routing works end-to-end without waiting for the scheduled trigger.
+
+    Body:
+      { branch_id: "..." }   # required — roles resolve against this branch
+
+    Uses the same role → user phone resolution the live scheduler uses, but
+    builds a short [SAMPLE] body so customers/staff can't confuse it with a
+    real alert. Bypasses the dedup log so the admin can retest freely.
+    """
+    check_perm(user, "settings", "edit")
+    from routes.close_reminder import STAGE_DEFAULTS, _load_stage_settings, _resolve_recipients
+    if stage_key not in STAGE_DEFAULTS:
+        raise HTTPException(status_code=404, detail=f"Unknown stage: {stage_key}")
+
+    data = data or {}
+    branch_id = (data.get("branch_id") or "").strip()
+    if not branch_id:
+        raise HTTPException(status_code=400, detail="branch_id is required")
+
+    org_id = user.get("organization_id") or ""
+    branch = await db.branches.find_one(
+        {"id": branch_id, "organization_id": org_id},
+        {"_id": 0, "id": 1, "name": 1},
+    )
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+
+    # Resolve the stage's CURRENT effective settings (org override → defaults).
+    merged = await _load_stage_settings(org_id)
+    cfg = merged.get(stage_key) or {}
+    if not cfg.get("enabled", True):
+        raise HTTPException(
+            status_code=400,
+            detail="This stage is currently disabled. Enable it first, then test.",
+        )
+    role_keys = list(cfg.get("recipients") or [])
+    if not role_keys:
+        raise HTTPException(
+            status_code=400,
+            detail="No recipient roles configured for this stage. Pick at least one role, then test.",
+        )
+
+    recipients = await _resolve_recipients(org_id, branch_id, role_keys)
+    if not recipients:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No users with phone numbers match the selected roles for this branch. "
+                "Add a phone number to a team member in the Team section, then retry."
+            ),
+        )
+
+    company_name = await _resolve_company_name()
+    sender = user.get("full_name") or user.get("email", "")
+    label = _STAGE_META.get(stage_key, {}).get("label", stage_key)
+
+    queued = []
+    for r in recipients:
+        body = (
+            f"[SAMPLE] {label} test — {company_name or 'AgriBooks'} / {branch.get('name', '')}. "
+            f"Hi {r.get('name') or r.get('role') or 'team'}, kung nakatanggap ka ng SMS na ito, "
+            f"gumagana nang tama ang reminder routing para sa '{label}' stage. "
+            f"Walang aksyon na kailangan. Sent by: {sender}."
+        )
+        doc = {
+            "id": new_id(),
+            "organization_id": org_id,
+            "template_key": f"sample_stage_test:{stage_key}",
+            "customer_id": r.get("id") or "",
+            "customer_name": f"{(r.get('role') or 'team').title()} — {branch.get('name', '')}",
+            "phone": r["phone"],
+            "message": body,
+            "status": "pending",
+            "trigger": "manual",
+            "trigger_ref": f"test_stage:{stage_key}:{branch_id}",
+            "dedup_key": "",
+            "branch_id": branch_id,
+            "branch_name": branch.get("name", ""),
+            "sent_by_name": sender,
+            "created_at": now_iso(),
+            "sent_at": None,
+            "failed_at": None,
+            "error": None,
+            "retry_count": 0,
+        }
+        await db.sms_queue.insert_one(doc)
+        queued.append({
+            "phone": r["phone"],
+            "role": r.get("role"),
+            "name": r.get("name"),
+        })
+
+    return {
+        "stage_key": stage_key,
+        "stage_label": label,
+        "branch_id": branch_id,
+        "branch_name": branch.get("name", ""),
+        "queued": len(queued),
+        "recipients": queued,
+    }
+
+
 # ── Stats ───────────────────────────────────────────────────────────────────
 
 @router.get("/stats")

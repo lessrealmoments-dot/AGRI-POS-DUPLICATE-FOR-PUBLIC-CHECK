@@ -1,5 +1,51 @@
 # AgriBooks Changelog
 
+## May 1, 2026 — Test Stage Button + Dynamic Price Scheme Columns (Iter 195)
+
+**Two improvements**:
+
+### Test Stage button (Team SMS Reminders)
+Each stage row now has an inline **"Test"** button that fires a `[SAMPLE]` SMS
+*right now* to the stage's currently-configured roles for the branch picked
+in **Preview**. Lets admins verify routing without waiting for the real
+trigger time.
+- **Backend**: `POST /api/sms/close-reminder/test-stage/{stage_key}`
+  with `{ branch_id }`. Resolves recipients via the same path the live
+  scheduler uses, builds a `[SAMPLE]` body, queues directly to `sms_queue`.
+  Bypasses the dedup log so it can be retested freely. Refuses if the stage
+  is currently disabled or no users with phones match the roles.
+- **Frontend** (`TeamSmsRemindersCard.js`): per-row Test button appears only
+  when stage is enabled + a Preview branch is picked + at least one role is
+  configured. Spinner during firing, toast with recipient count on success.
+- **UI clarifier banner** added: explains stage on/off + role toggles are
+  **org-wide**, only close times are per-branch. Fixes the confusion where
+  users thought clicking "Preview Branch 1" then toggling roles scoped the
+  change to that branch.
+- Tests: `tests/test_test_stage_button_195.py` (5 tests: missing branch,
+  unknown stage, disabled stage, no recipients with phones, happy-path queue).
+
+### Dynamic price scheme columns (Import Center)
+Import Center → Branch Stock + Price (and New Product Catalog) now
+automatically show a column for **every active price scheme** — Retail,
+Wholesale, Credit, and any future scheme the admin creates. No code change
+needed when a new scheme is added.
+- **Frontend** (`ImportPage.js`):
+  - Loads `/api/price-schemes` on mount, builds `PRODUCT_FIELDS` and
+    `BRANCH_STOCK_PRICE_FIELDS` dynamically from the result.
+  - "Active price schemes" badge row above the column mapper shows what's
+    available.
+  - Auto-mapping logic now matches headers like "Credit Price" /
+    "credit price" to the matching scheme automatically.
+  - Preview table renders one "New {Scheme}" column per active scheme
+    (replaces hardcoded New Retail / New Wholesale).
+- **Backend** (`routes/import_data.py`):
+  - `GET /api/import/template/{products|branch-stock-and-price}` now reads
+    active `price_schemes` and emits a `{Scheme} Price` column for each.
+    Sample rows updated accordingly.
+- Tests: `tests/test_test_stage_button_195.py` covers template inclusion of
+  Credit Price column when the scheme exists.
+
+
 ## May 1, 2026 — Phone Field on Team Users
 **Confirmed: SMS reminder roles resolve from the Users collection** (Team page),
 not the Collection Recipients. The Collection Recipients in
