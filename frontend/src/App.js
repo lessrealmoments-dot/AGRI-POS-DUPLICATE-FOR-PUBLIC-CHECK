@@ -43,6 +43,7 @@ import PaySupplierPage from './pages/PaySupplierPage';
 import ImportPage from './pages/ImportPage';
 import ReportsPage from './pages/ReportsPage';
 import PriceScanManager from './components/PriceScanManager';
+import CustomerDedupeManager from './components/CustomerDedupeManager';
 import ImpersonationBanner from './components/ImpersonationBanner';
 import ReturnRefundWizard from './pages/ReturnRefundWizard';
 import AuditCenterPage from './pages/AuditCenterPage';
@@ -81,6 +82,7 @@ function ProtectedRoute({ children }) {
     <Layout>
       <ImpersonationBanner />
       <PriceScanManager />
+      <CustomerDedupeManager />
       {children}
     </Layout>
   );
@@ -102,6 +104,7 @@ function AdminRoute({ children }) {
     <Layout>
       <ImpersonationBanner />
       <PriceScanManager />
+      <CustomerDedupeManager />
       {children}
     </Layout>
   );

@@ -1,6 +1,18 @@
 # AgriBooks PRD
 
-## Latest Iter 196 (May 1, 2026) — Branch-Scoped Product Editing
+## Latest Iter 197 (May 1, 2026) — Customer Dedupe Manager + Bulk Delete + No-Blocker Import ⭐ Critical Fix
+- **Root-cause fix**: Customer importer previously silently dropped opening-balance invoices in 3 cases (exact name dupe, default "skip" on fuzzy rows, duplicate-within-file). Re-imports created ZERO OBs.
+- **New flow** validated with user: Import = dumb ingest (always new customer + OB invoice). Dedupe = background popup (mirrors PriceScanManager).
+- 4 new backend endpoints under `/api/customers`:
+  - `GET /-/duplicates` — union-find clusters by name-sim / phone-tail
+  - `POST /merge` — re-points invoices, merges fields (master wins if present, else dup fills), audit trail
+  - `POST /mark-distinct` — pairwise distinct decisions persisted (`customer_dedupe_decisions`)
+  - `POST /bulk-delete` — PIN-gated (`customer_bulk_delete` policy), guards balance/open-invoices, force-admin override
+- New frontend component `CustomerDedupeManager` — floating pill + merge dialog with master-radio + canonical-name input
+- Bulk select checkboxes, "no balance" filter, PIN-gated bulk-delete modal on CustomersPage
+- Tested: 6/6 new pytest passing
+
+## Iter 196 (May 1, 2026) — Branch-Scoped Product Editing
 - **Critical fix**: PUT /api/products/{id} now accepts `?branch_id=X`; when set, price/cost edits route to `branch_prices` instead of clobbering the master catalog
 - GET /api/products?branch_id=X merges branch overrides into each row + tags `price_source: "branch_override" | "global"`
 - Edit dialog shows scope banner (purple = branch / blue = master); per-row `⚙ Branch` chip surfaces overrides at-a-glance

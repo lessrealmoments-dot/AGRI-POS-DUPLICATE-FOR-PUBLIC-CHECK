@@ -1,5 +1,43 @@
 # AgriBooks Changelog
 
+## May 1, 2026 — Customer Dedupe Manager + Bulk Delete + No-Blocker Import (Iter 197) ⭐ Critical Bug Fix
+
+**Root cause fixed**: the customer importer previously had THREE silent failure modes where opening-balance invoices were simply dropped — `exact_dupe` rows (same name or phone as an existing customer), `fuzzy` rows left at the default `action=skip`, and `duplicate_within_file` rows. On a re-import of the same file, *every row* fell into `exact_dupe` and **zero** OB invoices were created, which is what the user was seeing.
+
+### New architecture (user-validated)
+- **Import = dumb ingest.** Every valid row becomes a new customer + OB invoice (if OB > 0). No duplicate blocking, no decision screen. This guarantees no opening balance is ever silently lost.
+- **Dedupe = background popup**, same UX as `PriceScanManager`. Scans the branch for fuzzy + phone-tail clusters on mount, every 5 min, on window focus, and on demand after import. A floating pill "N possible duplicates · M customers" surfaces when matches are found.
+- **Merge rule**: master's non-empty fields *win*. If master's field is empty/zero and a duplicate has a value, the duplicate's value is copied over. Phones are merged (master first, dups appended, dedup).
+
+### Backend
+- **`routes/import_data.py`** — `/customers/preview` and `/customers/commit` gutted. Preview now returns every row in `auto_create` + `total_opening_balance` + `existing_similar_count` (informational). Commit creates a new customer + OB invoice for every valid row.
+- **`routes/customers.py`** — four new endpoints:
+  - `GET /api/customers/-/duplicates` — union-find clusters by normalized-name equality, token-sorted similarity ≥0.85, or shared 9-digit phone tail. Excludes pairs marked "distinct". Returns per-member balance/invoice count, sorted with richest cluster first.
+  - `POST /api/customers/merge` — `{master_id, duplicate_ids[], canonical_name?}`. Re-points invoices / receivables / `sms_inbox` to master, fills empty master fields from dups, merges phones, soft-deletes dups with `merged_into=<master>`, recomputes balance from open invoices, writes to new `customer_merges` audit collection.
+  - `POST /api/customers/mark-distinct` — persists pairwise "distinct" decisions in `customer_dedupe_decisions`, scoped per-branch. Future scans skip those pairs (but WILL re-flag if a *new* third customer joins the cluster — exactly the user's spec).
+  - `POST /api/customers/bulk-delete` — **PIN-gated** via new `customer_bulk_delete` PIN policy (admin/manager/TOTP). Refuses customers with balance>0 or open invoices unless `force=true` (admin/owner only). Returns per-id deleted/blocked arrays.
+- **`routes/verify.py`** — two new PIN-policy actions: `customer_bulk_delete` and `customer_merge`.
+- Route ordering fix: `/duplicates` moved to `/-/duplicates` so it can't be shadowed by the dynamic `/{customer_id}` GET.
+
+### Frontend
+- **`components/CustomerDedupeManager.js`** (NEW) — mirrors `PriceScanManager`. Background scan, floating pill, full-screen dialog with per-cluster tables. Radio to pick master (user's choice), optional canonical-name rename, Merge / Different customers / Snooze buttons. Dispatches/listens on the `customer-dedupe-rescan` window event so the ImportPage can trigger an immediate rescan after commit.
+- **`pages/ImportPage.js`** — fuzzy review cards removed; replaced with a single blue notice card: "Duplicate review happens AFTER import. N rows look similar to existing customers — you can merge them later via the Duplicate Review popup." Shows total OB ₱ committed. Fires `customer-dedupe-rescan` event on successful import.
+- **`pages/CustomersPage.js`** — row checkboxes + select-all header, "Show only customers with no balance (safe to purge)" client-side filter, "Delete Selected (N)" button that opens a PIN-gated dialog with force-delete toggle (admin/owner only) and a per-id result view listing deleted + blocked rows with reasons.
+- **`App.js`** — `<CustomerDedupeManager />` mounted alongside `<PriceScanManager />` in both `ProtectedRoute` and `AdminRoute`.
+
+### Tests — `tests/test_customer_dedupe_bulk_delete_197.py` (6/6 passing)
+1. Importer creates NEW customer + OB invoice even when same-name customer already exists
+2. `/duplicates` clusters "James Ahig" ≡ "Ahig James", excludes unrelated customers
+3. `mark-distinct` removes a pair from subsequent scans
+4. `merge` moves invoices, merges fields, soft-deletes dups, writes audit trail, recomputes balance
+5. Merge rule "master wins if present" — master's non-empty email/address NOT overwritten
+6. Bulk-delete needs PIN, respects balance/open-invoice guards without `force`, admin-force works
+
+### Migration note for existing deployments
+Old customers that were silently skipped during previous imports (with their OB dropped) can now be re-imported — every row becomes a new customer regardless. The dedupe popup then lets you merge the duplicates together, which preserves both OB invoices on the master.
+
+
+
 ## May 1, 2026 — Branch-Scoped Product Editing (Iter 196) ⭐ Critical Bug Fix
 
 **Footgun closed**: when a user had a specific branch selected in the sidebar

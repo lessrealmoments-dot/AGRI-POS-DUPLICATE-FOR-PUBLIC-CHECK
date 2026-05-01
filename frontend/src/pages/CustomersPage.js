@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { ScrollArea } from '../components/ui/scroll-area';
-import { Users, Plus, Pencil, Trash2, Search, FileText, Eye, X, Printer } from 'lucide-react';
+import { Users, Plus, Pencil, Trash2, Search, FileText, Eye, X, Printer, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import CustomerStatementModal from '../components/CustomerStatementModal';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
@@ -31,9 +31,11 @@ const getSaleTypeBadge = (inv) => {
 };
 
 export default function CustomersPage() {
-  const { currentBranch, hasPerm } = useAuth();
+  const { currentBranch, hasPerm, user } = useAuth();
   const canViewBalance = hasPerm('customers', 'view_balance');
   const canManageCredit = hasPerm('customers', 'manage_credit');
+  const canDelete = hasPerm('customers', 'delete');
+  const isAdminOrOwner = user?.role === 'admin' || user?.role === 'owner' || user?.is_super_admin;
   const [customers, setCustomers] = useState([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState('');
@@ -43,6 +45,15 @@ export default function CustomersPage() {
   const [schemes, setSchemes] = useState([]);
   const LIMIT = 20;
   const [form, setForm] = useState({ name: '', phone: '', email: '', address: '', price_scheme: 'retail', credit_limit: 0, interest_rate: 0 });
+
+  // Bulk selection & bulk delete
+  const [selected, setSelected] = useState(new Set());
+  const [filterNoInvoice, setFilterNoInvoice] = useState(false);
+  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
+  const [bulkPin, setBulkPin] = useState('');
+  const [bulkForce, setBulkForce] = useState(false);
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  const [bulkResult, setBulkResult] = useState(null);
   
   // Transaction history
   const [historyDialog, setHistoryDialog] = useState(false);
@@ -63,11 +74,62 @@ export default function CustomersPage() {
       const res = await api.get('/customers', { params });
       setCustomers(res.data.customers);
       setTotal(res.data.total);
+      setSelected(new Set()); // reset selection on page/search change
     } catch { toast.error('Failed to load customers'); }
   }, [search, page, currentBranch]);
 
   useEffect(() => { fetchCustomers(); }, [fetchCustomers]);
   useEffect(() => { api.get('/price-schemes').then(r => setSchemes(r.data)).catch(() => {}); }, []);
+
+  // Derived list respecting the "no invoice" filter (applied client-side on the current page)
+  const visibleCustomers = filterNoInvoice
+    ? customers.filter(c => (c.balance || 0) <= 0)
+    : customers;
+  const allVisibleSelected = visibleCustomers.length > 0 && visibleCustomers.every(c => selected.has(c.id));
+  const toggleAllVisible = () => {
+    if (allVisibleSelected) {
+      const next = new Set(selected);
+      visibleCustomers.forEach(c => next.delete(c.id));
+      setSelected(next);
+    } else {
+      const next = new Set(selected);
+      visibleCustomers.forEach(c => next.add(c.id));
+      setSelected(next);
+    }
+  };
+  const toggleOne = (id) => {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelected(next);
+  };
+
+  const openBulkDelete = () => {
+    if (!selected.size) { toast.error('Pick at least one customer'); return; }
+    setBulkPin('');
+    setBulkForce(false);
+    setBulkResult(null);
+    setBulkDialogOpen(true);
+  };
+
+  const submitBulkDelete = async () => {
+    if (!bulkPin.trim()) { toast.error('PIN required'); return; }
+    setBulkSubmitting(true);
+    try {
+      const res = await api.post('/customers/bulk-delete', {
+        customer_ids: Array.from(selected),
+        pin: bulkPin.trim(),
+        force: bulkForce,
+      });
+      setBulkResult(res.data);
+      toast.success(`Deleted ${res.data.deleted_count}, blocked ${res.data.blocked_count}`);
+      setSelected(new Set());
+      fetchCustomers();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Bulk delete failed');
+    }
+    setBulkSubmitting(false);
+  };
 
   const openCreate = () => { 
     setEditing(null); 
@@ -143,14 +205,40 @@ export default function CustomersPage() {
             {total} customers{currentBranch ? ` — ${currentBranch.name}` : ' (all branches)'}
           </p>
         </div>
-        <Button data-testid="create-customer-btn" onClick={openCreate} className="bg-[#1A4D2E] hover:bg-[#14532d] text-white">
-          <Plus size={16} className="mr-2" /> Add Customer
-        </Button>
+        <div className="flex items-center gap-2">
+          {canDelete && selected.size > 0 && (
+            <Button
+              data-testid="bulk-delete-btn"
+              onClick={openBulkDelete}
+              variant="outline"
+              className="border-red-300 text-red-600 hover:bg-red-50"
+            >
+              <Trash2 size={14} className="mr-1.5" /> Delete Selected ({selected.size})
+            </Button>
+          )}
+          <Button data-testid="create-customer-btn" onClick={openCreate} className="bg-[#1A4D2E] hover:bg-[#14532d] text-white">
+            <Plus size={16} className="mr-2" /> Add Customer
+          </Button>
+        </div>
       </div>
 
-      <div className="relative max-w-sm">
-        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-        <Input data-testid="customer-search" value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} placeholder="Search by name or phone..." className="pl-9 h-10" />
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+        <div className="relative max-w-sm flex-1">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <Input data-testid="customer-search" value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} placeholder="Search by name or phone..." className="pl-9 h-10" />
+        </div>
+        {canDelete && (
+          <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer select-none" data-testid="filter-no-invoice-label">
+            <input
+              type="checkbox"
+              data-testid="filter-no-invoice-toggle"
+              checked={filterNoInvoice}
+              onChange={e => setFilterNoInvoice(e.target.checked)}
+              className="w-4 h-4 accent-[#1A4D2E]"
+            />
+            Show only customers with no balance (safe to purge)
+          </label>
+        )}
       </div>
 
       <Card className="border-slate-200">
@@ -158,6 +246,18 @@ export default function CustomersPage() {
           <Table>
             <TableHeader>
               <TableRow className="bg-slate-50">
+                {canDelete && (
+                  <TableHead className="w-10">
+                    <input
+                      type="checkbox"
+                      data-testid="select-all-customers"
+                      checked={allVisibleSelected}
+                      onChange={toggleAllVisible}
+                      className="w-4 h-4 accent-[#1A4D2E] cursor-pointer"
+                      aria-label="Select all customers on this page"
+                    />
+                  </TableHead>
+                )}
                 <TableHead className="text-xs uppercase tracking-wider text-slate-500 font-medium">Name</TableHead>
                 <TableHead className="text-xs uppercase tracking-wider text-slate-500 font-medium">Phone</TableHead>
                 <TableHead className="text-xs uppercase tracking-wider text-slate-500 font-medium">Price Scheme</TableHead>
@@ -168,8 +268,20 @@ export default function CustomersPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {customers.map(c => (
+              {visibleCustomers.map(c => (
                 <TableRow key={c.id} className="table-row-hover cursor-pointer" onClick={() => openHistory(c)}>
+                  {canDelete && (
+                    <TableCell onClick={e => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        data-testid={`select-customer-${c.id}`}
+                        checked={selected.has(c.id)}
+                        onChange={() => toggleOne(c.id)}
+                        className="w-4 h-4 accent-[#1A4D2E] cursor-pointer"
+                        aria-label={`Select ${c.name}`}
+                      />
+                    </TableCell>
+                  )}
                   <TableCell className="font-medium">{c.name}</TableCell>
                   <TableCell className="text-slate-500 text-xs">
                     {(c.phones?.length ? c.phones : (c.phone ? [c.phone] : [])).join(', ') || '—'}
@@ -205,9 +317,11 @@ export default function CustomersPage() {
                   </TableCell>
                 </TableRow>
               ))}
-              {!customers.length && (
-                <TableRow><TableCell colSpan={currentBranch ? (4 + (canViewBalance ? 2 : 0)) : (5 + (canViewBalance ? 2 : 0))} className="text-center py-8 text-slate-400">
-                  {currentBranch ? `No customers for ${currentBranch.name} yet` : 'No customers found'}
+              {!visibleCustomers.length && (
+                <TableRow><TableCell colSpan={(canDelete ? 1 : 0) + (currentBranch ? (4 + (canViewBalance ? 2 : 0)) : (5 + (canViewBalance ? 2 : 0)))} className="text-center py-8 text-slate-400">
+                  {filterNoInvoice
+                    ? 'No customers with zero balance match your filter.'
+                    : (currentBranch ? `No customers for ${currentBranch.name} yet` : 'No customers found')}
                 </TableCell></TableRow>
               )}
             </TableBody>
@@ -469,6 +583,121 @@ export default function CustomersPage() {
         onOpenChange={setInvoiceModalOpen}
         invoiceNumber={selectedInvoiceNumber}
       />
+
+      {/* Bulk Delete Dialog — PIN-gated */}
+      <Dialog open={bulkDialogOpen} onOpenChange={(v) => { setBulkDialogOpen(v); if (!v) setBulkResult(null); }}>
+        <DialogContent className="sm:max-w-lg" data-testid="bulk-delete-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-700" style={{ fontFamily: 'Manrope' }}>
+              <AlertTriangle size={18} /> Delete {selected.size} Customer{selected.size === 1 ? '' : 's'}?
+            </DialogTitle>
+          </DialogHeader>
+
+          {!bulkResult ? (
+            <div className="space-y-4 mt-2">
+              <div className="bg-red-50 border border-red-200 rounded p-3 text-xs text-red-800">
+                <p className="font-semibold mb-1">This action cannot be easily undone.</p>
+                <ul className="list-disc ml-4 space-y-0.5">
+                  <li>By default, only customers with <strong>zero balance and no open invoices</strong> will be deleted. Others will be reported as blocked.</li>
+                  <li>Customers are soft-deleted (hidden, not hard-purged).</li>
+                  <li>PIN is required: owner / admin / manager / auditor PIN or TOTP.</li>
+                </ul>
+              </div>
+
+              <div>
+                <Label htmlFor="bulk-delete-pin">Enter PIN</Label>
+                <Input
+                  id="bulk-delete-pin"
+                  data-testid="bulk-delete-pin-input"
+                  type="password"
+                  value={bulkPin}
+                  onChange={e => setBulkPin(e.target.value)}
+                  autoFocus
+                  placeholder="Admin / Manager / TOTP"
+                  autoComplete="one-time-code"
+                />
+              </div>
+
+              {isAdminOrOwner && (
+                <label className="flex items-start gap-2 text-xs text-slate-600 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    data-testid="bulk-delete-force-toggle"
+                    checked={bulkForce}
+                    onChange={e => setBulkForce(e.target.checked)}
+                    className="w-4 h-4 accent-red-600 mt-0.5"
+                  />
+                  <span>
+                    <strong className="text-red-700">Force delete</strong> — override balance & open-invoice guard.
+                    Orphans any remaining invoices/receivables. Admin/owner only.
+                  </span>
+                </label>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <Button variant="outline" onClick={() => setBulkDialogOpen(false)} disabled={bulkSubmitting}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={submitBulkDelete}
+                  disabled={bulkSubmitting || !bulkPin.trim()}
+                  className="bg-red-600 hover:bg-red-700 text-white"
+                  data-testid="bulk-delete-confirm-btn"
+                >
+                  {bulkSubmitting ? 'Deleting…' : `Delete ${selected.size}`}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3 mt-2" data-testid="bulk-delete-result">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-emerald-50 border border-emerald-200 rounded p-3 text-center">
+                  <p className="text-2xl font-bold text-emerald-700">{bulkResult.deleted_count}</p>
+                  <p className="text-xs text-emerald-800 mt-0.5">Deleted</p>
+                </div>
+                <div className="bg-amber-50 border border-amber-200 rounded p-3 text-center">
+                  <p className="text-2xl font-bold text-amber-700">{bulkResult.blocked_count}</p>
+                  <p className="text-xs text-amber-800 mt-0.5">Blocked</p>
+                </div>
+              </div>
+              {bulkResult.verified_by && (
+                <p className="text-[11px] text-slate-500 text-center">Verified by: <strong>{bulkResult.verified_by}</strong></p>
+              )}
+
+              {bulkResult.blocked?.length > 0 && (
+                <ScrollArea className="max-h-48 border rounded">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-slate-50">
+                        <TableHead className="text-xs">Blocked</TableHead>
+                        <TableHead className="text-xs">Reason</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {bulkResult.blocked.map(b => (
+                        <TableRow key={b.id}>
+                          <TableCell className="text-xs">{b.name || b.id}</TableCell>
+                          <TableCell className="text-xs text-slate-500">
+                            {b.reason === 'has_balance' ? `Balance ₱${Number(b.balance || 0).toFixed(2)}` :
+                             b.reason === 'has_open_invoices' ? `${b.open_invoices} open invoice(s)` :
+                             b.reason?.replace(/_/g, ' ')}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </ScrollArea>
+              )}
+
+              <div className="flex justify-end pt-2">
+                <Button onClick={() => setBulkDialogOpen(false)} className="bg-[#1A4D2E] hover:bg-[#14532d] text-white">
+                  Done
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

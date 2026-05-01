@@ -1226,11 +1226,16 @@ async def preview_customer_import(
     user=Depends(get_current_user),
 ):
     """
-    Analyze customer file. Categorizes rows into:
-    - auto_create: no match found, will be created
-    - exact_dupe: hard duplicate (same name OR same phone), will be skipped
-    - fuzzy: needs user decision (merge / create / skip-and-remember)
+    Analyze customer file. Every row is treated as a new customer — NO duplicate
+    blocking at import time. Duplicates are reviewed AFTER import via the
+    Customer Dedupe tool (pop-up like Smart Price Checker).
+
+    Returns:
+    - auto_create: rows ready to import (always includes every valid row)
     - errors: rows with parsing problems
+    - total_opening_balance: sum of opening balances that will be invoiced
+    - existing_similar_count: how many existing customers would later be flagged
+      as possible duplicates (informational only — does NOT block import).
     """
     check_perm(user, "customers", "create")
 
@@ -1252,25 +1257,16 @@ async def preview_customer_import(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # Load all active customers for this branch — used for dupe detection
+    # Load existing active customers (informational — for existing_similar_count only)
     candidates = await db.customers.find(
         {"branch_id": branch_id, "active": True},
         {"_id": 0, "id": 1, "name": 1, "phone": 1, "phones": 1},
     ).to_list(20000)
 
-    # Load remembered "skip & treat as different" decisions for this branch
-    remembered = await db.customer_import_decisions.find(
-        {"branch_id": branch_id}, {"_id": 0}
-    ).to_list(10000)
-    # Set of (norm_name, existing_customer_id) pairs already declared distinct
-    distinct_pairs = {(d["norm_name"], d["existing_id"]) for d in remembered if d.get("decision") == "distinct"}
-
     auto_create = []
-    exact_dupe = []
-    fuzzy = []
     errors = []
-
-    seen_in_file_norm = set()  # detect duplicates *within the file itself*
+    total_opening_balance = 0.0
+    rows_with_similar_existing = 0
 
     for i, row in enumerate(rows, start=2):
         try:
@@ -1278,56 +1274,34 @@ async def preview_customer_import(
             if not payload["name"]:
                 continue
 
-            norm = _norm_name(payload["name"])
-            # Dupe within this same file
-            if norm in seen_in_file_norm:
-                exact_dupe.append({
-                    "row": i, "name": payload["name"],
-                    "reason": "duplicate_within_file",
-                    "matches": [],
-                })
-                continue
-            seen_in_file_norm.add(norm)
-
-            classification = await _find_customer_dupes(payload, branch_id, candidates)
-
-            if classification["verdict"] == "exact":
-                exact_dupe.append({
-                    "row": i, "name": payload["name"],
-                    "reason": classification["matches"][0].get("reason", "exact"),
-                    "matches": classification["matches"],
-                })
-                continue
-
-            if classification["verdict"] == "fuzzy":
-                # Filter out candidates the user previously declared "distinct"
-                remaining = [
-                    m for m in classification["matches"]
-                    if (norm, m["id"]) not in distinct_pairs
-                ]
-                if not remaining:
-                    auto_create.append({"row": i, "payload": payload})
-                    continue
-                fuzzy.append({
-                    "row": i,
-                    "payload": payload,
-                    "candidates": remaining,
-                })
-                continue
-
             auto_create.append({"row": i, "payload": payload})
+            ob = float(payload.get("opening_balance") or 0)
+            if ob > 0:
+                total_opening_balance += ob
+
+            # Count (don't block) if this row looks like an existing customer
+            classification = await _find_customer_dupes(payload, branch_id, candidates)
+            if classification["verdict"] in ("exact", "fuzzy"):
+                rows_with_similar_existing += 1
+
         except Exception as e:
             errors.append({"row": i, "name": _safe_str(row.get(col_map.get("name", ""), "")), "error": str(e)})
 
     return {
         "branch_id": branch_id,
         "auto_create": auto_create,
-        "exact_dupe": exact_dupe,
-        "fuzzy": fuzzy,
+        # Back-compat — frontend may still read these, always empty now
+        "exact_dupe": [],
+        "fuzzy": [],
         "errors": errors,
+        "total_opening_balance": round(total_opening_balance, 2),
+        "existing_similar_count": rows_with_similar_existing,
         "summary": (
-            f"{len(auto_create)} ready to import, {len(fuzzy)} need review, "
-            f"{len(exact_dupe)} duplicates (auto-skipped), {len(errors)} errors."
+            f"{len(auto_create)} customers will be imported. "
+            f"Opening balances total ₱{total_opening_balance:,.2f}. "
+            f"{rows_with_similar_existing} rows resemble existing customers — "
+            f"you can merge them afterwards via the Duplicate Review popup. "
+            f"{len(errors)} parse errors."
         ),
     }
 
@@ -1466,19 +1440,18 @@ async def commit_customer_import(
     file: UploadFile = File(...),
     mapping: str = Form(""),
     branch_id: str = Form(""),
-    decisions: str = Form("[]"),       # JSON list: [{row, action, target_id?}]
+    decisions: str = Form("[]"),       # kept for backward compat; ignored
     opening_balance_date: str = Form(""),  # YYYY-MM-DD; defaults to today
     user=Depends(get_current_user),
 ):
     """
-    Commit the customer import using the user's decisions on the fuzzy matches.
+    Commit the customer import. Every valid row becomes a new customer (plus
+    an opening-balance invoice when OB > 0). Duplicate detection happens
+    AFTER import via the Customer Dedupe pop-up — this keeps import simple
+    and ensures no opening balance ever gets silently dropped.
 
-    decisions[]: [
-      { "row": 5, "action": "merge", "target_id": "abc123" },        # update existing
-      { "row": 7, "action": "create" },                              # treat as new person
-      { "row": 9, "action": "skip" },                                # skip this row only
-      { "row": 11, "action": "skip_and_remember", "target_id": "x" } # remember pair as distinct
-    ]
+    The `decisions` form field is accepted but ignored (kept for compat with
+    older frontends during rollout).
     """
     check_perm(user, "customers", "create")
 
@@ -1488,15 +1461,13 @@ async def commit_customer_import(
     import json
     try:
         col_map = json.loads(mapping) if mapping else {}
-        decision_list = json.loads(decisions) if decisions else []
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON in mapping or decisions")
+        raise HTTPException(status_code=400, detail="Invalid JSON in mapping")
 
     if not col_map.get("name"):
         raise HTTPException(status_code=400, detail="Mapping must include 'name' field")
 
     ob_date = opening_balance_date or now_iso()[:10]
-    decision_by_row = {int(d["row"]): d for d in decision_list}
 
     try:
         content = await file.read()
@@ -1504,195 +1475,80 @@ async def commit_customer_import(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    candidates = await db.customers.find(
-        {"branch_id": branch_id, "active": True},
-        {"_id": 0, "id": 1, "name": 1, "phone": 1, "phones": 1},
-    ).to_list(20000)
-
-    remembered = await db.customer_import_decisions.find(
-        {"branch_id": branch_id}, {"_id": 0}
-    ).to_list(10000)
-    distinct_pairs = {(d["norm_name"], d["existing_id"]) for d in remembered if d.get("decision") == "distinct"}
-
     created = 0
-    merged = 0
     skipped = []
     invoiced = []         # rows where opening balance invoice was created
+    ob_amount_total = 0.0
     sms_queued = 0
     errors = []
-    seen_in_file_norm = set()
 
     for i, row in enumerate(rows, start=2):
         try:
             payload = _customer_payload_from_row(row, col_map)
             if not payload["name"]:
-                continue
-            norm = _norm_name(payload["name"])
-            if norm in seen_in_file_norm:
-                skipped.append({"row": i, "name": payload["name"], "reason": "duplicate_within_file"})
-                continue
-            seen_in_file_norm.add(norm)
-
-            decision = decision_by_row.get(i)
-            classification = await _find_customer_dupes(payload, branch_id, candidates)
-
-            # Hard exact duplicate → always skip
-            if classification["verdict"] == "exact" and not decision:
-                skipped.append({
-                    "row": i, "name": payload["name"],
-                    "reason": "exact_duplicate",
-                    "existing_id": classification["matches"][0]["id"],
-                })
+                skipped.append({"row": i, "name": "", "reason": "empty_name"})
                 continue
 
-            # Resolve target customer
-            target_customer = None
-            action = (decision or {}).get("action", "")
-
-            if action == "skip":
-                skipped.append({"row": i, "name": payload["name"], "reason": "user_skipped"})
-                continue
-
-            if action == "skip_and_remember":
-                tid = (decision or {}).get("target_id")
-                if tid:
-                    pair = (norm, tid)
-                    if pair not in distinct_pairs:
-                        await db.customer_import_decisions.insert_one({
-                            "id": new_id(),
-                            "branch_id": branch_id,
-                            "norm_name": norm,
-                            "existing_id": tid,
-                            "decision": "distinct",
-                            "decided_by_id": user["id"],
-                            "decided_by_name": user.get("full_name", user["username"]),
-                            "created_at": now_iso(),
-                        })
-                        distinct_pairs.add(pair)
-                # Then proceed to import as new
-                action = "create"
-
-            if action == "merge":
-                tid = (decision or {}).get("target_id")
-                if not tid:
-                    errors.append({"row": i, "name": payload["name"], "error": "merge requires target_id"})
-                    continue
-                target_customer = await db.customers.find_one({"id": tid, "active": True}, {"_id": 0})
-                if not target_customer:
-                    errors.append({"row": i, "name": payload["name"], "error": "merge target not found"})
-                    continue
-
-                # Merge: update non-empty fields; merge phones
-                merged_phones = list(dict.fromkeys(
-                    (target_customer.get("phones") or []) + (payload["phones"] or [])
-                ))
-                update = {
-                    "phones": merged_phones,
-                    "phone": merged_phones[0] if merged_phones else target_customer.get("phone", ""),
-                    "updated_at": now_iso(),
-                }
-                if payload["email"]:
-                    update["email"] = payload["email"]
-                if payload["address"]:
-                    update["address"] = payload["address"]
-                if payload["price_scheme"]:
-                    update["price_scheme"] = payload["price_scheme"]
-                if payload["credit_limit"] > 0:
-                    update["credit_limit"] = payload["credit_limit"]
-                if payload["interest_rate"] > 0:
-                    update["interest_rate"] = payload["interest_rate"]
-                if payload["grace_period"]:
-                    update["grace_period"] = payload["grace_period"]
-                await db.customers.update_one({"id": tid}, {"$set": update})
-                merged += 1
-                target_customer.update(update)
-
-            else:
-                # Create new — but first re-check fuzzy unless explicitly told to create
-                if classification["verdict"] == "fuzzy" and action != "create":
-                    # Filter out previously-distinct
-                    remaining = [m for m in classification["matches"] if (norm, m["id"]) not in distinct_pairs]
-                    if remaining:
-                        skipped.append({
-                            "row": i, "name": payload["name"],
-                            "reason": "needs_review_skipped",
-                            "matches": remaining,
-                        })
-                        continue
-
-                # Create new customer
-                phone_primary = payload["phones"][0] if payload["phones"] else ""
-                new_customer = {
-                    "id": new_id(),
-                    "name": payload["name"],
-                    "phone": phone_primary,
-                    "phones": payload["phones"],
-                    "email": payload["email"],
-                    "address": payload["address"],
-                    "price_scheme": payload["price_scheme"] or "retail",
-                    "credit_limit": payload["credit_limit"],
-                    "interest_rate": payload["interest_rate"],
-                    "grace_period": payload["grace_period"],
-                    "balance": 0.0,
-                    "branch_id": branch_id,
-                    "active": True,
-                    "imported_from": "customer_import",
-                    "created_at": now_iso(),
-                }
-                await db.customers.insert_one(new_customer)
-                new_customer.pop("_id", None)
-                target_customer = new_customer
-                created += 1
-                # Update candidates so subsequent rows in the same file see this person
-                candidates.append({
-                    "id": new_customer["id"], "name": new_customer["name"],
-                    "phone": phone_primary, "phones": payload["phones"],
-                })
+            # Create new customer (NO duplicate blocking — handled post-import)
+            phone_primary = payload["phones"][0] if payload["phones"] else ""
+            new_customer = {
+                "id": new_id(),
+                "name": payload["name"],
+                "phone": phone_primary,
+                "phones": payload["phones"],
+                "email": payload["email"],
+                "address": payload["address"],
+                "price_scheme": payload["price_scheme"] or "retail",
+                "credit_limit": payload["credit_limit"],
+                "interest_rate": payload["interest_rate"],
+                "grace_period": payload["grace_period"],
+                "balance": 0.0,
+                "branch_id": branch_id,
+                "active": True,
+                "imported_from": "customer_import",
+                "created_at": now_iso(),
+            }
+            await db.customers.insert_one(new_customer)
+            new_customer.pop("_id", None)
+            created += 1
 
             # Opening balance invoice + SMS
             ob = float(payload.get("opening_balance") or 0)
-            if ob > 0 and target_customer:
-                # Idempotency: don't double-invoice if customer already has one
-                existing_ob = await db.invoices.find_one(
-                    {"customer_id": target_customer["id"], "is_opening_balance": True,
-                     "status": {"$ne": "voided"}},
-                    {"_id": 0, "id": 1},
+            if ob > 0:
+                inv = await _create_opening_balance_invoice(
+                    new_customer, ob, branch_id, user, ob_date,
                 )
-                if not existing_ob:
-                    inv = await _create_opening_balance_invoice(
-                        target_customer, ob, branch_id, user, ob_date,
-                    )
-                    invoiced.append({"row": i, "customer_id": target_customer["id"],
-                                     "invoice_number": inv["invoice_number"], "amount": ob})
-                    # Refresh customer.balance from open invoices
-                    pipeline = [
-                        {"$match": {"customer_id": target_customer["id"],
-                                    "status": {"$nin": ["paid", "voided"]}}},
-                        {"$group": {"_id": None, "balance": {"$sum": "$balance"}}},
-                    ]
-                    agg = await db.invoices.aggregate(pipeline).to_list(1)
-                    new_bal = float(agg[0]["balance"]) if agg else 0.0
-                    await db.customers.update_one(
-                        {"id": target_customer["id"]},
-                        {"$set": {"balance": new_bal, "updated_at": now_iso()}},
-                    )
-                    sms_queued += await _send_opening_balance_sms(target_customer, ob, branch_id)
+                invoiced.append({
+                    "row": i,
+                    "customer_id": new_customer["id"],
+                    "customer_name": new_customer["name"],
+                    "invoice_number": inv["invoice_number"],
+                    "amount": ob,
+                })
+                ob_amount_total += ob
+                # Balance = the single OB invoice (no other invoices yet)
+                await db.customers.update_one(
+                    {"id": new_customer["id"]},
+                    {"$set": {"balance": ob, "updated_at": now_iso()}},
+                )
+                sms_queued += await _send_opening_balance_sms(new_customer, ob, branch_id)
 
         except Exception as e:
             errors.append({"row": i, "name": _safe_str(row.get(col_map.get("name", ""), "")), "error": str(e)})
 
     return {
         "created": created,
-        "merged": merged,
+        "merged": 0,  # no merges at import time — done post-import via dedupe tool
         "skipped": skipped,
         "invoiced_count": len(invoiced),
         "invoiced": invoiced[:200],
+        "ob_amount_total": round(ob_amount_total, 2),
         "sms_queued": sms_queued,
         "errors": errors,
         "summary": (
-            f"Created {created}, merged {merged}, skipped {len(skipped)}, "
-            f"opening-balance invoices: {len(invoiced)}, SMS queued: {sms_queued}, "
-            f"errors: {len(errors)}."
+            f"Created {created} customers, created {len(invoiced)} opening-balance "
+            f"invoices totalling ₱{ob_amount_total:,.2f}, queued {sms_queued} SMS, "
+            f"{len(errors)} errors. Review possible duplicates in the 'Duplicate Review' pop-up."
         ),
     }
 

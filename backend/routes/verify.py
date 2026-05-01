@@ -235,6 +235,9 @@ PIN_POLICY_ACTIONS = [
     # Supplier Payments — fund-source-aware PIN security
     {"key": "pay_po_standard",        "label": "Pay Supplier Invoice (Cash / Safe)", "module": "Purchase Orders", "defaults": ["admin_pin", "manager_pin", "totp"]},
     {"key": "pay_po_bank",            "label": "Pay Supplier Invoice (Bank / Digital)", "module": "Purchase Orders", "defaults": ["admin_pin", "totp"]},
+    # Customer Management — destructive bulk ops
+    {"key": "customer_bulk_delete",   "label": "Bulk Delete Customers",           "module": "Customers",         "defaults": ["admin_pin", "manager_pin", "totp"]},
+    {"key": "customer_merge",         "label": "Merge Duplicate Customers",       "module": "Customers",         "defaults": ["admin_pin", "manager_pin", "totp"]},
 ]
 
 # Build quick lookup: action_key → default methods

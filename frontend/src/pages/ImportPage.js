@@ -276,10 +276,10 @@ export default function ImportPage() {
         fd.append('branch_id', useBranch);
         const res = await api.post('/import/customers/preview', fd);
         setPreviewData(res.data);
-        // Init default decision for each fuzzy row = "skip" until user picks
-        const init = {};
-        (res.data.fuzzy || []).forEach(f => { init[f.row] = { action: 'skip' }; });
-        setDecisions(init);
+        // Customer imports no longer require per-row decisions — every row is
+        // imported as a new customer. Duplicate review happens post-import
+        // via the Customer Dedupe popup (see CustomerDedupeManager).
+        setDecisions({});
         setStep('preview');
       } else {
         if (importType === 'inventory-seed') {
@@ -318,14 +318,14 @@ export default function ImportPage() {
         const res = await api.post('/import/branch-stock-and-price', fd);
         setResult(res.data);
       } else {
-        // customers commit
-        const decisionList = Object.entries(decisions).map(([row, d]) => ({
-          row: parseInt(row, 10), ...d,
-        }));
-        fd.append('decisions', JSON.stringify(decisionList));
+        // customers commit — no decisions needed any more (every row → new customer)
+        fd.append('decisions', '[]');
         fd.append('opening_balance_date', openingBalanceDate);
         const res = await api.post('/import/customers/commit', fd);
         setResult(res.data);
+        // Tell CustomerDedupeManager to rescan — fresh imports often create
+        // clusters to review (e.g. re-import of same file).
+        try { window.dispatchEvent(new CustomEvent('customer-dedupe-rescan')); } catch {}
       }
       setStep('result');
     } catch (e) {
@@ -900,98 +900,26 @@ export default function ImportPage() {
             </Card>
           )}
 
-          {/* Customers — fuzzy review */}
-          {importType === 'customers' && previewData.fuzzy?.length > 0 && (
-            <Card className="border-amber-300 bg-amber-50/40">
-              <CardHeader className="py-3 px-5 bg-amber-50 border-b border-amber-200">
-                <CardTitle className="text-sm font-semibold text-amber-800">
-                  Possible Duplicates — Decide ({previewData.fuzzy.length})
+          {/* Customers — duplicate-review notice (post-import dedupe flow) */}
+          {importType === 'customers' && (previewData.existing_similar_count > 0 || previewData.auto_create?.length > 0) && (
+            <Card className="border-blue-200 bg-blue-50/50" data-testid="customer-dedupe-notice">
+              <CardHeader className="py-3 px-5">
+                <CardTitle className="text-sm font-semibold text-blue-800 flex items-center gap-2">
+                  <AlertTriangle size={14} /> Duplicate review happens AFTER import
                 </CardTitle>
-                <p className="text-xs text-amber-700 mt-1">
-                  These look similar to existing customers. For each row, choose: <strong>Merge</strong> (update existing), <strong>Create as new</strong>, <strong>Skip</strong>, or <strong>Skip & Remember</strong> (won't ask again).
+              </CardHeader>
+              <CardContent className="px-5 pb-4 text-xs text-blue-800 space-y-1.5">
+                <p>
+                  Every row will be imported as a new customer — <strong>no opening balance will be silently dropped</strong>.
                 </p>
-              </CardHeader>
-              <CardContent className="p-0 max-h-[600px] overflow-y-auto">
-                {previewData.fuzzy.map((f, i) => (
-                  <div key={i} className="border-b border-amber-100 p-4 space-y-2" data-testid={`fuzzy-row-${f.row}`}>
-                    <div className="flex items-center justify-between flex-wrap gap-2">
-                      <div className="text-sm">
-                        <span className="text-slate-400 text-xs mr-2">Row {f.row}</span>
-                        <span className="font-semibold">{f.payload.name}</span>
-                        {f.payload.phones?.[0] && <span className="text-xs text-slate-500 ml-2">· {f.payload.phones[0]}</span>}
-                        {f.payload.opening_balance > 0 && (
-                          <Badge className="ml-2 text-[10px] bg-blue-100 text-blue-700 border-0">
-                            OB ₱{Number(f.payload.opening_balance).toFixed(2)}
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                    <div className="text-xs text-slate-500">
-                      Looks like:
-                    </div>
-                    <div className="space-y-1.5 ml-4">
-                      {f.candidates.map((c, j) => (
-                        <div key={j} className="flex items-center gap-3 text-xs">
-                          <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded">{Math.round(c.similarity * 100)}%</span>
-                          <span className="font-medium">{c.name}</span>
-                          {c.phone && <span className="text-slate-500">· {c.phone}</span>}
-                          <span className="text-slate-400">({c.reason === 'phone_partial' ? 'phone match' : 'similar name'})</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      <Button size="sm" variant={decisions[f.row]?.action === 'merge' ? 'default' : 'outline'}
-                        className="text-xs h-7"
-                        onClick={() => setDecisions(prev => ({ ...prev, [f.row]: { action: 'merge', target_id: f.candidates[0].id } }))}
-                        data-testid={`decide-merge-${f.row}`}>
-                        Merge into "{f.candidates[0].name.slice(0, 20)}"
-                      </Button>
-                      <Button size="sm" variant={decisions[f.row]?.action === 'create' ? 'default' : 'outline'}
-                        className="text-xs h-7"
-                        onClick={() => setDecisions(prev => ({ ...prev, [f.row]: { action: 'create' } }))}
-                        data-testid={`decide-create-${f.row}`}>
-                        Create as new
-                      </Button>
-                      <Button size="sm" variant={decisions[f.row]?.action === 'skip' ? 'default' : 'outline'}
-                        className="text-xs h-7"
-                        onClick={() => setDecisions(prev => ({ ...prev, [f.row]: { action: 'skip' } }))}
-                        data-testid={`decide-skip-${f.row}`}>
-                        Skip
-                      </Button>
-                      <Button size="sm" variant={decisions[f.row]?.action === 'skip_and_remember' ? 'default' : 'outline'}
-                        className="text-xs h-7"
-                        onClick={() => setDecisions(prev => ({ ...prev, [f.row]: { action: 'skip_and_remember', target_id: f.candidates[0].id } }))}
-                        data-testid={`decide-remember-${f.row}`}>
-                        Skip &amp; Remember (different person)
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Customers — exact dupes (auto-skipped report) */}
-          {importType === 'customers' && previewData.exact_dupe?.length > 0 && (
-            <Card className="border-slate-200">
-              <CardHeader className="py-3 px-5 bg-slate-50 border-b">
-                <CardTitle className="text-sm text-slate-700">
-                  Auto-skipped Duplicates ({previewData.exact_dupe.length})
-                </CardTitle>
-                <p className="text-xs text-slate-500 mt-1">Hard duplicates (exact name or exact phone). These will not be imported.</p>
-              </CardHeader>
-              <CardContent className="p-0 max-h-48 overflow-y-auto">
-                <Table>
-                  <TableBody>
-                    {previewData.exact_dupe.map((d, i) => (
-                      <TableRow key={i}>
-                        <TableCell className="text-xs text-slate-400 w-12">{d.row}</TableCell>
-                        <TableCell className="text-sm">{d.name}</TableCell>
-                        <TableCell className="text-xs text-slate-500">{d.reason.replace(/_/g, ' ')}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                {previewData.existing_similar_count > 0 && (
+                  <p>
+                    <strong>{previewData.existing_similar_count}</strong> row{previewData.existing_similar_count === 1 ? '' : 's'} in this file look similar to existing customers. After import, a popup (like Smart Price Checker) will surface the clusters so you can <strong>Merge</strong> them or mark them as <strong>different customers</strong>.
+                  </p>
+                )}
+                {previewData.total_opening_balance > 0 && (
+                  <p>Opening balances total: <strong>₱{Number(previewData.total_opening_balance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> across {previewData.auto_create.length} customer{previewData.auto_create.length === 1 ? '' : 's'}.</p>
+                )}
               </CardContent>
             </Card>
           )}
