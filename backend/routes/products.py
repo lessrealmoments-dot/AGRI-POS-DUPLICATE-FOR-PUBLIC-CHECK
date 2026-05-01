@@ -76,6 +76,7 @@ async def list_products(
         pipeline += [{"$skip": skip}, {"$limit": limit}]
         products = await db.products.aggregate(pipeline).to_list(limit)
         products = await _enrich_repacks_with_live_capital(products, branch_id)
+        products = await _enrich_with_branch_overrides(products, branch_id)
         products = await _enrich_with_disabled_at_branch(products, branch_id)
         return {"products": products, "total": total, "skip": skip, "limit": limit}
 
@@ -97,8 +98,56 @@ async def list_products(
     else:
         products = await db.products.find(query, {"_id": 0}).sort(mongo_sort).skip(skip).limit(limit).to_list(limit)
     products = await _enrich_repacks_with_live_capital(products, branch_id)
+    products = await _enrich_with_branch_overrides(products, branch_id)
     products = await _enrich_with_disabled_at_branch(products, branch_id)
     return {"products": products, "total": total, "skip": skip, "limit": limit}
+
+
+async def _enrich_with_branch_overrides(products: list, branch_id: Optional[str]) -> list:
+    """Merge per-branch `branch_prices` overrides into each product's `prices`
+    map and `cost_price`, and tag each row with `price_source`.
+
+    Without this, the Products List always reflected the master catalog —
+    branch overrides imported via "Branch Stock + Price" or set per-branch
+    in the dialog were invisible from the list, which led admins to
+    re-edit the master thinking they were editing a branch (and thus
+    accidentally clobber every other branch's price).
+
+    Skips repacks: those are already handled in `_enrich_repacks_with_live_capital`.
+    """
+    if not branch_id or branch_id == "all" or not products:
+        # No branch context → return as-is, but still tag price_source so the
+        # frontend can render the same UI both ways without conditionals.
+        for p in products or []:
+            p.setdefault("price_source", "global")
+        return products
+
+    pids = [p["id"] for p in products if p.get("id") and not p.get("is_repack")]
+    if not pids:
+        return products
+    bp_docs = await db.branch_prices.find(
+        {"branch_id": branch_id, "product_id": {"$in": pids}}, {"_id": 0}
+    ).to_list(len(pids))
+    bp_map = {d["product_id"]: d for d in bp_docs}
+
+    for p in products:
+        if p.get("is_repack"):
+            # Repack rows already carry merged prices via the repack helper.
+            # Just tag them so the frontend can show the same chip.
+            bp = bp_map.get(p.get("id"))
+            p["price_source"] = "branch_override" if bp else "global"
+            continue
+        bp = bp_map.get(p.get("id"))
+        if not bp:
+            p["price_source"] = "global"
+            continue
+        # Override wins per-key; missing keys keep the master value.
+        merged = {**(p.get("prices") or {}), **(bp.get("prices") or {})}
+        p["prices"] = merged
+        if bp.get("cost_price") is not None:
+            p["cost_price"] = bp["cost_price"]
+        p["price_source"] = "branch_override"
+    return products
 
 
 async def _enrich_with_disabled_at_branch(products: list, branch_id: Optional[str]) -> list:
@@ -1632,9 +1681,29 @@ async def get_product_detail(product_id: str, branch_id: Optional[str] = None, u
 
 
 @router.put("/{product_id}")
-async def update_product(product_id: str, data: dict, user=Depends(get_current_user)):
-    """Update product details."""
+async def update_product(
+    product_id: str,
+    data: dict,
+    branch_id: Optional[str] = None,
+    user=Depends(get_current_user),
+):
+    """Update product details.
+
+    When `branch_id` is supplied (and is a real branch — not "all"), price-
+    related edits (`cost_price`, `prices`) are routed to the per-branch
+    `branch_prices` override collection instead of the master product doc.
+    Catalog-level fields (name, category, description, unit, etc.) ALWAYS
+    write to the master regardless — those are tenant-wide attributes that
+    don't make sense per-branch.
+
+    Without `branch_id` (or with branch_id == "all"): all edits hit the
+    master product, preserving the legacy global-edit flow.
+    """
     check_perm(user, "products", "edit")
+
+    # Normalize branch_id — UI passes "all" for the All-Branches view; treat
+    # that the same as "no branch" so we keep the historic global behaviour.
+    branch_scoped = bool(branch_id) and branch_id != "all"
 
     allowed = ["name", "category", "description", "unit", "cost_price", "prices", "barcode",
                "units_per_parent", "repack_unit", "product_type", "capital_method",
@@ -1663,9 +1732,77 @@ async def update_product(product_id: str, data: dict, user=Depends(get_current_u
             )
         update["cost_price"] = float(update["cost_price"])
 
+    # ── Branch-scoped path ──────────────────────────────────────────────
+    # Route price/cost into branch_prices; let everything else fall through
+    # to the master update below. This is the user-facing fix for the
+    # "I edited Branch 1 prices and accidentally clobbered every branch"
+    # bug — the master is now untouchable from a branch view.
+    if branch_scoped and ("prices" in update or "cost_price" in update):
+        # Confirm the branch exists and belongs to this user's org
+        br = await db.branches.find_one(
+            {"id": branch_id, "active": {"$ne": False}}, {"_id": 0, "id": 1}
+        )
+        if not br:
+            raise HTTPException(status_code=404, detail="Branch not found")
+
+        # Merge new prices on top of any existing override (override wins
+        # per-key; missing keys keep prior values intact).
+        existing_override = await db.branch_prices.find_one(
+            {"product_id": product_id, "branch_id": branch_id}, {"_id": 0}
+        )
+        merged_prices = dict((existing_override or {}).get("prices") or {})
+        if "prices" in update and isinstance(update["prices"], dict):
+            for k, v in update["prices"].items():
+                try:
+                    merged_prices[k] = float(v)
+                except (TypeError, ValueError):
+                    # Ignore garbage cells; never crash the save flow.
+                    continue
+
+        bp_doc = {
+            "product_id": product_id,
+            "branch_id": branch_id,
+            "prices": merged_prices,
+            "updated_at": now_iso(),
+            "updated_by_id": user["id"],
+            "updated_by_name": user.get("full_name", user.get("username", "")),
+        }
+        if "cost_price" in update:
+            bp_doc["cost_price"] = float(update["cost_price"])
+
+        if existing_override:
+            await db.branch_prices.update_one(
+                {"product_id": product_id, "branch_id": branch_id},
+                {"$set": bp_doc},
+            )
+        else:
+            bp_doc["id"] = new_id()
+            bp_doc["created_at"] = now_iso()
+            await db.branch_prices.insert_one(bp_doc)
+
+        # Mark the branch override as reviewed so the "Global Price" alert
+        # banner clears on this branch.
+        try:
+            await mark_price_reviewed(product_id, branch_id, source="manual")
+        except Exception:
+            pass
+
+        # Now strip the branch-scoped fields so they don't ALSO leak into
+        # the master update path below. Catalog fields (name/category/etc.)
+        # in `update` will still flow through.
+        update.pop("prices", None)
+        update.pop("cost_price", None)
+
+    # Nothing left to write to the master? Return the (effective) product.
+    if not update:
+        product = await db.products.find_one({"id": product_id}, {"_id": 0})
+        return await _apply_branch_override(product, branch_id) if branch_scoped else product
+
     update["updated_at"] = now_iso()
 
-    # Log capital change if cost_price is being updated
+    # Log capital change if cost_price is being updated (master path only —
+    # branch-scoped cost edits are tracked via branch_prices.updated_at and
+    # already audited per-row by the import flow).
     if "cost_price" in update:
         product_before = await db.products.find_one({"id": product_id}, {"_id": 0})
         old_capital = float(product_before.get("cost_price", 0)) if product_before else 0
@@ -1695,7 +1832,25 @@ async def update_product(product_id: str, data: dict, user=Depends(get_current_u
             await mark_price_reviewed(product_id, inv["branch_id"], source="manual")
 
     product = await db.products.find_one({"id": product_id}, {"_id": 0})
-    return product
+    return await _apply_branch_override(product, branch_id) if branch_scoped else product
+
+
+async def _apply_branch_override(product: dict, branch_id: Optional[str]) -> dict:
+    """Helper used by the update endpoint to return what the BRANCH actually
+    sees (master ⊕ override) when the caller edited under a branch context.
+    Mirrors the same merge logic used by GET /products."""
+    if not product or not branch_id or branch_id == "all":
+        return product
+    override = await db.branch_prices.find_one(
+        {"product_id": product["id"], "branch_id": branch_id}, {"_id": 0}
+    )
+    if not override:
+        return {**product, "price_source": "global"}
+    merged = {**(product.get("prices") or {}), **(override.get("prices") or {})}
+    out = {**product, "prices": merged, "price_source": "branch_override"}
+    if override.get("cost_price") is not None:
+        out["cost_price"] = override["cost_price"]
+    return out
 
 
 @router.get("/{product_id}/capital-history")

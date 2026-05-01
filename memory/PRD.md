@@ -1,6 +1,13 @@
 # AgriBooks PRD
 
-## Latest Iter 195 (May 1, 2026) — Test Stage button + Dynamic Price Scheme columns
+## Latest Iter 196 (May 1, 2026) — Branch-Scoped Product Editing
+- **Critical fix**: PUT /api/products/{id} now accepts `?branch_id=X`; when set, price/cost edits route to `branch_prices` instead of clobbering the master catalog
+- GET /api/products?branch_id=X merges branch overrides into each row + tags `price_source: "branch_override" | "global"`
+- Edit dialog shows scope banner (purple = branch / blue = master); per-row `⚙ Branch` chip surfaces overrides at-a-glance
+- Catalog fields (name/category/etc.) still always hit master — those are tenant-wide
+- Tested: 7/7 new pytest passing, no regressions on prior product tests
+
+## Iter 195 (May 1, 2026) — Test Stage button + Dynamic Price Scheme columns
 - "Test this Stage" button on each Team SMS Reminder row → fires `[SAMPLE]` SMS now
 - Org-wide vs per-branch behaviour clarified with banner (toggles=org-wide, close time=per-branch)
 - Import Center: dynamically renders one column per active price scheme (Retail/Wholesale/Credit/…) — both the column mapper and the downloaded CSV templates

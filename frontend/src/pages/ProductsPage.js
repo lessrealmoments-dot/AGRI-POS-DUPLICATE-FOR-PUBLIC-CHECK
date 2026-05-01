@@ -440,8 +440,18 @@ export default function ProductsPage() {
       if (editing) {
         // Strip cost_price from payload if user cannot edit capital
         const payload = canEditCost ? form : (({ cost_price, ...rest }) => rest)(form);
-        await api.put(`/products/${editing.id}`, payload);
-        toast.success('Product updated');
+        // When a specific branch is selected, route price/cost edits to the
+        // per-branch override collection by passing `branch_id` as a query
+        // param. Catalog fields (name/category/etc.) still hit the master
+        // server-side. With branchId="all" or no branch, behaviour matches
+        // legacy: master product is updated directly.
+        const branchId = currentBranch?.id;
+        const isBranchScoped = branchId && branchId !== 'all';
+        const cfg = isBranchScoped ? { params: { branch_id: branchId } } : undefined;
+        await api.put(`/products/${editing.id}`, payload, cfg);
+        toast.success(isBranchScoped
+          ? `Saved to ${currentBranch.name} only — master catalog untouched`
+          : 'Product updated (master catalog)');
       } else {
         const res = await api.post('/products', form);
         // Set starting inventory if provided
@@ -681,6 +691,18 @@ export default function ProductsPage() {
                           <EyeOff size={9} /> Disabled here
                         </Badge>
                       )}
+                      {/* Branch override chip — surfaces when this row's
+                          prices come from a per-branch override instead of
+                          the master. Only shown when a specific branch is
+                          selected; "All Branches" view tags everything as
+                          global by definition. */}
+                      {p.price_source === 'branch_override' && currentBranch?.id && currentBranch.id !== 'all' && (
+                        <Badge variant="outline" data-testid={`branch-override-${p.id}`}
+                          className="text-[10px] border-purple-300 text-purple-700 bg-purple-50 gap-1 px-1.5 py-0"
+                          title={`Custom price for ${currentBranch.name} — different from master catalog`}>
+                          <Tag size={9} /> Branch
+                        </Badge>
+                      )}
                     </div>
                   </TableCell>
                   <TableCell className="text-slate-500">{p.category}</TableCell>
@@ -757,6 +779,38 @@ export default function ProductsPage() {
           <DialogHeader>
             <DialogTitle style={{ fontFamily: 'Manrope' }}>{editing ? 'Edit Product' : 'New Product'}</DialogTitle>
           </DialogHeader>
+          {/* ── Edit-scope banner ─────────────────────────────────────────
+              Surfaces WHERE the edit will land. Without this, branch users
+              were silently editing the master catalog (a footgun that
+              clobbered every other branch's price). Now the cashier sees
+              "Editing for {Branch} only" before they even type. */}
+          {editing && (
+            currentBranch?.id && currentBranch.id !== 'all' ? (
+              <div
+                data-testid="edit-scope-banner-branch"
+                className="mt-2 rounded-md border border-purple-200 bg-purple-50 px-3 py-2 text-xs text-purple-900 leading-relaxed">
+                <p className="font-semibold flex items-center gap-1">
+                  <Tag size={12} /> Editing prices for <strong>{currentBranch.name}</strong> only
+                </p>
+                <p className="mt-0.5 text-purple-700">
+                  Master catalog stays untouched. Other branches keep their existing prices.
+                  Switch to <em>All Branches</em> at the top to edit the master.
+                </p>
+              </div>
+            ) : (
+              <div
+                data-testid="edit-scope-banner-global"
+                className="mt-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900 leading-relaxed">
+                <p className="font-semibold flex items-center gap-1">
+                  <Package size={12} /> Editing master catalog (all branches)
+                </p>
+                <p className="mt-0.5 text-blue-700">
+                  These prices apply to every branch unless that branch already has its own override.
+                  To edit one branch only, pick it in the branch switcher first.
+                </p>
+              </div>
+            )
+          )}
           <div className="space-y-4 mt-2">
             <div className="grid grid-cols-2 gap-4">
               <div>

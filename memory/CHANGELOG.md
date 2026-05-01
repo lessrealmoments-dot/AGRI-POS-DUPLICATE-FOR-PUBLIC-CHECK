@@ -1,5 +1,62 @@
 # AgriBooks Changelog
 
+## May 1, 2026 — Branch-Scoped Product Editing (Iter 196) ⭐ Critical Bug Fix
+
+**Footgun closed**: when a user had a specific branch selected in the sidebar
+and edited a product's price, the edit was silently writing to the **master
+catalog** (used by every branch). Caused months of accidental cross-branch
+clobbering — e.g. user thinks they're fixing Branch 2's Credit price, but
+the change applies to Branches 1, 3, 4 too. The Branch Stock + Price
+importer had been writing per-branch correctly, so people built mental
+models around "this app respects branch context" — but the manual edit
+dialog didn't.
+
+### Fix
+- **Backend** `routes/products.py`:
+  - `PUT /api/products/{id}` accepts `?branch_id=X`. When set (and not "all"):
+    - `prices` and `cost_price` route to `branch_prices` (per-branch override)
+    - Catalog fields (name, category, description, unit, etc.) still hit
+      the master — those are tenant-wide attributes
+    - Existing branch overrides are merged per-key (override wins, missing
+      keys keep prior values intact)
+    - Response reflects the BRANCH view (master ⊕ override) with new
+      `price_source: "branch_override" | "global"` field
+  - `GET /api/products?branch_id=X` now merges branch_prices into each
+    row and tags `price_source` so the frontend can render the override
+    chip. Without `branch_id` (or `=all`), behaviour is unchanged.
+  - New helper `_enrich_with_branch_overrides()` — same merge logic that
+    POS / search-detail already used, just lifted into the list path.
+
+- **Frontend** `pages/ProductsPage.js`:
+  - Edit dialog: contextual scope banner appears at the top —
+    purple "Editing prices for {Branch} only — master untouched" when
+    a branch is selected, blue "Editing master catalog (all branches)"
+    on All-Branches view. Eliminates the ambiguity.
+  - `handleSave()` passes `branch_id` query param to PUT when on a branch.
+  - Toast confirms scope: "Saved to {Branch} only — master catalog untouched".
+  - Per-row `⚙ Branch` chip surfaces when a price comes from a per-branch
+    override — admins spot at a glance which products are customised at
+    this branch vs inherited from master.
+
+### Backwards compatibility
+- All-Branches view unchanged — every existing edit flow that omits
+  `branch_id` still hits the master.
+- Existing branch_prices documents (from months of Branch Stock + Price
+  imports) now become **visible** in the Products List when their branch
+  is selected. They were always there, just hidden.
+
+### Tests
+- `tests/test_branch_scoped_product_edit_196.py` — 7 tests:
+  - PUT with branch writes ONLY to branch_prices, master untouched
+  - PUT without branch writes to master (legacy path)
+  - PUT with `branch_id=all` treated as no branch (backwards compat)
+  - Catalog fields always hit master regardless of branch_id
+  - GET with branch context merges override + tags `price_source`
+  - GET without branch context returns master + tags `global`
+  - Branch A override doesn't leak to Branch B
+  - Sequential edits on same branch preserve previously-set keys
+
+
 ## May 1, 2026 — Test Stage Button + Dynamic Price Scheme Columns (Iter 195)
 
 **Two improvements**:
