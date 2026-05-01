@@ -16,7 +16,7 @@ import requests
 import os
 import time
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://audit-pulse-8.preview.emergentagent.com')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://bulk-delete-5.preview.emergentagent.com')
 
 @pytest.fixture(scope="module")
 def auth_token():
