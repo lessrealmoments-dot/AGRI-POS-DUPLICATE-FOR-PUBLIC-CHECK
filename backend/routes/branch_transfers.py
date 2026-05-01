@@ -9,7 +9,7 @@ from config import db, _raw_db, get_org_context, set_org_context
 from utils import (
     get_current_user, check_perm, now_iso, new_id,
     log_movement, get_branch_cost, ensure_org_context,
-    mark_price_reviewed,
+    mark_price_reviewed, assert_branch_access,
 )
 
 router = APIRouter(prefix="/branch-transfers", tags=["Branch Transfers"])
@@ -283,6 +283,10 @@ async def create_transfer(data: dict, user=Depends(get_current_user)):
 
     from_branch_id = data["from_branch_id"]
     to_branch_id = data["to_branch_id"]
+    # Both ends must be branches the manager is assigned to. Admins skip
+    # this check (they can move stock anywhere within their org).
+    assert_branch_access(user, from_branch_id)
+    assert_branch_access(user, to_branch_id)
     items = data.get("items", [])
     if not items:
         raise HTTPException(status_code=400, detail="No items in transfer")

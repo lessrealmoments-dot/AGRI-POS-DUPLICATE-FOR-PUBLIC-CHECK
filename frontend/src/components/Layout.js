@@ -103,7 +103,8 @@ const NAV_ITEMS = NAV_SECTIONS.flatMap(s => s.items);
 export default function Layout({ children }) {
   const { 
     user, logout, branches, switchBranch, hasPerm, delegations,
-    selectedBranchId, canViewAllBranches, viewingBranchName, isConsolidatedView
+    selectedBranchId, canViewAllBranches, viewingBranchName, isConsolidatedView,
+    assignedBranchIds,
   } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
@@ -242,9 +243,16 @@ export default function Layout({ children }) {
                 </div>
               </SelectItem>
               <Separator className="my-1" />
-              {branches.map(b => (
-                <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-              ))}
+              {/* Multi-branch managers/auditors only see their assigned
+                  branches; admins (and legacy unscoped users) see all. */}
+              {(() => {
+                const visible = (user?.role === 'admin' || assignedBranchIds.length === 0)
+                  ? branches
+                  : branches.filter(b => assignedBranchIds.includes(b.id));
+                return visible.map(b => (
+                  <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                ));
+              })()}
             </SelectContent>
           </Select>
         ) : (

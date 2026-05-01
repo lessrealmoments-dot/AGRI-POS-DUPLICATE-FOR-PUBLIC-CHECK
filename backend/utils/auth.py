@@ -123,3 +123,61 @@ def has_perm(user: dict, module: str, action: str) -> bool:
     actual_module = module_map.get(module, module)
     perms = user.get("permissions", {})
     return perms.get(actual_module, {}).get(action, False)
+
+
+
+def user_branch_ids(user: dict) -> list:
+    """Return the branch whitelist for this user.
+
+    Honors the new `branch_ids` list (multi-branch assignment) AND the
+    legacy single `branch_id` for backward compat. Empty list means
+    "no assignment" — treated as legacy unscoped (full org access),
+    matching pre-multi-branch behaviour for users that haven't been
+    re-assigned yet.
+    """
+    if not user:
+        return []
+    ids = user.get("branch_ids") or []
+    if not isinstance(ids, list):
+        ids = []
+    ids = [b for b in ids if isinstance(b, str) and b.strip()]
+    legacy = (user.get("branch_id") or "").strip() if isinstance(user.get("branch_id"), str) else ""
+    if legacy and legacy not in ids:
+        ids.append(legacy)
+    return ids
+
+
+def assert_branch_access(user: dict, branch_id) -> None:
+    """Raise 403 if `user` is not allowed to operate on `branch_id`.
+
+    Rules:
+      * admins (role=admin) and super-admins → allowed everywhere
+      * users with no branch assignment at all (legacy unscoped) → allowed
+        everywhere within their org (preserves pre-multi-branch behaviour)
+      * everyone else → branch_id MUST be in `user.branch_ids` (or equal
+        to legacy `user.branch_id`)
+      * empty / None / 'all' branch_id → no-op (caller is asking for a
+        consolidated view; the org-scope tenant proxy will still gate
+        cross-org access)
+
+    Use this in any endpoint that accepts a branch_id from the client
+    (query param, body field, or path) and would otherwise expose another
+    branch's data on a forged request.
+    """
+    if not branch_id or branch_id == "all":
+        return
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if user.get("role") == "admin" or user.get("is_super_admin"):
+        return
+    allowed = user_branch_ids(user)
+    if not allowed:
+        # Legacy unscoped user — no assignment list. Don't block; org
+        # tenant proxy already prevents cross-org leak.
+        return
+    if branch_id not in allowed:
+        raise HTTPException(
+            status_code=403,
+            detail="You're not assigned to this branch. "
+                   "Ask an administrator to add it under Team → Edit User.",
+        )

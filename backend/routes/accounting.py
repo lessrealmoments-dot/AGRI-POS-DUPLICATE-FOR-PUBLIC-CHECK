@@ -9,7 +9,7 @@ from utils import (
     get_current_user, check_perm, now_iso, new_id, update_cashier_wallet,
     update_digital_wallet, is_digital_payment, record_safe_movement,
     get_branch_filter, apply_branch_filter, verify_password,
-    generate_next_number,
+    generate_next_number, assert_branch_access,
 )
 from utils.security import log_failed_pin_attempt
 
@@ -526,6 +526,7 @@ async def create_expense(data: dict, user=Depends(get_current_user)):
     branch_id = data.get("branch_id") or ""  # Safe: never raise KeyError
     if not branch_id:
         raise HTTPException(status_code=400, detail="Branch is required. Please select a specific branch before recording expenses.")
+    assert_branch_access(user, branch_id)
 
     # ── Employee Advance: enforce monthly CA limit on backend ──────────────
     if data.get("category") == "Employee Advance" and data.get("employee_id"):

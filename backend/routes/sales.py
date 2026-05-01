@@ -9,6 +9,7 @@ from utils import (
     log_movement, log_sale_items, update_cashier_wallet,
     update_digital_wallet, is_digital_payment, get_branch_cost,
     generate_next_number, check_idempotency, ensure_org_context,
+    assert_branch_access,
 )
 
 router = APIRouter(tags=["Sales"])
@@ -29,6 +30,10 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
     branch_id = data.get("branch_id")
     if not branch_id:
         raise HTTPException(status_code=400, detail="Branch ID required")
+    # Strict branch whitelist — non-admins can only sell in branches they're
+    # assigned to. Prevents a manager from forging branch_id for another
+    # store's POS session via DevTools.
+    assert_branch_access(user, branch_id)
 
     # Ensure org context for super admin
     await ensure_org_context(branch_id=branch_id)

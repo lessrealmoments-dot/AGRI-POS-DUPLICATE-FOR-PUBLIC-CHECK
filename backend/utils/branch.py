@@ -10,18 +10,24 @@ async def get_user_branches(user: dict) -> List[str]:
     """
     Get list of branch IDs the user can access.
     - Admin/Owner: All active branches
-    - Other users: Only their assigned branch
+    - Multi-branch user (branch_ids list): every branch in their list
+    - Single-branch user (legacy branch_id): their one assigned branch
+    - Otherwise: empty (caller decides whether to error)
     """
     if user.get("role") == "admin" or user.get("is_owner"):
         branches = await db.branches.find({"active": True}, {"_id": 0, "id": 1}).to_list(100)
         return [b["id"] for b in branches]
-    
-    branch_id = user.get("branch_id")
-    if branch_id:
-        return [branch_id]
-    
-    # No branch assigned - return empty (or could default to first branch)
-    return []
+
+    # Multi-branch assignment (new model). Honor `branch_ids` list AND fold
+    # in the legacy single `branch_id` so historical data isn't lost.
+    ids = user.get("branch_ids") or []
+    if not isinstance(ids, list):
+        ids = []
+    ids = [b for b in ids if isinstance(b, str) and b.strip()]
+    legacy = user.get("branch_id")
+    if legacy and isinstance(legacy, str) and legacy.strip() and legacy not in ids:
+        ids.append(legacy)
+    return ids
 
 
 async def get_branch_filter(user: dict, requested_branch_id: Optional[str] = None) -> dict:

@@ -1,5 +1,50 @@
 # AgriBooks Changelog
 
+## May 1, 2026 — Layer 2: Branch Switcher UX + Backend Whitelist (Iter 198 cont'd)
+
+A multi-branch manager/auditor can now actively **switch between** their assigned branches inside the app — POS, inventory, reports, close-day all flip to the active branch — while being strictly denied access to any branch they're not assigned to. Per-user `permissions` continue to gate actions independently (a manager assigned to branches 1-3 with `sales.create=false` still cannot sell anywhere).
+
+### Frontend
+- **`contexts/AuthContext.js`** — three changes:
+  - `canViewAllBranches` is now true for admins, legacy unscoped users, AND multi-branch users (`branch_ids.length >= 2`)
+  - `switchBranch` validates the target against `assignedBranchIds` (silently refuses off-list switches)
+  - `effectiveBranchId` honors `selectedBranchId` for multi-branch users (was previously locked to legacy `branch_id`); auto-snaps back to `'all'` if `localStorage` holds a stale branch from another account
+  - New `assignedBranchIds` exposed via context (memoized: `branch_ids` ∪ legacy `branch_id`)
+- **`components/Layout.js`** — header branch dropdown is now filtered to the user's `assignedBranchIds`. Admins still see every branch; managers see only their assigned 2/3/N. Empty assignment falls back to legacy unscoped behaviour.
+
+### Backend (defense-in-depth)
+- **`utils/auth.py`** — two new exports:
+  - `user_branch_ids(user)` → unified accessor (folds legacy `branch_id` into `branch_ids` list)
+  - `assert_branch_access(user, branch_id)` → raises 403 unless `branch_id ∈ user.branch_ids` (admin bypass + legacy unscoped pass-through). Use as a one-liner in any endpoint that takes a client-supplied branch_id.
+- **`utils/branch.py`** — `get_user_branches()` rewritten to honor `branch_ids` list. Because every read endpoint already routes through `get_branch_filter` (invoices, inventory, search, dashboard, reports, accounting, count_sheets, purchase_orders, daily_operations), this single helper change extends multi-branch READ protection to **every** endpoint that filters by branch. Cross-branch reads from forged URLs return 403 automatically.
+- **`routes/sales.py`** — POST `/unified-sale`: `assert_branch_access(user, branch_id)` after `check_perm`. A manager forging `branch_id` in the request body is rejected before any DB writes.
+- **`routes/accounting.py`** — POST `/expenses`: same guard.
+- **`routes/daily_operations.py`** — POST `/daily-close`: same guard.
+- **`routes/branch_transfers.py`** — POST `/branch-transfers`: guard applied to BOTH `from_branch_id` and `to_branch_id` (a manager can only transfer between branches they're assigned to).
+
+### Tests — `tests/test_branch_switcher_layer2_198.py` (11/11 passing)
+- Unit: `assert_branch_access` admin-bypass, legacy-unscoped pass-through, multi-branch whitelist, legacy single-branch lock, no-op for empty/all
+- Unit: `user_branch_ids` correctly combines `branch_ids` + legacy `branch_id`
+- Unit: `get_user_branches` returns multi-branch list
+- E2E: real manager user with `branch_ids=[allowed]` is rejected with 403 on:
+  - `POST /api/unified-sale?branch_id=forbidden`
+  - `POST /api/expenses?branch_id=forbidden`
+  - `POST /api/daily-close?branch_id=forbidden`
+- E2E: admin is unaffected (always allowed)
+
+### Two-layer enforcement (the contract)
+| Layer | Check | Source |
+|---|---|---|
+| Branch access | `branch_id ∈ user.branch_ids` (or admin) | `users.branch_ids` (Team page) |
+| Module permissions | `user.permissions[module][action] == true` | `users.permissions` (Team → Permissions tab) |
+
+Both must pass. Failing either = 403. Frontend hides denied UI; backend rejects denied requests. No bypass via DevTools.
+
+### Migration / Upgrade notes
+- **Zero migration required.** Existing single-branch users (legacy `branch_id` only) continue to work via auto-fold. When an admin edits them on the Team page, `branch_ids` is seeded from their current single branch.
+- Layer 2 surface area: ~30 read endpoints get multi-branch protection automatically via `get_user_branches`; 4 high-risk write endpoints (POS sale, expense, close-day, branch transfer) get explicit `assert_branch_access`. Any future write endpoint that takes a client-supplied `branch_id` should add the same one-liner.
+
+
 ## May 1, 2026 — Close-Reminder Scheduler Fix + Multi-Branch Users + Collection-Recipient Fallback (Iter 198) ⭐ Critical Bug Fix
 
 **Root cause fixed**: the scheduled close-day SMS (3 PM catch-up, precheck, late notice, escalation, day+1/day+2 overdue) **never fired** in production. The background scheduler ran every 60 s, but it used the tenant-scoped `db` proxy without an `_current_org_id` ContextVar set. The proxy fails closed by injecting `organization_id: "__no_org_context__"`, so every query matched zero rows — 0 branches, 0 users, 0 SMS queued, and (because `tick_once` never logged anything when it fired nothing) no log lines to reveal the silent failure. Only the synchronous Z-Report SMS (fired from inside an HTTP request) worked.

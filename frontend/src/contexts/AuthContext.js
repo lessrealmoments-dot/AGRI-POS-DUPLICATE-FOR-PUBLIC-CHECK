@@ -218,12 +218,30 @@ export function AuthProvider({ children }) {
     return localStorage.getItem('agripos_selected_branch') || 'all';
   });
 
-  // Determine if user can view multiple branches
+  // The user's authoritative branch whitelist. A user can ONLY switch into
+  // / receive data for branches in this list (admins are unscoped).
+  // Sources, in order:
+  //   1. `branch_ids` array (multi-branch assignment, new model)
+  //   2. legacy single `branch_id` (folded into a 1-element list)
+  //   3. empty list = "All Branches" legacy unscoped (same as admin)
+  const assignedBranchIds = useMemo(() => {
+    if (!user) return [];
+    const list = Array.isArray(user.branch_ids) ? [...user.branch_ids] : [];
+    if (user.branch_id && !list.includes(user.branch_id)) list.push(user.branch_id);
+    return list.filter(Boolean);
+  }, [user]);
+
+  // Determine if user can pick from a branch dropdown (vs. being locked to
+  // a single branch). Admins are always unscoped. Multi-branch users (2+)
+  // get the dropdown. Legacy "no assignment" users also get it (treated
+  // as unscoped, matching their pre-multi-branch behaviour).
   const canViewAllBranches = useMemo(() => {
     if (!user) return false;
-    // Admin/owner with no branch_id restriction can view all
-    return user.role === 'admin' || user.branch_id === null;
-  }, [user]);
+    if (user.role === 'admin') return true;
+    if (assignedBranchIds.length === 0) return true;   // legacy unscoped
+    if (assignedBranchIds.length >= 2) return true;    // multi-branch manager/auditor
+    return false;
+  }, [user, assignedBranchIds]);
 
   // Get the current branch object (or null if viewing all)
   const currentBranch = useMemo(() => {
@@ -231,13 +249,28 @@ export function AuthProvider({ children }) {
     return branches.find(b => b.id === selectedBranchId) || null;
   }, [selectedBranchId, branches]);
 
-  // Effective branch ID for API calls
+  // Effective branch ID for API calls.
+  //   - Admins / unscoped users → whatever they've selected ('all' or specific)
+  //   - Single-branch users    → forced to their one branch
+  //   - Multi-branch users     → can switch among their assigned branches;
+  //     'all' is allowed too IF they have 2+ branches (consolidated view
+  //     is gated to their whitelist via the API interceptor below + the
+  //     backend guard `assert_branch_access`)
   const effectiveBranchId = useMemo(() => {
-    // If user is restricted to a branch, always use that
-    if (user?.branch_id) return user.branch_id;
-    // Otherwise use selected (could be 'all' or specific ID)
-    return selectedBranchId;
-  }, [user, selectedBranchId]);
+    if (!user) return selectedBranchId;
+    // Admin → unscoped
+    if (user.role === 'admin') return selectedBranchId;
+    // Single-branch user with no branch_ids list → locked to legacy branch_id
+    if (assignedBranchIds.length === 1) return assignedBranchIds[0];
+    // No assignment at all (legacy unscoped) → behave like admin within org
+    if (assignedBranchIds.length === 0) return selectedBranchId;
+    // Multi-branch (2+): allow the chosen one, but if it's not in the
+    // whitelist (stale localStorage from another account), snap back to
+    // 'all' to avoid silent 403s on every page load.
+    if (selectedBranchId === 'all') return 'all';
+    if (assignedBranchIds.includes(selectedBranchId)) return selectedBranchId;
+    return 'all';
+  }, [user, selectedBranchId, assignedBranchIds]);
 
   // Update the interceptor's branch filter
   useEffect(() => {
@@ -397,9 +430,19 @@ export function AuthProvider({ children }) {
   };
 
   const switchBranch = (branchId) => {
-    // Only allow switching if user can view all branches
-    if (!canViewAllBranches && branchId !== user?.branch_id) return;
-    
+    if (!user) return;
+    // Admin → unrestricted, can pick anything (incl. 'all')
+    // Multi-branch user → may pick 'all' OR any branch in their assignment list
+    // Legacy unscoped user (no assignment) → may pick anything within their org
+    // Single-branch user → may only pick their one branch (no-op switch)
+    if (user.role === 'admin') {
+      // ok
+    } else if (assignedBranchIds.length === 0) {
+      // legacy unscoped — any branch in org allowed
+    } else {
+      const allowed = branchId === 'all' || assignedBranchIds.includes(branchId);
+      if (!allowed) return;  // silently refuse off-list switches
+    }
     setSelectedBranchId(branchId);
     localStorage.setItem('agripos_selected_branch', branchId);
   };
@@ -465,6 +508,8 @@ export function AuthProvider({ children }) {
       isConsolidatedView,      // true if viewing all branches
       viewingBranchName,       // Display name for current view
       switchBranch,
+      assignedBranchIds,       // Branches the user is allowed to operate in
+                               // (empty = legacy unscoped / admin-style access)
       // Permissions
       hasPerm,
       // Delegation

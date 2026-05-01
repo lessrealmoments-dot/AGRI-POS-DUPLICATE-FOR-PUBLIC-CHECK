@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 from datetime import datetime, timezone, timedelta
 from config import db
-from utils import get_current_user, check_perm, now_iso, new_id, get_branch_filter, apply_branch_filter
+from utils import get_current_user, check_perm, now_iso, new_id, get_branch_filter, apply_branch_filter, assert_branch_access
 
 router = APIRouter(tags=["Daily Operations"])
 
@@ -1137,6 +1137,7 @@ async def close_day(data: dict, user=Depends(get_current_user)):
 
     date = data["date"]
     branch_id = data["branch_id"]
+    assert_branch_access(user, branch_id)
 
     # Admin PIN required for day close
     admin_pin = data.get("admin_pin", "")
