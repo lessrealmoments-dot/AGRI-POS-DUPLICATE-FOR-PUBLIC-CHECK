@@ -11,7 +11,7 @@ import uuid
 import io
 from datetime import datetime, timedelta
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://team-reminders-hub.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://audit-pulse-8.preview.emergentagent.com').rstrip('/')
 D = {}  # shared test data
 
 def uid():
