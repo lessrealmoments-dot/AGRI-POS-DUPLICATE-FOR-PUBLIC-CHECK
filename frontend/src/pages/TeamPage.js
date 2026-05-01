@@ -29,7 +29,7 @@ const ROLES = [
 ];
 
 const BLANK_FORM = {
-  full_name: '', email: '', role: 'cashier',
+  full_name: '', email: '', phone: '', role: 'cashier',
   branch_id: '', password: '', confirm_password: '', manager_pin: ''
 };
 
@@ -220,6 +220,7 @@ export default function TeamPage() {
     setEditingUser(u);
     setForm({
       full_name: u.full_name || '', email: u.email || '',
+      phone: u.phone || '',
       role: u.role || 'cashier', branch_id: u.branch_id || '',
       password: '', confirm_password: '', manager_pin: ''
     });
@@ -235,7 +236,13 @@ export default function TeamPage() {
     if (form.password && form.password !== form.confirm_password) { toast.error('Passwords do not match'); return; }
     setSaving(true);
     try {
-      const payload = { full_name: form.full_name, email: form.email, role: form.role, branch_id: form.branch_id || null };
+      const payload = {
+        full_name: form.full_name,
+        email: form.email,
+        phone: (form.phone || '').trim(),
+        role: form.role,
+        branch_id: form.branch_id || null,
+      };
       if (form.password) payload.password = form.password;
       let savedUser;
       if (editingUser) {
@@ -470,6 +477,12 @@ export default function TeamPage() {
                                 {isMe && <span className="text-[10px] text-slate-400 ml-1">(you)</span>}
                               </p>
                               <p className="text-xs text-slate-400">{u.email || u.username}</p>
+                              <p className="text-[10px] mt-0.5 flex items-center gap-1"
+                                 data-testid={`user-phone-display-${u.id}`}>
+                                {u.phone
+                                  ? <span className="text-slate-500 font-mono">📱 {u.phone}</span>
+                                  : <span className="text-amber-600 italic">No phone — won't receive SMS</span>}
+                              </p>
                               {expandedUser === u.id && (
                                 <div className="mt-2 pt-2 border-t border-slate-100 space-y-1 text-xs text-slate-500" onClick={e => e.stopPropagation()}>
                                   <p>Created: {u.created_at ? new Date(u.created_at).toLocaleDateString() : 'N/A'}</p>
@@ -784,6 +797,26 @@ export default function TeamPage() {
               <Label className="text-xs">Email Address <span className="text-red-500">*</span></Label>
               <Input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="user@example.com" className="h-9" data-testid="user-email" disabled={!!editingUser} />
               {!editingUser && <p className="text-[10px] text-slate-400 mt-1">Used as login. Cannot be changed after creation.</p>}
+            </div>
+            <div>
+              <Label className="text-xs flex items-center gap-1">
+                Mobile Phone
+                <span className="text-[10px] font-normal text-slate-400">(used for SMS reminders & alerts)</span>
+              </Label>
+              <Input
+                type="tel"
+                value={form.phone}
+                onChange={e => setForm({ ...form, phone: e.target.value })}
+                placeholder="09XX XXX XXXX"
+                className="h-9"
+                data-testid="user-phone"
+              />
+              <p className="text-[10px] text-slate-400 mt-1">
+                Optional now, but required to receive close-day SMS, daily Z-report
+                summaries, and approval pings. The Collection Recipients in
+                Messages → Settings is just a fallback for when no team user
+                with this role has a phone set.
+              </p>
             </div>
             <div>
               <Label className="text-xs">Branch</Label>

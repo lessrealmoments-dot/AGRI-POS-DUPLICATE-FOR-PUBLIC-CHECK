@@ -1,5 +1,31 @@
 # AgriBooks Changelog
 
+## May 1, 2026 — Phone Field on Team Users
+**Confirmed: SMS reminder roles resolve from the Users collection** (Team page),
+not the Collection Recipients. The Collection Recipients in
+Messages → Settings is a fallback override for orgs that don't yet have
+team users with the right role.
+
+- **Backend** (`routes/users.py`):
+  - `POST /api/users` accepts `phone` in the body, stores trimmed value on
+    the new user doc.
+  - `PUT /api/users/{user_id}` adds `phone` to the editable-field whitelist.
+- **Frontend** (`pages/TeamPage.js`):
+  - **Mobile Phone** input added to the "Create New User" / "Edit User"
+    dialog with helper text explaining it's used by SMS reminders + that
+    Collection Recipients is the fallback.
+  - Team table row now shows the phone under email, or an amber
+    `"No phone — won't receive SMS"` warning when missing — at-a-glance
+    spotting of users who'd be silently skipped by the scheduler.
+  - `BLANK_FORM`, `openEdit`, and the save payload all include the phone.
+- **Verified**: phone set on a Manager user immediately appears in
+  `/api/sms/close-reminder/diagnose` under that branch's manager
+  `recipient_phones`, so the scheduler now finds the number on the next
+  tick.
+- New regression suite: `tests/test_user_phone_field_194.py` (4 tests:
+  create persists, PUT updates, diagnose reflects, optional phone OK).
+
+
 ## May 1, 2026 — Team SMS Reminders UI (per-stage toggles + per-branch close time)
 - **New `sms_close_stages` collection** (per-org overrides) — each stage of
   the close-reminder schedule can be independently enabled/disabled and have

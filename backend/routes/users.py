@@ -76,6 +76,10 @@ async def create_user(data: dict, user=Depends(get_current_user)):
         "username": username,
         "full_name": full_name,
         "email": email,
+        # Optional phone (used by SMS close-reminder dispatch — empty
+        # string when not yet provided so the resolver simply skips
+        # this user instead of failing).
+        "phone": (data.get("phone") or "").strip(),
         "password_hash": hash_password(password),
         "role": role,
         "pin_tier": pin_tier,
@@ -104,7 +108,7 @@ async def update_user(user_id: str, data: dict, user=Depends(get_current_user)):
     check_perm(user, "settings", "manage_users")
     
     update = {k: v for k, v in data.items() if k in (
-        "full_name", "email", "role", "branch_id", "active",
+        "full_name", "email", "phone", "role", "branch_id", "active",
         "is_auditor", "auditor_pin",
     )}
     
