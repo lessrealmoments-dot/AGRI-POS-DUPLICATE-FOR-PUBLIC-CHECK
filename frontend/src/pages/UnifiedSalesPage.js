@@ -934,16 +934,20 @@ export default function UnifiedSalesPage() {
   // guarded typo-tolerant fallback when the strict pass returns 0 hits.
   //
   // Strict pass: splits the query on whitespace/dashes/slashes/commas and
-  // requires every non-empty token to appear somewhere in the haystack
-  // (name + SKU + barcode). Order-independent. This makes
-  // "Galimax 1 Poultry Feeds - Pilmico" match "Galimax 1 Pilmico - Poultry
-  // Feeds", and "Starter Vital" match "Starter Premium Vital".
+  // requires every non-empty token to match. Token rules:
+  //   • 1–3 digit pure numbers ("1", "14", "200") must PREFIX-match a whole
+  //     word in the name. So "2" matches "Galimax 2" and "Galimax 21" but
+  //     not "Galimax 1" or a random "P-FINEX-2281" SKU. This stops short
+  //     numerics from leaking via SKU collisions.
+  //   • Everything else (alphanumeric, longer numbers, alpha words) does a
+  //     plain substring match across name + SKU + barcode.
+  // Order-independent: "Galimax 1 Poultry Feeds Pilmico" still matches
+  // "Galimax 1 Pilmico - Poultry Feeds".
   //
   // Fuzzy fallback (only when strict returns 0):
   //   • Levenshtein distance ≤ 1 for tokens 4–7 chars, ≤ 2 for 8+ chars
-  //   • Pure-numeric tokens ("1", "20kg") and short tokens (<4 chars) MUST
-  //     still match exactly — prevents "Galimax 1" silently matching
-  //     "Galimax 2" or random 3-letter collisions
+  //   • Pure-numeric / short tokens MUST still match exactly per the strict
+  //     rule above — prevents "Galimax 1" silently matching "Galimax 2"
   //   • Capped to the first 200 products by name to keep typing snappy
   // The banner state below tells the UI to surface a "Showing fuzzy matches
   // for 'X'" hint with a Clear button so the user is never surprised.
@@ -961,6 +965,14 @@ export default function UnifiedSalesPage() {
       return;
     }
 
+    const isShortNumeric = (t) => /^[0-9]{1,3}$/.test(t);
+    const tokenMatches = (t, haystack, nameWords) => {
+      if (isShortNumeric(t)) {
+        return nameWords.some(w => w.startsWith(t));
+      }
+      return haystack.includes(t);
+    };
+
     // ── Strict pass ──
     const strict = [];
     for (const p of allProducts) {
@@ -968,8 +980,14 @@ export default function UnifiedSalesPage() {
       const sku = (p.sku || '').toLowerCase();
       const barcode = (p.barcode || '').toLowerCase();
       const haystack = `${name} ${sku} ${barcode}`;
-      if (!tokens.every(t => haystack.includes(t))) continue;
-      const rank = haystack.includes(q) ? 0 : 1;
+      const nameWords = name.split(/[\s\-/,]+/).filter(Boolean);
+      if (!tokens.every(t => tokenMatches(t, haystack, nameWords))) continue;
+      // Rank: 0 = name starts with the full query (prefix), 1 = full query is
+      // a contiguous substring of name, 2 = token-only match. Tiebreak by
+      // name length so "Galimax 2" outranks "Galimax 2 Plus Premium".
+      let rank = 2;
+      if (name.startsWith(q)) rank = 0;
+      else if (name.includes(q)) rank = 1;
       strict.push({ p, rank, len: name.length });
     }
     if (strict.length > 0) {
@@ -980,15 +998,14 @@ export default function UnifiedSalesPage() {
     }
 
     // ── Fuzzy fallback ──
-    // Only "fuzzable" tokens get edit-distance checks. The rest must still
-    // match exactly to keep grade numbers/short codes honest.
+    // Only "fuzzable" tokens get edit-distance checks. Short numerics still
+    // need a prefix-of-word hit per the strict rule above (kept in
+    // exactRequired) so grade numbers stay honest.
     const fuzzable = tokens.filter(
       t => t.length >= 4 && !/^[0-9]+$/.test(t) && !/^[0-9]+[a-z]+$/i.test(t),
     );
     const exactRequired = tokens.filter(t => !fuzzable.includes(t));
 
-    // If literally no token is fuzzable (e.g. user typed "1 2 3"), give up —
-    // strict empty result stays.
     if (fuzzable.length === 0) {
       setFilteredProducts([]);
       setFuzzyHint(null);
@@ -1004,23 +1021,20 @@ export default function UnifiedSalesPage() {
       const sku = (p.sku || '').toLowerCase();
       const barcode = (p.barcode || '').toLowerCase();
       const haystack = `${name} ${sku} ${barcode}`;
+      const nameWords = name.split(/[\s\-/,]+/).filter(Boolean);
 
-      // Every exact-required token still needs a literal hit
-      if (!exactRequired.every(t => haystack.includes(t))) continue;
+      // Every exact-required token still needs a literal hit (with the same
+      // short-numeric prefix rule used in the strict pass).
+      if (!exactRequired.every(t => tokenMatches(t, haystack, nameWords))) continue;
 
-      // Split haystack into words once per product
       const words = haystack.split(/[\s\-/,]+/).filter(Boolean);
-
-      // Each fuzzable token must either substring-match the haystack OR be
-      // within `allowedDist(t)` of at least one whole word in the haystack
       let totalEdits = 0;
       let matchedAll = true;
       for (const t of fuzzable) {
-        if (haystack.includes(t)) continue; // exact wins, 0 edits
+        if (haystack.includes(t)) continue;
         let best = Infinity;
         const limit = allowedDist(t);
         for (const w of words) {
-          // Length pre-filter: if word length differs by > limit, skip
           if (Math.abs(w.length - t.length) > limit) continue;
           const d = levenshteinAtMost(t, w, limit);
           if (d < best) best = d;

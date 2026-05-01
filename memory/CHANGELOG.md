@@ -1,5 +1,32 @@
 # AgriBooks Changelog
 
+## May 1, 2026 — Product Search Refinement: Short-Numeric Prefix-of-Word
+Tightened the strict pass on both the frontend grid and `/products/search-detail`
+so short numeric tokens no longer leak unrelated products via SKU collisions.
+
+**Token rules (now consistent on both layers):**
+- 1–3 digit pure numbers (`1`, `14`, `200`) must **prefix-match a whole word
+  in the NAME** (anchored on string-start or whitespace/dash/slash/comma).
+- Everything else (alphanumeric, longer numbers, alpha words) keeps the
+  existing case-insensitive substring match across name + SKU + barcode.
+
+**Behavior changes (verified):**
+- `14-14-14` now returns ONLY actual 14-14-14 products. Previously leaked
+  any product whose SKU happened to contain `14` (FINEX/BOYOT/etc.).
+- `Galimax 1` returns ONLY Galimax 1. Previously leaked Galimax 2 / 3 / 21
+  via SKU random-suffix collisions.
+- `Galimax 2` correctly returns BOTH Galimax 2 and Galimax 21 (both have a
+  name word starting with `2`).
+- Ranking refined: name-prefix match > contiguous substring > token-only.
+  Tiebreaks by name length so the most specific name surfaces first.
+
+**Files**: `pages/UnifiedSalesPage.js` (frontend grid filter),
+`routes/products.py` (server endpoint with Mongo regex `(?:^|[\s\-/,])` anchor).
+
+**New regression suite**: `tests/test_product_short_numeric_search_191.py`
+(6 tests). All 11 product-search tests now green.
+
+
 ## Apr 30, 2026 — Typo-Tolerant Product Search Fallback (Sales Quick Mode)
 - Built on top of the token-AND search shipped earlier today. Strict pass
   still runs first; the fuzzy fallback only kicks in when strict returns 0.

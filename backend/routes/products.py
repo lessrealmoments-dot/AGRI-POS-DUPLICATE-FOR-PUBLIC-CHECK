@@ -270,11 +270,16 @@ async def search_products_detail(q: str = "", branch_id: Optional[str] = None, a
     """Enhanced product search with stock, branch prices, and capital reference data.
     also_branch_id: optional second branch to include stock levels for (used by Request Stock form).
 
-    Token-based matching: splits the query on whitespace / dashes / commas and
-    requires EVERY token to match somewhere in name/SKU/barcode (order-
-    independent). So "Galimax 1 Poultry Feeds - Pilmico" still finds
-    "Galimax 1 Pilmico - Poultry Feeds", and "Starter Vital" finds
-    "Starter Premium Vital".
+    Token rules (mirror of the frontend Quick-mode filter so server-side
+    SmartProductSearch results stay consistent with the grid):
+      • 1–3 digit pure numbers ("1", "14", "200") must PREFIX-match a whole
+        word in the product NAME — uses a Mongo regex anchored on
+        non-word/start so they cannot match random SKU suffixes. So "2"
+        matches "Galimax 2" / "Galimax 21" but not "Galimax 1" or
+        "P-FINEX-2281".
+      • Everything else (alphanumeric, longer numbers, alpha words) does the
+        usual case-insensitive substring match across name + SKU + barcode.
+    Order-independent: each token is its own AND condition.
     """
     if not q or len(q) < 1:
         return []
@@ -287,33 +292,48 @@ async def search_products_detail(q: str = "", branch_id: Optional[str] = None, a
     def _esc(t: str) -> str:
         return re.escape(t)
 
-    query = {"active": True}
+    def _token_clause(tok: str) -> dict:
+        """Return the Mongo $or clause for a single token, applying the
+        short-numeric prefix-of-word rule when applicable."""
+        if re.fullmatch(r"[0-9]{1,3}", tok):
+            # Match `tok` only when it appears at the start of a name word.
+            # Names are space/dash/slash/comma separated, so we anchor on
+            # either start-of-string or one of those separators.
+            pattern = r"(?:^|[\s\-/,])" + _esc(tok)
+            return {"name": {"$regex": pattern, "$options": "i"}}
+        return {"$or": [
+            {"name": {"$regex": _esc(tok), "$options": "i"}},
+            {"sku": {"$regex": _esc(tok), "$options": "i"}},
+            {"barcode": {"$regex": _esc(tok), "$options": "i"}},
+        ]}
+
+    query: dict = {"active": True}
     if len(tokens) == 1:
-        # Single token — keep the simpler $or shape (also lets Mongo use
-        # text/regex indexes more cleanly when only one term is needed).
-        query["$or"] = [
-            {"name": {"$regex": _esc(tokens[0]), "$options": "i"}},
-            {"sku": {"$regex": _esc(tokens[0]), "$options": "i"}},
-            {"barcode": {"$regex": _esc(tokens[0]), "$options": "i"}},
-        ]
+        clause = _token_clause(tokens[0])
+        # Flatten the single-clause case so we don't end up with a
+        # double-nested $or / $and that confuses the query planner.
+        if "$or" in clause:
+            query["$or"] = clause["$or"]
+        else:
+            query.update(clause)
     else:
-        query["$and"] = [
-            {"$or": [
-                {"name": {"$regex": _esc(tok), "$options": "i"}},
-                {"sku": {"$regex": _esc(tok), "$options": "i"}},
-                {"barcode": {"$regex": _esc(tok), "$options": "i"}},
-            ]}
-            for tok in tokens
-        ]
+        query["$and"] = [_token_clause(t) for t in tokens]
+
     products = await db.products.find(query, {"_id": 0}).limit(20).to_list(20)
 
-    # Rank: prefer rows where the full phrase appears as a substring (tighter
-    # match) over loose token-only hits. Tiebreak by name length so shorter,
-    # more specific names rank first.
+    # Rank: prefer rows where the full phrase appears as a name prefix (most
+    # specific), then a contiguous substring, then loose token-only hits.
+    # Tiebreak by name length so shorter, more specific names win.
     full_phrase = q.strip().lower()
     def _rank(p):
-        haystack = f"{(p.get('name') or '').lower()} {(p.get('sku') or '').lower()} {(p.get('barcode') or '').lower()}"
-        return (0 if full_phrase in haystack else 1, len(p.get("name", "") or ""))
+        name = (p.get("name") or "").lower()
+        if name.startswith(full_phrase):
+            r = 0
+        elif full_phrase in name:
+            r = 1
+        else:
+            r = 2
+        return (r, len(name))
     products.sort(key=_rank)
     products = products[:10]
     results = []
