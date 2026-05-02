@@ -27,6 +27,7 @@ import BranchComparisonWidget from '../components/dashboard/BranchComparisonWidg
 import AccountsPayableWidget from '../components/dashboard/AccountsPayableWidget';
 import InternalProfitWidget from '../components/dashboard/InternalProfitWidget';
 import AuditPulseWidget from '../components/dashboard/AuditPulseWidget';
+import QuickLaunch from '../components/QuickLaunch';
 
 const LAYOUT_KEY = 'agribooks_dashboard_layout';
 
@@ -465,6 +466,9 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        {/* Quick Launch — collapsible row of the 7 most-used manager actions */}
+        <QuickLaunch />
+
         <div ref={gridRef}>
         {gridMounted && (
         <Responsive
@@ -690,6 +694,9 @@ export default function DashboardPage() {
           <Button size="sm" onClick={() => navigate('/close-wizard')} className="bg-[#1A4D2E] text-white"><Lock size={13} className="mr-1.5" /> Close Wizard</Button>
         </div>
       </div>
+
+      {/* Quick Launch — collapsible row of the 7 most-used manager actions */}
+      <QuickLaunch />
 
       {/* Self-heal banner: company_info missing (typically post-Reset) */}
       {companyInfoMissing && (
