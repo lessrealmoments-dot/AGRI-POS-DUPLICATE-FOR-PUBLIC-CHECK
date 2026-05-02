@@ -350,6 +350,9 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
                 "client_old_price_hint": float(pc.get("old_price") or 0),
                 "reason": reason,
                 "reason_detail": (pc.get("reason_detail") or "").strip(),
+                # When True, the new price applies to THIS sale only — branch
+                # catalog is NOT updated. Still PIN-gated and audit-logged.
+                "customer_only": bool(pc.get("customer_only", False)),
             })
         if valid_price_changes:
             pm_pin = (data.get("price_match_pin") or "").strip()
@@ -999,35 +1002,40 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
         approver_method = pm_verifier.get("method", "")
         approver_id = pm_verifier.get("verifier_id") or pm_verifier.get("id") or ""
         for pc in valid_price_changes:
-            # Upsert branch_prices for this product/branch — ONLY this scheme
-            existing = await db.branch_prices.find_one(
-                {"product_id": pc["product_id"], "branch_id": branch_id}, {"_id": 0}
-            )
-            merged_prices = (existing or {}).get("prices", {}) or {}
-            merged_prices[pc["scheme"]] = pc["new_price"]
-            await db.branch_prices.update_one(
-                {"product_id": pc["product_id"], "branch_id": branch_id},
-                {
-                    "$set": {
-                        "prices": merged_prices,
-                        "updated_at": now_iso(),
-                        "updated_by_id": user["id"],
-                        "updated_by_name": user.get("full_name", user.get("username", "")),
-                        "source": "pos_price_match",
+            is_customer_only = bool(pc.get("customer_only", False))
+            if not is_customer_only:
+                # PERMANENT branch update — upsert branch_prices for this product/branch
+                # ONLY this scheme. Skipped entirely for customer-only overrides so
+                # the branch catalog stays untouched.
+                existing = await db.branch_prices.find_one(
+                    {"product_id": pc["product_id"], "branch_id": branch_id}, {"_id": 0}
+                )
+                merged_prices = (existing or {}).get("prices", {}) or {}
+                merged_prices[pc["scheme"]] = pc["new_price"]
+                await db.branch_prices.update_one(
+                    {"product_id": pc["product_id"], "branch_id": branch_id},
+                    {
+                        "$set": {
+                            "prices": merged_prices,
+                            "updated_at": now_iso(),
+                            "updated_by_id": user["id"],
+                            "updated_by_name": user.get("full_name", user.get("username", "")),
+                            "source": "pos_price_match",
+                        },
+                        "$setOnInsert": {
+                            "id": new_id(),
+                            "product_id": pc["product_id"],
+                            "branch_id": branch_id,
+                            "created_at": now_iso(),
+                        },
                     },
-                    "$setOnInsert": {
-                        "id": new_id(),
-                        "product_id": pc["product_id"],
-                        "branch_id": branch_id,
-                        "created_at": now_iso(),
-                    },
-                },
-                upsert=True,
-            )
-            # Clear "Global Price" badge — an explicit Price Match counts as
-            # a reviewed price for this branch/product.
-            await mark_price_reviewed(pc["product_id"], branch_id, source="pos_price_match")
-            # Audit log entry
+                    upsert=True,
+                )
+                # Clear "Global Price" badge — an explicit Price Match counts as
+                # a reviewed price for this branch/product.
+                await mark_price_reviewed(pc["product_id"], branch_id, source="pos_price_match")
+            # Audit log entry (always written — including customer_only overrides
+            # so admins can review them under Reports → Price Changes).
             await db.price_change_log.insert_one({
                 "id": new_id(),
                 "product_id": pc["product_id"],
@@ -1044,6 +1052,8 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
                               if pc["old_price"] > 0 else 0,
                 "reason": pc["reason"],
                 "reason_detail": pc.get("reason_detail", ""),
+                "customer_only": is_customer_only,
+                "scope": "customer_only" if is_customer_only else "branch_permanent",
                 "invoice_id": invoice["id"],
                 "invoice_number": inv_number,
                 "customer_id": data.get("customer_id"),
@@ -1064,8 +1074,16 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
             admins_pm = await db.users.find({"role": "admin", "active": True}, {"_id": 0, "id": 1}).to_list(50)
             admin_ids_pm = [a["id"] for a in admins_pm]
             if admin_ids_pm:
+                co_count = sum(1 for pc in valid_price_changes if pc.get("customer_only"))
+                perm_count = len(valid_price_changes) - co_count
+                scope_label = (
+                    f"{perm_count} branch permanent + {co_count} customer-only" if perm_count and co_count
+                    else f"{co_count} customer-only" if co_count
+                    else f"{perm_count} branch permanent"
+                )
                 items_summary = "; ".join(
                     f"{pc['product_name']}: ₱{pc['old_price']:.2f}→₱{pc['new_price']:.2f}"
+                    + (" [cust-only]" if pc.get("customer_only") else "")
                     for pc in valid_price_changes[:3]
                 )
                 if len(valid_price_changes) > 3:
@@ -1075,7 +1093,7 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
                     title=f"Price Match Approved — {inv_number}",
                     message=(
                         f"{user.get('full_name', user.get('username', ''))} matched price on "
-                        f"{len(valid_price_changes)} product(s) — approved by {approver_name}. {items_summary}"
+                        f"{len(valid_price_changes)} product(s) ({scope_label}) — approved by {approver_name}. {items_summary}"
                     ),
                     target_user_ids=admin_ids_pm,
                     branch_id=branch_id,

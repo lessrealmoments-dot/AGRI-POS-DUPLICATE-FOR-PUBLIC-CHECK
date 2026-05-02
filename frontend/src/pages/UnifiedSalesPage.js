@@ -4320,6 +4320,7 @@ export default function UnifiedSalesPage() {
         priceChanges={computePriceChanges()}
         schemeName={schemes.find(s => s.key === activeScheme)?.name || activeScheme}
         branchName={currentBranch?.name || ''}
+        customerName={selectedCustomer?.name || ''}
         submitting={priceMatchSubmitting}
         error={priceMatchError}
         onCancel={() => {

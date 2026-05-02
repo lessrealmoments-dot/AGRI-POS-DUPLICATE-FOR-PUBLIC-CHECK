@@ -3,9 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Textarea } from './ui/textarea';
-import { Tag, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { Tag, AlertTriangle, ShieldCheck, User, Globe } from 'lucide-react';
 import { formatPHP } from '../lib/utils';
 
 const REASONS = [
@@ -17,28 +15,35 @@ const REASONS = [
 ];
 
 /**
- * PriceMatchModal — collects per-line reason + manager/admin PIN to authorize
- * permanent branch-price changes triggered from the cart.
+ * PriceMatchModal — collects ONE reason + scope choice + PIN for the whole
+ * receipt (every changed line shares the decision).
+ *
+ * Scope:
+ *   • update_branch  (default): new prices are saved to branch_prices and
+ *     apply to every future sale at this branch — true Price Match.
+ *   • customer_only            : new prices apply ONLY to this sale. The
+ *     branch catalog stays untouched. Still PIN-gated, still audit-logged
+ *     under price_change_log with customer_only=true.
  *
  * Props:
  *   open: boolean
  *   priceChanges: [{ product_id, product_name, old_price, new_price, scheme }]
  *   schemeName: human-readable scheme name (e.g., "Retail")
  *   branchName: branch name for context
- *   onConfirm({ price_changes, pin }): called when user confirms with valid input
+ *   customerName: shown when scope = customer_only
+ *   onConfirm({ price_changes, pin }): called when user confirms
  *   onCancel(): called when user dismisses
  *   submitting: boolean — disable while parent processes
  *   error: optional error string from parent (e.g. invalid PIN response)
  */
 export default function PriceMatchModal({
-  open, priceChanges = [], schemeName = '', branchName = '',
+  open, priceChanges = [], schemeName = '', branchName = '', customerName = '',
   onConfirm, onCancel, submitting = false, error = '',
 }) {
-  // Default reason is 'competitor_match' — most common
-  const [reasons, setReasons] = useState(() =>
-    priceChanges.reduce((acc, pc) => ({ ...acc, [pc.product_id]: 'competitor_match' }), {})
-  );
-  const [details, setDetails] = useState({});
+  const [reason, setReason] = useState('competitor_match');
+  const [reasonDetail, setReasonDetail] = useState('');
+  // Scope: 'update_branch' (legacy default) | 'customer_only'
+  const [scope, setScope] = useState('update_branch');
   const [pin, setPin] = useState('');
   const [localErr, setLocalErr] = useState('');
 
@@ -47,128 +52,152 @@ export default function PriceMatchModal({
   const handleConfirm = () => {
     setLocalErr('');
     if (!pin.trim()) { setLocalErr('Manager / Admin PIN required'); return; }
-    // Build payload — every line must have a reason
-    const payload = priceChanges.map(pc => {
-      const r = reasons[pc.product_id] || 'competitor_match';
-      const d = (details[pc.product_id] || '').trim();
-      if (r === 'other' && !d) {
-        throw new Error(`Please specify a reason for "${pc.product_name}"`);
-      }
-      return {
-        product_id: pc.product_id,
-        scheme: pc.scheme,
-        old_price: pc.old_price,
-        new_price: pc.new_price,
-        reason: r,
-        reason_detail: d,
-      };
-    });
-    try {
-      onConfirm({ price_changes: payload, pin: pin.trim() });
-    } catch (e) {
-      setLocalErr(e.message || 'Validation failed');
+    if (reason === 'other' && !reasonDetail.trim()) {
+      setLocalErr('Please specify the reason in the Detail field');
+      return;
     }
+    const isCustomerOnly = scope === 'customer_only';
+    // Apply the same reason / scope to every changed line — single decision
+    // for the whole receipt.
+    const payload = priceChanges.map(pc => ({
+      product_id: pc.product_id,
+      scheme: pc.scheme,
+      old_price: pc.old_price,
+      new_price: pc.new_price,
+      reason,
+      reason_detail: reasonDetail.trim(),
+      customer_only: isCustomerOnly,
+    }));
+    onConfirm({ price_changes: payload, pin: pin.trim() });
   };
 
   const totalDelta = priceChanges.reduce((s, pc) => s + (pc.new_price - pc.old_price), 0);
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o && !submitting) onCancel(); }}>
-      <DialogContent className="max-w-2xl" data-testid="price-match-modal">
+      <DialogContent className="max-w-xl" data-testid="price-match-modal">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-amber-700">
-            <Tag size={18} /> Confirm Price Match — Permanent Change
+            <Tag size={18} /> Confirm Price Change
           </DialogTitle>
           <DialogDescription className="text-xs text-slate-500">
-            These prices will be saved to <span className="font-semibold">{branchName || 'this branch'}</span>
-            {' '}({schemeName} scheme) and apply to all future sales until changed again.
+            {priceChanges.length} item{priceChanges.length === 1 ? '' : 's'} on this receipt
+            {' · '}{schemeName} scheme · {branchName || 'this branch'}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3 py-2">
+        <div className="space-y-4 py-2">
+          {/* Changed lines — read-only summary */}
+          <div className="space-y-1 max-h-[28vh] overflow-y-auto pr-1 border border-slate-100 rounded p-2 bg-slate-50/60">
+            {priceChanges.map((pc) => (
+              <div key={pc.product_id} className="flex items-center justify-between text-xs py-0.5"
+                   data-testid={`price-match-line-${pc.product_id}`}>
+                <span className="font-medium text-slate-800 truncate flex-1 mr-2" title={pc.product_name}>
+                  {pc.product_name}
+                </span>
+                <span className="font-mono text-slate-500 shrink-0">
+                  <span className="line-through">{formatPHP(pc.old_price)}</span>
+                  {' → '}
+                  <span className="font-bold text-amber-700">{formatPHP(pc.new_price)}</span>
+                  <span className={`ml-2 ${pc.new_price < pc.old_price ? 'text-red-600' : 'text-emerald-600'}`}>
+                    ({pc.new_price < pc.old_price ? '-' : '+'}{formatPHP(Math.abs(pc.new_price - pc.old_price))})
+                  </span>
+                </span>
+              </div>
+            ))}
+            <div className="flex justify-between items-center text-[11px] pt-1.5 mt-1 border-t border-slate-200">
+              <span className="text-slate-600">{priceChanges.length} item(s) · Net change</span>
+              <span className={`font-mono font-bold ${totalDelta < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                {totalDelta < 0 ? '-' : '+'}{formatPHP(Math.abs(totalDelta))}
+              </span>
+            </div>
+          </div>
+
+          {/* Single reason for the whole receipt */}
+          <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+            <div className="sm:col-span-2">
+              <Label className="text-[10px] uppercase text-slate-500">Reason for change</Label>
+              <select
+                value={reason}
+                onChange={e => setReason(e.target.value)}
+                className="w-full h-9 px-2 text-xs border border-slate-200 rounded focus:outline-none focus:border-[#1A4D2E] bg-white"
+                data-testid="price-match-reason"
+              >
+                {REASONS.map(r => (
+                  <option key={r.key} value={r.key}>{r.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="sm:col-span-3">
+              <Label className="text-[10px] uppercase text-slate-500">
+                Detail {reason === 'other' ? '(required)' : '(optional)'}
+              </Label>
+              <Input
+                className="h-9 text-xs"
+                placeholder={
+                  reason === 'competitor_match' ? 'e.g., Robinsons same SKU at ₱950' :
+                  reason === 'other' ? 'Please specify' : 'Optional note'
+                }
+                value={reasonDetail}
+                onChange={e => setReasonDetail(e.target.value)}
+                data-testid="price-match-reason-detail"
+              />
+            </div>
+          </div>
+
+          {/* Scope choice — UPDATE branch price vs CUSTOMER ONLY */}
+          <div>
+            <Label className="text-[10px] uppercase text-slate-500 block mb-1.5">Apply to</Label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setScope('update_branch')}
+                data-testid="price-match-scope-update-branch"
+                className={`text-left p-3 rounded border-2 transition-all ${
+                  scope === 'update_branch'
+                    ? 'border-amber-500 bg-amber-50/70 shadow-sm'
+                    : 'border-slate-200 hover:border-slate-300 bg-white'
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <Globe size={14} className="text-amber-600" />
+                  <span className="text-sm font-semibold text-slate-800">Update branch price</span>
+                </div>
+                <p className="text-[10px] text-slate-500 leading-snug">
+                  Permanent — applies to <b>all future sales</b> at {branchName || 'this branch'}.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setScope('customer_only')}
+                data-testid="price-match-scope-customer-only"
+                className={`text-left p-3 rounded border-2 transition-all ${
+                  scope === 'customer_only'
+                    ? 'border-blue-500 bg-blue-50/70 shadow-sm'
+                    : 'border-slate-200 hover:border-slate-300 bg-white'
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <User size={14} className="text-blue-600" />
+                  <span className="text-sm font-semibold text-slate-800">Skip change for now</span>
+                </div>
+                <p className="text-[10px] text-slate-500 leading-snug">
+                  This sale only{customerName ? ` (${customerName})` : ''}. Branch catalog stays the same.
+                </p>
+              </button>
+            </div>
+          </div>
+
+          {/* Audit reminder */}
           <div className="bg-amber-50 border border-amber-200 rounded p-2 flex items-start gap-2">
             <AlertTriangle size={14} className="text-amber-600 mt-0.5 shrink-0" />
-            <p className="text-xs text-amber-700 leading-relaxed">
-              Each price change is logged with reason + approver. View under
-              <span className="italic"> Reports → Price Changes</span> to monitor competitor pricing trends.
+            <p className="text-[11px] text-amber-700 leading-relaxed">
+              Both options are logged with reason + approver under <span className="italic">Reports → Price Changes</span>.
             </p>
           </div>
 
-          <div className="space-y-2 max-h-[40vh] overflow-y-auto pr-1">
-            {priceChanges.map((pc) => {
-              const reason = reasons[pc.product_id] || 'competitor_match';
-              return (
-                <div
-                  key={pc.product_id}
-                  className="border border-slate-200 rounded p-2.5 space-y-2"
-                  data-testid={`price-match-line-${pc.product_id}`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold text-slate-800 truncate" title={pc.product_name}>
-                        {pc.product_name}
-                      </p>
-                      <p className="text-[11px] text-slate-500">
-                        <span className="line-through">{formatPHP(pc.old_price)}</span>
-                        {' → '}
-                        <span className="font-bold text-amber-700">{formatPHP(pc.new_price)}</span>
-                        <span className={`ml-2 ${pc.new_price < pc.old_price ? 'text-red-600' : 'text-emerald-600'}`}>
-                          ({pc.new_price < pc.old_price ? '-' : '+'}
-                          {formatPHP(Math.abs(pc.new_price - pc.old_price))},
-                          {' '}
-                          {pc.old_price > 0 ? `${(((pc.new_price - pc.old_price) / pc.old_price) * 100).toFixed(1)}%` : '—'})
-                        </span>
-                      </p>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 items-start">
-                    <div className="sm:col-span-2">
-                      <Label className="text-[10px] uppercase text-slate-500">Reason</Label>
-                      <Select
-                        value={reason}
-                        onValueChange={(v) => setReasons({ ...reasons, [pc.product_id]: v })}
-                      >
-                        <SelectTrigger
-                          className="h-8 text-xs"
-                          data-testid={`price-match-reason-${pc.product_id}`}
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {REASONS.map(r => (
-                            <SelectItem key={r.key} value={r.key} className="text-xs">{r.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="sm:col-span-3">
-                      <Label className="text-[10px] uppercase text-slate-500">
-                        Detail {reason === 'other' ? '(required)' : '(optional)'}
-                      </Label>
-                      <Input
-                        className="h-8 text-xs"
-                        placeholder={
-                          reason === 'competitor_match' ? 'e.g., Robinsons same SKU at ₱950' :
-                          reason === 'other' ? 'Please specify' : 'Optional note'
-                        }
-                        value={details[pc.product_id] || ''}
-                        onChange={e => setDetails({ ...details, [pc.product_id]: e.target.value })}
-                        data-testid={`price-match-detail-${pc.product_id}`}
-                      />
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="bg-slate-50 border border-slate-200 rounded p-2 flex justify-between items-center text-xs">
-            <span className="text-slate-600">{priceChanges.length} item(s) · Net change</span>
-            <span className={`font-mono font-bold ${totalDelta < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-              {totalDelta < 0 ? '-' : '+'}{formatPHP(Math.abs(totalDelta))}
-            </span>
-          </div>
-
+          {/* PIN */}
           <div>
             <Label className="text-xs flex items-center gap-1 text-slate-700">
               <ShieldCheck size={13} /> Manager / Admin PIN
@@ -203,10 +232,10 @@ export default function PriceMatchModal({
           <Button
             onClick={handleConfirm}
             disabled={submitting || !pin.trim()}
-            className="bg-amber-600 hover:bg-amber-700 text-white"
+            className={scope === 'customer_only' ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-amber-600 hover:bg-amber-700 text-white'}
             data-testid="price-match-confirm"
           >
-            {submitting ? 'Verifying…' : 'Confirm & Apply'}
+            {submitting ? 'Verifying…' : scope === 'customer_only' ? 'Apply for this sale only' : 'Update branch price'}
           </Button>
         </div>
       </DialogContent>

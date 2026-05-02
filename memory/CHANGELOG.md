@@ -1,5 +1,34 @@
 # AgriBooks Changelog
 
+## Feb 2026 — Price Match: "Skip change for now" customer-only scope (Iter 202)
+
+**Ask**: "When we create sales that suddenly change price we usually have something called Price Match as the reason. Add a feature there saying it is meant for this customer only — do not replace current price."
+
+**Refined**: "Make it per-receipt, not per-line. We ask the reason for the discount, ask to update the price because of the reason, OR skip change for now. Both still need PIN management."
+
+**Implemented:**
+
+**`frontend/src/components/PriceMatchModal.js`** (rewritten):
+- One reason + one detail input per receipt (not per line) — single decision applied to every changed line.
+- New **scope toggle** with two big tile-style buttons:
+  - **Update branch price** (amber, default) — permanent, applies to all future sales at this branch (legacy behavior).
+  - **Skip change for now** (blue) — applies to this sale / this customer only; branch catalog stays untouched.
+- Confirm button colour and label change based on scope ("Update branch price" vs "Apply for this sale only").
+- Both paths still require Manager / Admin PIN. The audit reminder banner makes it clear that both options are logged.
+
+**`UnifiedSalesPage.js`**: passes `customerName={selectedCustomer?.name}` so the customer-only tile shows the customer's name when one is selected.
+
+**`backend/routes/sales.py`**:
+- `valid_price_changes` now carries a `customer_only` boolean per row (defaults to False for backward compatibility).
+- Persist phase wraps the `branch_prices` upsert + `mark_price_reviewed` calls in `if not is_customer_only:` — branch catalog skipped entirely for customer-only overrides.
+- `price_change_log` always written (audit trail intact) with two new fields: `customer_only` (bool) and `scope` ('customer_only' | 'branch_permanent').
+- Admin notification text now reports the scope split: e.g. "2 branch permanent + 1 customer-only".
+
+**Test** — `backend/tests/test_price_match_customer_only_202.py` (2/2 passing):
+1. Customer-only flag → branch_prices unchanged after sale
+2. Permanent (default) → branch_prices.retail updated to new price
+
+
 ## Feb 2026 — Park / Draft Sales (offline-capable) (Iter 202)
 
 **Ask**: "I got stuck because a customer wanted to add a product from a far shelf and I had to pause; the next customer ended up waiting too long and left because I couldn't close my sale even though I was temporarily free. Add a Park button on /sales-new and a button to show all parked drafts. Must work offline too."
