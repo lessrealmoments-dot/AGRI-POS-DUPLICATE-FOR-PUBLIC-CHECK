@@ -10,7 +10,7 @@ import pytest
 import requests
 import os
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://multi-tenant-pos-crm.preview.emergentagent.com')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://sms-close-scheduler.preview.emergentagent.com')
 
 # Test credentials
 SUPER_ADMIN_EMAIL = "janmarkeahig@gmail.com"
