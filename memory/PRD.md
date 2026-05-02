@@ -1,5 +1,38 @@
 # AgriBooks PRD
 
+## Iter 205 (May 2026) — 🚨 P0 SyntheticEvent Regression Sweep (3 Critical Silent-Failure Bugs Fixed) ✅
+
+### The Pattern
+`<Button onClick={handlerFn}>` where `handlerFn(arg)` accepts a positional arg → React passes a SyntheticEvent as `arg` → handler treats it as truthy real data → injected into axios request body → `JSON.stringify` hits circular refs in the SyntheticEvent → synchronous `TypeError` aborts the HTTP request before it leaves the browser → user sees generic "X failed" toast with **zero network requests fired**.
+
+### Three Sites Fixed (defensive 2-layer pattern: arrow-wrap at binding + typeof-string coercion in handler)
+
+1. **PaymentsPage.js — Apply Payment** (originally reported by user, fixed iter 204b)
+   - Symptom: "Tried applying payment for dodong casipe, payment failed" — backend untouched, frontend silently aborted.
+   - Lines: `handleApplyPayment(pinOverride)` at :401 with `pinStr` coercion, button :1163 wrapped `() => handleApplyPayment()`.
+   - Verified end-to-end with live network trace in iter_182: POST /receive-payment fires with clean JSON, returns 200, balance updates.
+
+2. **UnifiedSalesPage.js — Credit Sale Approval (Authorize Sale button)** (P0 — same pattern, found in scan)
+   - Would have silently broken EVERY credit/partial sale where the cashier clicked "Authorize Sale" instead of pressing Enter — `pinToUse.trim()` would throw on a SyntheticEvent.
+   - Lines: `verifyManagerPin(_sessionPin)` at :1898 with `sessionPinStr` coercion, button :3901 wrapped `() => verifyManagerPin()`.
+
+3. **AccountingPage.js — Save Expense (Employee Advance over-limit gate)** (P1 — same pattern, found in scan)
+   - Two failure modes: (a) the manager-PIN dialog was being silently bypassed when over the CA monthly limit (because event was treated as approver name); (b) the SyntheticEvent was being JSON-stringified into `manager_approved_by` field → request abort.
+   - Lines: `handleSaveExpense(approvedBy='')` at :183 with `approver` coercion, gate at :197 uses `approver`, payload at :206 only sends string approver, button :800 wrapped `() => handleSaveExpense()`.
+
+### Backend touch
+- `routes/verify.py`: `modify_payment` now explicitly registered in `PIN_POLICY_ACTIONS` (was previously falling back to defaults — now policy-customizable).
+
+### Codebase scan
+- Wrote a Python AST-style scan that identified ALL 3 sites by matching `onClick={fn}` (bare, no arrow wrap) where `fn` is defined with a positional first arg whose name is not `e`/`event`/`ev`. Only 3 dangerous bindings exist app-wide. All fixed.
+- One false-positive: `<ResultRow onClick={handleResultClick}>` in TransactionSearchPage.jsx — internally wraps via `onClick={() => onClick(item)}`. Safe.
+
+### Test verification
+- iter_182.json: live POST /receive-payment confirmed with clean payload, status 200, balance 2000 → 1900.
+- iter_183.json: static code review of all 3 fixes — defensive double-layer pattern verified.
+
+---
+
 ## Iter 204 (May 2026) — Global & Customer Payment History + Close Wizard Enhancements ✅
 
 ### Global Payment History Tab (`/payments`)
