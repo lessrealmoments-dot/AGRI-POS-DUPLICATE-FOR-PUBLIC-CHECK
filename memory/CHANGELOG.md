@@ -1,5 +1,40 @@
 # AgriBooks Changelog
 
+## Feb 2026 — Unsaved-Changes Leave Guard (Iter 202)
+
+**Ask**: "I was encoding a sales with over 200 lines already, my mouse suddenly pressed Sales History — it went directly there making my effort all gone. I want a popup: 'Are you sure you want to leave?' on every form where I might lose work."
+
+**User choices**: All tiers, smart per-page dirty checks, **Park & leave** option for Sales specifically, beforeunload warning for tab close.
+
+**Architecture** — `<BrowserRouter>` (legacy declarative router, not a data router) so `useBlocker` was unavailable. Built a custom global guard instead:
+
+- **`contexts/UnsavedChangesContext.js`** (new) — Provider with:
+  - In-memory registry of guards keyed by id; pages register via the hook.
+  - Document-level click capture interceptor catches every `<a href="…">` click. If any registered guard returns `isDirty=true`, prevents default + opens the confirmation dialog. Properly bypasses external/mailto/tel/`target="_blank"`/Cmd-Cmd-click links and same-route clicks.
+  - `beforeunload` listener fires the browser's native warning when any guard is dirty (tab close / refresh).
+  - `requestSafe(action)` API for in-page non-route destructive switches like the Sales `New Sale ↔ History` tab toggle.
+  - Renders `<UnsavedChangesDialog>` itself once at the Provider level so pages don't have to mount it.
+  - `ctxValue` is `useMemo`'d (without this we hit infinite render loops; surfaced + fixed during testing).
+
+- **`lib/useUnsavedChangesGuard.js`** (new) — single-effect hook that registers `{getDirty, onPark, label}` with the Provider. Uses a `latestRef` and getter-style `onPark`/`label` so pages that inline arrow functions for `onPark` don't trigger re-registration on every render.
+
+- **`components/UnsavedChangesDialog.jsx`** (new) — three-button dialog: **Stay** (default), **Park & leave** (only when `onPark` is provided — Sales path), **Leave & lose changes**.
+
+**App.js** wires `<UnsavedChangesProvider>` between `<AuthProvider>` and `<AppRoutes>` so it has access to `useNavigate`.
+
+**Pages wired** (all use the same hook):
+- `UnifiedSalesPage.js` — `salesGuard` with `onPark={autoParkForGuard}` (auto-named "{customer} · 2:34 PM — auto-saved on leave"). Tab buttons (`tab-new-sale`, `tab-history`) wrapped in `salesGuard.requestSafe(() => setMainTab(...))`.
+- `PurchaseOrderPage.js` — guard fires when any line has `product_id`.
+- `BranchTransferPage.js` — fires when any reqRow has a chosen product.
+- `ReturnRefundWizard.js` — fires when `returnItems.length > 0`.
+- `JournalEntriesPage.js` — guard intentionally NOT gated on `createOpen` (radix Dialog's overlay click closes the modal before our document-level capture runs, so we key purely on form content; second sidebar click then triggers correctly).
+
+**Testing** — three E2E iterations:
+- iter_178 → caught `useBlocker must be used within a data router` invariant on every page; pivoted architecture to click-interceptor.
+- iter_179 → caught "Maximum update depth exceeded" infinite render loop (Provider value not memoized); testing agent applied `useMemo` fix.
+- iter_180 → architecture validated, Sales primary path (add product → tab-history → Stay/Park/Leave) fully passing. Secondary pages mount-clean. JE wiring tweaked (drop `createOpen` from isDirty).
+
+
 ## Feb 2026 — Park Resume = Atomic Consume (Iter 202)
 
 **Ask**: "I parked an invoice and opened it. While editing, I noticed the parked invoice was still in the list — confusing because it makes me think the customer didn't return."

@@ -101,10 +101,15 @@ export default function JournalEntriesPage() {
   const [saving, setSaving] = useState(false);
   const [accounts, setAccounts] = useState([]);
 
-  // Unsaved-changes guard — fires while the create-entry dialog is open
-  // AND the user has typed something. Provider renders the dialog.
+  // Unsaved-changes guard — fires when the user has typed any content
+  // into the create-entry form. We deliberately DON'T gate on
+  // `createOpen`: a radix Dialog's overlay eats the first sidebar click
+  // and closes itself, so by the time our document-level click capture
+  // runs, `createOpen` would already be false. Keying isDirty purely on
+  // form content lets the second sidebar click still fire the leave
+  // guard. Form state is reset only after a successful submit.
   useUnsavedChangesGuard({
-    isDirty: !saving && createOpen && (
+    isDirty: !saving && (
       !!entryType || !!memo || !!refNumber || (lines && lines.length > 0)
     ),
     label: 'Journal Entry',
