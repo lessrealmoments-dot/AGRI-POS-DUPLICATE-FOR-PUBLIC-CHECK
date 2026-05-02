@@ -606,7 +606,13 @@ export default function UnifiedSalesPage() {
   }, []);
 
   const startPinSession = useCallback((pin, method, name) => {
-    setPinSession({ pin, method, name: name || '', at: Date.now() });
+    // Defensive: only accept string/number PINs. If anything else (e.g. a stray
+    // SyntheticEvent from a misbound onClick) is passed, refuse to cache it —
+    // a poisoned warm PIN would cascade into every downstream verify/void/stock
+    // override flow and silently abort axios requests.
+    const pinStr = (typeof pin === 'string' || typeof pin === 'number') ? String(pin).trim() : '';
+    if (!pinStr) return;
+    setPinSession({ pin: pinStr, method, name: name || '', at: Date.now() });
   }, []);
 
   const clearPinSession = useCallback(() => setPinSession(null), []);
@@ -1991,10 +1997,10 @@ export default function UnifiedSalesPage() {
         await processSale(res.data.manager_name);
       } else {
         toast.error(res.data.detail || 'Invalid PIN / TOTP — check Settings > Security for accepted methods');
-        if (_sessionPin) clearPinSession(); // session PIN was stale
+        if (sessionPinStr) clearPinSession(); // session PIN was stale
       }
     } catch (e) {
-      if (_sessionPin) {
+      if (sessionPinStr) {
         clearPinSession();
         setCreditApprovalDialog(true); // fallback: show the dialog
         toast.info('PIN session expired — please re-enter');
