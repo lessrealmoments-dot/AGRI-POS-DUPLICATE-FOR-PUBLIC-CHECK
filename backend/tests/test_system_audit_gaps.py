@@ -11,7 +11,7 @@ import uuid
 import io
 from datetime import datetime, timedelta
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://cash-reserve-2.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://offline-interceptor.preview.emergentagent.com').rstrip('/')
 D = {}  # shared test data
 
 def uid():

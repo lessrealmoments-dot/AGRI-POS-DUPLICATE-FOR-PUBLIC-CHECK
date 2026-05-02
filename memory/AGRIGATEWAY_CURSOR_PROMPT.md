@@ -726,7 +726,7 @@ Layout:
 - "Login" button
 - A small expandable section "Advanced: Server URL" containing:
   - Label: "Production URL (default): https://agri-books.com"
-  - Text field: "Preview/Custom URL (optional)" — pre-filled with empty, hint: "https://cash-reserve-2.preview.emergentagent.com"
+  - Text field: "Preview/Custom URL (optional)" — pre-filled with empty, hint: "https://offline-interceptor.preview.emergentagent.com"
   - "Save URL" button
   - Note: "Leave blank to use production URL"
 
@@ -999,6 +999,6 @@ app/src/main/res/
 2. All Room database operations MUST run on a background thread. Never call Room DAOs on the main thread.
 3. The `GatewayForegroundService` inner polling loops use `Handler(Looper.getMainLooper())` with `postDelayed` — this is fine since the actual work is dispatched to background threads.
 4. For `EncryptedSharedPreferences`, use `MasterKey.Builder` with `KeyScheme.AES256_GCM` as the master key scheme.
-5. The app should be tested with the server at `https://cash-reserve-2.preview.emergentagent.com` during development — this URL should be the default text in the "Preview URL" field in settings.
+5. The app should be tested with the server at `https://offline-interceptor.preview.emergentagent.com` during development — this URL should be the default text in the "Preview URL" field in settings.
 6. Target a clean, professional Material Design 3 UI with the color scheme: primary green `#1A4D2E`, accent amber `#F59E0B`, background white `#FAFAFA`.
 7. Keep all UI text in English.
