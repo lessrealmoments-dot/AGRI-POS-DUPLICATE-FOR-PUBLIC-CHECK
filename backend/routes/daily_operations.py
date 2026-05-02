@@ -566,6 +566,36 @@ async def get_daily_close_preview(
         "discount_breakdown": await _get_discount_breakdown(branch_id, date),
         # ── Price change events today (Price Match) ─────────────────────────
         "price_changes_today": await _get_price_changes_today(branch_id, date),
+        # ── Interest / Penalty invoices created today ────────────────────────
+        "interest_invoices_today": [
+            {
+                "invoice_number": inv.get("invoice_number", ""),
+                "customer_name": inv.get("customer_name", ""),
+                "customer_id": inv.get("customer_id", ""),
+                "sale_type": inv.get("sale_type", ""),
+                "grand_total": round(float(inv.get("grand_total", 0)), 2),
+                "balance": round(float(inv.get("balance", 0)), 2),
+                "amount_paid": round(float(inv.get("amount_paid", 0)), 2),
+                "manual_interest": inv.get("manual_interest", False),
+            }
+            for inv in await db.invoices.find(
+                {"branch_id": branch_id, "order_date": date,
+                 "sale_type": {"$in": ["interest_charge", "penalty_charge"]},
+                 "status": {"$ne": "voided"}},
+                {"_id": 0, "invoice_number": 1, "customer_name": 1, "customer_id": 1,
+                 "sale_type": 1, "grand_total": 1, "balance": 1, "amount_paid": 1, "manual_interest": 1}
+            ).to_list(200)
+        ],
+        # ── AR payment stats (method breakdown + interest collected + discounts) ─
+        "ar_payment_by_method": {
+            m: {"total": round(sum(p["amount_paid"] for p in ar_payments if p.get("method") == m), 2),
+                "count": sum(1 for p in ar_payments if p.get("method") == m)}
+            for m in {p.get("method", "Cash") for p in ar_payments if p.get("fund_source") not in ("discount",)}
+        },
+        "ar_interest_collected": round(sum(p.get("interest_paid", 0) for p in ar_payments), 2),
+        "ar_discount_today": round(sum(
+            p["amount_paid"] for p in ar_payments if p.get("fund_source") == "discount"
+        ), 2),
     }
 
 

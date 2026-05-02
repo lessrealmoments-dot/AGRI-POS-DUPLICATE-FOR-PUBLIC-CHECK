@@ -14,7 +14,7 @@ import {
   Search, AlertTriangle, Percent, Receipt, Clock,
   Info, Zap, Edit3, Banknote, CreditCard, FileText, RefreshCw,
   Building2, Smartphone, X, Tag, Users, ArrowDownAZ, ArrowDown01, GhostIcon,
-  Shield, PenLine, Ban
+  Shield, PenLine, Ban, History, ChevronDown
 } from 'lucide-react';
 import { toast } from 'sonner';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
@@ -41,6 +41,46 @@ function round2(n) { return Math.round(n * 100) / 100; }
 
 export default function PaymentsPage() {
   const { currentBranch } = useAuth();
+
+  // ── Page tab ──
+  const [pageTab, setPageTab] = useState('payment'); // 'payment' | 'history'
+
+  // ── Global payment history ──
+  const [histGlobalData, setHistGlobalData] = useState(null);
+  const [histGlobalLoading, setHistGlobalLoading] = useState(false);
+  const [histGlobalDateFrom, setHistGlobalDateFrom] = useState(new Date().toISOString().slice(0, 10));
+  const [histGlobalDateTo, setHistGlobalDateTo] = useState(new Date().toISOString().slice(0, 10));
+  const [histGlobalMethod, setHistGlobalMethod] = useState('All');
+  const [histGlobalSearch, setHistGlobalSearch] = useState('');
+  const [histCustomerName, setHistCustomerName] = useState('');
+
+  const loadGlobalHistory = useCallback(async (dateFrom, dateTo, method, search) => {
+    setHistGlobalLoading(true);
+    try {
+      const params = { date_from: dateFrom, date_to: dateTo };
+      if (currentBranch?.id) params.branch_id = currentBranch.id;
+      if (method && method !== 'All') params.method = method;
+      if (search) params.customer_search = search;
+      const res = await api.get('/payments/history', { params });
+      setHistGlobalData(res.data);
+    } catch { toast.error('Failed to load payment history'); }
+    setHistGlobalLoading(false);
+  }, [currentBranch]);
+
+  useEffect(() => {
+    if (pageTab === 'history') {
+      loadGlobalHistory(histGlobalDateFrom, histGlobalDateTo, histGlobalMethod, histGlobalSearch);
+    }
+  }, [pageTab, loadGlobalHistory, histGlobalDateFrom, histGlobalDateTo, histGlobalMethod]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const loadCustomerHistoryById = async (customerId, customerName) => {
+    try {
+      const res = await api.get(`/customers/${customerId}/payment-history`);
+      setPayHistory(res.data);
+      setHistCustomerName(customerName);
+      setHistoryOpen(true);
+    } catch { toast.error('Failed to load customer history'); }
+  };
 
   // ── Left panel: customer list ──
   const [custList, setCustList] = useState([]);
@@ -415,6 +455,7 @@ export default function PaymentsPage() {
     try {
       const res = await api.get(`/customers/${selectedCustomer.id}/payment-history`);
       setPayHistory(res.data);
+      setHistCustomerName(selectedCustomer?.name || '');
       setHistoryOpen(true);
     } catch { toast.error('Failed to load history'); }
   };
@@ -476,10 +517,184 @@ export default function PaymentsPage() {
   })();
 
   return (
-    <div className="flex h-[calc(100vh-120px)] animate-fadeIn bg-white" data-testid="payments-page">
+    <div className="flex flex-col h-[calc(100vh-120px)] animate-fadeIn bg-white" data-testid="payments-page">
 
-      {/* ══════════ LEFT: Customer List ══════════ */}
-      <div className="w-72 shrink-0 flex flex-col border-r border-slate-200" data-testid="customer-list-panel">
+      {/* ══════════ PAGE TAB HEADER ══════════ */}
+      <div className="flex items-center gap-1 px-4 py-2 border-b border-slate-200 bg-white shrink-0">
+        <button
+          onClick={() => setPageTab('payment')}
+          data-testid="tab-customer-payment"
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+            pageTab === 'payment' ? 'bg-[#1A4D2E] text-white' : 'text-slate-600 hover:bg-slate-100'
+          }`}>
+          <Users size={13} /> Customer Payment
+        </button>
+        <button
+          onClick={() => setPageTab('history')}
+          data-testid="tab-payment-history"
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+            pageTab === 'history' ? 'bg-[#1A4D2E] text-white' : 'text-slate-600 hover:bg-slate-100'
+          }`}>
+          <History size={13} /> Payment History
+        </button>
+      </div>
+
+      {/* ══════════ GLOBAL PAYMENT HISTORY TAB ══════════ */}
+      {pageTab === 'history' && (
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Filters */}
+          <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-3 flex-wrap shrink-0 bg-white">
+            <div className="flex items-center gap-1.5">
+              <Label className="text-[10px] text-slate-400 uppercase shrink-0">From</Label>
+              <Input type="date" value={histGlobalDateFrom} onChange={e => setHistGlobalDateFrom(e.target.value)}
+                className="h-8 w-36 text-sm" data-testid="hist-date-from" />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Label className="text-[10px] text-slate-400 uppercase shrink-0">To</Label>
+              <Input type="date" value={histGlobalDateTo} onChange={e => setHistGlobalDateTo(e.target.value)}
+                className="h-8 w-36 text-sm" data-testid="hist-date-to" />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Label className="text-[10px] text-slate-400 uppercase shrink-0">Method</Label>
+              <div className="relative">
+                <select value={histGlobalMethod} onChange={e => setHistGlobalMethod(e.target.value)}
+                  className="h-8 pl-2 pr-7 text-sm border border-slate-200 rounded-md bg-white appearance-none"
+                  data-testid="hist-method-filter">
+                  {['All','Cash','Check','Bank Transfer','GCash','Maya','Discount'].map(m => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+                <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              </div>
+            </div>
+            <div className="relative flex-1 max-w-xs">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Input value={histGlobalSearch} onChange={e => setHistGlobalSearch(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && loadGlobalHistory(histGlobalDateFrom, histGlobalDateTo, histGlobalMethod, histGlobalSearch)}
+                placeholder="Search customer..." className="pl-8 h-8 text-sm" data-testid="hist-customer-search" />
+            </div>
+            <Button size="sm" className="h-8 bg-[#1A4D2E] hover:bg-[#14532d] text-white gap-1"
+              onClick={() => loadGlobalHistory(histGlobalDateFrom, histGlobalDateTo, histGlobalMethod, histGlobalSearch)}
+              data-testid="hist-refresh-btn">
+              <RefreshCw size={13} /> Refresh
+            </Button>
+          </div>
+
+          {/* Method Breakdown Chips */}
+          {histGlobalData && (
+            <div className="px-4 py-2 border-b border-slate-100 flex items-center gap-2 flex-wrap shrink-0 bg-slate-50">
+              {(histGlobalData.method_breakdown || []).map(m => {
+                const isDiscount = m.method === 'Discount';
+                return (
+                  <div key={m.method}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium ${
+                      isDiscount ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-slate-200 text-slate-700'
+                    }`}
+                    data-testid={`hist-method-chip-${m.method}`}>
+                    <span className="font-semibold">{m.method}</span>
+                    <span className="font-mono">{formatPHP(m.total)}</span>
+                    <span className="text-[10px] opacity-60">({m.count})</span>
+                  </div>
+                );
+              })}
+              {histGlobalData.method_breakdown?.length > 0 && (
+                <>
+                  <Separator orientation="vertical" className="h-5" />
+                  <div className="flex items-center gap-1 text-xs text-slate-500">
+                    <span>Total Received:</span>
+                    <span className="font-mono font-bold text-emerald-700">{formatPHP(histGlobalData.total_received)}</span>
+                  </div>
+                  {histGlobalData.total_discount > 0 && (
+                    <div className="flex items-center gap-1 text-xs text-slate-500">
+                      <span>Discounts:</span>
+                      <span className="font-mono font-semibold text-blue-600">{formatPHP(histGlobalData.total_discount)}</span>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Table */}
+          <div className="flex-1 overflow-auto">
+            {histGlobalLoading ? (
+              <div className="flex items-center justify-center h-32 text-slate-400">
+                <RefreshCw size={20} className="animate-spin mr-2" /> Loading…
+              </div>
+            ) : !histGlobalData ? (
+              <div className="flex items-center justify-center h-32 text-slate-400">
+                <History size={32} className="mr-2 opacity-30" /> Select date range and click Refresh
+              </div>
+            ) : histGlobalData.payments.length === 0 ? (
+              <div className="flex items-center justify-center h-32 text-slate-400">
+                <Receipt size={32} className="mr-2 opacity-30" /> No payments found for this period
+              </div>
+            ) : (
+              <table className="w-full text-sm" data-testid="global-payment-history-table">
+                <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
+                  <tr>
+                    <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-500 uppercase">Date</th>
+                    <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-500 uppercase">Customer</th>
+                    <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-500 uppercase">Invoice #</th>
+                    <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-500 uppercase">Type</th>
+                    <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-500 uppercase">Method</th>
+                    <th className="text-right px-3 py-2 text-[10px] font-semibold text-slate-500 uppercase">Amount</th>
+                    <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-500 uppercase">Reference</th>
+                    <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-500 uppercase">Recorded By</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {histGlobalData.payments.map((p, i) => {
+                    const tc = getTypeConfig(p.sale_type);
+                    const isDiscount = p.method === 'Discount' || p.fund_source === 'discount';
+                    return (
+                      <tr key={i} className={`border-b border-slate-50 hover:bg-slate-50/50 transition-colors ${isDiscount ? 'bg-blue-50/30' : ''}`}
+                        data-testid={`hist-row-${i}`}>
+                        <td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap">{p.date}</td>
+                        <td className="px-3 py-2">
+                          {p.customer_id ? (
+                            <button
+                              onClick={() => loadCustomerHistoryById(p.customer_id, p.customer_name)}
+                              className="text-sm font-medium text-blue-700 hover:underline truncate max-w-[140px] block text-left"
+                              data-testid={`hist-customer-link-${i}`}>
+                              {p.customer_name}
+                            </button>
+                          ) : (
+                            <span className="text-sm text-slate-700">{p.customer_name}</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 font-mono text-xs text-slate-600">{p.invoice_number}</td>
+                        <td className="px-3 py-2">
+                          <Badge variant="outline" className={`text-[9px] ${tc.cls}`}>{tc.label}</Badge>
+                        </td>
+                        <td className="px-3 py-2">
+                          {isDiscount ? (
+                            <Badge className="text-[9px] bg-blue-100 text-blue-700 border-blue-200">Discount</Badge>
+                          ) : (
+                            <span className="text-xs">{p.method}</span>
+                          )}
+                        </td>
+                        <td className={`px-3 py-2 text-right font-mono font-semibold text-sm ${isDiscount ? 'text-blue-600' : 'text-slate-800'}`}>
+                          {formatPHP(p.amount)}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-slate-400">{p.reference || '—'}</td>
+                        <td className="px-3 py-2 text-xs text-slate-500">{p.recorded_by}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ══════════ CUSTOMER PAYMENT TAB ══════════ */}
+      {pageTab === 'payment' && (
+        <div className="flex flex-1 overflow-hidden">
+
+        {/* ══════════ LEFT: Customer List ══════════ */}
+        <div className="w-72 shrink-0 flex flex-col border-r border-slate-200" data-testid="customer-list-panel">
         {/* Orphan receivables alert */}
         {orphans.length > 0 && (
           <button
@@ -953,12 +1168,14 @@ export default function PaymentsPage() {
           </div>
         )}
       </div>
+    </div>
+      )}
 
       {/* ── Payment History Dialog ── */}
       <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
         <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle style={{ fontFamily: 'Manrope' }}>Payment History — {selectedCustomer?.name}</DialogTitle>
+            <DialogTitle style={{ fontFamily: 'Manrope' }}>Payment History — {histCustomerName}</DialogTitle>
             <DialogDescription>All payments received. Edit payments that haven't been included in a Z-Report yet.</DialogDescription>
           </DialogHeader>
           <ScrollArea className="max-h-[420px]">

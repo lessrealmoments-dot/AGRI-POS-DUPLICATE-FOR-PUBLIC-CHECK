@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { ScrollArea } from '../components/ui/scroll-area';
-import { Users, Plus, Pencil, Trash2, Search, FileText, Eye, X, Printer, AlertTriangle } from 'lucide-react';
+import { Users, Plus, Pencil, Trash2, Search, FileText, Eye, X, Printer, AlertTriangle, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 import CustomerStatementModal from '../components/CustomerStatementModal';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
@@ -69,6 +69,23 @@ export default function CustomersPage() {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [transactions, setTransactions] = useState(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
+
+  // Payment history
+  const [payHistoryDialog, setPayHistoryDialog] = useState(false);
+  const [payHistoryCustomer, setPayHistoryCustomer] = useState(null);
+  const [payHistory, setPayHistory] = useState([]);
+  const [payHistoryLoading, setPayHistoryLoading] = useState(false);
+
+  const openPayHistory = async (customer) => {
+    setPayHistoryCustomer(customer);
+    setPayHistoryDialog(true);
+    setPayHistoryLoading(true);
+    try {
+      const res = await api.get(`/customers/${customer.id}/payment-history`);
+      setPayHistory(res.data || []);
+    } catch { toast.error('Failed to load payment history'); }
+    setPayHistoryLoading(false);
+  };
 
   const fetchCustomers = useCallback(async () => {
     try {
@@ -327,6 +344,10 @@ export default function CustomersPage() {
                     <div className="flex gap-1">
                       <Button variant="ghost" size="sm" data-testid={`view-customer-${c.id}`} onClick={() => openHistory(c)} title="View Transactions">
                         <Eye size={14} />
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => openPayHistory(c)} title="Payment History"
+                        className="text-indigo-400 hover:text-indigo-700" data-testid={`pay-history-${c.id}`}>
+                        <Clock size={14} />
                       </Button>
                       <Button variant="ghost" size="sm" onClick={() => { setStatementCustomer(c); setStatementDialog(true); }}
                         title="Statement of Account" className="text-slate-400 hover:text-[#1A4D2E]">
@@ -720,6 +741,67 @@ export default function CustomersPage() {
                 </Button>
               </div>
             </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Customer Payment History Dialog ── */}
+      <Dialog open={payHistoryDialog} onOpenChange={setPayHistoryDialog}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle style={{ fontFamily: 'Manrope' }} className="flex items-center gap-2">
+              <Clock size={16} className="text-indigo-600" /> Payment History — {payHistoryCustomer?.name}
+            </DialogTitle>
+          </DialogHeader>
+          {payHistoryLoading ? (
+            <div className="py-8 text-center text-slate-400">Loading…</div>
+          ) : (
+            <ScrollArea className="max-h-[460px]">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-slate-50">
+                    <TableHead className="text-xs">Date</TableHead>
+                    <TableHead className="text-xs">Invoice #</TableHead>
+                    <TableHead className="text-xs">Type</TableHead>
+                    <TableHead className="text-xs">Method</TableHead>
+                    <TableHead className="text-xs">Reference</TableHead>
+                    <TableHead className="text-xs text-right">Amount</TableHead>
+                    <TableHead className="text-xs">Recorded By</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {payHistory.length === 0 && (
+                    <TableRow><TableCell colSpan={7} className="text-center py-6 text-slate-400">No payment history found</TableCell></TableRow>
+                  )}
+                  {payHistory.map((p, i) => {
+                    const isDiscount = p.method === 'Discount';
+                    const saleTypeMap = { penalty_charge: { label: 'Penalty', cls: 'bg-red-100 text-red-700' }, interest_charge: { label: 'Interest', cls: 'bg-amber-100 text-amber-700' } };
+                    const tc = saleTypeMap[p.sale_type] || { label: 'Invoice', cls: 'bg-slate-100 text-slate-700' };
+                    return (
+                      <TableRow key={i} className={`${p.voided ? 'opacity-40 line-through' : ''} ${isDiscount ? 'bg-blue-50/40' : ''}`}
+                        data-testid={`cust-pay-hist-${i}`}>
+                        <TableCell className="text-xs">{p.date}</TableCell>
+                        <TableCell className="font-mono text-xs">{p.invoice_number}</TableCell>
+                        <TableCell><Badge variant="outline" className={`text-[9px] ${tc.cls}`}>{tc.label}</Badge></TableCell>
+                        <TableCell className="text-xs">
+                          {isDiscount ? <Badge className="text-[9px] bg-blue-100 text-blue-700">Discount</Badge> : p.method}
+                        </TableCell>
+                        <TableCell className="text-xs text-slate-400">{p.reference || '—'}</TableCell>
+                        <TableCell className={`text-right font-medium text-sm ${isDiscount ? 'text-blue-600' : ''}`}>{formatPHP(p.amount)}</TableCell>
+                        <TableCell className="text-xs text-slate-400">{p.recorded_by}</TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  {payHistory.filter(p => !p.voided && p.method !== 'Discount').length > 0 && (
+                    <TableRow className="bg-slate-50 font-semibold">
+                      <TableCell colSpan={5} className="text-right text-xs text-slate-500">Total Received</TableCell>
+                      <TableCell className="text-right">{formatPHP(payHistory.filter(p => !p.voided && p.method !== 'Discount').reduce((s, p) => s + (p.amount || 0), 0))}</TableCell>
+                      <TableCell />
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </ScrollArea>
           )}
         </DialogContent>
       </Dialog>

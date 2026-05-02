@@ -1788,6 +1788,101 @@ async def get_customer_payment_history(customer_id: str, user=Depends(get_curren
     return history
 
 
+@router.get("/payments/history")
+async def get_global_payment_history(
+    user=Depends(get_current_user),
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    branch_id: Optional[str] = None,
+    method: Optional[str] = None,
+    customer_search: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 150,
+):
+    """Global payment history across all customers for traceability.
+    Returns all payment records (cash, gcash, interest, discount) in the date range."""
+    check_perm(user, "accounting", "view")
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    dfrom = date_from or today
+    dto = date_to or today
+
+    inv_match: dict = {"status": {"$ne": "voided"}}
+    if branch_id:
+        inv_match["branch_id"] = branch_id
+    if customer_search:
+        inv_match["customer_name"] = {"$regex": customer_search, "$options": "i"}
+
+    pay_match: dict = {
+        "payments.date": {"$gte": dfrom, "$lte": dto},
+        "payments.voided": {"$ne": True},
+    }
+    if method and method != "All":
+        pay_match["payments.method"] = {"$regex": f"^{method}$", "$options": "i"}
+
+    pipeline = [
+        {"$match": inv_match},
+        {"$unwind": "$payments"},
+        {"$match": pay_match},
+        {"$project": {
+            "_id": 0,
+            "date": "$payments.date",
+            "customer_id": 1,
+            "customer_name": 1,
+            "invoice_id": "$id",
+            "invoice_number": 1,
+            "sale_type": 1,
+            "branch_id": 1,
+            "payment_id": "$payments.id",
+            "method": "$payments.method",
+            "amount": "$payments.amount",
+            "reference": "$payments.reference",
+            "recorded_by": "$payments.recorded_by",
+            "recorded_at": "$payments.recorded_at",
+            "fund_source": "$payments.fund_source",
+            "applied_to_interest": "$payments.applied_to_interest",
+            "applied_to_principal": "$payments.applied_to_principal",
+            "voided": "$payments.voided",
+        }},
+        {"$sort": {"recorded_at": -1}},
+        {"$skip": skip},
+        {"$limit": limit},
+    ]
+    payments = await db.invoices.aggregate(pipeline).to_list(limit)
+
+    # Method breakdown for the whole period
+    breakdown_pipeline = [
+        {"$match": inv_match},
+        {"$unwind": "$payments"},
+        {"$match": {
+            "payments.date": {"$gte": dfrom, "$lte": dto},
+            "payments.voided": {"$ne": True},
+        }},
+        {"$group": {
+            "_id": "$payments.method",
+            "total": {"$sum": "$payments.amount"},
+            "count": {"$sum": 1},
+        }},
+        {"$sort": {"total": -1}},
+    ]
+    breakdown_raw = await db.invoices.aggregate(breakdown_pipeline).to_list(20)
+    method_breakdown = [
+        {"method": r["_id"] or "Unknown", "total": round(r["total"], 2), "count": r["count"]}
+        for r in breakdown_raw
+    ]
+    total_received = sum(r["total"] for r in method_breakdown if r["method"] != "Discount")
+    total_discount = sum(r["total"] for r in method_breakdown if r["method"] == "Discount")
+
+    return {
+        "payments": payments,
+        "total": len(payments),
+        "method_breakdown": method_breakdown,
+        "total_received": round(total_received, 2),
+        "total_discount": round(total_discount, 2),
+        "date_from": dfrom,
+        "date_to": dto,
+    }
+
+
 @router.post("/customers/{customer_id}/modify-payment")
 async def modify_customer_payment(customer_id: str, data: dict, user=Depends(get_current_user)):
     """Modify a payment: void the original and re-apply with new amount.

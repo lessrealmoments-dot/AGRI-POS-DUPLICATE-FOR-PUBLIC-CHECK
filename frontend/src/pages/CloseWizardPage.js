@@ -1121,13 +1121,40 @@ export default function CloseWizardPage() {
             <div className="space-y-3">
               <div className="flex items-center justify-between mb-1">
                 <p className="text-sm text-slate-500">Payments received today on existing credit accounts.</p>
-                <p className="text-sm font-semibold text-blue-700">Total Received: {formatPHP(preview?.total_ar_received || 0)}</p>
+                <div className="flex items-center gap-3">
+                  {(preview?.ar_discount_today || 0) > 0 && (
+                    <span className="text-xs text-blue-600 flex items-center gap-1">
+                      Disc: <span className="font-mono font-semibold">{formatPHP(preview.ar_discount_today)}</span>
+                    </span>
+                  )}
+                  {(preview?.ar_interest_collected || 0) > 0 && (
+                    <span className="text-xs text-amber-600 flex items-center gap-1">
+                      INT collected: <span className="font-mono font-semibold">{formatPHP(preview.ar_interest_collected)}</span>
+                    </span>
+                  )}
+                  <p className="text-sm font-semibold text-blue-700">Total Received: {formatPHP(preview?.total_ar_received || 0)}</p>
+                </div>
               </div>
-              <ScrollArea className="h-[280px] rounded-lg border border-slate-200">
+
+              {/* AR payment method breakdown chips */}
+              {preview?.ar_payment_by_method && Object.keys(preview.ar_payment_by_method).length > 0 && (
+                <div className="flex items-center gap-2 flex-wrap" data-testid="ar-method-breakdown">
+                  {Object.entries(preview.ar_payment_by_method).map(([m, v]) => (
+                    <div key={m} className="flex items-center gap-1 px-2 py-0.5 bg-white border border-slate-200 rounded-full text-xs text-slate-600">
+                      <span className="font-semibold">{m}</span>
+                      <span className="font-mono">{formatPHP(v.total)}</span>
+                      <span className="text-[10px] text-slate-400">({v.count})</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <ScrollArea className="h-[240px] rounded-lg border border-slate-200">
                 <table className="w-full text-sm">
                   <thead className="sticky top-0 bg-slate-50 border-b border-slate-200">
                     <tr className="text-xs uppercase text-slate-500">
                       <th className="px-3 py-2 text-left">Customer / Invoice</th>
+                      <th className="px-3 py-2 text-left">Method</th>
                       <th className="px-3 py-2 text-right">Bal Before</th>
                       <th className="px-3 py-2 text-right">Interest</th>
                       <th className="px-3 py-2 text-right">Penalty</th>
@@ -1137,14 +1164,15 @@ export default function CloseWizardPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {(preview?.ar_payments || []).length === 0
-                      ? <tr><td colSpan={7} className="text-center py-8 text-slate-400">No AR payments received today</td></tr>
-                      : (preview?.ar_payments || []).map((p, i) => (
+                    {(preview?.ar_payments || []).filter(p => p.fund_source !== 'discount').length === 0
+                      ? <tr><td colSpan={8} className="text-center py-8 text-slate-400">No AR payments received today</td></tr>
+                      : (preview?.ar_payments || []).filter(p => p.fund_source !== 'discount').map((p, i) => (
                       <tr key={i} className="border-b border-slate-50 hover:bg-slate-50/50">
                         <td className="px-3 py-2">
                           <p className="font-medium">{p.customer_id ? <button onClick={() => openCustStmt(p.customer_id, p.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{p.customer_name}</button> : p.customer_name}</p>
                           <p className="text-xs text-slate-400 font-mono"><button className="text-blue-600 hover:underline" onClick={() => openDetailModal(p.invoice_number)}>{p.invoice_number}</button></p>
                         </td>
+                        <td className="px-3 py-2 text-xs text-slate-600">{p.method || 'Cash'}</td>
                         <td className="px-3 py-2 text-right font-mono text-xs">{formatPHP(p.balance_before)}</td>
                         <td className="px-3 py-2 text-right font-mono text-xs text-amber-600">{p.interest_paid > 0 ? formatPHP(p.interest_paid) : '—'}</td>
                         <td className="px-3 py-2 text-right font-mono text-xs text-red-500">{p.penalty_paid > 0 ? formatPHP(p.penalty_paid) : '—'}</td>
@@ -1161,6 +1189,48 @@ export default function CloseWizardPage() {
                   </tbody>
                 </table>
               </ScrollArea>
+
+              {/* Interest / Penalty Invoices Created Today */}
+              {(preview?.interest_invoices_today || []).length > 0 && (
+                <div className="rounded-lg border border-amber-200 overflow-hidden" data-testid="interest-invoices-today">
+                  <div className="px-3 py-2 bg-amber-50 flex items-center justify-between">
+                    <p className="text-xs font-bold uppercase tracking-wide text-amber-700">Interest & Penalty Invoices Created Today</p>
+                    <span className="text-xs font-mono text-amber-700 font-semibold">
+                      {formatPHP((preview.interest_invoices_today || []).reduce((s, i) => s + (i.grand_total || 0), 0))}
+                    </span>
+                  </div>
+                  <table className="w-full text-xs">
+                    <thead className="bg-amber-50/50 border-b border-amber-100">
+                      <tr>
+                        <th className="px-3 py-1.5 text-left text-amber-700 font-medium">Customer</th>
+                        <th className="px-3 py-1.5 text-left text-amber-700 font-medium">Invoice #</th>
+                        <th className="px-3 py-1.5 text-left text-amber-700 font-medium">Type</th>
+                        <th className="px-3 py-1.5 text-right text-amber-700 font-medium">Amount</th>
+                        <th className="px-3 py-1.5 text-right text-amber-700 font-medium">Collected</th>
+                        <th className="px-3 py-1.5 text-right text-amber-700 font-medium">Balance</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(preview.interest_invoices_today || []).map((inv, i) => (
+                        <tr key={i} className="border-b border-amber-50">
+                          <td className="px-3 py-1.5 font-medium text-slate-700">{inv.customer_name}</td>
+                          <td className="px-3 py-1.5 font-mono text-slate-500">{inv.invoice_number}</td>
+                          <td className="px-3 py-1.5">
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${
+                              inv.sale_type === 'penalty_charge' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                            }`}>
+                              {inv.sale_type === 'penalty_charge' ? 'Penalty' : inv.manual_interest ? 'Manual INT' : 'Interest'}
+                            </span>
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-mono">{formatPHP(inv.grand_total)}</td>
+                          <td className="px-3 py-1.5 text-right font-mono text-emerald-600">{inv.amount_paid > 0 ? formatPHP(inv.amount_paid) : '—'}</td>
+                          <td className="px-3 py-1.5 text-right font-mono font-semibold text-amber-700">{formatPHP(inv.balance)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
               {/* Find & Record Payment for ANY customer */}
               <div className="border border-dashed border-blue-300 rounded-lg">
@@ -1612,6 +1682,12 @@ export default function CloseWizardPage() {
                   {(preview?.total_digital_ar || 0) > 0 && (
                     <div className="flex justify-between text-xs"><span className="text-indigo-400 pl-3">AR Digital (e-wallet, not in drawer)</span><span className="font-mono text-indigo-400">{formatPHP(preview?.total_digital_ar || 0)}</span></div>
                   )}
+                  {(preview?.ar_interest_collected || 0) > 0 && (
+                    <div className="flex justify-between text-xs"><span className="text-amber-500 pl-3">↳ of which interest collected</span><span className="font-mono text-amber-600">{formatPHP(preview.ar_interest_collected)}</span></div>
+                  )}
+                  {(preview?.ar_discount_today || 0) > 0 && (
+                    <div className="flex justify-between text-xs"><span className="text-blue-500 pl-3">↳ discounts given on interest/penalty</span><span className="font-mono text-blue-600">-{formatPHP(preview.ar_discount_today)}</span></div>
+                  )}
                   {(preview?.net_fund_transfers || 0) !== 0 && (
                     <>
                       {(preview?.capital_to_cashier || 0) > 0 && (
@@ -1737,14 +1813,22 @@ export default function CloseWizardPage() {
               )}
 
               {/* Z-Report: AR Cash Payments — Detailed */}
-              {(preview?.ar_payments || []).length > 0 && (
-                <div className="rounded-xl border border-indigo-200 overflow-hidden">
-                  <div className="px-4 py-2 bg-indigo-50 flex items-center justify-between">
-                    <p className="text-xs font-bold uppercase tracking-wider text-indigo-600">AR Cash Payments</p>
-                    <span className="font-bold font-mono text-indigo-700 text-sm">{formatPHP(preview?.total_ar_received || 0)}</span>
+              {(preview?.ar_payments || []).filter(p => p.fund_source !== 'discount').length > 0 && (
+                <div className="rounded-xl border border-indigo-200 overflow-hidden" data-testid="z-ar-payments">
+                  <div className="px-4 py-2 bg-indigo-50 flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-3">
+                      <p className="text-xs font-bold uppercase tracking-wider text-indigo-600">AR Collections Today</p>
+                      {/* Method breakdown chips */}
+                      {preview?.ar_payment_by_method && Object.entries(preview.ar_payment_by_method).map(([m, v]) => (
+                        <span key={m} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">
+                          {m}: {formatPHP(v.total)}
+                        </span>
+                      ))}
+                    </div>
+                    <span className="font-bold font-mono text-indigo-700 text-sm">{formatPHP((preview?.ar_payments || []).filter(p => p.fund_source !== 'discount').reduce((s, p) => s + p.amount_paid, 0))}</span>
                   </div>
                   <div className="divide-y divide-indigo-100">
-                    {preview.ar_payments.map((p, i) => (
+                    {preview.ar_payments.filter(p => p.fund_source !== 'discount').map((p, i) => (
                       <div key={i} className="px-4 py-2 flex items-center justify-between text-sm">
                         <div>
                           <span className="font-medium text-slate-800">{p.customer_id ? <button onClick={() => openCustStmt(p.customer_id, p.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{p.customer_name}</button> : p.customer_name}</span>
@@ -1752,8 +1836,47 @@ export default function CloseWizardPage() {
                           <span className={`ml-2 text-[10px] px-1.5 py-0.5 rounded font-medium ${p.fund_source === 'cashier' ? 'bg-emerald-100 text-emerald-700' : 'bg-violet-100 text-violet-700'}`}>
                             {p.method || (p.fund_source === 'cashier' ? 'Cash' : 'Digital')}
                           </span>
+                          {p.interest_paid > 0 && (
+                            <span className="ml-1 text-[10px] text-amber-600">INT: {formatPHP(p.interest_paid)}</span>
+                          )}
                         </div>
                         <span className="font-mono font-semibold text-indigo-700">{formatPHP(p.amount_paid)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Discounts given on interest/penalty */}
+                  {(preview?.ar_discount_today || 0) > 0 && (
+                    <div className="px-4 py-2 bg-blue-50/60 border-t border-indigo-100 flex items-center justify-between text-xs">
+                      <span className="text-blue-600 flex items-center gap-1">Discounts given on interest/penalty (not in cashier drawer)</span>
+                      <span className="font-mono font-semibold text-blue-600">-{formatPHP(preview.ar_discount_today)}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Z-Report: Interest Invoices Created Today */}
+              {(preview?.interest_invoices_today || []).length > 0 && (
+                <div className="rounded-xl border border-amber-200 overflow-hidden" data-testid="z-interest-invoices">
+                  <div className="px-4 py-2 bg-amber-50 flex items-center justify-between">
+                    <p className="text-xs font-bold uppercase tracking-wider text-amber-700">Interest & Penalty Invoices Issued Today</p>
+                    <span className="font-mono font-bold text-amber-700 text-sm">{formatPHP((preview.interest_invoices_today || []).reduce((s, i) => s + (i.grand_total || 0), 0))}</span>
+                  </div>
+                  <div className="divide-y divide-amber-100">
+                    {(preview.interest_invoices_today || []).map((inv, i) => (
+                      <div key={i} className="px-4 py-2 flex items-center justify-between text-sm">
+                        <div>
+                          <span className="font-medium text-slate-700">{inv.customer_name}</span>
+                          <span className="font-mono text-xs text-slate-400 ml-2">{inv.invoice_number}</span>
+                          <span className={`ml-2 text-[9px] px-1.5 py-0.5 rounded font-medium ${inv.sale_type === 'penalty_charge' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                            {inv.sale_type === 'penalty_charge' ? 'Penalty' : inv.manual_interest ? 'Manual INT' : 'Interest'}
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          <span className="font-mono font-semibold text-amber-700">{formatPHP(inv.grand_total)}</span>
+                          {inv.amount_paid > 0 && (
+                            <span className="text-[10px] text-emerald-600 ml-2">({formatPHP(inv.amount_paid)} collected)</span>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
