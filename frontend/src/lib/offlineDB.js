@@ -58,7 +58,7 @@ async function clearOrgCache(oldOrgId) {
   }
 }
 
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 const STORES = {
   PRODUCTS: 'products',
@@ -67,6 +67,7 @@ const STORES = {
   INVENTORY: 'inventory',
   BRANCH_PRICES: 'branch_prices',
   PENDING_SALES: 'pending_sales',
+  PARKED_SALES: 'parked_sales',
   META: 'meta',
 };
 
@@ -410,6 +411,74 @@ export async function getPendingSale(saleId) {
     const req = tx.objectStore(STORES.PENDING_SALES).get(saleId);
     req.onsuccess = () => { db.close(); resolve(req.result || null); };
     req.onerror = () => { db.close(); reject(req.error); };
+  });
+}
+
+// ─── Parked / Draft sales (server-shared, with offline queue) ──────────
+// Local copy is the source of truth on the device. Each row carries a
+// `_sync` field: 'synced' (server has it), 'pending_create' (offline
+// add — push when online), 'pending_delete' (offline discard — push
+// delete when online). Server is the canonical store across devices.
+export async function putParkedSaleLocal(park) {
+  await putOne(STORES.PARKED_SALES, park);
+}
+
+export async function getParkedSalesLocal() {
+  const all = await getAll(STORES.PARKED_SALES);
+  // Hide rows that the user has already discarded but couldn't sync yet.
+  return (all || []).filter(p => p._sync !== 'pending_delete');
+}
+
+export async function getAllParkedSalesIncludingPending() {
+  return getAll(STORES.PARKED_SALES);
+}
+
+export async function getParkedSaleLocal(parkId) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORES.PARKED_SALES, 'readonly');
+    const req = tx.objectStore(STORES.PARKED_SALES).get(parkId);
+    req.onsuccess = () => { db.close(); resolve(req.result || null); };
+    req.onerror = () => { db.close(); reject(req.error); };
+  });
+}
+
+export async function removeParkedSaleLocal(parkId) {
+  await deleteOne(STORES.PARKED_SALES, parkId);
+}
+
+/** Replace local cache with the server's canonical list (for the active
+ * branch only, so cross-branch users don't accidentally overwrite). Local
+ * rows that are still pending_create / pending_delete are preserved so the
+ * sync queue isn't blown away by a refresh. */
+export async function reconcileParkedSales(branchId, serverRows) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORES.PARKED_SALES, 'readwrite');
+    const store = tx.objectStore(STORES.PARKED_SALES);
+    const req = store.getAll();
+    req.onsuccess = () => {
+      const existing = req.result || [];
+      const serverIds = new Set(serverRows.map(r => r.id));
+      // Keep local pending rows for THIS branch; drop the rest.
+      for (const row of existing) {
+        if (row.branch_id !== branchId) continue;
+        const isPending = row._sync === 'pending_create' || row._sync === 'pending_delete';
+        if (!isPending) store.delete(row.id);
+      }
+      // Insert the server's view
+      for (const row of serverRows) {
+        store.put({ ...row, _sync: 'synced' });
+      }
+      // Pending deletes that no longer exist on server can be cleared
+      for (const row of existing) {
+        if (row._sync === 'pending_delete' && !serverIds.has(row.id)) {
+          store.delete(row.id);
+        }
+      }
+    };
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
   });
 }
 

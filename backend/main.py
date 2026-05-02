@@ -56,6 +56,7 @@ from routes.app_downloads import router as app_downloads_router
 from routes.crop_credits import router as crop_credits_router
 from routes.signatures import router as signatures_router
 from routes.overage_reserve import router as overage_reserve_router
+from routes.parked_sales import router as parked_sales_router
 from routes.close_reminder import start_scheduler_on_startup as _start_close_reminder
 
 # =============================================================================
@@ -222,6 +223,9 @@ api_router.include_router(signatures_router)
 
 # Overage Reserve (Cash Over/Short pool + audit offset)
 api_router.include_router(overage_reserve_router)
+
+# Parked / Draft Sales
+api_router.include_router(parked_sales_router)
 
 # =============================================================================
 # WEBSOCKET ROUTES (must be on app directly with /api prefix)

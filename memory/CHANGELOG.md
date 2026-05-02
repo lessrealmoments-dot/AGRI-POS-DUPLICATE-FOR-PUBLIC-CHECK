@@ -1,5 +1,37 @@
 # AgriBooks Changelog
 
+## Feb 2026 — Park / Draft Sales (offline-capable) (Iter 202)
+
+**Ask**: "I got stuck because a customer wanted to add a product from a far shelf and I had to pause; the next customer ended up waiting too long and left because I couldn't close my sale even though I was temporarily free. Add a Park button on /sales-new and a button to show all parked drafts. Must work offline too."
+
+**Implemented (backend + frontend + regression):**
+
+**Backend** — `routes/parked_sales.py` (new), wired in `main.py`, `parked_sales` added to `TENANT_COLLECTIONS` in `config.py`:
+- `POST /api/parked-sales` — upsert (idempotent on `id`, so an offline outbox replay never duplicates).
+- `GET /api/parked-sales?branch_id=…` — branch-shared list (so any cashier on duty can resume a colleague's park).
+- `GET /api/parked-sales/{id}` — full snapshot.
+- `DELETE /api/parked-sales/{id}?pin=…` — owner deletes for free; deleting another user's park requires a manager/admin PIN via `verify_pin_for_action("parked_sale.discard_other")`.
+- Limits: 20 active parks per branch (409 on overflow), opportunistic auto-purge of any park older than 24 h on every list call (no extra cron job).
+
+**Frontend offline architecture** — `lib/offlineDB.js` adds `PARKED_SALES` store (DB version bumped to 6); new `lib/parkedSalesSync.js` module orchestrates:
+- `parkSale()` — saves locally first as `_sync='pending_create'`; if online, POSTs and flips to `_sync='synced'`. Offline parks are silently queued.
+- `discardParkedSale()` — online deletes immediately; PIN errors propagate (don't queue). Offline marks `_sync='pending_delete'` so the row stays hidden but the deletion is replayed later.
+- `loadParkedSales(branchId)` — drains the pending queue, fetches the server's canonical list, reconciles with local pending rows, returns the display list. Falls back to cache when offline so the dialog never goes blank.
+- `drainSyncQueue()` — walks all pending rows on reconnect; clears 404s automatically (already-deleted on server).
+
+**UnifiedSalesPage.js** — added two toolbar buttons next to Sync:
+- **Park** (Pause icon) — opens a small dialog with item count, subtotal, optional custom note (e.g. "guy in red shirt"), and an offline banner when applicable. Auto-tags as `[Customer name|Walk-in] · 2:34 PM`.
+- **Parked (N)** (Inbox icon) — opens a list dialog showing every park at the branch with mode badge (Quick/Order), creator, item count, subtotal, age, plus `Resume` and `Discard` actions. Other-cashier discards open a Manager-PIN sub-dialog.
+- Resume rehydrates: cart/lines, customer, scheme, header, mode (Quick↔Order round-trip).
+- Auto-loads on mount + auto-drains the offline queue on every `online` transition.
+
+**Tests** — `backend/tests/test_parked_sales_202.py` (4/4 passing):
+1. Create → list → resume → owner-discard happy path
+2. Branch isolation (park at branch A invisible from branch B)
+3. Repost with same `id` is idempotent (offline outbox safety)
+4. Other-cashier discard without PIN → 403
+
+
 ## Feb 2026 — Sales-new Order-Mode Search + Cart UX (Iter 202)
 
 **Ask**: "/sales-new Order-mode search isn't as accurate as Quick mode. Arrow-down doesn't keep the highlighted result visible — useless when products have similar names like Galimax 1, 2, 3, 4, 5. Also, the Quick cart doesn't auto-scroll, so the latest add isn't visible without manual scrolling."

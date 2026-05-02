@@ -17,7 +17,7 @@ import { UnclosedDaysBanner } from '../components/UnclosedDaysBanner';
 import {
   Search, Plus, Minus, Trash2, ShoppingCart, CreditCard, X, Wifi, WifiOff,
   RefreshCw, FileText, Lock, Zap, ClipboardList, AlertTriangle, Shield, CheckCircle2, Smartphone, Camera, Check,
-  PackageX, ShieldAlert, ChevronDown, Eye, EyeOff, User, Package
+  PackageX, ShieldAlert, ChevronDown, Eye, EyeOff, User, Package, PauseCircle, Inbox, RotateCcw
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -26,6 +26,9 @@ import {
   setOfflineAdminPinHash, setOfflinePinGrants,
 } from '../lib/offlineDB';
 import { syncPendingSales, startAutoSync, stopAutoSync, newEnvelopeId } from '../lib/syncManager';
+import {
+  buildParkPayload, parkSale, discardParkedSale, loadParkedSales, drainSyncQueue as drainParkQueue,
+} from '../lib/parkedSalesSync';
 import ReferenceNumberPrompt from '../components/ReferenceNumberPrompt';
 import CropCreditTypeDialog from '../components/CropCreditTypeDialog';
 import RequestSignatureDialog from '../components/RequestSignatureDialog';
@@ -521,6 +524,13 @@ export default function UnifiedSalesPage() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [pendingCount, setPendingCount] = useState(0);
   const [dataLoaded, setDataLoaded] = useState(false);
+
+  // Parked / Draft sales (server-shared, offline-capable)
+  const [parkedSales, setParkedSales] = useState([]);
+  const [parkedDialogOpen, setParkedDialogOpen] = useState(false);
+  const [parkLabel, setParkLabel] = useState('');
+  const [parkPromptOpen, setParkPromptOpen] = useState(false);
+  const [discardPinPrompt, setDiscardPinPrompt] = useState({ open: false, parkId: null, pin: '' });
 
   // Linked Scanner
   const [scannerSession, setScannerSession] = useState(null); // { session_id, branch_id }
@@ -1178,6 +1188,142 @@ export default function UnifiedSalesPage() {
     setPriceMatchApproved(null);
     setPriceMatchError('');
   };
+
+  // ── Parked / Draft sales ────────────────────────────────────────────────
+  // Save the current sale as a parked draft so the cashier can immediately
+  // serve another customer. Works online (server-shared) and offline (queued
+  // in IndexedDB and synced on reconnect). Branch-shared: any cashier on the
+  // same branch can resume.
+  const refreshParkedSales = useCallback(async () => {
+    if (!currentBranch?.id) return;
+    try {
+      const list = await loadParkedSales(currentBranch.id);
+      setParkedSales(list);
+    } catch (err) {
+      console.error('Failed to load parked sales', err);
+    }
+  }, [currentBranch?.id]);
+
+  // Initial load + reload whenever branch changes
+  useEffect(() => { refreshParkedSales(); }, [refreshParkedSales]);
+
+  // Drain offline mutation queue + reload list whenever we come online
+  useEffect(() => {
+    if (isOnline) {
+      drainParkQueue().finally(() => refreshParkedSales());
+    }
+  }, [isOnline, refreshParkedSales]);
+
+  const computeParkSummary = () => {
+    const itemCount = mode === 'quick'
+      ? cart.reduce((s, c) => s + (parseFloat(c.quantity) || 0), 0)
+      : lines.filter(l => l.product_id).reduce((s, l) => s + (parseFloat(l.quantity) || 0), 0);
+    const sub = mode === 'quick'
+      ? cart.reduce((s, c) => s + (c.total || 0), 0)
+      : lines.filter(l => l.product_id).reduce((s, l) => s + (l.quantity * l.rate || 0), 0);
+    return { itemCount, subtotal: sub };
+  };
+
+  const handleParkConfirm = async () => {
+    const filledQuick = cart.length > 0;
+    const filledOrder = lines.some(l => l.product_id);
+    if (!filledQuick && !filledOrder) {
+      toast.error('Cart is empty — nothing to park.');
+      return;
+    }
+    if (!currentBranch?.id) {
+      toast.error('No active branch — cannot park.');
+      return;
+    }
+    const { itemCount, subtotal } = computeParkSummary();
+    const auto = selectedCustomer?.name
+      ? `${selectedCustomer.name} · ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+      : `Walk-in · ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+    const label = parkLabel.trim() ? `${auto} — ${parkLabel.trim()}` : auto;
+    const payload = buildParkPayload({
+      branchId: currentBranch.id,
+      mode,
+      label,
+      customer: selectedCustomer ? {
+        id: selectedCustomer.id, name: selectedCustomer.name,
+        phone: selectedCustomer.phone, price_scheme: selectedCustomer.price_scheme,
+        address: selectedCustomer.address, shipping_address: selectedCustomer.shipping_address,
+      } : null,
+      activeScheme,
+      cart, lines, header,
+      itemCount, subtotal,
+    });
+    try {
+      await parkSale(payload);
+      toast.success(isOnline ? 'Sale parked' : 'Sale parked — will sync when online');
+      setParkLabel('');
+      setParkPromptOpen(false);
+      clearCart();
+      refreshParkedSales();
+    } catch (err) {
+      const msg = err?.response?.data?.detail || 'Failed to park sale';
+      toast.error(msg);
+    }
+  };
+
+  const resumeParkedSale = (park) => {
+    // Push the saved snapshot back into live state. We rehydrate based on
+    // the park's stored mode so Quick/Order distinction round-trips.
+    if (park.mode === 'quick') {
+      setMode('quick');
+      setCart(park.cart || []);
+      setLines([{ ...EMPTY_LINE }]);
+    } else {
+      setMode('order');
+      const filled = (park.lines || []).filter(l => l.product_id);
+      setLines([...filled, { ...EMPTY_LINE }]);
+      setCart([]);
+    }
+    if (park.customer) {
+      setSelectedCustomer(park.customer);
+      setCustSearch(park.customer.name || '');
+    } else {
+      setSelectedCustomer(null);
+      setCustSearch('');
+    }
+    if (park.active_scheme) setActiveScheme(park.active_scheme);
+    if (park.header) setHeader(h => ({ ...h, ...park.header }));
+    setParkedDialogOpen(false);
+    toast.success(`Resumed: ${park.label || 'Parked sale'}`);
+  };
+
+  const handleDiscardClick = async (park) => {
+    const isOwn = park.created_by === user?.id;
+    if (!isOwn) {
+      // Other-user park — open PIN prompt
+      setDiscardPinPrompt({ open: true, parkId: park.id, pin: '' });
+      return;
+    }
+    try {
+      await discardParkedSale(park.id);
+      toast.success('Parked sale discarded');
+      refreshParkedSales();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to discard');
+    }
+  };
+
+  const submitDiscardWithPin = async () => {
+    const { parkId, pin } = discardPinPrompt;
+    if (!pin || pin.length < 4) {
+      toast.error('PIN required');
+      return;
+    }
+    try {
+      await discardParkedSale(parkId, { pin });
+      toast.success('Parked sale discarded');
+      setDiscardPinPrompt({ open: false, parkId: null, pin: '' });
+      refreshParkedSales();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Invalid PIN');
+    }
+  };
+
 
   // Apply a scheme change: updates activeScheme and reprices all open cart/line items
   const applySchemeChange = (scheme) => {
@@ -2089,7 +2235,36 @@ export default function UnifiedSalesPage() {
               <Smartphone size={14} className="mr-1" /> {scannerCreating ? 'Creating...' : 'Link Scanner'}
             </Button>
           )}
-          
+
+          {/* Park current sale — "hold" so cashier can serve another customer */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setParkPromptOpen(true)}
+            disabled={cart.length === 0 && !lines.some(l => l.product_id)}
+            data-testid="park-sale-btn"
+            title="Pause this sale and serve another customer"
+          >
+            <PauseCircle size={14} className="mr-1" /> Park
+          </Button>
+
+          {/* Parked sales list — resume any parked draft */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => { setParkedDialogOpen(true); refreshParkedSales(); }}
+            data-testid="parked-sales-btn"
+            title="View and resume parked sales"
+          >
+            <Inbox size={14} className="mr-1" />
+            Parked
+            {parkedSales.length > 0 && (
+              <Badge variant="secondary" className="ml-1.5 text-[10px] h-4" data-testid="parked-count-badge">
+                {parkedSales.length}
+              </Badge>
+            )}
+          </Button>
+
           <Button variant="outline" size="sm" onClick={() => loadData(true)} disabled={!isOnline}>
             <RefreshCw size={14} className="mr-1" /> Sync
           </Button>
@@ -4197,6 +4372,182 @@ export default function UnifiedSalesPage() {
           }
         }}
       />
+
+      {/* ── Park Sale: optional label prompt ─────────────────────────────── */}
+      <Dialog open={parkPromptOpen} onOpenChange={(o) => { setParkPromptOpen(o); if (!o) setParkLabel(''); }}>
+        <DialogContent data-testid="park-prompt-dialog" className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <PauseCircle size={18} className="text-amber-600" /> Park this sale
+            </DialogTitle>
+            <DialogDescription>
+              Save the current cart so you can serve another customer. You'll be able to resume it from <strong>Parked</strong> on this or any device at this branch.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div>
+              <Label className="text-xs">Optional note (helps you find it later)</Label>
+              <Input
+                value={parkLabel}
+                onChange={e => setParkLabel(e.target.value)}
+                placeholder='e.g. "guy in red shirt", "rice farmer Pedro"'
+                maxLength={60}
+                data-testid="park-label-input"
+                onKeyDown={(e) => { if (e.key === 'Enter') handleParkConfirm(); }}
+                autoFocus
+              />
+              <p className="text-[10px] text-slate-400 mt-1">
+                Auto-tagged with {selectedCustomer?.name ? <b>{selectedCustomer.name}</b> : <b>Walk-in</b>} and the time.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 rounded p-2">
+              {(() => { const { itemCount, subtotal } = computeParkSummary(); return (
+                <>
+                  <ShoppingCart size={12} />
+                  <span>{itemCount.toFixed(0)} item{itemCount === 1 ? '' : 's'} · {formatPHP(subtotal)}</span>
+                  <span className="ml-auto text-amber-600 italic">Stock NOT reserved</span>
+                </>
+              ); })()}
+            </div>
+            {!isOnline && (
+              <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+                <WifiOff size={12} /> Offline — will sync to other devices when you're back online.
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => { setParkPromptOpen(false); setParkLabel(''); }} data-testid="park-cancel-btn">
+              Cancel
+            </Button>
+            <Button
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={handleParkConfirm}
+              data-testid="park-confirm-btn"
+            >
+              <PauseCircle size={14} className="mr-1.5" /> Park sale
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Parked Sales: list + resume + discard ────────────────────────── */}
+      <Dialog open={parkedDialogOpen} onOpenChange={setParkedDialogOpen}>
+        <DialogContent data-testid="parked-sales-dialog" className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Inbox size={18} className="text-[#1A4D2E]" /> Parked Sales
+              {parkedSales.length > 0 && (
+                <Badge variant="secondary" className="ml-1">{parkedSales.length}</Badge>
+              )}
+            </DialogTitle>
+            <DialogDescription>
+              Drafts saved at this branch. Auto-purged after 24 hours.
+              {!isOnline && <span className="ml-2 text-amber-600">· Offline view (cached)</span>}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-[60vh] overflow-y-auto -mx-6 px-6 divide-y divide-slate-100">
+            {parkedSales.length === 0 ? (
+              <div className="text-center py-8 text-slate-400 text-sm">
+                No parked sales right now.
+              </div>
+            ) : parkedSales.map((park) => {
+              const isOwn = park.created_by === user?.id;
+              const isPending = park._sync && park._sync !== 'synced';
+              const ageMin = Math.max(0, Math.floor((Date.now() - new Date(park.created_at).getTime()) / 60000));
+              const ageStr = ageMin < 60 ? `${ageMin}m ago` : ageMin < 1440 ? `${Math.floor(ageMin / 60)}h ago` : `${Math.floor(ageMin / 1440)}d ago`;
+              return (
+                <div key={park.id} className="py-3 flex items-start gap-3" data-testid={`parked-row-${park.id}`}>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium text-sm truncate">{park.label || 'Untitled park'}</span>
+                      <Badge variant="outline" className="text-[9px] py-0 px-1.5">
+                        {park.mode === 'quick' ? <><Zap size={9} className="mr-0.5" /> Quick</> : <><ClipboardList size={9} className="mr-0.5" /> Order</>}
+                      </Badge>
+                      {!isOwn && (
+                        <Badge className="text-[9px] py-0 px-1.5 bg-slate-100 text-slate-600 hover:bg-slate-100">
+                          {park.created_by_name || 'Other cashier'}
+                        </Badge>
+                      )}
+                      {isPending && (
+                        <Badge className="text-[9px] py-0 px-1.5 bg-amber-100 text-amber-700 hover:bg-amber-100" title="Will sync to server when online">
+                          {park._sync === 'pending_create' ? 'Pending sync' : 'Pending discard'}
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="flex gap-3 mt-0.5 text-[11px] text-slate-500">
+                      <span>{park.item_count?.toFixed(0) || 0} items</span>
+                      <span>·</span>
+                      <span className="font-semibold text-slate-700">{formatPHP(park.subtotal || 0)}</span>
+                      <span>·</span>
+                      <span>{ageStr}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <Button
+                      size="sm"
+                      onClick={() => resumeParkedSale(park)}
+                      data-testid={`resume-park-${park.id}`}
+                      className="bg-[#1A4D2E] hover:bg-[#14532d] text-white h-8"
+                    >
+                      <RotateCcw size={12} className="mr-1" /> Resume
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => handleDiscardClick(park)}
+                      data-testid={`discard-park-${park.id}`}
+                      className="h-8 text-red-500 hover:bg-red-50"
+                      title={isOwn ? 'Discard this park' : "Discard (manager PIN required for other cashier's park)"}
+                    >
+                      <Trash2 size={12} />
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <Button variant="outline" size="sm" onClick={refreshParkedSales} disabled={!isOnline}>
+              <RefreshCw size={12} className="mr-1" /> Refresh
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Discard PIN prompt (other-cashier parks only) ─────────────────── */}
+      <Dialog open={discardPinPrompt.open} onOpenChange={(o) => !o && setDiscardPinPrompt({ open: false, parkId: null, pin: '' })}>
+        <DialogContent data-testid="discard-park-pin-dialog" className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Shield size={16} className="text-amber-600" /> Manager PIN required
+            </DialogTitle>
+            <DialogDescription>
+              Discarding another cashier's parked sale needs a manager or admin PIN.
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            type="password"
+            placeholder="Enter PIN"
+            value={discardPinPrompt.pin}
+            onChange={e => setDiscardPinPrompt(p => ({ ...p, pin: e.target.value }))}
+            onKeyDown={e => { if (e.key === 'Enter') submitDiscardWithPin(); }}
+            data-testid="discard-park-pin-input"
+            autoFocus
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setDiscardPinPrompt({ open: false, parkId: null, pin: '' })}>Cancel</Button>
+            <Button
+              className="bg-red-600 hover:bg-red-700 text-white"
+              onClick={submitDiscardWithPin}
+              data-testid="discard-park-pin-confirm"
+            >
+              Discard
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
     </div>
   );

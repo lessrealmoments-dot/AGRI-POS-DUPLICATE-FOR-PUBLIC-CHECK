@@ -57,6 +57,7 @@ TENANT_COLLECTIONS = {
     'product_categories',            # Org-defined product category list
     'crop_credits',                  # Charged-to-crop credit accounts
     'signature_sessions',            # Digital signature capture sessions
+    'parked_sales',                  # Cashier "park sale" / draft cart staging
 }
 
 
