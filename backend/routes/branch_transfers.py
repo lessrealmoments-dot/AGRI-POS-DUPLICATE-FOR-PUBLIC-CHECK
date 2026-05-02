@@ -131,14 +131,35 @@ async def lookup_product_for_transfer(
     async def enrich_product(p):
         global_cost = float(p.get("cost_price", 0))
 
-        # Run all 3 independent lookups in parallel instead of sequentially
-        branch_capital_raw, po_refs, memory = await asyncio.gather(
+        # Run all 5 independent lookups in parallel
+        branch_capital_raw, po_refs, memory, target_capital_raw, target_po_refs = await asyncio.gather(
             get_branch_cost(p, from_branch_id) if from_branch_id else _val(global_cost),
             _get_po_refs(p["id"], from_branch_id),
             _get_price_memory(p["id"], to_branch_id) if to_branch_id else _val({}),
+            get_branch_cost(p, to_branch_id) if to_branch_id else _val(global_cost),
+            _get_po_refs(p["id"], to_branch_id) if to_branch_id else _val((0.0, 0.0)),
         )
         branch_capital = float(branch_capital_raw)
         last_purchase, moving_avg = po_refs
+        target_branch_capital = float(target_capital_raw)
+        target_last_purchase, target_moving_avg = target_po_refs
+
+        # Target current stock (for "new capital after transfer" weighted average)
+        target_branch_stock = 0.0
+        target_branch_retail = None
+        if to_branch_id:
+            target_inv = await db.inventory.find_one(
+                {"product_id": p["id"], "branch_id": to_branch_id}, {"_id": 0, "quantity": 1}
+            )
+            if target_inv:
+                target_branch_stock = float(target_inv.get("quantity", 0))
+            target_price_doc = await db.branch_prices.find_one(
+                {"product_id": p["id"], "branch_id": to_branch_id}, {"_id": 0, "prices": 1}
+            )
+            if target_price_doc:
+                target_branch_retail = target_price_doc.get("prices", {}).get("retail")
+        if target_branch_retail is None:
+            target_branch_retail = p.get("prices", {}).get("retail", 0) or 0
 
         result = {
             "id": p["id"],
@@ -153,6 +174,11 @@ async def lookup_product_for_transfer(
             "moving_average_ref": moving_avg,
             "last_branch_retail": memory.get("last_retail_price"),
             "last_transfer_capital": memory.get("last_transfer_capital"),
+            # ── Target-branch insights (helps the sender decide pricing) ─────
+            "target_branch_capital": target_branch_capital,
+            "target_branch_moving_average": target_moving_avg,
+            "target_branch_retail": float(target_branch_retail) if target_branch_retail else 0,
+            "target_branch_stock": target_branch_stock,
         }
 
         # Enrich with repack children — fetch all at once then parallel price lookups
@@ -162,7 +188,10 @@ async def lookup_product_for_transfer(
 
         async def enrich_repack(rp):
             units_per_parent = float(rp.get("units_per_parent", 1) or 1)
+            # FROM-branch capital per repack (what we currently book it at)
             capital_per_repack = round(branch_capital / units_per_parent, 4) if units_per_parent > 0 else 0
+            # TARGET-branch capital per repack (what they currently book it at)
+            target_capital_per_repack = round(target_branch_capital / units_per_parent, 4) if units_per_parent > 0 else 0
             dest_price_doc = await db.branch_prices.find_one(
                 {"product_id": rp["id"], "branch_id": to_branch_id}, {"_id": 0}
             ) if to_branch_id else None
@@ -179,6 +208,8 @@ async def lookup_product_for_transfer(
                 "units_per_parent": units_per_parent,
                 "capital_per_repack": capital_per_repack,
                 "current_dest_retail": float(dest_retail),
+                # Target-branch insights for repacks
+                "target_capital_per_repack": target_capital_per_repack,
             }
 
         result["repacks"] = await asyncio.gather(*[enrich_repack(rp) for rp in repacks])

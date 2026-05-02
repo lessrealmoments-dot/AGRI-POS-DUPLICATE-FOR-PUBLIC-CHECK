@@ -62,6 +62,9 @@ function newRow() {
     transfer_capital: '',
     branch_retail: '',
     last_purchase_ref: null, moving_average_ref: null, last_branch_retail: null,
+    // Target-branch snapshot (filled by selectProduct)
+    target_branch_capital: 0, target_branch_moving_average: 0,
+    target_branch_retail: 0, target_branch_stock: 0,
     override: false, override_reason: '',
   };
 }
@@ -430,6 +433,11 @@ export default function BranchTransferPage() {
       moving_average_ref: p.moving_average_ref,
       last_branch_retail: p.last_branch_retail,
       branch_retail: p.last_branch_retail != null ? String(p.last_branch_retail) : '',
+      // Target-branch snapshot (helps the sender decide pricing)
+      target_branch_capital: p.target_branch_capital ?? 0,
+      target_branch_moving_average: p.target_branch_moving_average ?? 0,
+      target_branch_retail: p.target_branch_retail ?? 0,
+      target_branch_stock: p.target_branch_stock ?? 0,
       // Repack children with their capital + current dest price
       repacks: (p.repacks || []).map(rp => ({
         ...rp,
@@ -1131,15 +1139,57 @@ export default function BranchTransferPage() {
                                 <Input type="number" min={0} step="0.01"
                                   value={row.transfer_capital}
                                   onChange={e => updateRow(row.id, { transfer_capital: e.target.value })}
+                                  onKeyDown={e => {
+                                    // Tab on the LAST row when branch_retail is disabled (non-admin) → auto-add new row
+                                    if (e.key === 'Tab' && !e.shiftKey && !isAdmin) {
+                                      const isLastRow = rows[rows.length - 1]?.id === row.id;
+                                      if (isLastRow && row.product) {
+                                        e.preventDefault();
+                                        const nr = newRow();
+                                        setRows(rs => [...rs, nr]);
+                                        setTimeout(() => {
+                                          const nextInput = document.querySelector(`[data-testid="product-search-${nr.id}"]`);
+                                          if (nextInput) nextInput.focus();
+                                        }, 50);
+                                      }
+                                    }
+                                  }}
                                   placeholder="0.00"
                                   className={`h-8 text-sm text-right font-mono font-bold ${rowBad && v.reason === 'below_cost' ? 'border-red-400 text-red-700 bg-red-50' : ''}`}
                                   data-testid={`transfer-capital-${row.id}`}
                                   disabled={!row.product}
                                 />
                                 {row.product && (
-                                  <div className="flex gap-2 mt-0.5">
-                                    {row.last_purchase_ref != null && <span className="text-[9px] text-slate-400">LP: {formatPHP(row.last_purchase_ref)}</span>}
-                                    {row.moving_average_ref != null && <span className="text-[9px] text-slate-400">MA: {formatPHP(row.moving_average_ref)}</span>}
+                                  <div className="flex flex-col gap-0 mt-0.5">
+                                    <div className="flex gap-2">
+                                      {row.last_purchase_ref != null && <span className="text-[9px] text-slate-400">LP: {formatPHP(row.last_purchase_ref)}</span>}
+                                      {row.moving_average_ref != null && <span className="text-[9px] text-slate-400">MA: {formatPHP(row.moving_average_ref)}</span>}
+                                    </div>
+                                    {toBranchId && (row.target_branch_capital > 0 || row.target_branch_moving_average > 0) && (() => {
+                                      const tStock = parseFloat(row.target_branch_stock) || 0;
+                                      const sendQty = parseFloat(row.qty) || 0;
+                                      const sendCap = parseFloat(row.transfer_capital) || 0;
+                                      const newCap = (tStock + sendQty > 0 && sendCap > 0)
+                                        ? (tStock * row.target_branch_capital + sendQty * sendCap) / (tStock + sendQty)
+                                        : null;
+                                      return (
+                                        <div className="flex flex-wrap gap-1.5 text-[9px] mt-0.5 pt-0.5 border-t border-slate-100">
+                                          <span className="text-purple-600 font-medium" title={`Target branch is currently booking this at ${formatPHP(row.target_branch_capital)}`}>
+                                            🎯 {formatPHP(row.target_branch_capital)}
+                                          </span>
+                                          {row.target_branch_moving_average > 0 && (
+                                            <span className="text-purple-400" title="Target branch moving-average">
+                                              MA {formatPHP(row.target_branch_moving_average)}
+                                            </span>
+                                          )}
+                                          {newCap != null && (
+                                            <span className="text-emerald-600 font-bold" title={`Weighted: (${tStock} × ${formatPHP(row.target_branch_capital)} + ${sendQty} × ${formatPHP(sendCap)}) ÷ ${tStock + sendQty}`}>
+                                              → {formatPHP(newCap)}
+                                            </span>
+                                          )}
+                                        </div>
+                                      );
+                                    })()}
                                   </div>
                                 )}
                               </div>
@@ -1151,6 +1201,21 @@ export default function BranchTransferPage() {
                                 <Input type="number" min={0} step="0.01"
                                   value={row.branch_retail}
                                   onChange={e => updateRow(row.id, { branch_retail: e.target.value })}
+                                  onKeyDown={e => {
+                                    // Tab on the LAST row's last input → auto-add new row & focus it
+                                    if (e.key === 'Tab' && !e.shiftKey) {
+                                      const isLastRow = rows[rows.length - 1]?.id === row.id;
+                                      if (isLastRow && row.product) {
+                                        e.preventDefault();
+                                        const nr = newRow();
+                                        setRows(rs => [...rs, nr]);
+                                        setTimeout(() => {
+                                          const nextInput = document.querySelector(`[data-testid="product-search-${nr.id}"]`);
+                                          if (nextInput) nextInput.focus();
+                                        }, 50);
+                                      }
+                                    }
+                                  }}
                                   placeholder="0.00"
                                   className={`h-8 text-sm text-right font-mono font-bold ${rowBad ? 'border-red-400 text-red-700 bg-red-50' : ''} ${!isAdmin ? 'bg-slate-50 text-slate-400' : ''}`}
                                   data-testid={`branch-retail-${row.id}`}
@@ -1158,6 +1223,11 @@ export default function BranchTransferPage() {
                                 />
                                 {row.last_branch_retail != null && (
                                   <span className="text-[9px] text-blue-400 mt-0.5 block">Last: {formatPHP(row.last_branch_retail)}</span>
+                                )}
+                                {toBranchId && row.product && row.target_branch_retail > 0 && (
+                                  <span className="text-[9px] text-purple-600 font-medium mt-0.5 block" title={`Current retail at ${destBranch?.name || 'target branch'}`}>
+                                    🎯 Now: {formatPHP(row.target_branch_retail)}
+                                  </span>
                                 )}
                                 {!isAdmin && row.product && (
                                   <span className="text-[9px] text-slate-400 mt-0.5 block">Admin sets retail</span>
@@ -1223,14 +1293,35 @@ export default function BranchTransferPage() {
                                   <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider mr-1 mt-1.5 shrink-0">
                                     📦 Repack prices at destination:
                                   </span>
-                                  {(row.repacks || []).map((rp, ri) => (
+                                  {(row.repacks || []).map((rp, ri) => {
+                                    // Compute new repack capital after this transfer is received
+                                    const sendQty = parseFloat(row.qty) || 0;
+                                    const sendCap = parseFloat(row.transfer_capital) || 0;
+                                    const tStock = parseFloat(row.target_branch_stock) || 0;
+                                    const upp = parseFloat(rp.units_per_parent) || 1;
+                                    const targetRepackCap = parseFloat(rp.target_capital_per_repack) || 0;
+                                    const newParentCap = (tStock + sendQty > 0 && sendCap > 0)
+                                      ? (tStock * (row.target_branch_capital || 0) + sendQty * sendCap) / (tStock + sendQty)
+                                      : null;
+                                    const newRepackCap = newParentCap != null ? newParentCap / upp : null;
+                                    return (
                                     <div key={rp.id} className="flex items-center gap-1.5 bg-white border border-blue-200 rounded-lg px-2.5 py-1.5 text-xs">
                                       <div className="text-slate-600 min-w-0">
                                         <span className="font-medium">{rp.name}</span>
                                         <span className="text-slate-400 ml-1">({rp.units_per_parent}/bag)</span>
-                                        <div className="flex items-center gap-2 mt-0.5">
-                                          <span className="text-slate-400 font-mono">Capital: {formatPHP(rp.capital_per_repack)}</span>
-                                          <span className="text-blue-500 font-mono">Now: {formatPHP(rp.current_dest_retail)}</span>
+                                        <div className="flex items-center flex-wrap gap-x-2 gap-y-0.5 mt-0.5">
+                                          <span className="text-slate-400 font-mono" title="Capital per repack at FROM branch">From: {formatPHP(rp.capital_per_repack)}</span>
+                                          {targetRepackCap > 0 && (
+                                            <span className="text-purple-600 font-mono font-medium" title={`Target branch is currently booking each repack at ${formatPHP(targetRepackCap)}`}>
+                                              🎯 {formatPHP(targetRepackCap)}
+                                            </span>
+                                          )}
+                                          {newRepackCap != null && (
+                                            <span className="text-emerald-600 font-mono font-bold" title="New capital per repack after this transfer is received (weighted)">
+                                              → {formatPHP(newRepackCap)}
+                                            </span>
+                                          )}
+                                          <span className="text-blue-500 font-mono" title="Current retail at target branch">Retail: {formatPHP(rp.current_dest_retail)}</span>
                                         </div>
                                       </div>
                                       <div className="flex items-center gap-1 ml-1">
@@ -1259,7 +1350,8 @@ export default function BranchTransferPage() {
                                         )}
                                       </div>
                                     </div>
-                                  ))}
+                                    );
+                                  })}
                                   <span className="text-[10px] text-slate-400 self-center ml-1">Leave blank to keep current price</span>
                                 </div>
                               </td>

@@ -1,5 +1,37 @@
 # AgriBooks PRD
 
+## Iter 209 (May 2026) — Branch Transfer: Target-Branch Insights + Tab-to-add-row ✅
+
+### Why
+Owner needs to make smart pricing decisions when sending stock to another branch. Without seeing the target branch's CURRENT capital, moving-average, and retail price, you're guessing. Worse, for repacks: if the receiving branch already books the repack at ₱25 and you send fresh stock at ₱28, the manager needs to see the resulting weighted-average new capital and decide whether to update retail to follow.
+
+### What shipped
+
+**Backend** — extended `GET /api/branch-transfers/product-lookup` (`routes/branch_transfers.py`):
+- New per-product fields:
+  - `target_branch_capital` — current cost the target branch books this product at
+  - `target_branch_moving_average` — MA cost from movements at target
+  - `target_branch_retail` — current retail scheme price at target
+  - `target_branch_stock` — current on-hand at target (used for "new capital after transfer" weighted average)
+- New per-repack field:
+  - `target_capital_per_repack` — current capital per repack at the target branch
+- Existing `current_dest_retail` (target retail per repack) is unchanged
+
+**Frontend** — `pages/BranchTransferPage.js`:
+- Below "Transfer Capital" input — inline meta showing 🎯 target capital, target MA, and the **projected new capital** if this transfer is received (weighted: `(target_stock × target_cap + qty × send_cap) / (target_stock + qty)`). Live recompute as qty / transfer_capital changes.
+- Below "Branch Retail" input — 🎯 current retail at target branch (so admin can decide whether to follow it or override)
+- Repack chip enhanced to show: **From-branch capital · 🎯 Target capital · → New capital after transfer · Retail at target**. All four numbers visible at a glance, hover-tooltips explain each.
+- **Tab-to-add-row**: pressing Tab on the last row's last editable input (Branch Retail for admin, Transfer Capital for non-admin) auto-creates a new row and focuses its product search — same UX as Sales page.
+
+### Tested
+- curl on `/branch-transfers/product-lookup?q=a&from_branch_id=X&to_branch_id=Y` returns all 4 new parent fields and the new repack field correctly.
+- Lint clean.
+
+### Backwards compatible
+- Pre-existing fields untouched. Only new keys added. Old callers continue to work; they just ignore the new keys.
+
+---
+
 ## Iter 208 (May 2026) — 🚨 P0 QR Receipt Upload "Session Expired" Fix ✅
 
 ### Bug
