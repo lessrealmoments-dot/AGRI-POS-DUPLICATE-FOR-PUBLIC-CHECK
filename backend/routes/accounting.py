@@ -2009,6 +2009,120 @@ async def modify_customer_payment(customer_id: str, data: dict, user=Depends(get
     }
 
 
+@router.post("/customers/{customer_id}/void-payment")
+async def void_customer_payment(customer_id: str, data: dict, user=Depends(get_current_user)):
+    """Void / Cancel a recorded payment in full.
+    
+    Use case: cashier applied a payment to the WRONG customer/invoice — full
+    cancellation is needed, not amount adjustment. This:
+      - reverses the cashier or digital wallet
+      - re-opens the invoice (balance restored, status flipped back to open/partial)
+      - restores the customer AR balance
+      - marks the payment row voided with audit trail
+    
+    Guards:
+      - PIN required (action_key=void_payment, defaults: admin/manager/totp)
+      - Cannot void if the payment date is in a closed Z-Report day (admin must
+        re-open the day or the cash-balancing trail will break)
+      - Cannot double-void a payment
+    """
+    check_perm(user, "accounting", "receive_payment")
+
+    invoice_id = data.get("invoice_id")
+    payment_id = data.get("payment_id")
+    manager_pin = data.get("manager_pin", "")
+    reason = (data.get("reason") or "").strip()
+
+    if not invoice_id or not payment_id:
+        raise HTTPException(status_code=400, detail="invoice_id and payment_id required")
+    if not manager_pin:
+        raise HTTPException(status_code=400, detail="Manager PIN required")
+    if not reason or len(reason) < 4:
+        raise HTTPException(status_code=400, detail="Reason is required (≥ 4 chars) — e.g. 'Applied to wrong customer'")
+
+    from routes.verify import verify_pin_for_action
+    verifier = await verify_pin_for_action(manager_pin, "void_payment")
+    if not verifier:
+        raise HTTPException(status_code=403, detail="Invalid PIN — void not authorized")
+
+    inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    payment = next((p for p in inv.get("payments", []) if p.get("id") == payment_id), None)
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment record not found")
+    if payment.get("voided"):
+        raise HTTPException(status_code=400, detail="Payment already voided")
+
+    branch_id = inv.get("branch_id", "")
+    pay_date = payment.get("date", "")
+    if pay_date and branch_id:
+        close_rec = await db.daily_closings.find_one(
+            {"date": pay_date, "branch_id": branch_id}, {"_id": 0}
+        )
+        if close_rec:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot void — payment dated {pay_date} is already included in a Z-Report. Re-open that day first."
+            )
+
+    old_amount = float(payment.get("amount", 0))
+    method = payment.get("method", "Cash")
+    fund_source = payment.get("fund_source", "cashier")
+    authorized_name = verifier.get("verifier_name", "Manager")
+
+    # 1. Reverse the wallet
+    if old_amount > 0:
+        if fund_source == "digital" or is_digital_payment(method):
+            await update_digital_wallet(branch_id, -old_amount, reference=f"Payment voided: {reason}")
+        else:
+            await update_cashier_wallet(branch_id, -old_amount, f"Payment voided: {reason}")
+
+    # 2. Recompute invoice balance / paid / status (subtract the voided amount)
+    old_paid = float(inv.get("amount_paid", 0))
+    grand_total = float(inv.get("grand_total", 0))
+    reversed_paid = max(0, round(old_paid - old_amount, 2))
+    reversed_balance = max(0, round(grand_total - reversed_paid, 2))
+    final_status = "paid" if reversed_balance <= 0 else ("partial" if reversed_paid > 0 else "open")
+
+    # 3. Mark payment voided + update invoice in one round-trip
+    await db.invoices.update_one(
+        {"id": invoice_id, "payments.id": payment_id},
+        {
+            "$set": {
+                "payments.$.voided": True,
+                "payments.$.voided_at": now_iso(),
+                "payments.$.void_reason": reason,
+                "payments.$.voided_by": user.get("full_name", user["username"]),
+                "payments.$.void_authorized_by": authorized_name,
+                "amount_paid": reversed_paid,
+                "balance": reversed_balance,
+                "status": final_status,
+            }
+        }
+    )
+
+    # 4. Restore customer AR balance
+    if old_amount > 0 and inv.get("customer_id"):
+        await db.customers.update_one(
+            {"id": inv["customer_id"]},
+            {"$inc": {"balance": round(old_amount, 2)}}
+        )
+
+    return {
+        "message": f"Payment voided — ₱{old_amount:,.2f} returned to {('digital' if fund_source == 'digital' or is_digital_payment(method) else 'cashier')} wallet",
+        "voided_amount": old_amount,
+        "method": method,
+        "fund_source": fund_source,
+        "new_balance": reversed_balance,
+        "new_status": final_status,
+        "authorized_by": authorized_name,
+        "reason": reason,
+    }
+
+
+
 # ==================== CUSTOMER INTEREST/PENALTY GENERATION ====================
 @router.get("/customers/{customer_id}/charges-preview")
 async def preview_customer_charges(customer_id: str, as_of_date: Optional[str] = None, rate_override: Optional[float] = None, user=Depends(get_current_user)):

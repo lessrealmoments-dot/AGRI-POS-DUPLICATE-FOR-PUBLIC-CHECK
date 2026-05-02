@@ -123,6 +123,12 @@ export default function PaymentsPage() {
   const [editReason, setEditReason] = useState('');
   const [editSubmitting, setEditSubmitting] = useState(false);
 
+  // Payment void (full cancel)
+  const [voidPayment, setVoidPayment] = useState(null); // { payment_id, invoice_id, amount, ... }
+  const [voidPin, setVoidPin] = useState('');
+  const [voidReason, setVoidReason] = useState('');
+  const [voidSubmitting, setVoidSubmitting] = useState(false);
+
   // No-rate prompt
   const [ratePromptOpen, setRatePromptOpen] = useState(false);
   const [ratePromptInput, setRatePromptInput] = useState('');
@@ -500,6 +506,44 @@ export default function PaymentsPage() {
     }
     setEditSubmitting(false);
   };
+
+  // ── Void Payment (full cancel — wallet, invoice, AR all reversed) ──
+  const handleVoidPayment = async () => {
+    if (!voidPayment) return;
+    if (!voidPin || voidPin.length < 4) { toast.error('Manager PIN required'); return; }
+    if (!voidReason.trim() || voidReason.trim().length < 4) {
+      toast.error('Reason required (≥ 4 chars) — e.g. "Applied to wrong customer"');
+      return;
+    }
+    setVoidSubmitting(true);
+    try {
+      const res = await api.post(`/customers/${selectedCustomer.id}/void-payment`, {
+        invoice_id: voidPayment.invoice_id,
+        payment_id: voidPayment.payment_id,
+        manager_pin: voidPin,
+        reason: voidReason.trim(),
+      });
+      toast.success(res.data.message + ` — authorized by ${res.data.authorized_by}`);
+      setVoidPayment(null);
+      setVoidPin('');
+      setVoidReason('');
+      // Reload everything (history, invoice list, AR balance, customer summary)
+      const histRes = await api.get(`/customers/${selectedCustomer.id}/payment-history`);
+      setPayHistory(histRes.data);
+      await loadInvoices(selectedCustomer.id);
+      await loadChargesPreview(selectedCustomer.id);
+      invalidateBalanceCache();
+      await loadCustList();
+      const refreshed = (await api.get('/customers/receivables-summary', {
+        params: { include_zero: showAll, ...(currentBranch?.id ? { branch_id: currentBranch.id } : {}) }
+      }).then(r => r.data || []).catch(() => [])).find(c => c.id === selectedCustomer.id);
+      if (refreshed) setSelectedCustomer(refreshed);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Void failed');
+    }
+    setVoidSubmitting(false);
+  };
+
 
   const getDaysOverdue = (dueDate) => {
     if (!dueDate) return 0;
@@ -1217,16 +1261,28 @@ export default function PaymentsPage() {
                             <Ban size={9} /> Closed
                           </span>
                         ) : (
-                          <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px] text-blue-600 hover:text-blue-700 gap-0.5"
-                            onClick={() => {
-                              setEditPayment(p);
-                              setEditAmount(String(p.amount));
-                              setEditPin('');
-                              setEditReason('');
-                            }}
-                            data-testid={`edit-payment-${p.payment_id}`}>
-                            <PenLine size={10} /> Edit
-                          </Button>
+                          <div className="flex items-center gap-0.5">
+                            <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px] text-blue-600 hover:text-blue-700 gap-0.5"
+                              onClick={() => {
+                                setEditPayment(p);
+                                setEditAmount(String(p.amount));
+                                setEditPin('');
+                                setEditReason('');
+                              }}
+                              data-testid={`edit-payment-${p.payment_id}`}>
+                              <PenLine size={10} /> Edit
+                            </Button>
+                            <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px] text-red-600 hover:text-red-700 hover:bg-red-50 gap-0.5"
+                              onClick={() => {
+                                setVoidPayment(p);
+                                setVoidPin('');
+                                setVoidReason('');
+                              }}
+                              title="Void / Cancel this payment — money returns to wallet, balance restored"
+                              data-testid={`void-payment-${p.payment_id}`}>
+                              <Ban size={10} /> Cancel
+                            </Button>
+                          </div>
                         )
                       )}
                     </TableCell>
@@ -1283,7 +1339,7 @@ export default function PaymentsPage() {
             </div>
             <div className="flex gap-2 pt-1">
               <Button variant="outline" className="flex-1" onClick={() => setEditPayment(null)}>Cancel</Button>
-              <Button className="flex-1 bg-blue-600 hover:bg-blue-700 text-white" onClick={handleModifyPayment}
+              <Button className="flex-1 bg-blue-600 hover:bg-blue-700 text-white" onClick={() => handleModifyPayment()}
                 disabled={editSubmitting || !editPin || editPin.length < 4}
                 data-testid="edit-payment-confirm">
                 {editSubmitting ? 'Processing...' : 'Modify Payment'}
@@ -1292,6 +1348,57 @@ export default function PaymentsPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ── Void Payment Dialog (full cancel) ── */}
+      <Dialog open={!!voidPayment} onOpenChange={(o) => { if (!o) setVoidPayment(null); }}>
+        <DialogContent className="sm:max-w-sm" data-testid="void-payment-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base text-red-700">
+              <Ban size={16} /> Cancel Payment
+            </DialogTitle>
+            <DialogDescription>
+              {voidPayment?.invoice_number} — {voidPayment?.date}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs space-y-1">
+              <div className="flex justify-between">
+                <span className="text-slate-600">Amount to reverse</span>
+                <span className="font-mono font-bold text-red-700">{formatPHP(voidPayment?.amount || 0)}</span>
+              </div>
+              <div className="flex justify-between"><span className="text-slate-600">Method</span><span>{voidPayment?.method}</span></div>
+              <div className="text-[10px] text-red-600 mt-1.5 leading-snug">
+                <Info size={9} className="inline mr-0.5" />
+                Money will return to the {voidPayment?.fund_source === 'digital' ? 'digital' : 'cashier'} wallet.
+                Customer balance will be restored. This cannot be reversed.
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs">Reason <span className="text-red-600">*</span></Label>
+              <Input value={voidReason} onChange={e => setVoidReason(e.target.value)}
+                placeholder="e.g. Applied to wrong customer" className="h-8 mt-1 text-xs"
+                data-testid="void-payment-reason" />
+              <p className="text-[10px] text-slate-400 mt-0.5">Minimum 4 characters — visible in the audit log</p>
+            </div>
+            <div>
+              <Label className="text-xs flex items-center gap-1"><Shield size={11} /> Manager PIN</Label>
+              <Input type="password" value={voidPin} onChange={e => setVoidPin(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleVoidPayment()}
+                placeholder="Enter PIN" className="h-9 mt-1 font-mono text-center text-xl tracking-widest"
+                data-testid="void-payment-pin" />
+            </div>
+            <div className="flex gap-2 pt-1">
+              <Button variant="outline" className="flex-1" onClick={() => setVoidPayment(null)}>Keep Payment</Button>
+              <Button className="flex-1 bg-red-600 hover:bg-red-700 text-white" onClick={() => handleVoidPayment()}
+                disabled={voidSubmitting || !voidPin || voidPin.length < 4 || !voidReason.trim() || voidReason.trim().length < 4}
+                data-testid="void-payment-confirm">
+                {voidSubmitting ? 'Voiding...' : 'Confirm Cancel'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
 
       {/* ── Discount PIN Dialog ── */}
       <Dialog open={discountPinOpen} onOpenChange={(o) => { if (!o) setDiscountPinOpen(false); }}>

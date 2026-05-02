@@ -1,5 +1,40 @@
 # AgriBooks PRD
 
+## Iter 206 (May 2026) — Void Payment from Payment History ✅
+
+### Why
+User applied a credit-payment to the WRONG customer's invoice. The existing "Edit" flow only let them change the AMOUNT; there was no way to fully cancel the payment and return the money to the wallet. Trapped scenarios where the only escape was DB surgery.
+
+### What shipped
+- **Backend** (`routes/accounting.py:2010`): new `POST /api/customers/{customer_id}/void-payment` — full reversal endpoint.
+  - Reverses cashier or digital wallet (whichever fund_source the original payment hit)
+  - Restores invoice balance + status (paid → open / partial)
+  - Restores customer AR balance via `$inc`
+  - Marks payment row `voided=True` with full audit trail (`void_reason`, `voided_by`, `void_authorized_by`, `voided_at`)
+  - PIN-gated via `void_payment` policy action (defaults: admin/manager/totp)
+  - Z-Report day guard (cannot void payments dated in a closed day — protects cash-balancing trail)
+  - Reason required (≥ 4 chars)
+  - Idempotent: re-void of a voided payment returns 400
+  
+- **Frontend** (`pages/PaymentsPage.js`):
+  - Red **Cancel** button next to Edit in Payment History modal (`data-testid=void-payment-{payment_id}`)
+  - Confirmation dialog with manager PIN + reason fields, red-bordered amount card showing exactly which wallet the money returns to
+  - Auto-refreshes invoice list, charges preview, customer summary, balance cache after void
+  - Keyboard support (Enter to confirm)
+
+### Tested via curl
+1. Voided ₱100 payment from Juan Dela Cruz: customer balance 1,900 → 2,000, invoice status `paid` → `open`, wallet decreased by 100 ✅
+2. Re-void of already-voided payment: 400 "Payment already voided" ✅
+3. Wrong PIN: 403 "Invalid PIN — void not authorized" ✅
+4. Short reason: 400 "Reason is required (≥ 4 chars)" ✅
+
+### Differences vs Modify-Payment
+- Modify = void original + create replacement payment (use when amount was wrong)
+- Void = full cancellation, no replacement (use when payment was misapplied to wrong customer/invoice)
+- Both share the same wallet/invoice/AR reversal primitives
+
+---
+
 ## Iter 205 (May 2026) — 🚨 P0 SyntheticEvent Regression Sweep (3 Critical Silent-Failure Bugs Fixed) ✅
 
 ### The Pattern
