@@ -134,8 +134,12 @@ function AnchoredDropdown({ anchor, open, children, minWidth = 320 }) {
         width: pos.width,
         maxHeight: pos.maxHeight,
         zIndex: 9999,
+        // Always-visible scrollbar so the user can see their scroll position.
+        // The global 6px scrollbar with transparent track was too subtle here.
+        scrollbarColor: '#94a3b8 #f1f5f9',
+        scrollbarWidth: 'auto',
       }}
-      className="bg-white border border-slate-200 rounded-lg shadow-xl overflow-y-auto overscroll-contain"
+      className="bg-white border border-slate-200 rounded-lg shadow-xl overflow-y-auto flex flex-col anchored-dropdown-scroll"
     >
       {children}
     </div>,
