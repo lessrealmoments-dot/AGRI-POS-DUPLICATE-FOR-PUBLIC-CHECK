@@ -31,7 +31,6 @@ import {
   buildParkPayload, parkSale, discardParkedSale, consumeParkedSale, loadParkedSales, drainSyncQueue as drainParkQueue,
 } from '../lib/parkedSalesSync';
 import { useUnsavedChangesGuard } from '../lib/useUnsavedChangesGuard';
-import UnsavedChangesDialog from '../components/UnsavedChangesDialog';
 import ReferenceNumberPrompt from '../components/ReferenceNumberPrompt';
 import CropCreditTypeDialog from '../components/CropCreditTypeDialog';
 import RequestSignatureDialog from '../components/RequestSignatureDialog';
@@ -4646,7 +4645,7 @@ export default function UnifiedSalesPage() {
       </Dialog>
 
       {/* ── Unsaved-changes leave guard ───────────────────────────────────── */}
-      <UnsavedChangesDialog guard={salesGuard} />
+      {/* Dialog is rendered by UnsavedChangesProvider — we only register here. */}
 
     </div>
   );

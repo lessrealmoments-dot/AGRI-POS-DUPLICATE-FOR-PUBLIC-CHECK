@@ -16,7 +16,6 @@ import {
 import { toast } from 'sonner';
 import UploadQRDialog from '../components/UploadQRDialog';
 import { useUnsavedChangesGuard } from '../lib/useUnsavedChangesGuard';
-import UnsavedChangesDialog from '../components/UnsavedChangesDialog';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -87,8 +86,8 @@ export default function ReturnRefundWizard() {
   const [returnItems, setReturnItems] = useState([]);
 
   // Unsaved-changes guard — fires when at least one return line has been
-  // queued. Mid-return navigation away would blow away the cashier's work.
-  const returnGuard = useUnsavedChangesGuard({
+  // queued. Provider renders the dialog.
+  useUnsavedChangesGuard({
     isDirty: (returnItems || []).length > 0,
     label: 'Return / Refund',
   });
@@ -714,7 +713,6 @@ export default function ReturnRefundWizard() {
           )}
         </CardContent>
       </Card>
-      <UnsavedChangesDialog guard={returnGuard} />
     </div>
   );
 }

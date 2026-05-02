@@ -18,7 +18,6 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUnsavedChangesGuard } from '../lib/useUnsavedChangesGuard';
-import UnsavedChangesDialog from '../components/UnsavedChangesDialog';
 
 const ENTRY_TYPES = [
   { value: 'sale_adjustment', label: 'Sale Adjustment', desc: 'A sale happened but wasn\'t recorded in the system', color: 'bg-emerald-100 text-emerald-700' },
@@ -103,9 +102,8 @@ export default function JournalEntriesPage() {
   const [accounts, setAccounts] = useState([]);
 
   // Unsaved-changes guard — fires while the create-entry dialog is open
-  // AND the user has typed something. Saving is transient, so we treat it
-  // as not-dirty so the success-redirect doesn't double-prompt.
-  const journalGuard = useUnsavedChangesGuard({
+  // AND the user has typed something. Provider renders the dialog.
+  useUnsavedChangesGuard({
     isDirty: !saving && createOpen && (
       !!entryType || !!memo || !!refNumber || (lines && lines.length > 0)
     ),
@@ -577,7 +575,6 @@ export default function JournalEntriesPage() {
           </DialogContent>
         </Dialog>
       )}
-      <UnsavedChangesDialog guard={journalGuard} />
     </div>
   );
 }

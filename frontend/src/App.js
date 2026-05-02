@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { UnsavedChangesProvider } from './contexts/UnsavedChangesContext';
 import { Toaster } from './components/ui/sonner';
 import Layout from './components/Layout';
 import FeatureGate from './components/FeatureGate';
@@ -262,8 +263,10 @@ export default function App() {
         {/* All other routes go through AuthProvider */}
         <Route path="*" element={
           <AuthProvider>
-            <AppRoutes />
-            <Toaster position="bottom-right" richColors />
+            <UnsavedChangesProvider>
+              <AppRoutes />
+              <Toaster position="bottom-right" richColors />
+            </UnsavedChangesProvider>
           </AuthProvider>
         } />
       </Routes>

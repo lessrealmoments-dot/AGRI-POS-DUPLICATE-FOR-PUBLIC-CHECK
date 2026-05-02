@@ -30,7 +30,6 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUnsavedChangesGuard } from '../lib/useUnsavedChangesGuard';
-import UnsavedChangesDialog from '../components/UnsavedChangesDialog';
 
 const EMPTY_LINE = {
   product_id: '', product_name: '', unit: '', description: '',
@@ -92,9 +91,9 @@ export default function PurchaseOrderPage() {
   const [saving, setSaving] = useState(false);
 
   // Unsaved-changes guard — fires when user tries to leave with at least
-  // one filled line. Saving = transient state that we treat as not-dirty
-  // so we don't double-prompt during the actual submit.
-  const poGuard = useUnsavedChangesGuard({
+  // one filled line. The Provider renders the dialog; we only need to
+  // register the dirty state.
+  useUnsavedChangesGuard({
     isDirty: !saving && lines.some(l => l.product_id),
     label: 'Purchase Order',
   });
@@ -2025,8 +2024,6 @@ export default function PurchaseOrderPage() {
       type="po"
       title={refPrompt.vendor}
     />
-
-    <UnsavedChangesDialog guard={poGuard} />
   </div>
   );
 }
