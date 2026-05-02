@@ -1,5 +1,42 @@
 # AgriBooks Changelog
 
+## May 2026 — PIN Session (3-Minute Warm Window) (Iter 203)
+
+**Ask**: "Our sales have too many PIN gates. Once the manager inputs the PIN, continue directly for the next few actions within the same sale — only stop if a different authority level is required."
+
+**User choices**: 3-minute TTL, per-sale scope (resets on cart clear), visual badge.
+
+**Architecture** — `UnifiedSalesPage.js`:
+- New `pinSession` state: `{ pin, method, name, at }` — cached plaintext PIN in memory only (never persisted).
+- `startPinSession(pin, method, name)` — called on every successful PIN verification.
+- `isPinSessionWarm()` — checks if session exists and `Date.now() - at < 3min`.
+- `clearPinSession()` — called in `clearCart()` (per-sale scope) and on any failed auto-bypass.
+- `pinSessionRef` — ref mirror for non-stale reads in async functions.
+
+**Full auto-bypass** (dialog not shown when warm):
+- Credit Approval (online) — calls `verifyManagerPin(sessionPin)` silently; on fail → clears session, shows dialog as fallback.
+- Capital Reveal — validates via `/products/cost-details` with cached PIN; on fail → shows dialog.
+- Insufficient Stock Override — calls `handleStockOverride(sessionPin, saleData)` directly (passes `saleData` to avoid React state timing issue).
+- JIT Repack Retail — feeds cached PIN directly to `processSale(null, pin, sig)`.
+- Discard Park (other-cashier) — calls `discardParkedSale(id, { pin })` directly.
+- E-Payment Verify — uses cached PIN instead of `prompt()`.
+
+**Auto-fill PIN** (dialog still shown for additional inputs):
+- Credit Approval (offline) — auto-fills `managerPin` state via `useEffect`, user still enters bypass reason.
+- Price Match Modal — new `warmPin` prop auto-fills the PIN field; green "PIN auto-filled" indicator.
+- Void Sale — auto-fills `voidPin` when dialog opens.
+- Late Encode — new `warmPin` prop auto-fills PIN; user still enters reason.
+
+**Visual badge** — `PinSessionBadge` component:
+- Emerald pill with 🔓 icon: "PIN active · Manager Name · 2:45"
+- 1-second countdown timer; auto-clears on expiry.
+- Positioned in the Sales header right section.
+
+**PIN session starts** on successful: Credit approval, Void, Capital reveal, Stock override, Price Match confirm, Discard park, E-payment verify.
+
+**No backend changes.**
+
+
 ## May 2026 — Order Mode Input UX: Tab-Select + Leading Decimal (Iter 203)
 
 **Ask**: "When I press Tab on quantity and price in Order mode, I want it to select all text so I can type a new value immediately. Also let me type `.5` or `.05` without having to type `0.5` first."

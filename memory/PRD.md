@@ -1,6 +1,16 @@
 # AgriBooks PRD
 
-## Iter 203 (May 2026) — Order Mode Input UX: Tab-Select + Leading Decimal ✅
+## Iter 203 (May 2026) — PIN Session + Input UX ✅
+
+### PIN Session (3-Minute Warm Window)
+- Once a manager/admin PIN is verified, cached for 3 minutes (per-sale scope).
+- Subsequent PIN gates at the same authority level auto-bypass or auto-fill the cached PIN.
+- Full auto-bypass: Credit Approval (online), Capital Reveal, Stock Override, JIT Repack, Discard Park, E-Payment Verify.
+- Auto-fill: Price Match (needs reason/scope), Void (needs reason), Late Encode (needs reason), Credit Approval (offline, needs bypass reason).
+- Visual badge: emerald "PIN active · Name · 2:45" countdown in Sales header.
+- Per-sale: resets on cart clear. Fails safely: clears session and falls back to dialog on any API rejection.
+
+### Order Mode Input UX: Tab-Select + Leading Decimal
 - Qty, Rate, Discount in Order mode now auto-select all text on Tab/focus for instant overwrite.
 - Changed from `type="number"` to `type="text" inputMode="decimal"` to allow `.5`, `.05` entry.
 - String-intermediate pattern prevents transient states (`.`, `0.`, empty) from snapping to `0`.

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -38,7 +38,7 @@ const REASONS = [
  */
 export default function PriceMatchModal({
   open, priceChanges = [], schemeName = '', branchName = '', customerName = '',
-  onConfirm, onCancel, submitting = false, error = '',
+  onConfirm, onCancel, submitting = false, error = '', warmPin = null,
 }) {
   const [reason, setReason] = useState('competitor_match');
   const [reasonDetail, setReasonDetail] = useState('');
@@ -46,6 +46,11 @@ export default function PriceMatchModal({
   const [scope, setScope] = useState('update_branch');
   const [pin, setPin] = useState('');
   const [localErr, setLocalErr] = useState('');
+
+  // Auto-fill PIN from warm session when modal opens
+  useEffect(() => {
+    if (open && warmPin && !pin) setPin(warmPin);
+  }, [open, warmPin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!open) return null;
 
@@ -207,6 +212,11 @@ export default function PriceMatchModal({
             <Label className="text-xs flex items-center gap-1 text-slate-700">
               <ShieldCheck size={13} /> Manager / Admin PIN
             </Label>
+            {warmPin && pin === warmPin && (
+              <p className="text-[10px] text-emerald-600 mt-0.5 flex items-center gap-1 font-medium">
+                <ShieldCheck size={10} /> PIN auto-filled from active session
+              </p>
+            )}
             <Input
               type="password"
               inputMode="numeric"

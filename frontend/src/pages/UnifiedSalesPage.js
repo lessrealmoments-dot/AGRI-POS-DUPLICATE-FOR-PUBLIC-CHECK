@@ -18,7 +18,7 @@ import {
   Search, Plus, Minus, Trash2, ShoppingCart, CreditCard, X, Wifi, WifiOff,
   RefreshCw, FileText, Lock, Zap, ClipboardList, AlertTriangle, Shield, CheckCircle2, Smartphone, Camera, Check,
   PackageX, ShieldAlert, ChevronDown, Eye, EyeOff, User, Package, PauseCircle, Inbox, RotateCcw,
-  ArrowUpRight, ArrowDownRight, Info
+  ArrowUpRight, ArrowDownRight, Info, Unlock
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -173,6 +173,38 @@ function InsufficientStockModal({ open, insufficientItems, onOverride, onCancel,
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ── PIN Session Badge ────────────────────────────────────────────────────────
+// Shows a countdown when a PIN session is active (3 min warm window).
+const PIN_SESSION_TTL = 3 * 60 * 1000;
+
+function PinSessionBadge({ session, onExpired }) {
+  const [remaining, setRemaining] = useState(0);
+  useEffect(() => {
+    const update = () => {
+      const left = Math.max(0, PIN_SESSION_TTL - (Date.now() - session.at));
+      setRemaining(left);
+      if (left <= 0) onExpired();
+    };
+    update();
+    const id = setInterval(update, 1000);
+    return () => clearInterval(id);
+  }, [session.at, onExpired]);
+  if (remaining <= 0) return null;
+  const mins = Math.floor(remaining / 60000);
+  const secs = Math.floor((remaining % 60000) / 1000);
+  return (
+    <div
+      className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-medium"
+      data-testid="pin-session-badge"
+      title={`PIN session active — ${session.name || 'Authorized'}. Expires in ${mins}:${secs.toString().padStart(2, '0')}. Will auto-bypass PIN prompts for permitted actions.`}
+    >
+      <Unlock size={11} />
+      <span>PIN active{session.name ? ` · ${session.name}` : ''}</span>
+      <span className="font-mono text-[10px] tabular-nums opacity-75">{mins}:{secs.toString().padStart(2, '0')}</span>
+    </div>
   );
 }
 
@@ -479,6 +511,7 @@ export default function UnifiedSalesPage() {
       setCapitalPin(capitalPinInput);
       setCapitalShown(true);
       setCapitalPinModal(false);
+      startPinSession(capitalPinInput, 'pin', '');
       setCapitalPinInput('');
       toast.success('Capital visible');
     } catch (e) {
@@ -494,6 +527,31 @@ export default function UnifiedSalesPage() {
   };
 
   const requestShowCapital = () => {
+    // Auto-bypass if PIN session is warm
+    if (isPinSessionWarm()) {
+      setCapitalPinInput(pinSessionRef.current.pin);
+      // Directly submit with cached PIN
+      (async () => {
+        setCapitalPinSubmitting(true);
+        try {
+          await api.post('/products/cost-details', {
+            branch_id: currentBranch?.id,
+            product_ids: ['__validate__'],
+            pin: pinSessionRef.current.pin,
+          });
+          setCapitalPin(pinSessionRef.current.pin);
+          setCapitalShown(true);
+          toast.success('Capital visible (PIN active)');
+        } catch {
+          // Fallback to dialog
+          clearPinSession();
+          setCapitalPinInput('');
+          setCapitalPinModal(true);
+        }
+        setCapitalPinSubmitting(false);
+      })();
+      return;
+    }
     setCapitalPinInput('');
     setCapitalPinModal(true);
   };
@@ -533,6 +591,32 @@ export default function UnifiedSalesPage() {
   const [parkLabel, setParkLabel] = useState('');
   const [parkPromptOpen, setParkPromptOpen] = useState(false);
   const [discardPinPrompt, setDiscardPinPrompt] = useState({ open: false, parkId: null, pin: '' });
+
+  // ── PIN Session: cache a successful PIN for 3 min (per-sale scope) ────────
+  // Once verified, subsequent PIN gates auto-bypass or auto-fill the cached PIN
+  // so cashiers/managers aren't re-prompted for every action in the same sale.
+  const [pinSession, setPinSession] = useState(null);
+  // { pin: '...', method: 'manager_pin'|'admin_pin'|'totp', name: 'Manager Name', at: Date.now() }
+  const pinSessionRef = useRef(null);
+  useEffect(() => { pinSessionRef.current = pinSession; }, [pinSession]);
+
+  const isPinSessionWarm = useCallback(() => {
+    const s = pinSessionRef.current;
+    return !!(s && (Date.now() - s.at) < PIN_SESSION_TTL);
+  }, []);
+
+  const startPinSession = useCallback((pin, method, name) => {
+    setPinSession({ pin, method, name: name || '', at: Date.now() });
+  }, []);
+
+  const clearPinSession = useCallback(() => setPinSession(null), []);
+
+  // Auto-fill manager PIN in credit approval dialog when PIN session is warm
+  useEffect(() => {
+    if (creditApprovalDialog && isPinSessionWarm() && !managerPin) {
+      setManagerPin(pinSessionRef.current.pin);
+    }
+  }, [creditApprovalDialog]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Linked Scanner
   const [scannerSession, setScannerSession] = useState(null); // { session_id, branch_id }
@@ -838,6 +922,7 @@ export default function UnifiedSalesPage() {
         manager_pin: voidPin,
       });
       toast.success(`${selectedInvoice.invoice_number} voided — authorized by ${res.data.authorized_by}`);
+      startPinSession(voidPin, 'manager_pin', res.data.authorized_by);
       const snap = res.data.snapshot;
       setVoidDialog(false);
       setVoidReason('');
@@ -1194,6 +1279,8 @@ export default function UnifiedSalesPage() {
     // Reset Price Match approval — next sale must re-authorize if it has price edits
     setPriceMatchApproved(null);
     setPriceMatchError('');
+    // Reset PIN session (per-sale scope)
+    clearPinSession();
   };
 
   // ── Parked / Draft sales ────────────────────────────────────────────────
@@ -1323,6 +1410,18 @@ export default function UnifiedSalesPage() {
   const handleDiscardClick = async (park) => {
     const isOwn = park.created_by === user?.id;
     if (!isOwn) {
+      // Auto-bypass if PIN session is warm
+      if (isPinSessionWarm()) {
+        try {
+          await discardParkedSale(park.id, { pin: pinSessionRef.current.pin });
+          toast.success('Parked sale discarded (PIN active)');
+          refreshParkedSales();
+        } catch {
+          clearPinSession();
+          setDiscardPinPrompt({ open: true, parkId: park.id, pin: '' });
+        }
+        return;
+      }
       // Other-user park — open PIN prompt
       setDiscardPinPrompt({ open: true, parkId: park.id, pin: '' });
       return;
@@ -1345,6 +1444,7 @@ export default function UnifiedSalesPage() {
     try {
       await discardParkedSale(parkId, { pin });
       toast.success('Parked sale discarded');
+      startPinSession(pin, 'manager_pin', '');
       setDiscardPinPrompt({ open: false, parkId: null, pin: '' });
       refreshParkedSales();
     } catch (err) {
@@ -1774,19 +1874,30 @@ export default function UnifiedSalesPage() {
     // Credit without a customer — proceed to PIN directly
     setPendingCreditSale({ paymentType, partialPayment, amountTendered });
     setCheckoutDialog(false);
-    setCreditApprovalDialog(true);
+    // Auto-bypass if PIN session is warm (online only — offline needs reason)
+    if (isPinSessionWarm() && isOnline) {
+      verifyManagerPin(pinSessionRef.current.pin);
+    } else {
+      setCreditApprovalDialog(true);
+    }
   };
 
   // Handle crop type confirmed — proceed to PIN approval
   const handleCropTypeConfirmed = (config) => {
     setCropCreditConfig(config);
     setCropTypeDialog(false);
-    setCreditApprovalDialog(true);
+    // Auto-bypass if PIN session is warm (online only — offline needs reason)
+    if (isPinSessionWarm() && isOnline) {
+      verifyManagerPin(pinSessionRef.current.pin);
+    } else {
+      setCreditApprovalDialog(true);
+    }
   };
 
-  // Verify manager PIN
-  const verifyManagerPin = async () => {
-    if (!managerPin) { toast.error('Enter authorization code'); return; }
+  // Verify manager PIN — accepts optional override for PIN session auto-bypass
+  const verifyManagerPin = async (_sessionPin) => {
+    const pinToUse = _sessionPin || managerPin;
+    if (!pinToUse) { toast.error('Enter authorization code'); return; }
     // Offline credit sale: a written reason is required for the audit log
     if (!isOnline && (paymentType === 'credit' || paymentType === 'partial') && selectedCustomer?.id) {
       if (!offlineBypassReason.trim() || offlineBypassReason.trim().length < 4) {
@@ -1798,7 +1909,7 @@ export default function UnifiedSalesPage() {
     try {
       const customerName = selectedCustomer?.name || 'Walk-in';
       const res = await api.post('/auth/verify-manager-pin', {
-        pin: managerPin.trim(),
+        pin: pinToUse.trim(),
         action_key: 'credit_sale_approval',
         context: {
           type: 'credit_sale',
@@ -1811,9 +1922,11 @@ export default function UnifiedSalesPage() {
         }
       });
       if (res.data.valid) {
-        toast.success(`Approved by ${res.data.manager_name}`);
+        toast.success(`Approved by ${res.data.manager_name}${_sessionPin ? ' (PIN active)' : ''}`);
         setCreditApprovalDialog(false);
         setManagerPin('');
+        // Start/refresh PIN session
+        startPinSession(pinToUse.trim(), res.data.method || 'manager_pin', res.data.manager_name);
 
         const balanceForCheck = grandTotal - (pendingCreditSale?.partialPayment || 0);
         const isCreditOrPartial = paymentType === 'credit' || paymentType === 'partial';
@@ -1874,9 +1987,16 @@ export default function UnifiedSalesPage() {
         await processSale(res.data.manager_name);
       } else {
         toast.error(res.data.detail || 'Invalid PIN / TOTP — check Settings > Security for accepted methods');
+        if (_sessionPin) clearPinSession(); // session PIN was stale
       }
     } catch (e) {
-      toast.error(e.response?.data?.detail || 'Verification failed — check your connection');
+      if (_sessionPin) {
+        clearPinSession();
+        setCreditApprovalDialog(true); // fallback: show the dialog
+        toast.info('PIN session expired — please re-enter');
+      } else {
+        toast.error(e.response?.data?.detail || 'Verification failed — check your connection');
+      }
     }
   };
 
@@ -2119,14 +2239,32 @@ export default function UnifiedSalesPage() {
           setInsufficientItems(detail.items || []);
           setPendingSaleData(saleData);
           setCheckoutDialog(false);
-          setStockOverrideModal(true);
-          setSaving(false);
+          // Auto-bypass if PIN session is warm
+          if (isPinSessionWarm()) {
+            setSaving(false);
+            try {
+              await handleStockOverride(pinSessionRef.current.pin, saleData);
+            } catch {
+              clearPinSession();
+              setStockOverrideModal(true);
+            }
+          } else {
+            setStockOverrideModal(true);
+            setSaving(false);
+          }
           return;
         }
         // JIT retail PIN required — show Owner PIN modal then retry
         if (e?.response?.status === 422 && detail?.type === 'jit_retail_pin_required') {
-          setJitPinModal({ open: true, items: detail.items || [], saleData, signatureData });
-          setSaving(false);
+          // Auto-bypass if PIN session is warm
+          if (isPinSessionWarm()) {
+            setSaving(false);
+            const pinToUse = pinSessionRef.current.pin;
+            setTimeout(() => processSale(null, pinToUse, signatureData), 30);
+          } else {
+            setJitPinModal({ open: true, items: detail.items || [], saleData, signatureData });
+            setSaving(false);
+          }
           return;
         }
         // Closed-day: offer Late-Encode flow for credit / partial sales
@@ -2186,19 +2324,21 @@ export default function UnifiedSalesPage() {
   }, [isDateClosed, floorDate, lastCloseDate]);
 
   // Handle manager override: retry the pending sale with override PIN
-  const handleStockOverride = async (overridePin) => {
-    if (!pendingSaleData) return;
-    const saleWithOverride = { ...pendingSaleData, manager_override_pin: overridePin };
+  const handleStockOverride = async (overridePin, _saleDataOverride) => {
+    const data = _saleDataOverride || pendingSaleData;
+    if (!data) return;
+    const saleWithOverride = { ...data, manager_override_pin: overridePin };
     const res = await api.post('/unified-sale', saleWithOverride);
     const invoiceNum = res.data.invoice_number || res.data.sale_number;
     invalidateBalanceCache();
+    startPinSession(overridePin, 'manager_pin', '');
     toast.success(`Sale ${invoiceNum} completed with manager override. Discrepancy ticket created.`, { duration: 5000 });
     setStockOverrideModal(false);
     setPendingSaleData(null);
     setInsufficientItems([]);
     clearCart();
     setPendingCreditSale(null);
-    if ((pendingSaleData.payment_type === 'digital' || pendingSaleData.payment_type === 'split') && res.data.id) {
+    if ((data.payment_type === 'digital' || data.payment_type === 'split') && res.data.id) {
       try {
         const qrRes = await api.post(`${process.env.REACT_APP_BACKEND_URL}/api/uploads/generate-link`, {
           record_type: 'invoice', record_id: res.data.id,
@@ -2297,6 +2437,10 @@ export default function UnifiedSalesPage() {
         </div>
 
         <div className="flex items-center gap-3">
+          {/* PIN Session Badge */}
+          {pinSession && (
+            <PinSessionBadge session={pinSession} onExpired={clearPinSession} />
+          )}
           {/* Linked Scanner indicator */}
           {scannerSession && (
             <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium cursor-pointer ${
@@ -3702,6 +3846,11 @@ export default function UnifiedSalesPage() {
               <p className="text-[10px] text-slate-400 mb-2">
                 Enter Admin PIN, Manager PIN, or TOTP code from Authenticator app
               </p>
+              {managerPin && isPinSessionWarm() && (
+                <p className="text-[10px] text-emerald-600 mb-1 flex items-center gap-1 font-medium" data-testid="credit-pin-session-hint">
+                  <Unlock size={10} /> PIN auto-filled from active session
+                </p>
+              )}
               <Input
                 data-testid="manager-pin"
                 type="password" autoComplete="new-password"
@@ -4057,14 +4206,18 @@ export default function UnifiedSalesPage() {
                   {selectedInvoice.receipt_review_status !== 'reviewed' && selectedInvoice._receipts?.length > 0 && (
                     <button
                       onClick={async () => {
-                        const pin = prompt('Enter manager PIN to verify this payment:');
+                        const pin = isPinSessionWarm() ? pinSessionRef.current.pin : prompt('Enter manager PIN to verify this payment:');
                         if (!pin) return;
                         try {
                           await api.post(`/uploads/mark-reviewed/invoice/${selectedInvoice.id}`, { pin });
+                          startPinSession(pin, 'manager_pin', '');
                           toast.success('Payment verified!');
                           setSelectedInvoice({ ...selectedInvoice, receipt_review_status: 'reviewed' });
                           loadHistory();
-                        } catch (e) { toast.error(e.response?.data?.detail || 'Verification failed'); }
+                        } catch (e) {
+                          if (isPinSessionWarm()) clearPinSession();
+                          toast.error(e.response?.data?.detail || 'Verification failed');
+                        }
                       }}
                       className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
                       data-testid="verify-epayment-btn"
@@ -4078,7 +4231,10 @@ export default function UnifiedSalesPage() {
               {/* Action buttons */}
               {selectedInvoice.status !== 'voided' && (
                 <button
-                  onClick={() => setVoidDialog(true)}
+                  onClick={() => {
+                    if (isPinSessionWarm()) setVoidPin(pinSessionRef.current.pin);
+                    setVoidDialog(true);
+                  }}
                   className="w-full py-2.5 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-sm font-medium transition-colors flex items-center justify-center gap-2"
                   data-testid="reopen-sale-btn"
                 >
@@ -4453,6 +4609,7 @@ export default function UnifiedSalesPage() {
         schemeName={schemes.find(s => s.key === activeScheme)?.name || activeScheme}
         branchName={currentBranch?.name || ''}
         customerName={selectedCustomer?.name || ''}
+        warmPin={isPinSessionWarm() ? pinSessionRef.current?.pin : null}
         submitting={priceMatchSubmitting}
         error={priceMatchError}
         onCancel={() => {
@@ -4484,6 +4641,7 @@ export default function UnifiedSalesPage() {
             }
           }
           setPriceMatchApproved({ price_changes, pin });
+          startPinSession(pin, 'manager_pin', '');
           setPriceMatchSubmitting(false);
           setPriceMatchModal(false);
           // Re-trigger checkout — with priceMatchApproved set the modal is skipped.
@@ -4496,6 +4654,7 @@ export default function UnifiedSalesPage() {
         open={lateEncodeDialog.open}
         orderDate={lateEncodeDialog.saleData?.order_date}
         paymentType={lateEncodeDialog.saleData?.payment_type}
+        warmPin={isPinSessionWarm() ? pinSessionRef.current?.pin : null}
         onClose={() => setLateEncodeDialog({ open: false, saleData: null, signatureData: null })}
         onConfirm={async ({ reason, pin }) => {
           const retryData = {

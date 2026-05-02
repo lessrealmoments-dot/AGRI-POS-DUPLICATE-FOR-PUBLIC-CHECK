@@ -32,14 +32,14 @@ const daysBetween = (targetDate) => {
   } catch { return 0; }
 };
 
-export default function LateEncodeDialog({ open, onClose, orderDate, paymentType, onConfirm }) {
+export default function LateEncodeDialog({ open, onClose, orderDate, paymentType, onConfirm, warmPin }) {
   const [reason, setReason] = useState('');
   const [pin, setPin] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (open) { setReason(''); setPin(''); setBusy(false); }
-  }, [open]);
+    if (open) { setReason(''); setPin(warmPin || ''); setBusy(false); }
+  }, [open, warmPin]);
 
   const daysBack = useMemo(() => daysBetween(orderDate), [orderDate]);
   const crossMonth = useMemo(() => {
