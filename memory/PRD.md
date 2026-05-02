@@ -1,5 +1,36 @@
 # AgriBooks PRD
 
+## Iter 214 (May 2026) — 🚨 P0 AccountingPage White-Screen Crash Fix ✅
+
+### Bug
+User reported: "Expense section — white screen upon inputting expense. IT BLACKS OUT ON ALL EXPENSE AFTER PRESSING SAVE. THE ONLY THING GOING THROUGH ARE THE CASH ADVANCE LINKED TO A PERSON." Save Expense crashed the React tree on every category except Employee Advance.
+
+### Root cause
+The backend's `update_cashier_wallet()` (`utils/helpers.py:178`) raises a structured `HTTPException(status_code=400, detail={...})` — a dict object with keys `{type, message, cashier_balance, required, shortfall, suggestion}` — when the cashier wallet has insufficient funds. The frontend's catch block did:
+
+```js
+catch (e) { toast.error(e.response?.data?.detail || 'Error saving expense'); }
+```
+
+`detail` was an object, not a string. Sonner's `toast.error(obj)` then tried to render the raw object as a React child → "Objects are not valid as a React child" → Uncaught runtime error → white screen.
+
+Employee Advance worked because its dedicated 400 path inside `create_expense` returns a STRING detail (CA limit message), never the structured cashier object. Every non-Employee-Advance category in a branch with empty cashier hit the structured object → crash.
+
+### Fix
+- `pages/AccountingPage.js`:
+  - Added `getErrorMessage(e, fallback)` helper that safely extracts a string from any axios error (handles string detail, object detail with .message/.detail, or falls back to e.message / fallback).
+  - Replaced all 6 `toast.error(e.response?.data?.detail || ...)` catch blocks (`handleSaveExpense`, `handleCaManagerPin`, `handleCreateFarmExpense`, `handleCreateCashOut`, `handleCreatePayable`, `handlePayment`).
+  - Special-cased `insufficient_funds` in `handleSaveExpense`: shows the backend message PLUS a tip to switch payment method to Safe or top up the cashier first.
+
+### Verified end-to-end
+1. Insufficient cashier balance → friendly toast "Cashier has ₱0.00 but ₱75.00 is needed. Use the Safe or add a deposit to the cashier first." + tip line. **No white screen.**
+2. Topped up cashier ₱5,000 via API → saved Office Supplies ₱250 + Rent ₱300 → green "Expense recorded" toast, table refreshed, totals updated to ₱550.00.
+
+### Why minimal scope
+The same `e.response?.data?.detail` pattern exists in 195 places across the frontend, but only the 6 in AccountingPage.js were on the immediate crash path the user reported. A wider sweep is queued as P2 backlog (apply `getErrorMessage` helper in shared `lib/utils.js`).
+
+---
+
 ## Iter 213 (May 2026) — Branch Transfer Receive: 3-Step Wizard + Scrollable List ✅
 
 ### Why

@@ -32,6 +32,23 @@ const EXPENSE_CATEGORIES = [
 
 const PAYMENT_METHODS = ["Cash", "Check", "Bank Transfer", "GCash", "Maya", "Credit Card"];
 
+// Safely turn an axios error into a string message. Backend may return
+// detail as a string OR a structured object (e.g. insufficient_funds with
+// {type, message, cashier_balance, required, shortfall, suggestion}).
+// Rendering the raw object into <toast.error/> crashes React. This helper
+// always returns a plain string.
+function getErrorMessage(e, fallback = 'Something went wrong') {
+  const detail = e?.response?.data?.detail;
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (detail && typeof detail === 'object') {
+    if (typeof detail.message === 'string' && detail.message.trim()) return detail.message;
+    if (typeof detail.detail === 'string' && detail.detail.trim()) return detail.detail;
+    try { return JSON.stringify(detail); } catch { /* ignore */ }
+  }
+  if (typeof e?.message === 'string' && e.message.trim()) return e.message;
+  return fallback;
+}
+
 export default function AccountingPage() {
   const { currentBranch } = useAuth();
   const [expenses, setExpenses] = useState([]);
@@ -218,7 +235,19 @@ export default function AccountingPage() {
       setCaSummary(null);
       setExpenseReceiptData(null);
       fetchAll();
-    } catch (e) { toast.error(e.response?.data?.detail || 'Error saving expense'); }
+    } catch (e) {
+      const detail = e?.response?.data?.detail;
+      // Friendly insufficient-funds toast (backend returns structured object)
+      if (detail && typeof detail === 'object' && detail.type === 'insufficient_funds') {
+        toast.error(detail.message || 'Insufficient cashier balance', {
+          description: detail.suggestion === 'safe'
+            ? 'Tip: change Payment Method to use the Safe, or top up the Cashier first.'
+            : undefined,
+        });
+        return;
+      }
+      toast.error(getErrorMessage(e, 'Error saving expense'));
+    }
   };
 
   const handleCaManagerPin = async () => {
@@ -247,7 +276,7 @@ export default function AccountingPage() {
       } else {
         toast.error('Invalid PIN');
       }
-    } catch (e) { toast.error(e.response?.data?.detail || 'Verification failed'); }
+    } catch (e) { toast.error(getErrorMessage(e, 'Verification failed')); }
   };
 
   const handleCreateFarmExpense = async () => {
@@ -264,7 +293,7 @@ export default function AccountingPage() {
       toast.success(res.data.message);
       setFarmExpenseDialog(false);
       fetchAll();
-    } catch (e) { toast.error(e.response?.data?.detail || 'Error creating farm expense'); }
+    } catch (e) { toast.error(getErrorMessage(e, 'Error creating farm expense')); }
   };
 
   const handleCreateCashOut = async () => {
@@ -281,7 +310,7 @@ export default function AccountingPage() {
       toast.success(res.data.message);
       setCashOutDialog(false);
       fetchAll();
-    } catch (e) { toast.error(e.response?.data?.detail || 'Error creating cash out'); }
+    } catch (e) { toast.error(getErrorMessage(e, 'Error creating cash out')); }
   };
 
   const handleCreatePayable = async () => {
@@ -290,7 +319,7 @@ export default function AccountingPage() {
       toast.success('Payable recorded');
       setPayableDialog(false);
       fetchAll();
-    } catch (e) { toast.error(e.response?.data?.detail || 'Error'); }
+    } catch (e) { toast.error(getErrorMessage(e, 'Error recording payable')); }
   };
 
   const openPayment = (item, type) => {
@@ -309,7 +338,7 @@ export default function AccountingPage() {
       toast.success('Payment recorded');
       setPaymentDialog(false);
       fetchAll();
-    } catch (e) { toast.error(e.response?.data?.detail || 'Error'); }
+    } catch (e) { toast.error(getErrorMessage(e, 'Error recording payment')); }
   };
 
   const deleteExpense = async (id) => {
