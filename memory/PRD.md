@@ -1,5 +1,37 @@
 # AgriBooks PRD
 
+## Iter 207 (May 2026) — Quick Launch (Manager Fast-Action Card) ✅
+
+### Why
+Owner asked for a visible always-on shortcut for the 7 most-used manager actions, so a non-tech-savvy manager doesn't have to fumble through the sidebar to find Sales, Receive Payment, etc.
+
+### What shipped
+- New component `/app/frontend/src/components/QuickLaunch.js` (148 lines):
+  - Collapsible card pinned at the top of the Dashboard
+  - Persists collapsed state per-user via localStorage key `agripos_quick_launch_collapsed`
+  - 7 colored tile buttons in a responsive grid (2 cols mobile → 4 cols tablet → 7 cols desktop):
+    1. Sales → /sales-new (emerald)
+    2. Receive Payment → /payments (blue)
+    3. Purchase Order → /purchase-orders (purple)
+    4. Pay Supplier → /pay-supplier (indigo)
+    5. Expense → /accounting (rose)
+    6. Branch Transfer → /branch-transfers (amber)
+    7. Closing Wizard → /close-wizard (slate, brand-green icon)
+  - Each tile has `data-testid="quick-launch-{key}"`; toggle has `data-testid="quick-launch-toggle"`; container `data-testid="quick-launch"`
+- Wired into BOTH `DashboardPage.js` views:
+  - Owner Consolidated View (line 470, after header before grid)
+  - Branch / Single View (line 699, after warnings before grid)
+
+### Non-invasive
+- Purely navigation; no backend dep
+- Doesn't touch existing dashboard widgets / grid layout
+- Lint clean
+
+### Verification
+- iter_184.json: static code review confirms all 7 testids, correct routes, localStorage persistence, no SyntheticEvent risks (onClick wrapped in arrow fn per iter_205 defensive pattern)
+
+---
+
 ## Iter 206 (May 2026) — Void Payment from Payment History ✅
 
 ### Why
