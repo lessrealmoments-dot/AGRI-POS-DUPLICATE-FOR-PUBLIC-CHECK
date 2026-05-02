@@ -8,6 +8,14 @@
  * data router, so we route all blocking through a global click capture
  * (see UnsavedChangesContext) plus a `beforeunload` listener.
  *
+ * Stable identity
+ * ───────────────
+ * The hook only registers ONCE per mount. Pages typically inline arrow
+ * functions for `onPark`, which would otherwise re-register on every
+ * keystroke. To stay cheap, we read the latest `isDirty`, `onPark`, and
+ * `label` through a ref so the registry's lookup callbacks always see
+ * fresh values without forcing the Provider to re-state-update.
+ *
  * Usage
  * ─────
  *   const guard = useUnsavedChangesGuard({
@@ -15,11 +23,10 @@
  *     onPark: async () => { await parkCurrentSale(); },
  *     label: 'Sales',
  *   });
- *   // For in-page destructive switches (tabs, mode toggles, ...):
  *   <button onClick={() => guard.requestSafe(() => setMainTab('history'))} />
  *
- * The page does NOT need to render <UnsavedChangesDialog> itself anymore
- * (the Provider does it). The hook returns a stable `requestSafe` only.
+ * The page does NOT need to render <UnsavedChangesDialog> itself — the
+ * Provider does it. The hook returns a stable `requestSafe` only.
  */
 import { useEffect, useRef } from 'react';
 import { useUnsavedChangesContext } from '../contexts/UnsavedChangesContext';
@@ -28,14 +35,13 @@ let _guardSeq = 0;
 
 export function useUnsavedChangesGuard({ isDirty, onPark = null, label = 'this section' }) {
   const ctx = useUnsavedChangesContext();
-  // Stable id per guard instance so the registry can find/replace it.
   const idRef = useRef(null);
   if (!idRef.current) {
     _guardSeq += 1;
     idRef.current = `guard-${_guardSeq}`;
   }
-  // Latest values via ref so the registry's getDirty() always sees fresh
-  // state without forcing the Provider to re-register on every render.
+  // Latest values via ref so the registry's getDirty()/onPark() callbacks
+  // always see fresh state without forcing the Provider to re-state-update.
   const latestRef = useRef({ isDirty, onPark, label });
   latestRef.current = { isDirty, onPark, label };
 
@@ -44,28 +50,19 @@ export function useUnsavedChangesGuard({ isDirty, onPark = null, label = 'this s
     const id = idRef.current;
     ctx.register(id, {
       getDirty: () => !!latestRef.current.isDirty,
-      onPark: latestRef.current.onPark
-        ? () => latestRef.current.onPark()
-        : null,
-      label: latestRef.current.label,
+      // Provider checks `!!guard.onPark` to decide whether to render the
+      // Park button. Wrap dynamically so this stays accurate when the
+      // page passes onPark conditionally.
+      get onPark() {
+        return latestRef.current.onPark ? () => latestRef.current.onPark() : null;
+      },
+      get label() {
+        return latestRef.current.label;
+      },
     });
     return () => ctx.unregister(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx]);
-
-  // Re-register when `onPark` becomes available/unavailable so the dialog
-  // can correctly decide whether to show the Park button. (label / isDirty
-  // changes are picked up via the ref so they don't need re-register.)
-  useEffect(() => {
-    if (!ctx) return;
-    const id = idRef.current;
-    ctx.register(id, {
-      getDirty: () => !!latestRef.current.isDirty,
-      onPark: latestRef.current.onPark
-        ? () => latestRef.current.onPark()
-        : null,
-      label: latestRef.current.label,
-    });
-  }, [ctx, onPark]);
 
   return {
     requestSafe: (action) => {

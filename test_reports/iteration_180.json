@@ -1,0 +1,56 @@
+{
+  "summary": "Re-validated the rebuilt UnsavedChanges architecture after iter_179 cleanup. The fix is solid: ZERO 'Maximum update depth exceeded' and ZERO 'useBlocker must be used within a data router' pageerrors across all 5 guarded routes (/sales-new, /purchase-orders, /branch-transfers, /returns, /journal-entries). The single useEffect in useUnsavedChangesGuard (deps [ctx]) plus the useMemo'd ctxValue + getter-based onPark/label has eliminated the infinite-render regression entirely. SALES primary path FULLY RE-CONFIRMED: add product (clicked product card) → tab-history → dialog appears with all three buttons (unsaved-stay, unsaved-park, unsaved-leave), label is 'Sales', text 'You're about to leave Sales with unsaved work'. Click Stay → dialog closes cleanly. Then sidebar nav-inventory click while still dirty → dialog re-opens with Park button visible. EMPTY-CART SANITY PASSED: /sales-new with no dirty guard → sidebar click navigates to /inventory directly, no dialog. Secondary pages (PO, JE, BT, Returns) all MOUNT-CLEAN, but I was unable to drive PO/BT/Returns into a 'dirty' state within available time because the product autocomplete on PurchaseOrderPage's smart-product-search returned 0 options for 'Disable' (a known SKU prefix in the test org), and the BranchTransfer + Returns flows require additional preconditions (source/destination branch + an existing invoice). For JOURNAL ENTRIES the guard appears not to wire isDirty correctly: after clicking [data-testid=new-je-btn] → [data-testid=je-type-sale_adjustment] → filling the memo textarea, clicking sidebar nav-inventory did NOT show the unsaved-changes-dialog. This may indicate JournalEntriesPage's guard isn't registered or its isDirty selector doesn't observe the modal-local state. Worth E1 verification.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "JournalEntriesPage / new-entry modal guard",
+        "issue": "After [data-testid=new-je-btn] → click [data-testid=je-type-sale_adjustment] → fill memo textarea, sidebar nav-inventory click navigated away WITHOUT showing unsaved-changes-dialog. Either the guard isn't registered on this page, or its isDirty selector ignores the modal's local state (entryType / memo). Other guarded pages (Sales) fired correctly under identical sidebar click sequence.",
+        "selector": "[data-testid=\"unsaved-changes-dialog\"] (never appeared)",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "PO smart-product-search dirty-state E2E",
+        "issue": "Could not reach a dirty PO state: typing 'Disable' into [data-testid=\"product-search-input\"] yielded 0 results in the listbox. SKU prefix 'DT-' / product name 'Disable Test...' is present in the inventory but not surfacing through SmartProductSearch. Could be a search index mismatch or vendor-scoped filtering. Blocks E2E validation of PO guard label.",
+        "affected_selectors": ["[data-testid=\"product-search-input\"]", "[role=\"option\"]"]
+      },
+      {
+        "flow": "BranchTransfer Request Stock + product pick",
+        "issue": "Same product autocomplete returned no options on the request-stock row. Combined with source/dest branch picker friction, BT dirty path not exercised this run.",
+        "affected_selectors": ["input[placeholder*=\"product\"]"]
+      },
+      {
+        "flow": "Returns wizard",
+        "issue": "Page renders empty-state 'Please select a branch to process returns.' Branch picker top-bar shows 'All Branches'; even after selecting Main Warehouse the wizard entry point and invoice lookup were not reached in available time.",
+        "affected_selectors": []
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Verify JournalEntriesPage's useUnsavedChangesGuard registration: confirm `isDirty` is hooked to the modal's entryType/lines/memo state and that the guard is mounted at the page level (not only inside a child that unmounts). Repro: /journal-entries → click 'New Entry' → click 'Sale Adjustment' tile → type into memo → click sidebar 'Inventory'. Expected: unsaved-changes-dialog with label 'Journal Entry'. Actual: navigation proceeds with no dialog.",
+    "Investigate SmartProductSearch on /purchase-orders: typing 'Disable' (a known product-name prefix in this test org) returns 0 results. Check whether the PO product search applies vendor-scoping, branch-scoping, or a different index than the Sales product grid (which lists those same products with [data-testid=\"product-<id>\"]).",
+    "Add seed-data prerequisite or a smoke fixture for the secondary flows so the testing agent can drive each page into 'dirty' state deterministically. Suggested: a callable like `_seed_minimum_invoice_for_returns_test()` and a known SKU guaranteed to appear in PO search.",
+    "Architecturally good — the useMemo + getter-based registry pattern from iter_179 is holding up. No further action needed on the core hook/provider unless the JE wiring above turns out to be a guard-side bug rather than a page-side wiring miss."
+  ],
+  "critical_code_review_comments": [
+    "useUnsavedChangesGuard.js (post-cleanup): now a single useEffect with deps [ctx], stable id via idRef, and getter-style {onPark, label} on the registry payload — read fresh on every Provider tick without re-registration. This is the right pattern. eslint-disable on exhaustive-deps is justified by the latestRef. Good.",
+    "UnsavedChangesContext.js: ctxValue is correctly memoized (verified). Document-level click interceptor with closest('a[href]') + dataset.skipGuard='true' bypass + protocol/target='_blank' bypass is the canonical implementation for declarative <BrowserRouter> setups. One nit: `dataset.skipGuard` only works if set on the anchor itself, not on a child element — fine for current callers, worth a JSDoc.",
+    "Still no route-level ErrorBoundary wraps the guarded routes. With the guard now stable this is lower risk, but a single throw in any future page-level guard could still cascade into a red overlay across a major workflow. Recommend wrapping <Routes> children individually in ErrorBoundary.",
+    "JournalEntriesPage: investigate whether the guard is mounted at page-level or only inside the modal subtree. If only inside the modal, the guard unmounts as the user navigates and useUnsavedChangesGuard's cleanup runs — but more importantly, the page-level is the only place to keep the guard alive across modal mounts. Pattern from PurchaseOrderPage / UnifiedSalesPage is page-level."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "n/a (frontend-only request)",
+    "frontend": "Mount-clean: 5/5 routes (100%). Empty-cart sanity: PASS. Sales dirty-flow (tab-history + sidebar): PASS. JE dirty-flow: FAIL (no dialog). PO/BT/Returns dirty-flows: NOT EXERCISED (autocomplete / seed-data blockers, not guard bugs)."
+  },
+  "test_credentials": "test_org_admin@regression.local / RegressionPass!2026",
+  "seed_data_creation": "None this iteration (Sales add-to-cart did not Park; clicked Stay only).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Architecture is solid (no Maximum update depth, no useBlocker invariant). Sales primary path validated end-to-end. To finish the secondary pages: 1) JE — fix or confirm guard wiring on JournalEntriesPage so isDirty=true after entry-type + memo, then re-test sidebar click → expect dialog 'Journal Entry'. 2) PO — needs a working SmartProductSearch dropdown (currently returns 0 options for known SKU prefix). Once a product can be added to po-lines-table, sidebar click should fire dialog with label 'Purchase Order' and NO Park button (only Stay + Leave). 3) BranchTransfers — pick source+dest branch then product on request-stock row, sidebar click → expect 'Branch Transfer Request'. 4) Returns — select branch + lookup invoice + add return item to queue, sidebar click → expect 'Return / Refund'. Selectors confirmed available: [data-testid=\"unsaved-changes-dialog\"], [data-testid=\"unsaved-stay\"], [data-testid=\"unsaved-park\"], [data-testid=\"unsaved-leave\"], [data-testid=\"nav-inventory\"]. Sales selectors: [data-testid=\"product-<uuid>\"] cards (clickable in Quick mode), [data-testid=\"tab-history\"], [data-testid=\"tab-new-sale\"]. JE selectors: [data-testid=\"new-je-btn\"], [data-testid=\"je-type-sale_adjustment\"] etc. PO selectors: [data-testid=\"smart-product-search\"], [data-testid=\"product-search-input\"], [data-testid=\"po-lines-table\"].",
+  "rca of the issue": "No new RCA — iter_179's useMemo + iter_180-targeted useEffect cleanup successfully eliminated the previous infinite render loop. Verified by zero pageerror events across the 5 guarded routes both on cold mount and after extensive interaction. The remaining JE-not-firing observation is a page-level guard wiring question (does JournalEntriesPage call useUnsavedChangesGuard at the top level with isDirty bound to entryType/lines/memo?) rather than a hook/provider bug, since identical sidebar-click navigation correctly fires the dialog on UnifiedSalesPage."
+}
