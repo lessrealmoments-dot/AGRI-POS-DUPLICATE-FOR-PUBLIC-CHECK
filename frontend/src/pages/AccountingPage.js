@@ -181,6 +181,9 @@ export default function AccountingPage() {
   };
 
   const handleSaveExpense = async (approvedBy = '') => {
+    // Defensive: when bound directly to onClick, React passes a SyntheticEvent
+    // here. Only treat string as a real approver name; ignore anything else.
+    const approver = (typeof approvedBy === 'string') ? approvedBy.trim() : '';
     if (!expenseForm.amount || expenseForm.amount <= 0) {
       toast.error('Amount must be greater than 0');
       return;
@@ -193,14 +196,14 @@ export default function AccountingPage() {
     // Employee Advance CA limit check
     if (expenseForm.category === 'Employee Advance' && expenseForm.employee_id && caSummary && !editMode) {
       const limit = caSummary.monthly_ca_limit || 0;
-      if (limit > 0 && (caSummary.this_month_total + parseFloat(expenseForm.amount)) > limit && !approvedBy) {
+      if (limit > 0 && (caSummary.this_month_total + parseFloat(expenseForm.amount)) > limit && !approver) {
         setCaManagerPinDialog(true);
         return;
       }
     }
     try {
       const payload = { ...expenseForm, branch_id: currentBranch?.id };
-      if (approvedBy) payload.manager_approved_by = approvedBy;
+      if (approver) payload.manager_approved_by = approver;
       if (expenseReceiptData?.sessionId) {
         payload.upload_session_ids = [expenseReceiptData.sessionId];
       }
@@ -794,7 +797,7 @@ export default function AccountingPage() {
             )}
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setExpenseDialog(false)}>Cancel</Button>
-              <Button onClick={handleSaveExpense} className="bg-[#1A4D2E] hover:bg-[#14532d] text-white" data-testid="save-expense-btn">
+              <Button onClick={() => handleSaveExpense()} className="bg-[#1A4D2E] hover:bg-[#14532d] text-white" data-testid="save-expense-btn">
                 {editMode ? 'Update Expense' : 'Save Expense'}
               </Button>
             </div>

@@ -1896,7 +1896,11 @@ export default function UnifiedSalesPage() {
 
   // Verify manager PIN — accepts optional override for PIN session auto-bypass
   const verifyManagerPin = async (_sessionPin) => {
-    const pinToUse = _sessionPin || managerPin;
+    // Defensive: when bound directly to onClick, React may pass a SyntheticEvent
+    // here. Only treat string/number as a real session-PIN; ignore anything else.
+    const sessionPinStr = (typeof _sessionPin === 'string' || typeof _sessionPin === 'number')
+      ? String(_sessionPin) : '';
+    const pinToUse = sessionPinStr || managerPin;
     if (!pinToUse) { toast.error('Enter authorization code'); return; }
     // Offline credit sale: a written reason is required for the audit log
     if (!isOnline && (paymentType === 'credit' || paymentType === 'partial') && selectedCustomer?.id) {
@@ -1922,7 +1926,7 @@ export default function UnifiedSalesPage() {
         }
       });
       if (res.data.valid) {
-        toast.success(`Approved by ${res.data.manager_name}${_sessionPin ? ' (PIN active)' : ''}`);
+        toast.success(`Approved by ${res.data.manager_name}${sessionPinStr ? ' (PIN active)' : ''}`);
         setCreditApprovalDialog(false);
         setManagerPin('');
         // Start/refresh PIN session
@@ -3894,7 +3898,7 @@ export default function UnifiedSalesPage() {
               <Button 
                 data-testid="verify-pin"
                 className="flex-1 bg-amber-500 hover:bg-amber-600 text-white"
-                onClick={verifyManagerPin}
+                onClick={() => verifyManagerPin()}
                 disabled={!managerPin || saving}
               >
                 <CheckCircle2 size={16} className="mr-2" /> Authorize Sale
