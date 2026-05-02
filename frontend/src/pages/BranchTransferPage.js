@@ -810,13 +810,18 @@ export default function BranchTransferPage() {
   const handleReceive = async () => {
     if (!viewOrder) return;
 
-    // Receipt is mandatory for final receiving
-    if (!receiveReceiptData?.fileCount) {
-      toast.error('Please upload at least 1 receipt / DR photo before confirming receipt');
-      return;
-    }
-
     const { hasVariance } = getVariances(viewOrder.items);
+
+    // Soft warning if no receipt — but allow proceeding (one-time confirm).
+    // Receipt is recommended for audit trail but not blocking.
+    if (!receiveReceiptData?.fileCount && !receiveConfirmStep) {
+      const ok = window.confirm(
+        'No receipt / DR photo uploaded.\n\n' +
+        'A receipt photo is recommended for audit trail. You can scan the QR code with your phone or upload from this computer using the Upload Receipt section above.\n\n' +
+        'Proceed without a receipt?'
+      );
+      if (!ok) return;
+    }
 
     // First click with variance: show double-check step
     if (hasVariance && !receiveConfirmStep) {
@@ -2753,11 +2758,11 @@ export default function BranchTransferPage() {
                 data-testid="receive-notes"
               />
             </div>
-            {/* Receipt upload — mandatory for final receiving */}
+            {/* Receipt upload — optional but recommended for audit trail */}
             <div className="mx-3 mb-2">
               <ReceiptUploadInline
-                required={true}
-                label="Receipt / DR Photo (Required)"
+                required={false}
+                label="Upload Receipt / DR Photo (optional, but recommended for audit)"
                 recordType="branch_transfer"
                 recordSummary={viewOrder ? {
                   type_label: 'Branch Transfer',

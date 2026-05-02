@@ -1,5 +1,27 @@
 # AgriBooks PRD
 
+## Iter 212 (May 2026) — Branch Transfer: Receipt Photo Now Optional ✅
+
+### Why
+Manager reported: "I can't receive the product because it is asking me to upload a photo which doesn't make sense." The Branch Transfer receive flow was hard-blocking with a mandatory receipt photo, trapping the manager when the QR upload was failing (the iter 208 bug) or when a paper DR is acceptable as the audit trail.
+
+### What changed
+1. **`pages/BranchTransferPage.js` line 814** — removed the hard block in `handleReceive`. Now if no receipt is uploaded, the user gets a one-time soft confirm: "Proceed without a receipt? (Recommended for audit trail)" — they can OK to proceed or Cancel and upload first.
+2. **Receive dialog** — `ReceiptUploadInline` is now `required={false}` with new label "Upload Receipt / DR Photo (optional, but recommended for audit)".
+
+### What was already working (no change needed)
+The user's described workflow is already fully implemented in `ReceiptUploadInline`:
+- Click "Upload Receipt" → opens choice between desktop file picker AND QR code
+- QR code points to public `/upload/{token}` page that the iter 208 fix made work again
+- Phone uploads are detected via 3-second polling on `/api/uploads/session-status/{sessionId}` — file count + thumbnails appear live in the receive dialog
+- User can then click Confirm Receipt to finalize
+
+### Net effect
+- Manager who has a paper DR signed → click Receive → enter actual qty → click Confirm Receipt → soft confirm → done. No photo needed.
+- Manager who wants the photo trail → click Receive → enter qty → tap "Upload Receipt" → either drag-drop on PC or scan QR with phone → photo arrives → click Confirm Receipt → done.
+
+---
+
 ## Iter 211 (May 2026) — Branch Transfer: No-wheel-scroll + Smart Dropdown ✅
 
 ### Why
