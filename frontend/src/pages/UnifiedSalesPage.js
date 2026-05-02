@@ -1168,13 +1168,12 @@ export default function UnifiedSalesPage() {
   };
 
   const updateCartPrice = (productId, newPrice) => {
-    // Price editing triggers Price Match flow (manager PIN at checkout). Since
-    // Price Match requires server-side PIN verification + branch_prices upsert,
-    // it cannot safely run while offline. Block the edit in that case.
-    if (!isOnline) {
-      toast.error('Price editing is disabled while offline. Apply a discount instead, or wait until you are back online to price-match.');
-      return;
-    }
+    // Price editing now works offline too: the PriceMatchModal verifies the
+    // manager/admin PIN locally via verifyOfflinePin (cached bcrypt hash +
+    // branch-scoped grants), and the queued sale carries `price_changes` +
+    // `price_match_pin` so the backend can re-validate and upsert
+    // branch_prices when the connection is back. If no offline credentials
+    // were ever cached, the modal will surface that and block submission.
     const price = parseFloat(newPrice) || 0;
     setCart(cart.map(c => c.product_id !== productId ? c : { ...c, price, total: price * c.quantity }));
   };
@@ -1528,14 +1527,8 @@ export default function UnifiedSalesPage() {
   };
 
   const updateLine = (index, field, value) => {
-    // Block price edits while offline — Price Match requires server-side PIN.
-    if (field === 'rate' && !isOnline) {
-      const cur = lines[index];
-      if (cur?.product_id && parseFloat(cur.original_rate) > 0 && Math.abs(parseFloat(value) - cur.original_rate) > 0.001) {
-        toast.error('Price editing is disabled while offline. Apply a discount instead, or wait until you are back online to price-match.');
-        return;
-      }
-    }
+    // Price edits work offline: the PriceMatchModal verifies the
+    // manager/admin PIN locally and the queued sale carries the change.
     const newLines = [...lines];
     newLines[index] = { ...newLines[index], [field]: value };
     setLines(newLines);
@@ -4423,10 +4416,28 @@ export default function UnifiedSalesPage() {
           setPriceMatchError('');
         }}
         onConfirm={async ({ price_changes, pin }) => {
-          // Save approved payload — the next openCheckout call will skip this
-          // modal because priceMatchApproved is now non-null.
+          // Online: server validates the PIN at /unified-sale time.
+          // Offline: validate locally NOW so we can fail fast (clear error
+          // in the modal) instead of letting a bad PIN reach the queue.
+          // Either way the plaintext PIN ships with the queued sale and the
+          // backend re-validates on sync.
           setPriceMatchSubmitting(true);
           setPriceMatchError('');
+          if (!isOnline) {
+            try {
+              const { verifyOfflinePin } = await import('../lib/offlineAuth');
+              const result = await verifyOfflinePin(pin);
+              if (!result.ok) {
+                setPriceMatchError(result.reason || 'Invalid PIN (offline)');
+                setPriceMatchSubmitting(false);
+                return;
+              }
+            } catch {
+              setPriceMatchError('Could not verify PIN offline. Sync once while online to enable offline price match.');
+              setPriceMatchSubmitting(false);
+              return;
+            }
+          }
           setPriceMatchApproved({ price_changes, pin });
           setPriceMatchSubmitting(false);
           setPriceMatchModal(false);

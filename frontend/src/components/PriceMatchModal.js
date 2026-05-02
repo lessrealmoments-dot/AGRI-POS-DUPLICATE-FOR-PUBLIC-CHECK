@@ -194,6 +194,11 @@ export default function PriceMatchModal({
             <AlertTriangle size={14} className="text-amber-600 mt-0.5 shrink-0" />
             <p className="text-[11px] text-amber-700 leading-relaxed">
               Both options are logged with reason + approver under <span className="italic">Reports → Price Changes</span>.
+              {!navigator.onLine && (
+                <span className="block mt-1 text-amber-800 font-medium">
+                  ⚠ Offline — PIN is verified locally. The price change will sync to the server when your connection is back.
+                </span>
+              )}
             </p>
           </div>
 

@@ -1,5 +1,27 @@
 # AgriBooks Changelog
 
+## Feb 2026 — Offline Price Match (Iter 202)
+
+**Ask**: "I want to do the price match even when offline. It only saves the reason offline first and eventually syncs when the internet is back. We require PINs for this regardless in Quick or Order — so we cache the admin and manager PINs to make it work even offline."
+
+**Implemented (frontend + backend + regression):**
+
+**Frontend** — `UnifiedSalesPage.js`:
+- Removed the offline-block in `updateCartPrice` (Quick mode) and `updateLine` rate edit (Order mode). Cashiers can now edit prices in cart even with no connection.
+- `PriceMatchModal.onConfirm` (`UnifiedSalesPage.js`) now performs a local PIN check via `verifyOfflinePin` (already-cached bcrypt admin hash + branch-scoped manager grants) when `!isOnline` BEFORE accepting the modal. If the PIN is wrong, the modal stays open with an inline error — exactly like the online flow. The plaintext PIN still ships with the queued sale so the server can re-validate on resync.
+- `components/PriceMatchModal.js`: added an inline "Offline — PIN is verified locally. The price change will sync when your connection is back" banner so the cashier knows what's happening.
+
+**Backend** — `routes/sync.py` `/sales/sync` endpoint:
+- After importing the offline invoice, if the sale carries `price_changes` + `price_match_pin`, the endpoint now re-verifies the PIN against the CURRENT bcrypt hash via `verify_pin_for_action("price_match")`.
+- On success: upserts `branch_prices` (skipped when `customer_only=True`, matching the live flow) and writes the audit row to `price_change_log` with `offline_origin=True`, `scope`, `customer_only`, and the same approver metadata.
+- On PIN-resync failure (rare — only if the admin/manager PIN was rotated between the offline write and the resync): the sale STILL imports (the goods are already gone), the branch_prices update is silently skipped, and the audit row is flagged `pin_resync_failed=True` so admins can review under Reports → Price Changes.
+
+**Test** — `backend/tests/test_offline_price_match_replay_202.py` (3/3 passing):
+1. Branch-permanent replay → `branch_prices.retail` updated to the new price.
+2. Customer-only replay → `branch_prices` untouched (audit row still written).
+3. Invalid-PIN replay → sale imports, `branch_prices` untouched, log carries `pin_resync_failed=True`.
+
+
 ## Feb 2026 — Order-Mode Product Search: Offline Fallback (Iter 202)
 
 **Ask**: "I tried going offline on Quick mode and the product search worked perfectly, fully offline. My problem is in the advance order page (Order mode) — the product search function disappears."

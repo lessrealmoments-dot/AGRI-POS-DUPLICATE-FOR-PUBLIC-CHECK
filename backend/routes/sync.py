@@ -577,6 +577,119 @@ async def sync_offline_sales(data: dict, user=Depends(get_current_user)):
                 user.get("full_name", user["username"])
             )
 
+            # ── Phase 2-cont'd: Replay offline price-match changes ──────────
+            # When a cashier offline-changes a price, the sale is queued with
+            # `price_changes` + `price_match_pin`. We re-validate the PIN
+            # against the CURRENT bcrypt hash here, then upsert
+            # `branch_prices` (unless `customer_only=True`) and append a
+            # `price_change_log` entry. PIN failures don't block the sale —
+            # the goods are already gone — but we flag the row so admins
+            # can review.
+            offline_price_changes = sale.get("price_changes") or []
+            if offline_price_changes:
+                from routes.verify import verify_pin_for_action
+                pm_pin = (sale.get("price_match_pin") or "").strip()
+                pm_verifier = None
+                if pm_pin:
+                    try:
+                        pm_verifier = await verify_pin_for_action(
+                            pm_pin, "price_match", branch_id=branch_id
+                        )
+                    except Exception:
+                        pm_verifier = None
+                pm_failed_resync = pm_pin and not pm_verifier
+                approver_name = (pm_verifier or {}).get("verifier_name") or (pm_verifier or {}).get("full_name") or ""
+                approver_method = (pm_verifier or {}).get("method", "")
+                approver_id = (pm_verifier or {}).get("verifier_id") or (pm_verifier or {}).get("id") or ""
+
+                for pc in offline_price_changes:
+                    pid = (pc.get("product_id") or "").strip()
+                    if not pid:
+                        continue
+                    try:
+                        new_p = float(pc.get("new_price"))
+                    except (TypeError, ValueError):
+                        continue
+                    if new_p <= 0:
+                        continue
+                    scheme = (pc.get("scheme") or "retail").strip()
+                    is_customer_only = bool(pc.get("customer_only", False))
+                    # Re-fetch the server-trusted old_price the same way
+                    # the live /unified-sale path does (branch override → global).
+                    bp_doc = await db.branch_prices.find_one(
+                        {"product_id": pid, "branch_id": branch_id}, {"_id": 0}
+                    ) or {}
+                    bp_prices = bp_doc.get("prices") or {}
+                    server_old = bp_prices.get(scheme)
+                    if server_old is None:
+                        prod_doc = await db.products.find_one({"id": pid}, {"_id": 0, "name": 1, "sku": 1, "prices": 1}) or {}
+                        server_old = (prod_doc.get("prices") or {}).get(scheme, 0)
+                    else:
+                        prod_doc = await db.products.find_one({"id": pid}, {"_id": 0, "name": 1, "sku": 1}) or {}
+                    try:
+                        server_old = float(server_old or 0)
+                    except (TypeError, ValueError):
+                        server_old = 0
+                    # Upsert branch_prices ONLY when:
+                    #   (a) PIN re-verified successfully, AND
+                    #   (b) the change is NOT customer-only
+                    if (not pm_failed_resync) and (not is_customer_only) and server_old != new_p:
+                        existing_bp = bp_doc or {}
+                        merged_prices = (existing_bp.get("prices") or {})
+                        merged_prices[scheme] = new_p
+                        await db.branch_prices.update_one(
+                            {"product_id": pid, "branch_id": branch_id},
+                            {
+                                "$set": {
+                                    "prices": merged_prices,
+                                    "updated_at": now_iso(),
+                                    "updated_by_id": user["id"],
+                                    "updated_by_name": user.get("full_name", user.get("username", "")),
+                                    "source": "pos_price_match_offline_replay",
+                                },
+                                "$setOnInsert": {
+                                    "id": new_id(),
+                                    "product_id": pid,
+                                    "branch_id": branch_id,
+                                    "created_at": now_iso(),
+                                },
+                            },
+                            upsert=True,
+                        )
+                    # Always log to price_change_log so the audit trail is complete
+                    await db.price_change_log.insert_one({
+                        "id": new_id(),
+                        "product_id": pid,
+                        "product_name": prod_doc.get("name", ""),
+                        "sku": prod_doc.get("sku", ""),
+                        "branch_id": branch_id,
+                        "branch_name": sale.get("branch_name", ""),
+                        "scheme": scheme,
+                        "old_price": server_old,
+                        "client_old_price_hint": float(pc.get("old_price") or 0),
+                        "new_price": new_p,
+                        "delta": round(new_p - server_old, 2),
+                        "delta_pct": round((new_p - server_old) / server_old * 100, 2) if server_old > 0 else 0,
+                        "reason": (pc.get("reason") or "").strip(),
+                        "reason_detail": (pc.get("reason_detail") or "").strip(),
+                        "customer_only": is_customer_only,
+                        "scope": "customer_only" if is_customer_only else "branch_permanent",
+                        "invoice_id": sale_id,
+                        "invoice_number": inv_number,
+                        "customer_id": invoice.get("customer_id"),
+                        "customer_name": invoice.get("customer_name", ""),
+                        "cashier_id": user["id"],
+                        "cashier_name": user.get("full_name", user.get("username", "")),
+                        "approver_id": approver_id,
+                        "approver_name": approver_name,
+                        "approver_method": approver_method,
+                        "offline_origin": True,
+                        "pin_resync_failed": pm_failed_resync,
+                        "date": log_date,
+                        "created_at": now_iso(),
+                        "organization_id": user.get("organization_id"),
+                    })
+
             result = {"id": sale_id, "status": "synced", "invoice_number": inv_number}
             if stock_warnings:
                 result["stock_warnings"] = stock_warnings
