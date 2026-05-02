@@ -184,6 +184,48 @@ DEFAULT_TEMPLATES = [
         "trigger": "manual",
         "active": True,
     },
+    # ── Branch Transfer Approval Workflow ────────────────────────────────────
+    {
+        "key": "transfer_pending_approval",
+        "name": "Transfer Pending Approval (to Admin)",
+        "body": (
+            "Hi <admin_name>, <requester_name> submitted Branch Transfer "
+            "<order_number> from <from_branch> to <to_branch> "
+            "(<items_count> item/s, P<cost_total>). "
+            "Review & approve: <approval_link>"
+        ),
+        "placeholders": ["admin_name", "requester_name", "order_number",
+                         "from_branch", "to_branch", "items_count",
+                         "cost_total", "approval_link", "company_name"],
+        "trigger": "auto",
+        "active": True,
+    },
+    {
+        "key": "transfer_approved",
+        "name": "Transfer Approved (to Manager)",
+        "body": (
+            "Hi <manager_name>, your Branch Transfer <order_number> "
+            "(<from_branch> -> <to_branch>) has been APPROVED by "
+            "<approver_name> and dispatched. You may now print and send."
+        ),
+        "placeholders": ["manager_name", "approver_name", "order_number",
+                         "from_branch", "to_branch"],
+        "trigger": "auto",
+        "active": True,
+    },
+    {
+        "key": "transfer_rejected",
+        "name": "Transfer Rejected (to Manager)",
+        "body": (
+            "Hi <manager_name>, your Branch Transfer <order_number> was "
+            "RETURNED by <rejecter_name>. Reason: <reason>. Please review, "
+            "fix, and resubmit."
+        ),
+        "placeholders": ["manager_name", "rejecter_name", "order_number",
+                         "from_branch", "reason"],
+        "trigger": "auto",
+        "active": True,
+    },
     # ── Crop Credit Notifications ────────────────────────────────────────────
     {
         "key": "crop_season_started",

@@ -17,6 +17,74 @@ router = APIRouter(prefix="/branch-transfers", tags=["Branch Transfers"])
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+async def _notify_admins_pending_approval(transfer: dict, requester: dict):
+    """Send SMS to all admins in the org with a link to approve/reject the transfer."""
+    org_id = transfer.get("organization_id") or requester.get("organization_id")
+    if not org_id:
+        return
+    # Resolve branch names for the SMS message
+    from_branch = await _raw_db.branches.find_one(
+        {"id": transfer["from_branch_id"]}, {"_id": 0, "name": 1}
+    )
+    to_branch = await _raw_db.branches.find_one(
+        {"id": transfer["to_branch_id"]}, {"_id": 0, "name": 1}
+    )
+    from_name = from_branch.get("name", "") if from_branch else ""
+    to_name = to_branch.get("name", "") if to_branch else ""
+
+    # Get the public app URL (frontend) to build the approval link.
+    # Prefer org-configured value; fall back to env (REACT_APP_FRONTEND_URL or APP_PUBLIC_URL).
+    import os
+    org = await _raw_db.organizations.find_one({"id": org_id}, {"_id": 0})
+    app_url = (
+        (org or {}).get("app_url")
+        or os.environ.get("REACT_APP_FRONTEND_URL", "")
+        or os.environ.get("APP_PUBLIC_URL", "")
+    )
+    app_url = app_url.rstrip("/")
+    approval_link = f"{app_url}/approve-transfer/{transfer['id']}" if app_url else f"/approve-transfer/{transfer['id']}"
+
+    # Find all admin users in the org with phone numbers
+    admins = await _raw_db.users.find(
+        {"organization_id": org_id, "role": "admin", "active": True},
+        {"_id": 0, "id": 1, "full_name": 1, "username": 1, "phone": 1, "phone_number": 1}
+    ).to_list(50)
+
+    # Compose the message variables (template body uses < > placeholders)
+    items_count = len(transfer.get("items", []))
+    cost_total = transfer.get("total_at_transfer_capital", 0)
+    company = (org or {}).get("name", "AgriBooks") if org else "AgriBooks"
+
+    from routes.sms import queue_sms
+    for admin in admins:
+        phone = (admin.get("phone") or admin.get("phone_number") or "").strip()
+        if not phone:
+            continue
+        await queue_sms(
+            template_key="transfer_pending_approval",
+            customer_id=admin["id"],
+            customer_name=admin.get("full_name") or admin.get("username", "Admin"),
+            phone=phone,
+            variables={
+                "admin_name": admin.get("full_name") or admin.get("username", "Admin"),
+                "requester_name": requester.get("full_name") or requester.get("username", "Manager"),
+                "order_number": transfer.get("order_number", ""),
+                "from_branch": from_name,
+                "to_branch": to_name,
+                "items_count": str(items_count),
+                "cost_total": f"{float(cost_total):,.2f}",
+                "approval_link": approval_link,
+                "company_name": company,
+            },
+            organization_id=org_id,
+            branch_id=transfer.get("from_branch_id", ""),
+            branch_name=from_name,
+            trigger="auto",
+            trigger_ref=transfer["id"],
+            dedup_key=f"transfer_pending_approval:{transfer['id']}:{admin['id']}",
+        )
+
+
 async def _get_po_refs(product_id: str, branch_id: str = None):
     """Get moving average and last purchase cost from acquisition history (POs + transfers), branch-specific.
     Excludes reversed movements (e.g. from PO Reopen) — Fix #4."""
@@ -271,8 +339,8 @@ async def update_transfer(transfer_id: str, data: dict, user=Depends(get_current
     order = await db.branch_transfer_orders.find_one({"id": transfer_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Transfer not found")
-    if order["status"] != "draft":
-        raise HTTPException(status_code=400, detail="Only draft orders can be edited")
+    if order["status"] not in ("draft", "pending_approval", "returned"):
+        raise HTTPException(status_code=400, detail="Only draft / pending / returned orders can be edited")
 
     # Non-admin: must be the source branch
     user_branch = user.get("branch_id")
@@ -342,7 +410,7 @@ async def create_transfer(data: dict, user=Depends(get_current_user)):
         "order_number": order_number,
         "from_branch_id": from_branch_id,
         "to_branch_id": to_branch_id,
-        "status": "draft",
+        "status": "pending_approval" if data.get("requires_approval") else "draft",
         "min_margin": float(data.get("min_margin", 20)),
         "category_markups": data.get("category_markups", []),
         "items": items,
@@ -375,7 +443,261 @@ async def create_transfer(data: dict, user=Depends(get_current_user)):
     except Exception:
         pass  # Invoice creation failure should not block transfer creation
 
+    # If this draft was Submitted for Approval, notify all admins via SMS
+    if transfer["status"] == "pending_approval":
+        try:
+            await _notify_admins_pending_approval(transfer, user)
+        except Exception as notify_err:
+            # Non-critical — admins can still see it in Pending Approval tab
+            import logging
+            logging.getLogger("branch_transfers").warning(
+                f"pending-approval SMS failed for {transfer['order_number']}: {notify_err}"
+            )
+
     return transfer
+
+
+# ── Pending-Approval Workflow (Manager submits, Admin approves) ───────────────
+
+@router.post("/{transfer_id}/approve")
+async def approve_pending_transfer(transfer_id: str, data: dict, user=Depends(get_current_user)):
+    """
+    Admin approves a pending-approval transfer. Body may include:
+      - items: [{product_id, branch_retail}]  (admin-set retail per row)
+      - notes: optional approval note
+    On approval: items are merged with admin's retail values, status flips to
+    'sent' immediately (auto-dispatch — owner approved + chose not to send back
+    to manager), stock deduction notifications fire to destination branch.
+    """
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can approve transfers")
+    order = await db.branch_transfer_orders.find_one({"id": transfer_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Transfer not found")
+    if order.get("status") != "pending_approval":
+        raise HTTPException(status_code=400, detail=f"Transfer is not awaiting approval (status: {order.get('status')})")
+
+    # Ensure org context
+    if not get_org_context():
+        await ensure_org_context(branch_id=order["from_branch_id"], org_id=order.get("organization_id"))
+
+    # Merge admin-set retail prices into items
+    admin_items = {it.get("product_id"): it for it in (data.get("items") or []) if it.get("product_id")}
+    new_items = []
+    for it in order.get("items", []):
+        merged = dict(it)
+        admin_row = admin_items.get(it.get("product_id"))
+        if admin_row and admin_row.get("branch_retail") is not None:
+            merged["branch_retail"] = float(admin_row["branch_retail"])
+        new_items.append(merged)
+
+    # Recompute retail total
+    total_at_branch_retail = round(sum(
+        float(i.get("branch_retail", 0)) * float(i.get("qty", 0)) for i in new_items), 2)
+
+    approval_meta = {
+        "approved_by": user["id"],
+        "approved_by_name": user.get("full_name", user["username"]),
+        "approved_at": now_iso(),
+        "approval_note": data.get("notes", ""),
+    }
+
+    await db.branch_transfer_orders.update_one(
+        {"id": transfer_id},
+        {"$set": {
+            **approval_meta,
+            "items": new_items,
+            "total_at_branch_retail": total_at_branch_retail,
+            "status": "sent",
+            "sent_at": now_iso(),
+            "sent_by": user["id"],
+        }}
+    )
+
+    # Re-use the same destination notification + invoice update + doc-code path as /send
+    from_branch = await db.branches.find_one({"id": order["from_branch_id"]}, {"_id": 0, "name": 1})
+    to_branch = await db.branches.find_one({"id": order["to_branch_id"]}, {"_id": 0, "name": 1})
+    from_name = from_branch.get("name", order["from_branch_id"]) if from_branch else order["from_branch_id"]
+    to_name = to_branch.get("name", order["to_branch_id"]) if to_branch else order["to_branch_id"]
+
+    dest_users = await db.users.find(
+        {"branch_id": order["to_branch_id"], "active": True}, {"_id": 0, "id": 1}
+    ).to_list(50)
+    admins = await db.users.find(
+        {"role": "admin", "active": True}, {"_id": 0, "id": 1}
+    ).to_list(50)
+    target_ids = list({u["id"] for u in dest_users + admins})
+
+    await db.notifications.insert_one({
+        "id": new_id(),
+        "type": "transfer_incoming",
+        "title": "Incoming Stock Transfer (Approved)",
+        "message": f"Transfer {order['order_number']} from {from_name} approved by {approval_meta['approved_by_name']} — on the way",
+        "branch_id": order["to_branch_id"],
+        "branch_name": to_name,
+        "metadata": {
+            "transfer_id": transfer_id,
+            "order_number": order["order_number"],
+            "from_branch": from_name,
+            "to_branch": to_name,
+            "approved_by": approval_meta["approved_by_name"],
+        },
+        "target_user_ids": target_ids,
+        "read_by": [],
+        "created_at": now_iso(),
+    })
+
+    # SMS the manager that submitted it
+    try:
+        requester = await _raw_db.users.find_one(
+            {"id": order.get("created_by")},
+            {"_id": 0, "phone": 1, "phone_number": 1, "full_name": 1, "username": 1, "id": 1}
+        )
+        phone = (requester or {}).get("phone") or (requester or {}).get("phone_number") or ""
+        if phone:
+            from routes.sms import queue_sms
+            await queue_sms(
+                template_key="transfer_approved",
+                customer_id=requester.get("id", ""),
+                customer_name=requester.get("full_name") or requester.get("username", "Manager"),
+                phone=phone.strip(),
+                variables={
+                    "manager_name": requester.get("full_name") or requester.get("username", "Manager"),
+                    "approver_name": approval_meta["approved_by_name"],
+                    "order_number": order.get("order_number", ""),
+                    "from_branch": from_name,
+                    "to_branch": to_name,
+                },
+                organization_id=order.get("organization_id", ""),
+                branch_id=order.get("from_branch_id", ""),
+                branch_name=from_name,
+                trigger="auto",
+                trigger_ref=transfer_id,
+                dedup_key=f"transfer_approved:{transfer_id}",
+            )
+    except Exception:
+        pass  # Non-critical
+
+    # Update internal invoice status
+    from routes.internal_invoices import update_invoice_status
+    try:
+        await update_invoice_status(transfer_id, "sent")
+    except Exception:
+        pass
+
+    # Auto-generate doc code so QR is ready on the printed transfer slip
+    from routes.doc_lookup import auto_generate_doc_code
+    try:
+        await auto_generate_doc_code(
+            "branch_transfer", transfer_id,
+            org_id=order.get("organization_id", ""),
+            created_by=user.get("id", ""),
+        )
+    except Exception:
+        pass
+
+    return {"message": "Transfer approved and dispatched", "status": "sent"}
+
+
+@router.post("/{transfer_id}/reject")
+async def reject_pending_transfer(transfer_id: str, data: dict, user=Depends(get_current_user)):
+    """Admin rejects a pending-approval transfer with a reason. Manager can edit and resubmit."""
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can reject transfers")
+    reason = (data.get("reason") or "").strip()
+    if len(reason) < 4:
+        raise HTTPException(status_code=400, detail="Rejection reason is required (≥ 4 chars)")
+
+    order = await db.branch_transfer_orders.find_one({"id": transfer_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Transfer not found")
+    if order.get("status") != "pending_approval":
+        raise HTTPException(status_code=400, detail=f"Transfer is not awaiting approval (status: {order.get('status')})")
+
+    if not get_org_context():
+        await ensure_org_context(branch_id=order["from_branch_id"], org_id=order.get("organization_id"))
+
+    await db.branch_transfer_orders.update_one(
+        {"id": transfer_id},
+        {"$set": {
+            "status": "returned",
+            "rejected_by": user["id"],
+            "rejected_by_name": user.get("full_name", user["username"]),
+            "rejected_at": now_iso(),
+            "rejection_reason": reason,
+        }}
+    )
+
+    # SMS the manager who created it
+    try:
+        from_branch = await _raw_db.branches.find_one({"id": order["from_branch_id"]}, {"_id": 0, "name": 1})
+        from_name = (from_branch or {}).get("name", "")
+        requester = await _raw_db.users.find_one(
+            {"id": order.get("created_by")},
+            {"_id": 0, "phone": 1, "phone_number": 1, "full_name": 1, "username": 1, "id": 1}
+        )
+        phone = (requester or {}).get("phone") or (requester or {}).get("phone_number") or ""
+        if phone:
+            from routes.sms import queue_sms
+            await queue_sms(
+                template_key="transfer_rejected",
+                customer_id=requester.get("id", ""),
+                customer_name=requester.get("full_name") or requester.get("username", "Manager"),
+                phone=phone.strip(),
+                variables={
+                    "manager_name": requester.get("full_name") or requester.get("username", "Manager"),
+                    "rejecter_name": user.get("full_name", user.get("username", "Admin")),
+                    "order_number": order.get("order_number", ""),
+                    "from_branch": from_name,
+                    "reason": reason,
+                },
+                organization_id=order.get("organization_id", ""),
+                branch_id=order.get("from_branch_id", ""),
+                branch_name=from_name,
+                trigger="auto",
+                trigger_ref=transfer_id,
+                dedup_key=f"transfer_rejected:{transfer_id}",
+            )
+    except Exception:
+        pass
+
+    return {"message": "Transfer rejected — manager has been notified", "status": "returned"}
+
+
+@router.post("/{transfer_id}/resubmit")
+async def resubmit_returned_transfer(transfer_id: str, user=Depends(get_current_user)):
+    """Manager resubmits a 'returned' transfer for approval after fixing it."""
+    if user.get("role") not in ("admin", "manager"):
+        raise HTTPException(status_code=403, detail="Manager or admin required")
+    order = await db.branch_transfer_orders.find_one({"id": transfer_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Transfer not found")
+    if order.get("status") != "returned":
+        raise HTTPException(status_code=400, detail=f"Only returned transfers can be resubmitted (status: {order.get('status')})")
+    # Source-branch / admin gate
+    user_branch = user.get("branch_id")
+    if user.get("role") != "admin" and user_branch and user_branch != order["from_branch_id"]:
+        raise HTTPException(status_code=403, detail="Only the source branch can resubmit this transfer")
+
+    if not get_org_context():
+        await ensure_org_context(branch_id=order["from_branch_id"], org_id=order.get("organization_id"))
+
+    await db.branch_transfer_orders.update_one(
+        {"id": transfer_id},
+        {"$set": {
+            "status": "pending_approval",
+            "resubmitted_by": user["id"],
+            "resubmitted_by_name": user.get("full_name", user["username"]),
+            "resubmitted_at": now_iso(),
+        },
+         "$unset": {"rejected_by": "", "rejected_by_name": "", "rejected_at": "", "rejection_reason": ""}}
+    )
+    refreshed = await db.branch_transfer_orders.find_one({"id": transfer_id}, {"_id": 0})
+    try:
+        await _notify_admins_pending_approval(refreshed, user)
+    except Exception:
+        pass
+    return {"message": "Transfer resubmitted for approval", "status": "pending_approval"}
 
 
 @router.get("/{transfer_id}")

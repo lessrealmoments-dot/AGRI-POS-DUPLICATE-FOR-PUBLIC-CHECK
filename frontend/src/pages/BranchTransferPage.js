@@ -23,7 +23,7 @@ import {
   Plus, Trash2, Send, CheckCircle2, Search, RefreshCw, Settings2,
   AlertTriangle, ChevronDown, ChevronUp, Building2, Package, X,
   TrendingUp, TrendingDown, Clock, ArrowRight, Eye, XCircle, Pencil, Upload, Check,
-  ClipboardCheck, FileText, Smartphone, Lock, Pause, FolderOpen, Trash, Tag
+  ClipboardCheck, FileText, Smartphone, Lock, Pause, FolderOpen, Trash, Tag, Shield
 } from 'lucide-react';
 import PrintEngine from '../lib/PrintEngine';
 import { toast } from 'sonner';
@@ -44,6 +44,8 @@ const noWheel = (e) => { e.currentTarget.blur(); };
 
 const STATUS_COLORS = {
   draft: 'bg-slate-100 text-slate-600',
+  pending_approval: 'bg-amber-100 text-amber-700',
+  returned: 'bg-rose-100 text-rose-700',
   sent: 'bg-blue-100 text-blue-700',
   sent_to_terminal: 'bg-amber-100 text-amber-700',
   received_pending: 'bg-yellow-100 text-yellow-700',
@@ -82,7 +84,9 @@ const MARKUP_TYPES = [
 function validateRow(row, minMargin) {
   const tc = parseFloat(row.transfer_capital) || 0;
   const br = parseFloat(row.branch_retail) || 0;
-  if (!tc || !br) return { ok: false, reason: 'incomplete', margin: 0 };
+  if (!tc && !br) return { ok: false, reason: 'incomplete', margin: 0 };
+  if (!tc) return { ok: false, reason: 'no_capital', margin: 0 };
+  if (!br) return { ok: false, reason: 'retail', margin: 0 };
   const margin = br - tc;
   if (tc > br) return { ok: false, reason: 'below_cost', margin };
   if (margin < minMargin) return { ok: false, reason: 'low_margin', margin };
@@ -635,13 +639,18 @@ export default function BranchTransferPage() {
 
 
   // ── Submit ─────────────────────────────────────────────────────────────────
-  const handleSubmit = async () => {
+  const handleSubmit = async (opts = {}) => {
+    // opts may be a SyntheticEvent if called directly from <Button onClick>; defensive coercion.
+    const requiresApproval = (opts && typeof opts === 'object' && opts.requiresApproval === true);
+
     if (!toBranchId) { toast.error('Select a destination branch'); return; }
     if (!rows.length || rows.every(r => !r.product)) { toast.error('Add at least one product'); return; }
 
     const validRows = rows.filter(r => r.product);
     const blockers = validRows.filter(r => {
       const v = validateRow(r, minMargin);
+      // When submitting for approval, retail==0 is allowed (admin will set it)
+      if (requiresApproval && v.reason === 'retail') return false;
       return !v.ok && !r.override;
     });
     if (blockers.length > 0) {
@@ -674,6 +683,7 @@ export default function BranchTransferPage() {
         from_branch_id: fromBranchId,
         to_branch_id: toBranchId,
         min_margin: minMargin,
+        requires_approval: requiresApproval,
         category_markups: categoryMarkups.filter(m => parseFloat(m.value) > 0),
         repack_price_updates,
         request_po_id: requestContext?.po_id || '',
@@ -695,7 +705,7 @@ export default function BranchTransferPage() {
           override_reason: r.override_reason,
         })),
       });
-      toast.success('Branch transfer order created!');
+      toast.success(requiresApproval ? 'Submitted for admin approval — admin notified by SMS' : 'Branch transfer order created!');
       setRows([newRow()]);
       setRequestContext(null);
       setTab('history');
@@ -931,6 +941,15 @@ export default function BranchTransferPage() {
       toast.success('Transfer marked as sent');
       loadOrders();
     } catch (e) { toast.error(e.response?.data?.detail || 'Failed'); }
+  };
+
+  const handleResubmit = async (orderId) => {
+    if (!window.confirm('Resubmit this transfer for admin approval? Admins will be notified by SMS.')) return;
+    try {
+      await api.post(`/branch-transfers/${orderId}/resubmit`);
+      toast.success('Resubmitted — admins notified');
+      loadOrders();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed to resubmit'); }
   };
 
   const sendTransferToTerminal = async (orderId) => {
@@ -1573,13 +1592,24 @@ export default function BranchTransferPage() {
                     <p className="text-[10px] text-slate-400 uppercase tracking-wider">Branch Retail</p>
                     <p className="font-mono font-bold text-emerald-700">{formatPHP(totalRetail)}</p>
                   </div>
-                  <Button onClick={editingOrderId ? handleUpdateDraft : handleSubmit}
+                  <Button onClick={editingOrderId ? handleUpdateDraft : () => handleSubmit()}
                     disabled={saving || !toBranchId || !validRows.length}
                     className="bg-[#1A4D2E] hover:bg-[#14532d] text-white ml-4"
                     data-testid="create-transfer-btn">
                     {saving ? <RefreshCw size={14} className="animate-spin mr-1.5" /> : <Send size={14} className="mr-1.5" />}
                     {editingOrderId ? 'Save Draft' : 'Create Transfer Order'}
                   </Button>
+                  {!editingOrderId && (
+                    <Button onClick={() => handleSubmit({ requiresApproval: true })}
+                      disabled={saving || !toBranchId || !validRows.length}
+                      variant="outline"
+                      className="ml-2 border-amber-400 text-amber-700 hover:bg-amber-50"
+                      data-testid="submit-for-approval-btn"
+                      title="Save the order without retail prices and notify Admin via SMS to approve. Useful when manager doesn't have permission to set retail."
+                    >
+                      <Shield size={14} className="mr-1.5" /> Submit for Approval
+                    </Button>
+                  )}
                 </div>
               </div>
             </>
@@ -1747,6 +1777,8 @@ export default function BranchTransferPage() {
               {[
                 { key: 'all', label: 'All', dot: 'bg-slate-400' },
                 { key: 'requests', label: 'Requests', dot: 'bg-violet-500' },
+                { key: 'pending_approval', label: 'Pending Approval', dot: 'bg-amber-500' },
+                { key: 'returned', label: 'Returned', dot: 'bg-rose-500' },
                 { key: 'draft', label: 'Drafts', dot: 'bg-slate-400' },
                 { key: 'in_transit', label: 'In Transit', dot: 'bg-blue-500' },
                 { key: 'checking', label: 'Terminal', dot: 'bg-amber-500' },
@@ -1756,6 +1788,8 @@ export default function BranchTransferPage() {
               ].map(st => {
                 const count = st.key === 'all' ? orders.length
                   : st.key === 'requests' ? (stockRequests.length + outgoingRequests.length)
+                  : st.key === 'pending_approval' ? orders.filter(o => o.status === 'pending_approval').length
+                  : st.key === 'returned' ? orders.filter(o => o.status === 'returned').length
                   : st.key === 'draft' ? orders.filter(o => o.status === 'draft').length
                   : st.key === 'in_transit' ? orders.filter(o => o.status === 'sent').length
                   : st.key === 'checking' ? orders.filter(o => o.status === 'sent_to_terminal').length
@@ -1764,7 +1798,7 @@ export default function BranchTransferPage() {
                   : st.key === 'disputes' ? orders.filter(o => o.status === 'disputed').length
                   : 0;
                 const isActive = historyTab === st.key;
-                const needsAttention = (st.key === 'pending' || st.key === 'disputes') && count > 0;
+                const needsAttention = (st.key === 'pending' || st.key === 'disputes' || st.key === 'pending_approval' || st.key === 'returned') && count > 0;
                 return (
                   <button key={st.key}
                     onClick={() => { setHistoryTab(st.key); if (st.key === 'requests') { loadRequests(); loadOutgoingRequests(); } }}
@@ -1961,6 +1995,8 @@ export default function BranchTransferPage() {
             // ── Transfer Cards ──
             const statusFilter = {
               all: () => true,
+              pending_approval: o => o.status === 'pending_approval',
+              returned: o => o.status === 'returned',
               draft: o => o.status === 'draft',
               in_transit: o => o.status === 'sent',
               checking: o => o.status === 'sent_to_terminal',
@@ -1973,6 +2009,8 @@ export default function BranchTransferPage() {
 
             const borderColorMap = {
               draft: 'border-l-slate-300',
+              pending_approval: 'border-l-amber-500',
+              returned: 'border-l-rose-500',
               sent: 'border-l-blue-500',
               sent_to_terminal: 'border-l-amber-500',
               received_pending: 'border-l-orange-500',
@@ -1982,6 +2020,8 @@ export default function BranchTransferPage() {
             };
             const statusLabel = {
               draft: 'Draft',
+              pending_approval: 'Pending Approval',
+              returned: 'Returned',
               sent: 'In Transit',
               sent_to_terminal: 'On Terminal',
               received_pending: 'Pending Review',
@@ -2079,6 +2119,27 @@ export default function BranchTransferPage() {
                         <span className="text-sm text-slate-400 whitespace-nowrap shrink-0">{o.created_at?.slice(0, 10)}</span>
                       </div>
 
+                      {/* Returned reason banner */}
+                      {o.status === 'returned' && o.rejection_reason && (
+                        <div className="mx-5 mb-2 px-3 py-2 bg-rose-50 border border-rose-200 rounded-lg flex items-start gap-2" data-testid={`rejection-banner-${o.id}`}>
+                          <AlertTriangle size={14} className="text-rose-600 mt-0.5 shrink-0" />
+                          <div className="text-xs text-rose-700">
+                            <span className="font-semibold">Returned by {o.rejected_by_name || 'admin'}:</span>{' '}
+                            <span>{o.rejection_reason}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Pending approval banner (shown to manager for context) */}
+                      {o.status === 'pending_approval' && (
+                        <div className="mx-5 mb-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
+                          <Clock size={14} className="text-amber-600 mt-0.5 shrink-0" />
+                          <div className="text-xs text-amber-700">
+                            <span className="font-semibold">Submitted for admin approval</span> — waiting for retail prices to be set and the order to be released.
+                          </div>
+                        </div>
+                      )}
+
                       {/* Timeline */}
                       <div className="px-5 py-3 border-t border-slate-100">
                         <div className="flex items-center">
@@ -2132,6 +2193,31 @@ export default function BranchTransferPage() {
                               className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold" data-testid={`send-btn-${o.id}`}>
                               <Send size={14} className="mr-1.5" /> Send
                             </Button>
+                          )}
+                          {/* Pending approval — Admin can review-and-approve / Manager just sees the badge */}
+                          {o.status === 'pending_approval' && isAdmin && (
+                            <Button size="sm" onClick={() => navigate(`/approve-transfer/${o.id}`)}
+                              className="h-9 px-4 bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold" data-testid={`approve-btn-${o.id}`}>
+                              <Shield size={14} className="mr-1.5" /> Review & Approve
+                            </Button>
+                          )}
+                          {o.status === 'pending_approval' && !isAdmin && (
+                            <Badge className="h-9 px-3 bg-amber-50 text-amber-700 border border-amber-200 text-xs flex items-center gap-1.5">
+                              <Clock size={12} /> Awaiting Admin
+                            </Badge>
+                          )}
+                          {/* Returned — Manager can edit + resubmit */}
+                          {o.status === 'returned' && isSourceBranch && (
+                            <>
+                              <Button variant="ghost" size="sm" onClick={() => loadOrderIntoEdit(o)}
+                                className="h-9 px-3 text-amber-600 text-sm" title="Edit & Fix" data-testid={`edit-returned-btn-${o.id}`}>
+                                <Pencil size={16} className="mr-1" /> Edit
+                              </Button>
+                              <Button size="sm" onClick={() => handleResubmit(o.id)}
+                                className="h-9 px-4 bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold" data-testid={`resubmit-btn-${o.id}`}>
+                                <RefreshCw size={14} className="mr-1.5" /> Resubmit
+                              </Button>
+                            </>
                           )}
                           {o.status === 'sent' && isDestBranch && (
                             <Button size="sm" onClick={() => openReceive(o)}

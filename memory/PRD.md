@@ -1,5 +1,62 @@
 # AgriBooks PRD
 
+## Iter 215 (May 2026) — Manager-Initiated Transfer with Admin Approval ✅
+
+### Why
+Owner reported (with screenshot of SAMPOLI BRANCH → Main Branch transfer): when the source branch is staffed by a manager (no admin), they can't fill Branch Retail prices, so the existing validation blocks the transfer entirely. They need a way to **prepare the order, submit it for the admin to validate the prices, and only then dispatch it.**
+
+### What shipped — End-to-end approval workflow
+
+**Backend** (`routes/branch_transfers.py`):
+- New status `pending_approval` (created when payload has `requires_approval=true`) and new status `returned` (rejected by admin, manager can edit & resubmit).
+- `POST /api/branch-transfers` accepts `requires_approval: bool` — sets initial status accordingly.
+- `POST /api/branch-transfers/{id}/approve` — admin merges per-product retail prices into items, recomputes retail total, **flips status straight to `sent` (auto-dispatch)**, fires the same destination-notification + invoice + doc-code path as the existing `/send` endpoint, and SMS-notifies the manager.
+- `POST /api/branch-transfers/{id}/reject` — requires `reason` ≥ 4 chars, status → `returned`, persists `rejected_by_name` + `rejection_reason`, SMS-notifies the manager.
+- `POST /api/branch-transfers/{id}/resubmit` — manager flips `returned` → `pending_approval`, clears rejection metadata, re-fires admin SMS.
+- `update_transfer` extended to allow editing `pending_approval` and `returned` orders (manager fixes a returned draft).
+- `_notify_admins_pending_approval` helper: looks up all admins in the org with phone numbers, fires one SMS each (dedup-keyed per admin/transfer).
+
+**SMS** (`routes/sms.py`):
+- 3 new DEFAULT_TEMPLATES auto-seeded:
+  - `transfer_pending_approval` (admin gets the link)
+  - `transfer_approved` (manager gets the OK)
+  - `transfer_rejected` (manager gets the reason)
+- Approval link is built from `org.app_url` → `REACT_APP_FRONTEND_URL` env → `APP_PUBLIC_URL` env → relative path fallback.
+
+**Frontend**:
+- `BranchTransferPage.js`:
+  - New **"Submit for Approval"** button next to "Create Transfer Order" — works for any role; useful when the cashier/manager skipped retail.
+  - `validateRow` now distinguishes 'retail' (only retail missing) from 'no_capital' / 'incomplete' so the submit-for-approval flow can ignore retail-missing rows while still blocking missing capital.
+  - 2 new history filter pills: **Pending Approval** (amber) and **Returned** (rose), both flagged as "needsAttention" when count > 0.
+  - New status colors + status labels for `pending_approval` and `returned`.
+  - Card now shows an amber "Submitted for admin approval" banner on pending cards and a rose "Returned by [admin]: [reason]" banner on returned cards.
+  - Per-card actions: Admin → "Review & Approve" button; non-admin → "Awaiting Admin" badge; on returned cards → manager gets Edit + Resubmit buttons.
+- New `pages/ApproveTransferPage.js` (`/approve-transfer/:id`):
+  - Header card with order #, submitter, branches, status pill.
+  - Items table with editable retail-per-row inputs (amber-highlighted column), live margin/unit color (red < 0, amber < min, emerald >=).
+  - Live totals strip: Our Cost → Transfer Price → Branch Retail → Profit-at-Target.
+  - Approval Note textarea (optional, audit-trail).
+  - "Approve & Dispatch" (emerald) and "Return / Reject" (rose, opens reason dialog) buttons.
+  - Soft confirmation when approving with any retail still 0.
+  - Guards: non-admin → friendly "Admin access required" view; non-pending → "Not awaiting approval" view.
+
+### Tested
+- 9/9 pytest in `backend/tests/test_transfer_approval_215.py` pass:
+  - status flag respected, draft fallback works
+  - approve dispatches + persists admin retail + approval_note
+  - approve on non-pending → 400
+  - reject reason < 4 → 400; valid reject → returned + reason persisted + rejected_by_name
+  - resubmit clears rejection metadata + re-fires SMS; resubmit on non-returned → 400
+  - list filter by `status=pending_approval` works
+- End-to-end Playwright smoke: created pending transfer via curl → admin clicked "Review & Approve" pill → ApproveTransferPage rendered → filled retail → "Approve & Dispatch" → success toast → returned to /branch-transfers showing the order moved into "In Transit". No console errors.
+
+### Backwards compatible
+- `requires_approval` is opt-in; existing flows untouched.
+- New statuses don't appear in old callers' filters (default `all` shows everything; specific filters unchanged).
+- Internal invoice + doc-code generation hooked at the same point as the existing `/send`.
+
+---
+
 ## Iter 214 (May 2026) — 🚨 P0 AccountingPage White-Screen Crash Fix ✅
 
 ### Bug
