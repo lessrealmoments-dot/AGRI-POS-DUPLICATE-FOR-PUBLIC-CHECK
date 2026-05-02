@@ -59,11 +59,24 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
   // local state so toggling feels instant; mirrored to the server on click.
   const [branchDisabled, setBranchDisabled] = useState({});
   const [togglingDisabled, setTogglingDisabled] = useState({});
+  // Fresh copy of branches fetched directly from the server. Parent passes a
+  // cached copy from AuthContext/localStorage which can be stale for
+  // `close_reminder_disabled` right after a mute toggle. Internal fetch
+  // keeps the UI honest.
+  const [liveBranches, setLiveBranches] = useState(null);
+  const effectiveBranches = liveBranches || branches || [];
   // Which branch drives the "Fires at" preview next to each stage row.
   const [previewBranchId, setPreviewBranchId] = useState('');
   // Which stage row is currently firing a test SMS (so we can disable the
   // button + show a spinner without a full-card re-render).
   const [testing, setTesting] = useState({});
+
+  const refreshBranches = useCallback(async () => {
+    try {
+      const r = await api.get('/branches');
+      setLiveBranches(r.data || []);
+    } catch { /* fall back to prop */ }
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -76,15 +89,15 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
     }
     setLoading(false);
   }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); refreshBranches(); }, [load, refreshBranches]);
 
   useEffect(() => {
-    // Seed per-branch close-time input from the `branches` prop. We convert
-    // a 24 h float (e.g. 18.5) into the HH:mm shape the <input type="time">
-    // expects — and back on save.
+    // Seed per-branch close-time input from the effective branch list
+    // (live > prop). We convert a 24h float (e.g. 18.5) into the HH:mm shape
+    // the <input type="time"> expects — and back on save.
     const next = {};
     const disabledNext = {};
-    (branches || []).forEach(b => {
+    (effectiveBranches || []).forEach(b => {
       const h = Number.isFinite(b.close_time_h) ? b.close_time_h : 18;
       const hh = String(Math.floor(h)).padStart(2, '0');
       const mm = String(Math.round((h - Math.floor(h)) * 60)).padStart(2, '0');
@@ -93,8 +106,8 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
     });
     setBranchCloseH(next);
     setBranchDisabled(disabledNext);
-    if (!previewBranchId && branches?.[0]?.id) setPreviewBranchId(branches[0].id);
-  }, [branches]);
+    if (!previewBranchId && effectiveBranches?.[0]?.id) setPreviewBranchId(effectiveBranches[0].id);
+  }, [effectiveBranches]);
 
   const updateStage = async (stage_key, patch) => {
     const stage = stages.find(s => s.stage_key === stage_key);
@@ -144,6 +157,34 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
     }
     setSavingBranch(s => ({ ...s, [branchId]: false }));
   };
+
+  // Flip the "no close-day SMS reminders for this branch" flag. Some branches
+  // (warehouses, transfer-only) never handle money — owners want silence.
+  // After save we RECONCILE with the server's echoed value (source of truth)
+  // and re-fetch the branches list so subsequent re-renders don't overwrite
+  // the new state from a stale localStorage cache.
+  const toggleBranchDisabled = async (branchId) => {
+    const nextDisabled = !branchDisabled[branchId];
+    setTogglingDisabled(s => ({ ...s, [branchId]: true }));
+    // Optimistic flip so the UI feels instant
+    setBranchDisabled(s => ({ ...s, [branchId]: nextDisabled }));
+    try {
+      const r = await api.put(`/sms/close-reminder/branch-toggle/${branchId}`, { disabled: nextDisabled });
+      const serverValue = !!r.data?.close_reminder_disabled;
+      setBranchDisabled(s => ({ ...s, [branchId]: serverValue }));
+      toast.success(serverValue
+        ? '🔕 Close-day SMS MUTED for this branch'
+        : '🔔 Close-day SMS RE-ENABLED for this branch');
+      // Refresh the fresh-from-server copy so optimistic state sticks
+      refreshBranches();
+    } catch (e) {
+      // Roll back on failure
+      setBranchDisabled(s => ({ ...s, [branchId]: !nextDisabled }));
+      toast.error(e.response?.data?.detail || 'Save failed');
+    }
+    setTogglingDisabled(s => ({ ...s, [branchId]: false }));
+  };
+
 
   // Fire a [SAMPLE] SMS for a single stage right now, against the branch
   // currently selected in the Preview column. Resolves recipients exactly
@@ -205,7 +246,7 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
     );
   }
 
-  const previewBranch = branches.find(b => b.id === previewBranchId);
+  const previewBranch = effectiveBranches.find(b => b.id === previewBranchId);
   const previewCloseH = previewBranch
     ? (() => {
       const raw = branchCloseH[previewBranch.id] || '18:00';
@@ -245,7 +286,7 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
         </div>
 
         {/* ── Per-branch close time ──────────────────────────────────────── */}
-        {branches.length > 0 && (
+        {effectiveBranches.length > 0 && (
           <div className="border border-slate-200 rounded-lg p-3 bg-slate-50">
             <div className="flex items-center gap-2 mb-2">
               <Clock size={14} className="text-slate-500" />
@@ -254,18 +295,30 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
               </p>
             </div>
             <div className="space-y-2">
-              {branches.map(br => {
+              {effectiveBranches.map(br => {
                 const isDisabled = !!branchDisabled[br.id];
+                const isToggling = !!togglingDisabled[br.id];
                 return (
-                <div key={br.id} className={`flex flex-wrap items-center gap-2 text-xs ${isDisabled ? 'opacity-60' : ''}`}>
-                  <span className="flex-1 min-w-[120px] font-medium text-slate-700 flex items-center gap-1.5">
+                <div key={br.id}
+                  data-testid={`branch-row-${br.id}`}
+                  data-muted={isDisabled ? 'true' : 'false'}
+                  className={`flex flex-wrap items-center gap-2 text-xs rounded-md border p-2 transition-colors ${
+                    isDisabled
+                      ? 'bg-amber-50 border-amber-300'
+                      : 'bg-white border-transparent'
+                  }`}>
+                  {/* Huge, unmissable status chip on the left */}
+                  <span
+                    className={`shrink-0 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-md border ${
+                      isDisabled
+                        ? 'bg-amber-500 text-white border-amber-600'
+                        : 'bg-emerald-500 text-white border-emerald-600'
+                    }`}
+                    data-testid={`branch-status-chip-${br.id}`}>
+                    {isDisabled ? <><BellOff size={11} /> Muted</> : <><BellRing size={11} /> Active</>}
+                  </span>
+                  <span className={`flex-1 min-w-[120px] font-medium ${isDisabled ? 'text-slate-500 line-through decoration-amber-400' : 'text-slate-700'}`}>
                     {br.name}
-                    {isDisabled && (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500 bg-slate-200 border border-slate-300 px-1.5 py-0.5 rounded"
-                        data-testid={`branch-disabled-pill-${br.id}`}>
-                        <BellOff size={10} /> Muted
-                      </span>
-                    )}
                   </span>
                   <input
                     type="time"
@@ -283,23 +336,26 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
                     className="px-2 py-1 text-[11px] font-medium rounded-md border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-40 disabled:cursor-not-allowed">
                     {savingBranch[br.id] ? '…' : 'Save'}
                   </button>
+                  {/* Mute toggle — text + color changes dramatically with state.
+                      Solid filled while active (loud) vs outlined while muted (quiet). */}
                   <button
                     type="button"
                     data-testid={`branch-mute-toggle-${br.id}`}
-                    disabled={!!togglingDisabled[br.id]}
+                    aria-pressed={isDisabled}
+                    disabled={isToggling}
                     onClick={() => toggleBranchDisabled(br.id)}
                     title={isDisabled
-                      ? 'Turn close-day SMS back on for this branch'
-                      : 'Mute close-day SMS reminders for this branch (useful for transfer-only / warehouse branches)'}
-                    className={`inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-md border transition-colors disabled:opacity-40 ${
+                      ? 'Close-day SMS is currently MUTED — click to turn alerts back on'
+                      : 'Close-day SMS is currently ACTIVE — click to MUTE for warehouse/transfer-only branches'}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold rounded-md border-2 transition-all shadow-sm disabled:opacity-50 ${
                       isDisabled
-                        ? 'border-slate-300 text-slate-600 hover:bg-slate-100'
-                        : 'border-amber-300 text-amber-700 hover:bg-amber-50'
+                        ? 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50 hover:border-slate-400'
+                        : 'bg-amber-500 text-white border-amber-600 hover:bg-amber-600'
                     }`}>
-                    {togglingDisabled[br.id]
-                      ? <Loader2 size={10} className="animate-spin" />
-                      : isDisabled ? <BellRing size={10} /> : <BellOff size={10} />}
-                    {isDisabled ? 'Un-mute' : 'Mute'}
+                    {isToggling
+                      ? <Loader2 size={12} className="animate-spin" />
+                      : isDisabled ? <BellRing size={12} /> : <BellOff size={12} />}
+                    {isToggling ? 'Saving…' : isDisabled ? 'Click to Un-Mute' : 'Click to Mute'}
                   </button>
                   <button
                     type="button"
