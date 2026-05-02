@@ -17,7 +17,8 @@ import { UnclosedDaysBanner } from '../components/UnclosedDaysBanner';
 import {
   Search, Plus, Minus, Trash2, ShoppingCart, CreditCard, X, Wifi, WifiOff,
   RefreshCw, FileText, Lock, Zap, ClipboardList, AlertTriangle, Shield, CheckCircle2, Smartphone, Camera, Check,
-  PackageX, ShieldAlert, ChevronDown, Eye, EyeOff, User, Package, PauseCircle, Inbox, RotateCcw
+  PackageX, ShieldAlert, ChevronDown, Eye, EyeOff, User, Package, PauseCircle, Inbox, RotateCcw,
+  ArrowUpRight, ArrowDownRight, Info
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -2842,14 +2843,23 @@ export default function UnifiedSalesPage() {
                             />
                             <span className="text-xs font-semibold text-[#1A4D2E] text-right flex-1">{formatPHP(item.total)}</span>
                           </div>
-                          {!item.is_repack && parseFloat(item.original_price) > 0 && Math.abs(item.price - item.original_price) > 0.001 && (
-                            <p className="text-[10px] text-amber-700 flex items-center gap-1 font-medium" data-testid={`price-match-flag-${item.product_id}`}>
-                              <AlertTriangle size={9}/> Price changed
-                              <span className="line-through opacity-70">{formatPHP(item.original_price)}</span>
-                              <span>→ {formatPHP(item.price)}</span>
-                              <span className="text-slate-500 italic">(manager PIN required at checkout)</span>
-                            </p>
-                          )}
+                          {!item.is_repack && parseFloat(item.original_price) > 0 && Math.abs(item.price - item.original_price) > 0.001 && (() => {
+                            const delta = item.price - item.original_price;
+                            const isIncrease = delta > 0;
+                            const pct = item.original_price > 0 ? (delta / item.original_price) * 100 : 0;
+                            return (
+                              <p className={`text-[10px] flex items-center gap-1 font-medium ${isIncrease ? 'text-emerald-700' : 'text-rose-700'}`} data-testid={`price-match-flag-${item.product_id}`}>
+                                {isIncrease ? <ArrowUpRight size={11} className="text-emerald-600" /> : <ArrowDownRight size={11} className="text-rose-600" />}
+                                <span className="font-semibold">Price {isIncrease ? 'increased' : 'decreased'}</span>
+                                <span className="line-through opacity-60">{formatPHP(item.original_price)}</span>
+                                <span>→ {formatPHP(item.price)}</span>
+                                <span className={`px-1 rounded ${isIncrease ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                                  {isIncrease ? '+' : '−'}{formatPHP(Math.abs(delta))} ({Math.abs(pct).toFixed(1)}%)
+                                </span>
+                                <span className="text-slate-500 italic">(manager PIN at checkout)</span>
+                              </p>
+                            );
+                          })()}
                           {item.price <= 0 && (
                             <p className="text-[10px] text-amber-600 flex items-center gap-1"><AlertTriangle size={9}/> Set price before checkout</p>
                           )}
@@ -2870,12 +2880,18 @@ export default function UnifiedSalesPage() {
                               )}
                             </p>
                           )}
-                          {/* Capital reference — always visible when product has PO history */}
+                          {/* Capital reference — read-only display only. Sales NEVER modify
+                              moving average or capital_method (only POs / transfers / Count Sheet do). */}
                           {canViewCost && (item.moving_average_cost > 0 || item.last_purchase_cost > 0) && (
-                            <div className="flex items-center gap-2 text-[10px] mt-0.5">
+                            <div
+                              className="flex items-center gap-2 text-[10px] mt-0.5"
+                              title="Reference values only — sales do NOT change moving average or capital. Updates happen via POs, Transfers, or Count Sheet."
+                            >
+                              <Info size={9} className="text-slate-300 shrink-0" />
+                              <span className="text-slate-300 italic">Ref:</span>
                               {item.moving_average_cost > 0 && (
                                 <span className={`${item.price > 0 && item.price < item.moving_average_cost ? 'text-red-500 font-semibold' : 'text-slate-400'}`}>
-                                  Avg ₱{item.moving_average_cost.toFixed(2)}
+                                  MA ₱{item.moving_average_cost.toFixed(2)}
                                 </span>
                               )}
                               {item.last_purchase_cost > 0 && item.last_purchase_cost !== item.moving_average_cost && (
@@ -3035,21 +3051,37 @@ export default function UnifiedSalesPage() {
                                 readOnly={!canDiscount}
                                 title={!canDiscount ? 'No permission to change prices' : 'Edit to trigger Price Match (manager PIN required at checkout)'}
                               />
-                              {/* Price Match flag for changed rate */}
-                              {line.product_id && !line.is_repack && parseFloat(line.original_rate) > 0 && Math.abs(line.rate - line.original_rate) > 0.001 && (
-                                <p className="text-[10px] text-amber-700 flex items-center gap-1 font-medium mt-0.5"
-                                  data-testid={`order-price-match-flag-${line.product_id}`}>
-                                  <AlertTriangle size={9}/>
-                                  <span className="line-through opacity-70">{formatPHP(line.original_rate)}</span>
-                                  <span>→ {formatPHP(line.rate)}</span>
-                                </p>
-                              )}
-                              {/* Capital reference — shown when a product is selected */}
+                              {/* Price Match flag for changed rate — directional + delta */}
+                              {line.product_id && !line.is_repack && parseFloat(line.original_rate) > 0 && Math.abs(line.rate - line.original_rate) > 0.001 && (() => {
+                                const delta = line.rate - line.original_rate;
+                                const isIncrease = delta > 0;
+                                const pct = line.original_rate > 0 ? (delta / line.original_rate) * 100 : 0;
+                                return (
+                                  <p className={`text-[10px] flex items-center gap-1 font-medium mt-0.5 ${isIncrease ? 'text-emerald-700' : 'text-rose-700'}`}
+                                    data-testid={`order-price-match-flag-${line.product_id}`}>
+                                    {isIncrease ? <ArrowUpRight size={11} className="text-emerald-600" /> : <ArrowDownRight size={11} className="text-rose-600" />}
+                                    <span className="font-semibold">{isIncrease ? 'Up' : 'Down'}</span>
+                                    <span className="line-through opacity-60">{formatPHP(line.original_rate)}</span>
+                                    <span>→ {formatPHP(line.rate)}</span>
+                                    <span className={`px-1 rounded ${isIncrease ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                                      {isIncrease ? '+' : '−'}{formatPHP(Math.abs(delta))} ({Math.abs(pct).toFixed(1)}%)
+                                    </span>
+                                  </p>
+                                );
+                              })()}
+                              {/* Capital reference — read-only display only. Sales NEVER modify
+                                  moving average or capital_method. */}
                               {canViewCost && line.product_id && (line.moving_average_cost > 0 || line.last_purchase_cost > 0) && (
-                                <div className="flex flex-col gap-0.5 mt-0.5">
+                                <div
+                                  className="flex flex-col gap-0.5 mt-0.5"
+                                  title="Reference values only — sales do NOT change moving average or capital. Updates happen via POs, Transfers, or Count Sheet."
+                                >
+                                  <span className="text-[9px] text-slate-300 italic flex items-center gap-1">
+                                    <Info size={8} /> Ref (read-only)
+                                  </span>
                                   {line.moving_average_cost > 0 && (
                                     <span className={`text-[10px] ${line.rate > 0 && line.rate < line.moving_average_cost ? 'text-red-500 font-semibold' : 'text-slate-400'}`}>
-                                      Avg ₱{line.moving_average_cost.toFixed(2)}
+                                      MA ₱{line.moving_average_cost.toFixed(2)}
                                     </span>
                                   )}
                                   {line.last_purchase_cost > 0 && line.last_purchase_cost !== line.moving_average_cost && (
