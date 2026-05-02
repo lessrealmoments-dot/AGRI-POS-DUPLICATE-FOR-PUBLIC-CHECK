@@ -1,5 +1,39 @@
 # AgriBooks PRD
 
+## Iter 208 (May 2026) — 🚨 P0 QR Receipt Upload "Session Expired" Fix ✅
+
+### Bug
+Manager scans QR code on a Purchase Order / Expense / Branch Transfer to upload a receipt photo from their phone → URL `/upload/{token}` opens in browser → "Link Invalid or Expired".
+
+User-facing report: `https://agri-books.com/upload/cDkp81CmIA8agxX3yCYlFiVdTu8b1xZM` returns "Session expired".
+
+### Root cause
+The Iter 180 cross-tenant privacy fix (TenantCollection fail-closed proxy) broke ALL public token endpoints in `routes/uploads.py`. These endpoints have no JWT auth, so `get_org_context()` returns None, the proxy injects sentinel `organization_id: "__no_org_context__"` into every query, and the legitimate session document is invisible.
+
+Affected endpoints (all public, all broken):
+- `GET /api/uploads/preview/{token}` — phone "show me what I'm uploading to"
+- `POST /api/uploads/upload/{token}` — phone "upload my photos"
+- `GET /api/uploads/file/{record_type}/{record_id}/{file_id}` — public file serve
+- `GET /api/uploads/view-session/{token}` — phone "view-only" QR
+
+### Fix
+Switched the initial token lookup from `db.upload_sessions` (scoped) to `_raw_db.upload_sessions` (unscoped) in all 4 public endpoints, then `set_org_context(session.organization_id)` so any subsequent scoped queries (record summary, invoice receipt_status update, related collections) target the correct tenant.
+
+### Pattern matches qr_actions.py
+This is the same pattern already used by `routes/qr_actions.py` for cross-tenant QR document lookups — public endpoint resolves doc_code via `_raw_db`, then sets context for downstream calls. Now `routes/uploads.py` follows the same convention.
+
+### Verified end-to-end
+1. Generate upload link via authenticated `/api/uploads/generate-link` — returns token
+2. Public `GET /api/uploads/preview/{token}` (no auth) — returns full record summary ✅
+3. Public `POST /api/uploads/upload/{token}` with file — returns `{uploaded: 1, total_files: 1}` ✅
+4. R2 storage receives file correctly
+
+### Side effects
+- None on existing flows: authenticated callers still go through the scoped proxy as before
+- Receipt upload now works on the same VPS where it was previously failing — no migration needed
+
+---
+
 ## Iter 207 (May 2026) — Quick Launch (Manager Fast-Action Card) ✅
 
 ### Why

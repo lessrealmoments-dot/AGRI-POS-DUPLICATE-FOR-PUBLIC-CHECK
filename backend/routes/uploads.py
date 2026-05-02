@@ -8,7 +8,7 @@ from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import secrets
-from config import db, get_org_context
+from config import db, _raw_db, get_org_context, set_org_context
 from utils import get_current_user, now_iso, new_id
 from utils.r2_storage import upload_file, get_presigned_url, delete_file, build_key
 
@@ -131,10 +131,21 @@ async def generate_upload_link(data: dict, user=Depends(get_current_user)):
 
 @router.get("/preview/{token}")
 async def get_upload_preview(token: str):
-    """Public endpoint — shows record summary for phone upload page."""
-    session = await db.upload_sessions.find_one({"token": token}, {"_id": 0})
+    """Public endpoint — shows record summary for phone upload page.
+    
+    Uses _raw_db for the token lookup because public endpoints have no auth and
+    therefore no org_context — the scoped proxy would fail-closed and return
+    nothing. Once we identify the org from the session doc, we set the context
+    so any downstream scoped queries (e.g. record summary) work correctly.
+    """
+    session = await _raw_db.upload_sessions.find_one({"token": token}, {"_id": 0})
     if not session:
         raise HTTPException(status_code=404, detail="Upload link not found")
+
+    # Set org context from the session so any scoped queries downstream work
+    org_id = session.get("organization_id") or session.get("org_id")
+    if org_id:
+        set_org_context(org_id)
 
     expires_at = session.get("token_expires_at", "")
     if expires_at:
@@ -162,10 +173,20 @@ async def upload_files_via_token(
     token: str,
     files: List[UploadFile] = File(...),
 ):
-    """Public endpoint — accepts photo uploads from mobile. Stores in R2."""
-    session = await db.upload_sessions.find_one({"token": token}, {"_id": 0})
+    """Public endpoint — accepts photo uploads from mobile. Stores in R2.
+    
+    Uses _raw_db for the initial token lookup (public, no auth). Sets org
+    context from the session so subsequent scoped writes (e.g. invoice
+    receipt_status update) target the correct tenant.
+    """
+    session = await _raw_db.upload_sessions.find_one({"token": token}, {"_id": 0})
     if not session:
         raise HTTPException(status_code=404, detail="Upload link not found")
+
+    # Set org context from the session so all subsequent scoped queries work
+    org_id = session.get("organization_id") or session.get("org_id")
+    if org_id:
+        set_org_context(org_id)
 
     expires_at = session.get("token_expires_at", "")
     if expires_at:
@@ -254,10 +275,14 @@ async def get_record_uploads(
 
 @router.get("/file/{record_type}/{record_id}/{file_id}")
 async def serve_file(record_type: str, record_id: str, file_id: str):
-    """Serve a file — redirects to pre-signed R2 URL, or serves local file for legacy."""
-    session = await db.upload_sessions.find_one(
+    """Serve a file — redirects to pre-signed R2 URL, or serves local file for legacy.
+    
+    Public endpoint (linked from the upload preview page on mobile). Uses _raw_db
+    because public endpoints have no org context.
+    """
+    session = await _raw_db.upload_sessions.find_one(
         {"record_type": record_type, "record_id": record_id, "files.id": file_id},
-        {"_id": 0, "files": 1, "org_id": 1}
+        {"_id": 0, "files": 1, "org_id": 1, "organization_id": 1}
     )
     if not session:
         raise HTTPException(status_code=404, detail="File not found")
@@ -316,10 +341,19 @@ async def generate_view_token(data: dict, user=Depends(get_current_user)):
 
 @router.get("/view-session/{token}")
 async def get_view_session(token: str):
-    """Public endpoint — returns record summary + all uploaded files for the view QR."""
-    view_doc = await db.view_tokens.find_one({"token": token, "token_type": "view"}, {"_id": 0})
+    """Public endpoint — returns record summary + all uploaded files for the view QR.
+    
+    Uses _raw_db for the initial token lookup (public, no auth) and sets org
+    context from the view doc so subsequent scoped queries work.
+    """
+    view_doc = await _raw_db.view_tokens.find_one({"token": token, "token_type": "view"}, {"_id": 0})
     if not view_doc:
         raise HTTPException(status_code=404, detail="View link not found or expired")
+
+    # Set org context from the view doc
+    org_id = view_doc.get("organization_id") or view_doc.get("org_id")
+    if org_id:
+        set_org_context(org_id)
 
     expires_at = view_doc.get("token_expires_at", "")
     if expires_at:
