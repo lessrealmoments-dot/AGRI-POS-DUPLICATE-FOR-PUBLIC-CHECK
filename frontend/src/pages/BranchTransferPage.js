@@ -23,7 +23,7 @@ import {
   Plus, Trash2, Send, CheckCircle2, Search, RefreshCw, Settings2,
   AlertTriangle, ChevronDown, ChevronUp, Building2, Package, X,
   TrendingUp, TrendingDown, Clock, ArrowRight, Eye, XCircle, Pencil, Upload, Check,
-  ClipboardCheck, FileText, Smartphone, Lock
+  ClipboardCheck, FileText, Smartphone, Lock, Pause, FolderOpen, Trash, Tag
 } from 'lucide-react';
 import PrintEngine from '../lib/PrintEngine';
 import { toast } from 'sonner';
@@ -157,6 +157,14 @@ export default function BranchTransferPage() {
   const [saving, setSaving] = useState(false);
   const [categories, setCategories] = useState([]);
   const [templateLoaded, setTemplateLoaded] = useState(false);
+
+  // Park / Resume — draft transfer staging
+  const [parkedTransfers, setParkedTransfers] = useState([]);
+  const [parkDialogOpen, setParkDialogOpen] = useState(false);
+  const [parkingNow, setParkingNow] = useState(false);
+  const [resumeDialogOpen, setResumeDialogOpen] = useState(false);
+  const [parkLabel, setParkLabel] = useState('');
+  const [activeParkId, setActiveParkId] = useState(null); // ID of currently-resumed park, if any
 
   // Sync fromBranchId with currentBranch on initial load
   useEffect(() => {
@@ -482,6 +490,86 @@ export default function BranchTransferPage() {
       toast.success('Markup template saved');
     } catch { toast.error('Failed to save template'); }
   };
+
+  // ── Park / Resume — Draft transfer staging ────────────────────────────────
+  const loadParkedTransfers = useCallback(async () => {
+    if (!fromBranchId) { setParkedTransfers([]); return; }
+    try {
+      const res = await api.get('/parked-branch-transfers', { params: { from_branch_id: fromBranchId } });
+      setParkedTransfers(res.data?.parks || []);
+    } catch { /* silent */ }
+  }, [fromBranchId]);
+
+  // Load park count whenever from-branch changes
+  useEffect(() => { loadParkedTransfers(); }, [loadParkedTransfers]);
+
+  const handlePark = async () => {
+    if (!fromBranchId) { toast.error('Source branch required'); return; }
+    const populated = rows.filter(r => r.product);
+    if (!populated.length) { toast.error('Nothing to park — add at least one product'); return; }
+
+    setParkingNow(true);
+    try {
+      const payload = {
+        id: activeParkId || undefined,
+        from_branch_id: fromBranchId,
+        to_branch_id: toBranchId || '',
+        label: parkLabel.trim() || (toBranchId ? `To ${branches.find(b => b.id === toBranchId)?.name || 'branch'}` : 'Draft'),
+        rows,
+        min_margin: minMargin,
+        category_markups: categoryMarkups,
+        item_count: populated.length,
+      };
+      await api.post('/parked-branch-transfers', payload);
+      toast.success(activeParkId ? 'Park updated — pick it up later' : 'Transfer parked — pick it up later');
+      setParkDialogOpen(false);
+      setParkLabel('');
+      setActiveParkId(null);
+      // Reset to a fresh draft
+      setRows([newRow()]);
+      setToBranchId('');
+      await loadParkedTransfers();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to park transfer');
+    }
+    setParkingNow(false);
+  };
+
+  const handleResume = async (parkId) => {
+    try {
+      const res = await api.post(`/parked-branch-transfers/${parkId}/consume`);
+      const doc = res.data;
+      // Skip the source-branch reset effect when we set toBranchId so rows aren't wiped
+      skipResetRef.current = true;
+      setFromBranchId(doc.from_branch_id || fromBranchId);
+      setToBranchId(doc.to_branch_id || '');
+      setRows((doc.rows && doc.rows.length) ? doc.rows : [newRow()]);
+      setMinMargin(doc.min_margin ?? 20);
+      setCategoryMarkups(doc.category_markups || []);
+      setActiveParkId(parkId); // remember so re-park overwrites instead of creating new
+      setResumeDialogOpen(false);
+      toast.success('Resumed — picked up where you left off');
+      await loadParkedTransfers();
+      // Allow effects again on next user-driven branch change
+      setTimeout(() => { skipResetRef.current = false; }, 100);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to resume');
+      await loadParkedTransfers();
+    }
+  };
+
+  const handleDiscardPark = async (parkId) => {
+    if (!window.confirm('Discard this parked transfer? This cannot be undone.')) return;
+    try {
+      await api.delete(`/parked-branch-transfers/${parkId}`);
+      toast.success('Discarded');
+      await loadParkedTransfers();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to discard');
+    }
+  };
+
+
 
   // ── Submit ─────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
@@ -1225,9 +1313,20 @@ export default function BranchTransferPage() {
                                   <span className="text-[9px] text-blue-400 mt-0.5 block">Last: {formatPHP(row.last_branch_retail)}</span>
                                 )}
                                 {toBranchId && row.product && row.target_branch_retail > 0 && (
-                                  <span className="text-[9px] text-purple-600 font-medium mt-0.5 block" title={`Current retail at ${destBranch?.name || 'target branch'}`}>
-                                    🎯 Now: {formatPHP(row.target_branch_retail)}
-                                  </span>
+                                  <div className="flex items-center gap-1 mt-0.5">
+                                    <span className="text-[9px] text-purple-600 font-medium" title={`Current retail at ${destBranch?.name || 'target branch'}`}>
+                                      🎯 Now: {formatPHP(row.target_branch_retail)}
+                                    </span>
+                                    {isAdmin && parseFloat(row.branch_retail) !== parseFloat(row.target_branch_retail) && (
+                                      <button
+                                        type="button"
+                                        onClick={() => updateRow(row.id, { branch_retail: String(row.target_branch_retail) })}
+                                        className="text-[9px] text-blue-600 hover:text-blue-800 underline-offset-2 hover:underline font-medium"
+                                        title="Use the target branch's current retail price"
+                                        data-testid={`match-target-retail-${row.id}`}
+                                      >match</button>
+                                    )}
+                                  </div>
                                 )}
                                 {!isAdmin && row.product && (
                                   <span className="text-[9px] text-slate-400 mt-0.5 block">Admin sets retail</span>
@@ -1368,10 +1467,26 @@ export default function BranchTransferPage() {
 
               {/* Add row + Totals + Submit */}
               <div className="flex items-start justify-between gap-4">
-                <Button variant="outline" size="sm" onClick={() => setRows(r => [...r, newRow()])}
-                  data-testid="add-row-btn">
-                  <Plus size={14} className="mr-1" /> Add Product
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setRows(r => [...r, newRow()])}
+                    data-testid="add-row-btn">
+                    <Plus size={14} className="mr-1" /> Add Product
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => { setParkLabel(''); setParkDialogOpen(true); }}
+                    disabled={!rows.some(r => r.product)}
+                    className="text-amber-700 border-amber-300 hover:bg-amber-50"
+                    data-testid="park-transfer-btn"
+                    title="Save current draft and continue later — like Park Sale">
+                    <Pause size={13} className="mr-1" /> {activeParkId ? 'Update Park' : 'Park'}
+                  </Button>
+                  {parkedTransfers.length > 0 && (
+                    <Button variant="outline" size="sm" onClick={() => setResumeDialogOpen(true)}
+                      className="text-blue-700 border-blue-300 hover:bg-blue-50"
+                      data-testid="resume-park-btn">
+                      <FolderOpen size={13} className="mr-1" /> Resume <span className="ml-1 text-[10px] bg-blue-600 text-white rounded-full px-1.5">{parkedTransfers.length}</span>
+                    </Button>
+                  )}
+                </div>
 
                 <div className="flex items-center gap-6 text-sm">
                   <div className="text-right">
@@ -2927,6 +3042,98 @@ export default function BranchTransferPage() {
           </DialogContent>
         </Dialog>
       )}
+
+      {/* ── Park Transfer Dialog ── */}
+      <Dialog open={parkDialogOpen} onOpenChange={setParkDialogOpen}>
+        <DialogContent className="sm:max-w-md" data-testid="park-transfer-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base text-amber-700">
+              <Pause size={16} /> Park Transfer
+            </DialogTitle>
+            <DialogDescription>
+              Save this draft and pick it up later. Stock is not reserved while parked.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 pt-1">
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs space-y-1">
+              <div className="flex justify-between"><span className="text-slate-600">From</span><span className="font-medium">{branches.find(b => b.id === fromBranchId)?.name || '—'}</span></div>
+              <div className="flex justify-between"><span className="text-slate-600">To</span><span className="font-medium">{toBranchId ? (branches.find(b => b.id === toBranchId)?.name || '—') : <span className="text-slate-400">(not yet selected)</span>}</span></div>
+              <div className="flex justify-between"><span className="text-slate-600">Items in draft</span><span className="font-mono font-bold">{rows.filter(r => r.product).length}</span></div>
+              <div className="text-[10px] text-amber-600 mt-1">Auto-deletes after 24 hours.</div>
+            </div>
+            <div>
+              <Label className="text-xs">Label (optional)</Label>
+              <Input value={parkLabel} onChange={e => setParkLabel(e.target.value)}
+                placeholder="e.g. Waiting on truck Tuesday"
+                onKeyDown={e => e.key === 'Enter' && handlePark()}
+                className="h-9 mt-1" data-testid="park-label-input" />
+              <p className="text-[10px] text-slate-400 mt-0.5">Helps you find this park later</p>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <Button variant="outline" className="flex-1" onClick={() => setParkDialogOpen(false)}>Cancel</Button>
+              <Button onClick={handlePark} disabled={parkingNow}
+                className="flex-1 bg-amber-600 hover:bg-amber-700 text-white"
+                data-testid="park-confirm-btn">
+                {parkingNow ? 'Parking...' : (activeParkId ? 'Update Park' : 'Park Transfer')}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Resume Park Dialog ── */}
+      <Dialog open={resumeDialogOpen} onOpenChange={setResumeDialogOpen}>
+        <DialogContent className="sm:max-w-2xl" data-testid="resume-park-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base text-blue-700">
+              <FolderOpen size={16} /> Resume Parked Transfer
+            </DialogTitle>
+            <DialogDescription>
+              Pick up where you (or a colleague at this branch) left off. Drafts auto-expire after 24 h.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 pt-1 max-h-96 overflow-y-auto">
+            {parkedTransfers.length === 0 && (
+              <p className="text-center text-sm text-slate-400 py-8">No parked transfers.</p>
+            )}
+            {parkedTransfers.map(p => {
+              const dest = branches.find(b => b.id === p.to_branch_id);
+              const ageMins = Math.round((Date.now() - new Date(p.created_at).getTime()) / 60000);
+              const ageStr = ageMins < 60 ? `${ageMins}m ago` : `${Math.floor(ageMins / 60)}h ${ageMins % 60}m ago`;
+              return (
+                <div key={p.id} className="border border-slate-200 rounded-lg p-3 hover:bg-slate-50 transition-colors flex items-center justify-between gap-3"
+                  data-testid={`parked-transfer-${p.id}`}>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-sm font-semibold text-slate-800 truncate">{p.label || 'Untitled draft'}</span>
+                      <span className="text-[10px] bg-slate-100 text-slate-600 rounded px-1.5 py-0.5">{p.item_count} {p.item_count === 1 ? 'item' : 'items'}</span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 flex flex-wrap gap-x-3 gap-y-0.5">
+                      <span><Building2 size={9} className="inline mr-0.5" /> To: <span className="font-medium">{dest?.name || '(none)'}</span></span>
+                      <span><Clock size={9} className="inline mr-0.5" /> {ageStr}</span>
+                      <span>by {p.created_by_name || 'unknown'}</span>
+                    </div>
+                  </div>
+                  <div className="flex gap-1.5 shrink-0">
+                    <Button size="sm" onClick={() => handleResume(p.id)}
+                      className="h-8 bg-blue-600 hover:bg-blue-700 text-white"
+                      data-testid={`resume-park-${p.id}`}>
+                      Resume
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => handleDiscardPark(p.id)}
+                      className="h-8 px-2 text-red-500 hover:text-red-700 hover:bg-red-50"
+                      data-testid={`discard-park-${p.id}`}
+                      title="Discard this park">
+                      <Trash size={13} />
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }

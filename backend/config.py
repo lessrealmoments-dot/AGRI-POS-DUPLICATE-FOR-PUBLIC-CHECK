@@ -58,6 +58,7 @@ TENANT_COLLECTIONS = {
     'crop_credits',                  # Charged-to-crop credit accounts
     'signature_sessions',            # Digital signature capture sessions
     'parked_sales',                  # Cashier "park sale" / draft cart staging
+    'parked_branch_transfers',       # Manager "park transfer" / draft transfer staging
 }
 
 

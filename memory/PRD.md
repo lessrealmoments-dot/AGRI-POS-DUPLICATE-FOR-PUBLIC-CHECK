@@ -1,5 +1,44 @@
 # AgriBooks PRD
 
+## Iter 210 (May 2026) — Branch Transfer: Park Draft + Match-Target-Retail ✅
+
+### What shipped
+
+**1. Park / Resume Branch Transfer** (mirrors the Parked Sales pattern)
+- Backend: new `routes/parked_branch_transfers.py` + collection `parked_branch_transfers`:
+  - `POST /api/parked-branch-transfers` — create/upsert with rows, branch selection, markup template, label
+  - `GET /api/parked-branch-transfers?from_branch_id=X` — list with auto-purge of >24 h stale parks
+  - `GET /api/parked-branch-transfers/{id}` — fetch one
+  - `POST /api/parked-branch-transfers/{id}/consume` — atomic fetch+delete (the Resume action), returns 410 Gone on race
+  - `DELETE /api/parked-branch-transfers/{id}` — discard (PIN required to discard another user's park)
+  - Branch-shared (any user at the from-branch can pick up a colleague's draft)
+  - 10 active parks per branch limit, 24 h TTL
+- Frontend (`pages/BranchTransferPage.js`):
+  - **Park button** (amber, ⏸ icon) next to "Add Product" — opens dialog with optional label, then saves & resets to a fresh blank draft
+  - **Resume button** (blue, 📁 icon) appears only when parks exist, shows count badge — opens dialog listing all branch-shared parks with label, target branch, age, item count, creator name, and Resume/Discard buttons per row
+  - When you Park while already on a resumed park, it updates the existing row (not a duplicate)
+  - Discarding a park: confirm prompt, soft-deletes from list
+
+**2. Match-Target-Retail one-click button**
+- Below the 🎯 "Now: ₱X" hint on Branch Retail cell, when the entered retail differs from target's current retail, a small "match" link appears (admin only)
+- Click → instantly fills the row's branch_retail with the target branch's current retail price (zero typing for "follow what they already charge" transfers)
+
+### Tested via curl
+- POST create park with rows + label ✅
+- GET list returns the park ✅
+- POST consume returns full snapshot (rows, min_margin, etc.) ✅
+- Re-consume returns 410 Gone (race-safe) ✅
+- Lint clean (frontend + backend)
+
+### Bonus pre-existing fix
+While restarting backend, found a pre-existing syntax error in `main.py` line 1192 (orphaned text from a botched copy-paste in an earlier session) — cleaned up so the server actually starts.
+
+### Backwards compatible
+- New collection, new routes — zero impact on existing branch transfer flows
+- The Park button is gated by `rows.some(r => r.product)` so it only appears when there's something worth parking
+
+---
+
 ## Iter 209 (May 2026) — Branch Transfer: Target-Branch Insights + Tab-to-add-row ✅
 
 ### Why
