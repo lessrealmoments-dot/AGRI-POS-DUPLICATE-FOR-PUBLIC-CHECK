@@ -27,6 +27,8 @@ import {
 } from 'lucide-react';
 import PrintEngine from '../lib/PrintEngine';
 import { toast } from 'sonner';
+import { useUnsavedChangesGuard } from '../lib/useUnsavedChangesGuard';
+import UnsavedChangesDialog from '../components/UnsavedChangesDialog';
 
 // Smart quantity formatter — display max 3 decimal places, no trailing zeros.
 // Raw precision is preserved in the database — this is display only.
@@ -99,6 +101,14 @@ export default function BranchTransferPage() {
   // ── Request Stock form state ────────────────────────────────────────────
   const [reqTargetBranch, setReqTargetBranch] = useState('');
   const [reqRows, setReqRows] = useState([{ id: Date.now(), search: '', product: null, qty: '', matches: [] }]);
+
+  // Unsaved-changes guard — fires when the request form has at least one
+  // chosen product. Keeps the user from blowing away a long stock request
+  // by clicking sidebar / refresh.
+  const transferGuard = useUnsavedChangesGuard({
+    isDirty: (reqRows || []).some(r => r.product),
+    label: 'Branch Transfer Request',
+  });
   const [reqNotes, setReqNotes] = useState('');
   const [reqSaving, setReqSaving] = useState(false);
   const [reqShowRetail, setReqShowRetail] = useState(true);
@@ -2827,6 +2837,8 @@ export default function BranchTransferPage() {
           </DialogContent>
         </Dialog>
       )}
+
+      <UnsavedChangesDialog guard={transferGuard} />
     </div>
   );
 }

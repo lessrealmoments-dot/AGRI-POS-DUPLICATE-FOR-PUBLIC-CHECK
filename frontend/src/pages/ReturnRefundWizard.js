@@ -15,6 +15,8 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import UploadQRDialog from '../components/UploadQRDialog';
+import { useUnsavedChangesGuard } from '../lib/useUnsavedChangesGuard';
+import UnsavedChangesDialog from '../components/UnsavedChangesDialog';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -83,6 +85,13 @@ export default function ReturnRefundWizard() {
 
   // Step 2 — products
   const [returnItems, setReturnItems] = useState([]);
+
+  // Unsaved-changes guard — fires when at least one return line has been
+  // queued. Mid-return navigation away would blow away the cashier's work.
+  const returnGuard = useUnsavedChangesGuard({
+    isDirty: (returnItems || []).length > 0,
+    label: 'Return / Refund',
+  });
   const [productSearch, setProductSearch] = useState('');
   const [productMatches, setProductMatches] = useState([]);
   const [activeSearchIdx, setActiveSearchIdx] = useState(-1);
@@ -705,6 +714,7 @@ export default function ReturnRefundWizard() {
           )}
         </CardContent>
       </Card>
+      <UnsavedChangesDialog guard={returnGuard} />
     </div>
   );
 }

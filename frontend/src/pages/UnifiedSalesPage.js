@@ -30,6 +30,8 @@ import { syncPendingSales, startAutoSync, stopAutoSync, newEnvelopeId } from '..
 import {
   buildParkPayload, parkSale, discardParkedSale, consumeParkedSale, loadParkedSales, drainSyncQueue as drainParkQueue,
 } from '../lib/parkedSalesSync';
+import { useUnsavedChangesGuard } from '../lib/useUnsavedChangesGuard';
+import UnsavedChangesDialog from '../components/UnsavedChangesDialog';
 import ReferenceNumberPrompt from '../components/ReferenceNumberPrompt';
 import CropCreditTypeDialog from '../components/CropCreditTypeDialog';
 import RequestSignatureDialog from '../components/RequestSignatureDialog';
@@ -1346,6 +1348,46 @@ export default function UnifiedSalesPage() {
     }
   };
 
+  // ── Unsaved-changes guard ───────────────────────────────────────────
+  // Triggers the leave-confirmation dialog whenever the user navigates
+  // away (sidebar click, route change, browser tab close) OR uses the
+  // exposed `requestSafe()` to wrap in-page destructive switches like
+  // mainTab quote↔history. The "Park & leave" branch reuses the same
+  // park flow as the manual button, so a misclick never costs work.
+  const isSalesDirty = cart.length > 0 || lines.some(l => l.product_id);
+  const autoParkForGuard = useCallback(async () => {
+    if (!currentBranch?.id) {
+      throw new Error('No active branch');
+    }
+    const { itemCount, subtotal } = computeParkSummary();
+    const auto = selectedCustomer?.name
+      ? `${selectedCustomer.name} · ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+      : `Walk-in · ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+    const payload = buildParkPayload({
+      branchId: currentBranch.id,
+      mode,
+      label: `${auto} — auto-saved on leave`,
+      customer: selectedCustomer ? {
+        id: selectedCustomer.id, name: selectedCustomer.name,
+        phone: selectedCustomer.phone, price_scheme: selectedCustomer.price_scheme,
+        address: selectedCustomer.address, shipping_address: selectedCustomer.shipping_address,
+      } : null,
+      activeScheme,
+      cart, lines, header,
+      itemCount, subtotal,
+    });
+    await parkSale(payload);
+    toast.success(isOnline ? 'Sale parked — recoverable from Parked' : 'Sale parked — will sync when online');
+    clearCart();
+    refreshParkedSales();
+  }, [currentBranch?.id, mode, selectedCustomer, activeScheme, cart, lines, header, isOnline, refreshParkedSales]); // eslint-disable-line
+
+  const salesGuard = useUnsavedChangesGuard({
+    isDirty: isSalesDirty,
+    onPark: autoParkForGuard,
+    label: 'Sales',
+  });
+
 
   // Apply a scheme change: updates activeScheme and reprices all open cart/line items
   const applySchemeChange = (scheme) => {
@@ -2168,14 +2210,14 @@ export default function UnifiedSalesPage() {
           {/* Main Tab: New Sale / History */}
           <div className="flex items-center bg-slate-100 rounded-lg p-1">
             <button
-              onClick={() => setMainTab('sale')}
+              onClick={() => salesGuard.requestSafe(() => setMainTab('sale'))}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${mainTab === 'sale' ? 'bg-white shadow-sm text-[#1A4D2E]' : 'text-slate-500 hover:text-slate-700'}`}
               data-testid="tab-new-sale"
             >
               <ShoppingCart size={14} /> New Sale
             </button>
             <button
-              onClick={() => setMainTab('history')}
+              onClick={() => salesGuard.requestSafe(() => setMainTab('history'))}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${mainTab === 'history' ? 'bg-white shadow-sm text-[#1A4D2E]' : 'text-slate-500 hover:text-slate-700'}`}
               data-testid="tab-history"
             >
@@ -4602,6 +4644,9 @@ export default function UnifiedSalesPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ── Unsaved-changes leave guard ───────────────────────────────────── */}
+      <UnsavedChangesDialog guard={salesGuard} />
 
     </div>
   );

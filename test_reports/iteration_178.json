@@ -1,0 +1,54 @@
+{
+  "summary": "P0 REGRESSION: The new unsaved-changes guard feature is fundamentally broken. `useUnsavedChangesGuard` calls `useBlocker` from react-router-dom, but the app is mounted under `<BrowserRouter>` (App.js line 258) which is NOT a data router. React Router throws `useBlocker must be used within a data router` on every render of every page that mounts the guard. This crashes UnifiedSalesPage (/sales-new), PurchaseOrderPage (/purchase-orders), ReturnRefundWizard (/returns), and JournalEntriesPage (/journal-entries) with an Uncaught runtime error overlay. None of the requested test scenarios are reachable. Tests halted after reproducing the root cause on multiple routes.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "useUnsavedChangesGuard / UnifiedSalesPage / PurchaseOrderPage / ReturnRefundWizard / JournalEntriesPage",
+        "issue": "Throws `useBlocker must be used within a data router. See https://reactrouter.com/en/main/routers/picking-a-router.` — page crashes with React error overlay; cart/PO/return/journal forms unusable.",
+        "selector": "any of: /sales-new, /purchase-orders, /returns, /journal-entries",
+        "priority": "CRITICAL"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Sales History tab click after adding cart item (the original 200-line misclick scenario)",
+        "issue": "Cannot be tested — UnifiedSalesPage throws on mount due to useBlocker invariant. Dialog elements (data-testid='unsaved-changes-dialog', 'unsaved-stay', 'unsaved-park', 'unsaved-leave') never render because the page itself errors before they mount.",
+        "affected_selectors": ["[data-testid=\"tab-history\"]", "[data-testid=\"tab-new-sale\"]", "[data-testid=\"unsaved-changes-dialog\"]"]
+      },
+      {
+        "flow": "Sidebar route blocking on /sales-new, /purchase-orders, /returns, /journal-entries",
+        "issue": "Cannot be tested — same useBlocker crash. Even if it didn't crash, useBlocker would never fire because BrowserRouter is not a data router.",
+        "affected_selectors": ["a[href=\"/inventory\"]", "[data-testid=\"unsaved-changes-dialog\"]"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "P0: Fix useUnsavedChangesGuard's in-app routing block. `useBlocker` from react-router-dom v6.4+/v7 ONLY works inside a data router (`createBrowserRouter` + `<RouterProvider>`). The app uses `<BrowserRouter>` in /app/frontend/src/App.js which is incompatible.",
+    "Two paths to fix (recommend Option A):",
+    "Option A (smaller blast radius): Remove `useBlocker` from useUnsavedChangesGuard.js. Implement a global DirtyGuardContext provider mounted high in App.js that lets pages register an `isDirty` callback. Intercept sidebar Link clicks (or wrap react-router-dom's `Link` / `NavLink` with a custom version that consults the registry, prevents default, and opens the dialog) — also intercept `useNavigate` calls via a shared wrapper. Keep beforeunload and the in-page `requestSafe` logic as-is (those work fine).",
+    "Option B (bigger): Migrate /app/frontend/src/App.js from `<BrowserRouter>` + `<Routes>` to `createBrowserRouter([...])` + `<RouterProvider router={...}>`. Then useBlocker will work natively. Requires converting every Route into a descriptor object; touches a 270-line file but is the official RR v7 idiom.",
+    "After fix, retest all 10 scenarios: Sales History tab click + Stay/Park/Leave, sidebar clicks on Sales/PO/BranchTransfer/Returns/Journal, and the empty-cart no-dialog sanity check.",
+    "Also verify BranchTransferPage — in our quick check it didn't throw on initial /branch-transfer load (perhaps the guard is mounted lazily on a sub-form), but it still uses the same hook and will throw the moment a row's product is picked."
+  ],
+  "critical_code_review_comments": [
+    "useUnsavedChangesGuard.js line 38: `useBlocker(...)` called unconditionally — invariant fails under BrowserRouter. Hook crashes the consuming page.",
+    "App.js line 1/258: imports and mounts `<BrowserRouter>` which is the non-data router. Any feature relying on `useBlocker`, `unstable_usePrompt`, `useRevalidator`, loaders, or actions will fail the same way.",
+    "No error boundary wraps the guarded pages — a single hook throw turns into a full-page red overlay. Add an ErrorBoundary at minimum so a regression in one feature can't take a whole route offline.",
+    "Hook returns `requestSafe` which works regardless of router type — the in-page tab-switch path could ship today if useBlocker is removed/guarded.",
+    "Consider conditionally calling `useBlocker` via a try/catch wrapper hook OR feature-detect the data router via context — would let the rest of the guard degrade gracefully instead of crashing."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only request)", "frontend": "0% — primary feature crashes on mount; none of the 10 scenarios testable"},
+  "test_credentials": "test_org_admin@regression.local / RegressionPass!2026 (login itself worked)",
+  "seed_data_creation": "none",
+  "retest_needed": true,
+  "main_agent_can_self_test": false,
+  "context_for_next_testing_agent": "After E1 fixes the data-router/useBlocker mismatch, re-run the 10 scenarios from the review_request in order. Login: test_org_admin@regression.local / RegressionPass!2026. Primary critical test is on /sales-new — add an item to Quick mode cart then click [data-testid='tab-history']; expect [data-testid='unsaved-changes-dialog'] with three buttons (unsaved-stay, unsaved-park, unsaved-leave). Do NOT proceed past basic page load until pageerror events for `useBlocker must be used within a data router` are gone — listen with page.on('pageerror', ...).",
+  "rca of the issue": "ROOT CAUSE: react-router-dom v7's `useBlocker` hook contains an invariant that throws if there is no `DataRouterContext` ancestor. `DataRouterContext` is only provided by routers created via `createBrowserRouter` / `createMemoryRouter` etc. and rendered through `<RouterProvider>`. The legacy declarative `<BrowserRouter>` in /app/frontend/src/App.js does NOT provide that context. As a result, the moment any page mounts `useUnsavedChangesGuard`, react-router throws synchronously during render. REPRODUCTION: 1) Login. 2) Navigate to /sales-new (or /purchase-orders, /returns, /journal-entries). 3) Observe full-page `Uncaught runtime errors: useBlocker must be used within a data router`. Console shows the throw originating in useUnsavedChangesGuard at the line calling useBlocker. MITIGATION: see action_items — Option A (replace useBlocker with a custom Link-interceptor + context registry) is recommended because it preserves the existing App.js routing and is incremental. Option B (migrate to createBrowserRouter) is the canonical RR v7 fix but touches all routes."
+}
