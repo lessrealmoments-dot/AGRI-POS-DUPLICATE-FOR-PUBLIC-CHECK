@@ -11,17 +11,34 @@ export default function SmartProductSearch({ onSelect, branchId, onCreateNew }) 
   const [noResults, setNoResults] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   const [fuzzyHint, setFuzzyHint] = useState(null);
-  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0, maxHeight: 400, flipUp: false });
   const inputRef = useRef(null);
   const dropdownRef = useRef(null);
   const debounceRef = useRef(null);
 
-  // Position the dropdown using fixed coords to escape any overflow:hidden/auto ancestor
+  // Position the dropdown using fixed coords to escape any overflow:hidden/auto ancestor.
+  // Auto-flip: when there's < 320px below the input AND more space above, render
+  // ABOVE the input instead. Keeps the result list visible whether the cashier
+  // is typing on a row near the bottom of the screen or near the top.
+  // Also clamps max-height to the available space so the list never spills
+  // past the viewport edge.
   const updateDropdownPos = () => {
-    if (inputRef.current) {
-      const rect = inputRef.current.getBoundingClientRect();
-      setDropdownPos({ top: rect.bottom + 4, left: rect.left, width: Math.max(rect.width, 320) });
-    }
+    if (!inputRef.current) return;
+    const rect = inputRef.current.getBoundingClientRect();
+    const vh = window.innerHeight;
+    const spaceBelow = vh - rect.bottom - 8;
+    const spaceAbove = rect.top - 8;
+    // Flip up when there isn't comfortable room below AND we have more headroom up
+    const flipUp = spaceBelow < 280 && spaceAbove > spaceBelow;
+    const maxHeight = Math.max(180, Math.min(400, flipUp ? spaceAbove : spaceBelow));
+    setDropdownPos({
+      top: flipUp ? null : rect.bottom + 4,
+      bottom: flipUp ? vh - rect.top + 4 : null,
+      left: rect.left,
+      width: Math.max(rect.width, 320),
+      maxHeight,
+      flipUp,
+    });
   };
 
   useEffect(() => {
@@ -121,9 +138,19 @@ export default function SmartProductSearch({ onSelect, branchId, onCreateNew }) 
 
       {open && (results.length > 0 || noResults) && (
         <div
-          style={{ position: 'fixed', top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width, zIndex: 9999 }}
-          className="bg-white border border-slate-200 rounded-lg shadow-xl max-h-[400px] overflow-y-auto"
+          style={{
+            position: 'fixed',
+            ...(dropdownPos.flipUp
+              ? { bottom: dropdownPos.bottom }
+              : { top: dropdownPos.top }),
+            left: dropdownPos.left,
+            width: dropdownPos.width,
+            maxHeight: dropdownPos.maxHeight,
+            zIndex: 9999,
+          }}
+          className="bg-white border border-slate-200 rounded-lg shadow-xl overflow-y-auto flex flex-col"
           data-testid="search-results-dropdown"
+          data-flip={dropdownPos.flipUp ? 'up' : 'down'}
         >
           {/* Did-you-mean chip when fuzzy fallback fired */}
           {fuzzyHint && (
