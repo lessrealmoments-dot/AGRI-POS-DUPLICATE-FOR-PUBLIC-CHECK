@@ -18,7 +18,7 @@ from datetime import datetime
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 if not BASE_URL:
-    BASE_URL = "https://sms-close-scheduler.preview.emergentagent.com"
+    BASE_URL = "https://sms-scheduler-7.preview.emergentagent.com"
 
 # Test credentials
 TEST_EMAIL = "janmarkeahig@gmail.com"
