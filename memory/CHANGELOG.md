@@ -1,5 +1,18 @@
 # AgriBooks Changelog
 
+## Feb 2026 — Order-Mode Product Search: Offline Fallback (Iter 202)
+
+**Ask**: "I tried going offline on Quick mode and the product search worked perfectly, fully offline. My problem is in the advance order page (Order mode) — the product search function disappears."
+
+**Root cause**: `SmartProductSearch.js` (used in Order mode and other places) called `api.get('/products/search-detail')` and on error just set `results=[]`. When `navigator.onLine` mistakenly reports `true` while there's no real connection (well-known browser false-negative), the response interceptor in `AuthContext.js` doesn't fire its IndexedDB fallback, so the request fails silently with empty results. To the cashier this looks like the search "disappears". Quick mode never had this issue because it filters `allProducts` (already in memory) entirely client-side.
+
+**Fix** — `SmartProductSearch.js`:
+- New `searchProductsLocal(query, branchId)` helper that mirrors Quick mode's logic exactly — token-AND with the short-numeric prefix rule, then a Levenshtein fuzzy fallback on tokens ≥4 chars at distance 1–2. Reads from `getProducts()` / `getInventoryItem()` / `getBranchPrice()` in IndexedDB and enriches each result with the same shape the API returns.
+- The fetch effect now tries the API first; on ANY error (offline, server error, browser misreporting `onLine`) it falls back to `searchProductsLocal()` automatically.
+- New offline indicator chip at top of the dropdown: amber bar with WifiOff icon — "Offline — searching cached products. Stock & prices may not reflect the latest changes." — so the cashier knows the data is from cache.
+- Local fuzzy hits set the same "Did you mean" chip locally (no more silent zeros for typo'd queries while offline).
+
+
 ## Feb 2026 — Unsaved-Changes Leave Guard (Iter 202)
 
 **Ask**: "I was encoding a sales with over 200 lines already, my mouse suddenly pressed Sales History — it went directly there making my effort all gone. I want a popup: 'Are you sure you want to leave?' on every form where I might lose work."
