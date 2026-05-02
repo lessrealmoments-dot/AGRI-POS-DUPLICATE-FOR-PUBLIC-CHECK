@@ -181,6 +181,7 @@ PIN_POLICY_ACTIONS = [
     {"key": "credit_sale_approval",   "label": "Credit / Partial Sale Approval",  "module": "Sales",             "defaults": ["admin_pin", "manager_pin", "totp"]},
     {"key": "void_invoice",           "label": "Void Invoice",                    "module": "Sales",             "defaults": ["admin_pin", "manager_pin", "totp"]},
     {"key": "void_payment",           "label": "Void Payment on Invoice",         "module": "Sales",             "defaults": ["admin_pin", "manager_pin", "totp"]},
+    {"key": "modify_payment",         "label": "Modify Payment on Invoice",       "module": "Sales",             "defaults": ["admin_pin", "manager_pin", "totp"]},
     {"key": "void_return",            "label": "Void Return",                     "module": "Sales",             "defaults": ["admin_pin", "manager_pin", "totp"]},
     {"key": "invoice_edit",           "label": "Edit Posted Invoice",             "module": "Sales",             "defaults": ["admin_pin", "manager_pin", "totp"]},
     {"key": "pos_discount",           "label": "POS Discount / Price Override",   "module": "Sales",             "defaults": ["admin_pin", "manager_pin", "totp"]},

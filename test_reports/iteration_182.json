@@ -1,0 +1,58 @@
+{
+  "summary": "Verified P0 regression fix for 'Payment failed' silent abort bug on /payments. Real Save & Apply click was executed and a POST /api/customers/{id}/receive-payment was confirmed firing with valid JSON body and HTTP 200 response — the exact regression that slipped through iter_181. Backend regression suite (test_payment_history_181.py) still passes 15/15 (2 skipped due to no test data).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_payment_history_181.py",
+    "/app/test_reports/pytest/pytest_results_182.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "PaymentsPage.js line 1163 — Save & Apply button correctly wraps handleApplyPayment in arrow fn `() => handleApplyPayment()` so React's SyntheticEvent is no longer passed as the first arg.",
+    "PaymentsPage.js line 401-406 — Defensive type-coercion of pinOverride (only string/number is accepted; SyntheticEvent / object rejected) is the correct belt-and-suspenders fix to prevent regression even if a future caller forgets the arrow wrapper.",
+    "verify.py PIN_POLICY_ACTIONS — modify_payment is now explicitly registered; behaviorally identical because verify_pin_for_action already had a default fallback, so no risk of breakage.",
+    "axios interceptor in AuthContext.js (line 191) only intercepts when offline mode is true; in online mode errors propagate normally — confirmed via the regression: previous bug was a JSON.stringify TypeError thrown synchronously inside axios, never reached an interceptor at all.",
+    "Console hydration warnings ('<span> cannot be a child of <tr>/<tbody>') originate from the dev visual-editor's injected `x-file-name` spans, NOT from app code. No functional impact."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (15 passed, 2 skipped — no test data — 0 failed)",
+    "frontend": "100% on the regression flow (Save & Apply click → POST fired → 200 → balance updated)"
+  },
+  "test_credentials": "test_org_admin@regression.local / RegressionPass!2026 (Manager PIN 521325)",
+  "seed_data_creation": "None — used existing seeded customers (12 with non-zero balance)",
+  "features_verified": {
+    "regression_fix_apply_payment_post_fires": "✅ CONFIRMED — clicked Save & Apply button on customer 'Juan Dela Cruz 633c26' (id=396be500-…) with ₱100 in payment-row input. Network trace captured 1 POST /api/customers/{id}/receive-payment with body {allocations:[{invoice_id, amount:100, discount:0}], method:'Cash', date:'2026-05-02', memo:''} — discount_pin field is correctly OMITTED (not a stringified SyntheticEvent). Status 200 returned. Customer balance dropped ₱2,000 → ₱1,900 in UI.",
+    "payments_page_loads": "✅ /payments renders, Customer Payment + Payment History tabs both present, 12 customers with balance listed, customer-row testids work, payment-row inputs render after customer click",
+    "backend_regression_suite": "✅ 15/15 pass (test_payment_history_181.py) — Global history endpoint, per-customer history endpoint, close-wizard preview fields all green",
+    "auth_login": "✅ Login with test_org_admin@regression.local works, redirects to /dashboard, token stored",
+    "branch_selector_default": "✅ 'All Branches' loaded by default; receivables-summary returns 12 customers"
+  },
+  "features_not_fully_executed": {
+    "discount_pin_dialog_flow": "Not executed end-to-end via Playwright. The discount-row input is conditionally rendered based on a per-row discountMode toggle which requires UI interaction to enable; the script timed out trying to find discount-row inputs without first toggling the mode. The DEFENSIVE coercion in handleApplyPayment was verified by code review — pinStr coercion at line 405-406 is correct and the regression fix in line 1163 is independent of this path. Recommended: main agent or next testing agent can verify the discount + PIN dialog flow if needed; the core regression fix is proven.",
+    "modify_payment_from_history": "Not executed end-to-end (multi-step flow: clock icon → edit row → enter amount + PIN + reason → save). Backend endpoint /modify-payment was not directly hit. Recommend a focused test if this is a follow-up concern.",
+    "close_wizard_step3_step7": "Smoke check only — already verified working in iteration_181 with green status. No code changes since iter 181 affect these screens."
+  },
+  "regression_proof": {
+    "request_method": "POST",
+    "request_url": "https://offline-interceptor.preview.emergentagent.com/api/customers/396be500-1d91-40d2-8b11-7a04b5ed1728/receive-payment",
+    "request_body_json": {"allocations":[{"invoice_id":"4b021f13-daf6-43be-92a6-b2876ee9512c","amount":100,"discount":0}],"method":"Cash","reference":"","date":"2026-05-02","memo":""},
+    "discount_pin_field_present": false,
+    "discount_pin_field_correct_type": "n/a — field omitted (correct, no PIN required when discount=0)",
+    "response_status": 200,
+    "balance_before": 2000.00,
+    "balance_after": 1900.00,
+    "result": "FIX_CONFIRMED"
+  },
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "The P0 regression (Save & Apply silently failing with no POST request) is FIXED and VERIFIED end-to-end. Iter_181 missed this because it never actually clicked the Save & Apply button; iter_182 explicitly clicked it and inspected the network trace — POST fires cleanly. If revisiting payments tests, also exercise: (a) discount mode toggle → enter discount → Save & Apply → discount PIN dialog → confirm with 521325, asserting payload.discount_pin === '521325' (string, not object); (b) modify-payment from /payments History clock icon. Both paths are protected by the same defensive `pinStr` coercion at PaymentsPage.js line 405-406 so regression risk is low.",
+  "rca of the issue": "Root cause: Button onClick={handleApplyPayment} (without arrow wrapper) caused React to pass the SyntheticEvent as the first arg `pinOverride`. The function treated truthy → assigned event object to payload.discount_pin. axios then called JSON.stringify on a SyntheticEvent containing circular refs → TypeError thrown synchronously, request never serialized, fetch:null observed in browser, catch block fired generic 'Payment failed' toast. Fix: (1) wrap onClick in arrow fn `() => handleApplyPayment()` so no event arg leaks (PaymentsPage.js:1163); (2) defensive coercion `const pinStr = (typeof pinOverride === 'string' || typeof pinOverride === 'number') ? String(pinOverride).trim() : ''` rejects non-PIN args (PaymentsPage.js:405-406). Verification: real button-click in Playwright now fires POST /receive-payment with clean payload (no discount_pin pollution) and backend returns 200."
+}

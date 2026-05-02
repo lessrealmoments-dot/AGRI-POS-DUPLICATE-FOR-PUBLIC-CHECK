@@ -399,12 +399,17 @@ export default function PaymentsPage() {
   // ── Apply Payment ──
   // Interest must be generated manually before applying (auto-generate removed).
   const handleApplyPayment = async (pinOverride) => {
+    // Defensive: when bound directly to a button, React passes a SyntheticEvent
+    // here. Strip anything that's not a real PIN string so we don't poison the
+    // payload (was causing axios JSON.stringify to throw on circular refs → silent fail).
+    const pinStr = (typeof pinOverride === 'string' || typeof pinOverride === 'number')
+      ? String(pinOverride).trim() : '';
     const totalEntered = invoices.reduce((s, inv) => s + (parseFloat(rowAmounts[inv.id] || 0)), 0);
     const totalDisc = invoices.reduce((s, inv) => s + getDiscountAmount(inv), 0);
     if (totalEntered <= 0 && totalDisc <= 0) { toast.error('Enter payment amounts for at least one invoice'); return; }
 
     // If discount is applied, require manager PIN
-    if (totalDisc > 0 && !pinOverride) {
+    if (totalDisc > 0 && !pinStr) {
       setDiscountPin('');
       setDiscountPinError('');
       setDiscountPinOpen(true);
@@ -427,7 +432,7 @@ export default function PaymentsPage() {
         allocations, method: payMethod, reference: payRef, date: payDate,
         branch_id: currentBranch?.id, memo: payMemo,
       };
-      if (pinOverride) payload.discount_pin = pinOverride;
+      if (pinStr) payload.discount_pin = pinStr;
 
       const res = await api.post(`/customers/${selectedCustomer.id}/receive-payment`, payload);
       const parts = [`${formatPHP(res.data.total_applied)} applied`];
@@ -1155,7 +1160,7 @@ export default function PaymentsPage() {
 
                 {/* Right: Actions */}
                 <div className="flex flex-col gap-2">
-                  <Button onClick={handleApplyPayment} disabled={processing || !hasUnsavedAmounts}
+                  <Button onClick={() => handleApplyPayment()} disabled={processing || !hasUnsavedAmounts}
                     className="h-10 px-6 bg-[#1A4D2E] hover:bg-[#14532d] text-white" data-testid="apply-payment-btn">
                     {processing ? 'Processing...' : 'Save & Apply'}
                   </Button>
