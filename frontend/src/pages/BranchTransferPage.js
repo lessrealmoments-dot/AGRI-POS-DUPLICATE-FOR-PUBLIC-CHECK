@@ -38,6 +38,10 @@ const fmtQty = (v) => {
   return parseFloat(n.toFixed(3)).toString();
 };
 
+// Prevent accidental wheel-scroll changes on number inputs.
+// (User reported their value changing when they hovered + scrolled the page.)
+const noWheel = (e) => { e.currentTarget.blur(); };
+
 const STATUS_COLORS = {
   draft: 'bg-slate-100 text-slate-600',
   sent: 'bg-blue-100 text-blue-700',
@@ -85,12 +89,67 @@ function validateRow(row, minMargin) {
   return { ok: true, reason: '', margin };
 }
 
+// ── Anchor-positioned dropdown (mirrors SmartProductSearch positioning) ───────
+// Re-positions on scroll/resize, auto-flips up when there's no room below,
+// clamps max-height to available viewport space. Used for both the main
+// transfer product search and the stock-request product search.
+function AnchoredDropdown({ anchor, open, children, minWidth = 320 }) {
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 0, maxHeight: 320, flipUp: false });
+
+  useEffect(() => {
+    if (!open || !anchor) return;
+    const compute = () => {
+      const rect = anchor.getBoundingClientRect();
+      const vh = window.innerHeight;
+      const spaceBelow = vh - rect.bottom - 8;
+      const spaceAbove = rect.top - 8;
+      const flipUp = spaceBelow < 220 && spaceAbove > spaceBelow;
+      const maxHeight = Math.max(160, Math.min(360, flipUp ? spaceAbove : spaceBelow));
+      setPos({
+        top: flipUp ? null : rect.bottom + 4,
+        bottom: flipUp ? vh - rect.top + 4 : null,
+        left: rect.left,
+        width: Math.max(rect.width, minWidth),
+        maxHeight,
+        flipUp,
+      });
+    };
+    compute();
+    window.addEventListener('scroll', compute, true);
+    window.addEventListener('resize', compute);
+    return () => {
+      window.removeEventListener('scroll', compute, true);
+      window.removeEventListener('resize', compute);
+    };
+  }, [open, anchor, minWidth]);
+
+  if (!open || !anchor) return null;
+  return createPortal(
+    <div
+      style={{
+        position: 'fixed',
+        top: pos.top != null ? pos.top : undefined,
+        bottom: pos.bottom != null ? pos.bottom : undefined,
+        left: pos.left,
+        width: pos.width,
+        maxHeight: pos.maxHeight,
+        zIndex: 9999,
+      }}
+      className="bg-white border border-slate-200 rounded-lg shadow-xl overflow-y-auto overscroll-contain"
+    >
+      {children}
+    </div>,
+    document.body
+  );
+}
+
 export default function BranchTransferPage() {
   const { branches, currentBranch, user, canViewAllBranches, selectedBranchId, isConsolidatedView } = useAuth();
   const navigate = useNavigate();
   const isAdmin = user?.role === 'admin';
   const searchTimers = useRef({});
   const dropdownRefs = useRef({});
+  const reqDropdownRefs = useRef({});
   const skipResetRef = useRef(false); // skip row/branch reset when loading from request
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -983,6 +1042,7 @@ export default function BranchTransferPage() {
               <Label className="text-xs">Min Margin (₱ / unit)</Label>
               <Input type="number" min={0} value={minMargin}
                 onChange={e => setMinMargin(parseFloat(e.target.value) || 0)}
+                onWheel={noWheel}
                 className="mt-1 h-9 font-mono" data-testid="min-margin-input" />
             </div>
             {toBranchId && (
@@ -1133,41 +1193,36 @@ export default function BranchTransferPage() {
                                     ref={el => { dropdownRefs.current[row.id] = el; }}
                                     autoComplete="new-password"
                                   />
-                                  {row.productMatches?.length > 0 && (() => {
-                                    const el = dropdownRefs.current[row.id];
-                                    if (!el) return null;
-                                    const rect = el.getBoundingClientRect();
-                                    return createPortal(
-                                      <div style={{ position:'fixed', top: rect.bottom+4, left: rect.left, width: Math.max(rect.width, 300), zIndex: 9999 }}
-                                        className="bg-white border border-slate-200 rounded-lg shadow-xl max-h-64 overflow-y-auto">
-                                        {row.productMatches.map((p, idx) => (
-                                          <button key={p.id} onMouseDown={() => selectProduct(row.id, p)}
-                                            className={`w-full text-left px-3 py-2 border-b last:border-0 transition-colors ${
-                                              idx === row.activeSearchIndex
-                                                ? 'bg-emerald-50 border-l-[3px] border-l-emerald-700'
-                                                : 'hover:bg-slate-50'
-                                            }`}>
-                                            <div className="flex justify-between items-start">
-                                              <div>
-                                                <span className="font-medium text-sm">{p.name}</span>
-                                                <span className="text-slate-400 text-xs ml-2">{p.sku} · {p.category}</span>
-                                              </div>
-                                              <span className="text-xs font-mono text-slate-600">{formatPHP(p.branch_capital)}</span>
-                                            </div>
-                                            {p.last_branch_retail && (
-                                              <span className="text-[10px] text-blue-500">Last retail at branch: {formatPHP(p.last_branch_retail)}</span>
-                                            )}
-                                          </button>
-                                        ))}
-                                        <div className="px-3 py-1 bg-slate-50 text-[10px] text-slate-400 flex gap-3 border-t">
-                                          <span>↑↓ navigate</span>
-                                          <span>Enter to select</span>
-                                          <span>Esc to close</span>
+                                  <AnchoredDropdown
+                                    anchor={dropdownRefs.current[row.id]}
+                                    open={(row.productMatches?.length || 0) > 0}
+                                    minWidth={320}
+                                  >
+                                    {row.productMatches?.map((p, idx) => (
+                                      <button key={p.id} onMouseDown={() => selectProduct(row.id, p)}
+                                        className={`w-full text-left px-3 py-2 border-b last:border-0 transition-colors ${
+                                          idx === row.activeSearchIndex
+                                            ? 'bg-emerald-50 border-l-[3px] border-l-emerald-700'
+                                            : 'hover:bg-slate-50'
+                                        }`}>
+                                        <div className="flex justify-between items-start">
+                                          <div>
+                                            <span className="font-medium text-sm">{p.name}</span>
+                                            <span className="text-slate-400 text-xs ml-2">{p.sku} · {p.category}</span>
+                                          </div>
+                                          <span className="text-xs font-mono text-slate-600">{formatPHP(p.branch_capital)}</span>
                                         </div>
-                                      </div>,
-                                      document.body
-                                    );
-                                  })()}
+                                        {p.last_branch_retail && (
+                                          <span className="text-[10px] text-blue-500">Last retail at branch: {formatPHP(p.last_branch_retail)}</span>
+                                        )}
+                                      </button>
+                                    ))}
+                                    <div className="px-3 py-1 bg-slate-50 text-[10px] text-slate-400 flex gap-3 border-t sticky bottom-0">
+                                      <span>↑↓ navigate</span>
+                                      <span>Enter to select</span>
+                                      <span>Esc to close</span>
+                                    </div>
+                                  </AnchoredDropdown>
                                 </div>
                               )}
                             </td>
@@ -1198,6 +1253,7 @@ export default function BranchTransferPage() {
                             <td className="px-2 py-1.5 text-center">
                               <Input type="number" min={0} value={row.qty}
                                 onChange={e => updateRow(row.id, { qty: e.target.value })}
+                                onWheel={noWheel}
                                 className={`h-8 text-sm text-center font-mono w-16 ${
                                   isFromRequest && row.requested_qty != null && parseFloat(row.qty) < row.requested_qty
                                     ? 'border-amber-300 bg-amber-50'
@@ -1227,6 +1283,7 @@ export default function BranchTransferPage() {
                                 <Input type="number" min={0} step="0.01"
                                   value={row.transfer_capital}
                                   onChange={e => updateRow(row.id, { transfer_capital: e.target.value })}
+                                  onWheel={noWheel}
                                   onKeyDown={e => {
                                     // Tab on the LAST row when branch_retail is disabled (non-admin) → auto-add new row
                                     if (e.key === 'Tab' && !e.shiftKey && !isAdmin) {
@@ -1289,6 +1346,7 @@ export default function BranchTransferPage() {
                                 <Input type="number" min={0} step="0.01"
                                   value={row.branch_retail}
                                   onChange={e => updateRow(row.id, { branch_retail: e.target.value })}
+                                  onWheel={noWheel}
                                   onKeyDown={e => {
                                     // Tab on the LAST row's last input → auto-add new row & focus it
                                     if (e.key === 'Tab' && !e.shiftKey) {
@@ -1436,6 +1494,7 @@ export default function BranchTransferPage() {
                                             );
                                             updateRow(row.id, { repacks: updated });
                                           }}
+                                          onWheel={noWheel}
                                           placeholder="New price"
                                           className="w-24 h-7 border border-blue-300 rounded-md px-2 text-xs font-mono text-right focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
                                           data-testid={`repack-price-${rp.id}`}
@@ -1577,10 +1636,14 @@ export default function BranchTransferPage() {
                         onChange={e => handleReqSearch(row.id, e.target.value)}
                         placeholder="Search product..."
                         data-testid={`req-product-search-${row.id}`}
+                        ref={el => { reqDropdownRefs.current[row.id] = el; }}
                       />
-                      {row.matches.length > 0 && (
-                        <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
-                          {row.matches.map(p => (
+                      <AnchoredDropdown
+                        anchor={reqDropdownRefs.current[row.id]}
+                        open={(row.matches?.length || 0) > 0}
+                        minWidth={300}
+                      >
+                        {(row.matches || []).map(p => (
                             <button key={p.id} onClick={() => selectReqProduct(row.id, p)}
                               className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 border-b border-slate-50 last:border-0"
                               data-testid={`req-match-${p.id}`}>
@@ -1600,8 +1663,7 @@ export default function BranchTransferPage() {
                               </div>
                             </button>
                           ))}
-                        </div>
-                      )}
+                      </AnchoredDropdown>
                       {row.product && (
                         <div className="flex items-center gap-3 mt-0.5 px-1">
                           <span className="text-[10px] text-slate-400">{row.product.sku || ''} {row.product.category ? `· ${row.product.category}` : ''}</span>
@@ -1621,6 +1683,7 @@ export default function BranchTransferPage() {
                       className="h-9 text-sm text-center"
                       value={row.qty}
                       onChange={e => updateReqRow(row.id, { qty: e.target.value })}
+                      onWheel={noWheel}
                       placeholder="0"
                       min="1"
                       data-testid={`req-qty-${row.id}`}
@@ -2584,6 +2647,7 @@ export default function BranchTransferPage() {
                           min={0}
                           value={receiveQtys[item.product_id] ?? ordered}
                           onChange={e => setReceiveQtys(q => ({ ...q, [item.product_id]: e.target.value }))}
+                          onWheel={noWheel}
                           className={`h-8 text-sm text-center font-mono w-24 mx-auto block font-bold ${
                             isShort ? 'border-amber-400 bg-amber-50 text-amber-800' :
                             isExcess ? 'border-blue-400 bg-blue-50 text-blue-800' :

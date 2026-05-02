@@ -1,5 +1,42 @@
 # AgriBooks PRD
 
+## Iter 211 (May 2026) — Branch Transfer: No-wheel-scroll + Smart Dropdown ✅
+
+### Why
+1. Manager reported: "If I accidentally point my pointer there [number input] and scroll, it changes value without me knowing." Classic browser behaviour: focused number inputs respond to mouse-wheel as +/- adjustments. Silent data corruption risk.
+2. Search dropdown didn't reposition when scrolling, didn't flip up at the bottom of the page, and clipped behind table boundaries — felt sluggish vs the polished Sales → Order Mode dropdown.
+
+### What shipped
+
+**1. Wheel-scroll guard on every number input**
+- New helper `noWheel = (e) => e.currentTarget.blur()` at the top of `BranchTransferPage.js`.
+- Applied via `onWheel={noWheel}` to every user-facing number input on the page:
+  - Quantity (transfer rows + stock-request rows)
+  - Transfer Capital
+  - Branch Retail
+  - Repack new-retail-price
+  - Min Margin
+  - Category Markup value
+  - Receive Qty (for confirming receipt)
+- Behaviour: hover + scroll → input loses focus → wheel goes to page scroll. Existing focused-edit experience untouched.
+
+**2. AnchoredDropdown — same UX as Sales SmartProductSearch**
+- New helper component within `BranchTransferPage.js`:
+  - Re-positions on `window.scroll` (capture phase) AND `window.resize`
+  - **Auto-flips up** when there's < 220 px below the input AND more headroom above
+  - **Clamps `max-height`** to available viewport space (160–360 px) so the list never spills past the screen edge
+  - Rendered via `createPortal` to escape any `overflow:hidden`/`overflow:auto` ancestor
+  - `overscroll-contain` so wheel inside the list doesn't scroll the page
+- Replaces both dropdowns:
+  - Main transfer product search (was a one-shot IIFE that froze on render)
+  - Stock-request product search (was `absolute z-50` which clipped behind table cells)
+
+### Tested
+- Lint clean.
+- Backend endpoints from prior iters all pass curl smoke tests.
+
+---
+
 ## Iter 210 (May 2026) — Branch Transfer: Park Draft + Match-Target-Retail ✅
 
 ### What shipped
