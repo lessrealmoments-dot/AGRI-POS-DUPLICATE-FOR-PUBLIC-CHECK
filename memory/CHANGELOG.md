@@ -1,5 +1,28 @@
 # AgriBooks Changelog
 
+## May 2026 — Payments Page Improvements (Iter 203)
+
+**Ask**: "Disable auto-generate interest, add manual interest input, make discount inputable with PIN, and add payment history editing."
+
+**1. Manual Interest Generation (auto-generate removed):**
+- Removed auto-INT-invoice creation at payment time (was silently creating interest invoices before applying payment)
+- Interest invoices are now created **only** when the user explicitly clicks:
+  - "Generate INT" button → auto-computes from terms & due dates (existing behavior, renamed from "Force INT")
+  - Manual ₱ input field + apply → creates an INT invoice with any user-specified amount (`manual_amount` param on backend)
+- Backend: `POST /customers/{id}/generate-interest` now accepts `manual_amount` to skip computation
+
+**2. Interest Discount with Manager PIN:**
+- Discount column on interest/penalty invoices now requires **manager PIN** when applying payment
+- Frontend shows a PIN prompt dialog before submitting if `totalDiscount > 0`
+- Backend: `POST /customers/{id}/receive-payment` validates `discount_pin` via `verify_pin_for_action("interest_discount")`
+
+**3. Payment History — Edit Before Z-Report:**
+- Payment history now shows `payment_id`, `invoice_id`, `voided` status, and `is_closed` (Z-Report guard)
+- Each non-voided payment has an "Edit" button (disabled with "Closed" badge if the date is in a Z-Report)
+- Edit dialog: change amount + enter reason + manager PIN
+- Backend: `POST /customers/{id}/modify-payment` — atomically voids the old payment (reverses wallet + AR) and applies a new one with the corrected amount. Blocked if the payment date is in `daily_closings`.
+
+
 ## May 2026 — PIN Session (3-Minute Warm Window) (Iter 203)
 
 **Ask**: "Our sales have too many PIN gates. Once the manager inputs the PIN, continue directly for the next few actions within the same sale — only stop if a different authority level is required."

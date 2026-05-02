@@ -13,7 +13,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import {
   Search, AlertTriangle, Percent, Receipt, Clock,
   Info, Zap, Edit3, Banknote, CreditCard, FileText, RefreshCw,
-  Building2, Smartphone, X, Tag, Users, ArrowDownAZ, ArrowDown01, GhostIcon
+  Building2, Smartphone, X, Tag, Users, ArrowDownAZ, ArrowDown01, GhostIcon,
+  Shield, PenLine, Ban
 } from 'lucide-react';
 import { toast } from 'sonner';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
@@ -68,6 +69,19 @@ export default function PaymentsPage() {
   const [generatingCharge, setGeneratingCharge] = useState(null);
   const [interestRateInput, setInterestRateInput] = useState('');
   const interestPreviewTimer = useRef(null);
+  const [manualInterestAmt, setManualInterestAmt] = useState('');
+
+  // Discount PIN prompt
+  const [discountPinOpen, setDiscountPinOpen] = useState(false);
+  const [discountPin, setDiscountPin] = useState('');
+  const [discountPinError, setDiscountPinError] = useState('');
+
+  // Payment edit
+  const [editPayment, setEditPayment] = useState(null); // { payment_id, invoice_id, amount, ... }
+  const [editAmount, setEditAmount] = useState('');
+  const [editPin, setEditPin] = useState('');
+  const [editReason, setEditReason] = useState('');
+  const [editSubmitting, setEditSubmitting] = useState(false);
 
   // No-rate prompt
   const [ratePromptOpen, setRatePromptOpen] = useState(false);
@@ -285,7 +299,7 @@ export default function PaymentsPage() {
     }
   };
 
-  // ── Generate Interest manually (force=true, bypasses 30-day guard) ──
+  // ── Generate Interest (auto-compute from terms/due date) ──
   const handleGenerateInterest = async () => {
     const rate = parseFloat(interestRateInput) || 0;
     if (rate <= 0) { toast.error('Enter an interest rate (% per month) first'); return; }
@@ -296,12 +310,33 @@ export default function PaymentsPage() {
       });
       if (res.data.total_interest > 0) {
         toast.success(`Interest invoice ${res.data.invoice_number} created — ${formatPHP(res.data.total_interest)}`);
+        setManualInterestAmt('');
         await loadInvoices(selectedCustomer.id);
         await loadChargesPreview(selectedCustomer.id, rate);
       } else {
         toast(`No interest to generate — ${res.data.message}`, { description: `Grace: ${res.data.grace_period} days` });
       }
     } catch (e) { toast.error(e.response?.data?.detail || 'Failed to generate interest'); }
+    setGeneratingCharge(null);
+  };
+
+  // ── Apply Manual Interest (user-entered amount) ──
+  const handleManualInterest = async () => {
+    const amt = parseFloat(manualInterestAmt) || 0;
+    if (amt <= 0) { toast.error('Enter a manual interest amount'); return; }
+    setGeneratingCharge('manual');
+    try {
+      const res = await api.post(`/customers/${selectedCustomer.id}/generate-interest`, {
+        as_of_date: payDate, force: true, manual_amount: amt,
+        manual_note: `Manual entry by ${selectedCustomer?.name || 'cashier'}`,
+      });
+      if (res.data.total_interest > 0) {
+        toast.success(`Manual interest invoice ${res.data.invoice_number} — ${formatPHP(res.data.total_interest)}`);
+        setManualInterestAmt('');
+        await loadInvoices(selectedCustomer.id);
+        await loadChargesPreview(selectedCustomer.id);
+      }
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed to create manual interest'); }
     setGeneratingCharge(null);
   };
 
@@ -322,75 +357,22 @@ export default function PaymentsPage() {
   };
 
   // ── Apply Payment ──
-  // Before applying: if customer has overdue invoices and a rate, generate the INT invoice
-  // (force=true) so that interest is collected at this payment. autoApply ordering puts
-  // interest first so the staff still sees the same applied total.
-  const handleApplyPayment = async () => {
+  // Interest must be generated manually before applying (auto-generate removed).
+  const handleApplyPayment = async (pinOverride) => {
     const totalEntered = invoices.reduce((s, inv) => s + (parseFloat(rowAmounts[inv.id] || 0)), 0);
     const totalDisc = invoices.reduce((s, inv) => s + getDiscountAmount(inv), 0);
     if (totalEntered <= 0 && totalDisc <= 0) { toast.error('Enter payment amounts for at least one invoice'); return; }
 
+    // If discount is applied, require manager PIN
+    if (totalDisc > 0 && !pinOverride) {
+      setDiscountPin('');
+      setDiscountPinError('');
+      setDiscountPinOpen(true);
+      return;
+    }
+
     setProcessing(true);
     try {
-      // Auto-generate INT invoice at pay-time (only if rate set + computed interest > 0)
-      const rate = parseFloat(interestRateInput) || parseFloat(selectedCustomer.interest_rate) || 0;
-      const computedInt = chargesPreview?.total_interest || 0;
-      let intInvoiceCreated = null;
-      if (rate > 0 && computedInt > 0.005) {
-        try {
-          const intRes = await api.post(`/customers/${selectedCustomer.id}/generate-interest`, {
-            as_of_date: payDate, rate_override: rate, force: true,
-          });
-          if (intRes.data.total_interest > 0 && intRes.data.invoice_number) {
-            intInvoiceCreated = intRes.data;
-            // Reload invoices so the new INT invoice appears for allocation
-            const fresh = await loadInvoices(selectedCustomer.id);
-            // Auto-apply: route entered amount through the now-updated invoice list
-            // (interest invoice will be paid first because of sort order)
-            const totalToApply = totalEntered + (intInvoiceCreated ? intInvoiceCreated.total_interest : 0);
-            let remaining = totalToApply;
-            const newAmounts = {};
-            for (const inv of fresh) {
-              if (remaining <= 0) break;
-              const apply = Math.min(remaining, inv.balance);
-              if (apply > 0) { newAmounts[inv.id] = apply.toFixed(2); remaining = round2(remaining - apply); }
-            }
-            setRowAmounts(newAmounts);
-            // Build allocations from the freshly loaded invoices
-            const allocations = fresh
-              .map(inv => ({ invoice_id: inv.id, amount: parseFloat(newAmounts[inv.id] || 0), discount: 0 }))
-              .filter(a => a.amount > 0);
-            const res = await api.post(`/customers/${selectedCustomer.id}/receive-payment`, {
-              allocations, method: payMethod, reference: payRef, date: payDate,
-              branch_id: currentBranch?.id, memo: payMemo,
-            });
-            toast.success(
-              `${formatPHP(res.data.total_applied)} applied to ${res.data.applied_invoices.length} invoice(s) — incl. ${formatPHP(intInvoiceCreated.total_interest)} interest (${intInvoiceCreated.invoice_number})`,
-              { description: `Deposited to ${res.data.deposited_to}` }
-            );
-            setRowAmounts({});
-            setRowDiscounts({});
-            setDiscountModes({});
-            setPayRef('');
-            setPayMemo('');
-            await loadInvoices(selectedCustomer.id);
-            await loadChargesPreview(selectedCustomer.id, rate);
-            invalidateBalanceCache();
-            await loadCustList();
-            const refreshed = (await api.get('/customers/receivables-summary', {
-              params: { include_zero: showAll, ...(currentBranch?.id ? { branch_id: currentBranch.id } : {}) }
-            }).then(r => r.data || []).catch(() => [])).find(c => c.id === selectedCustomer.id);
-            if (refreshed) setSelectedCustomer(refreshed);
-            setProcessing(false);
-            return;
-          }
-        } catch (e) {
-          // If INT generation fails (e.g., 30-day guard hit), proceed with normal payment
-          console.warn('INT generation skipped:', e.response?.data?.detail);
-        }
-      }
-
-      // Standard path — no INT invoice was created (or none needed)
       const allocations = invoices
         .map(inv => ({
           invoice_id: inv.id,
@@ -401,10 +383,13 @@ export default function PaymentsPage() {
 
       if (allocations.length === 0) { toast.error('Enter payment amounts for at least one invoice'); setProcessing(false); return; }
 
-      const res = await api.post(`/customers/${selectedCustomer.id}/receive-payment`, {
+      const payload = {
         allocations, method: payMethod, reference: payRef, date: payDate,
         branch_id: currentBranch?.id, memo: payMemo,
-      });
+      };
+      if (pinOverride) payload.discount_pin = pinOverride;
+
+      const res = await api.post(`/customers/${selectedCustomer.id}/receive-payment`, payload);
       const parts = [`${formatPHP(res.data.total_applied)} applied`];
       if (res.data.total_discounted > 0) parts.push(`${formatPHP(res.data.total_discounted)} discounted`);
       parts.push(`to ${res.data.applied_invoices.length} invoice(s)`);
@@ -432,6 +417,42 @@ export default function PaymentsPage() {
       setPayHistory(res.data);
       setHistoryOpen(true);
     } catch { toast.error('Failed to load history'); }
+  };
+
+  const handleModifyPayment = async () => {
+    if (!editPayment) return;
+    const newAmt = parseFloat(editAmount);
+    if (isNaN(newAmt) || newAmt < 0) { toast.error('Enter a valid amount'); return; }
+    if (!editPin || editPin.length < 4) { toast.error('Manager PIN required'); return; }
+    setEditSubmitting(true);
+    try {
+      const res = await api.post(`/customers/${selectedCustomer.id}/modify-payment`, {
+        invoice_id: editPayment.invoice_id,
+        payment_id: editPayment.payment_id,
+        new_amount: newAmt,
+        manager_pin: editPin,
+        reason: editReason || 'Amount corrected',
+      });
+      toast.success(res.data.message + ` — authorized by ${res.data.authorized_by}`);
+      setEditPayment(null);
+      setEditAmount('');
+      setEditPin('');
+      setEditReason('');
+      // Reload everything
+      const histRes = await api.get(`/customers/${selectedCustomer.id}/payment-history`);
+      setPayHistory(histRes.data);
+      await loadInvoices(selectedCustomer.id);
+      await loadChargesPreview(selectedCustomer.id);
+      invalidateBalanceCache();
+      await loadCustList();
+      const refreshed = (await api.get('/customers/receivables-summary', {
+        params: { include_zero: showAll, ...(currentBranch?.id ? { branch_id: currentBranch.id } : {}) }
+      }).then(r => r.data || []).catch(() => [])).find(c => c.id === selectedCustomer.id);
+      if (refreshed) setSelectedCustomer(refreshed);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Modification failed');
+    }
+    setEditSubmitting(false);
   };
 
   const getDaysOverdue = (dueDate) => {
@@ -722,7 +743,26 @@ export default function PaymentsPage() {
                     </Badge>
                   )}
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 flex-wrap">
+                  {/* Manual interest amount input */}
+                  <div className="flex items-center gap-0.5 bg-amber-50 border border-amber-200 rounded-md px-1.5 py-0.5">
+                    <span className="text-[9px] text-amber-600 font-medium">₱</span>
+                    <input
+                      type="text" inputMode="decimal"
+                      value={manualInterestAmt}
+                      onChange={e => setManualInterestAmt(e.target.value)}
+                      onFocus={e => e.target.select()}
+                      placeholder="Manual INT"
+                      className="w-20 h-6 text-xs text-right border-0 bg-transparent outline-none font-bold text-amber-700"
+                      data-testid="manual-interest-input"
+                    />
+                    <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px] text-amber-700 hover:text-amber-800"
+                      onClick={handleManualInterest}
+                      disabled={!!generatingCharge || !(parseFloat(manualInterestAmt) > 0)}
+                      data-testid="apply-manual-interest-btn">
+                      {generatingCharge === 'manual' ? <RefreshCw size={10} className="animate-spin" /> : <Zap size={10} />}
+                    </Button>
+                  </div>
                   <Button variant="ghost" size="sm" className="text-xs gap-1" onClick={() => setStatementOpen(true)}
                     disabled={invoices.length === 0} data-testid="view-statement-btn">
                     <FileText size={12} /> Statement
@@ -730,9 +770,9 @@ export default function PaymentsPage() {
                   <Button variant="ghost" size="sm" className="text-xs gap-1 text-amber-600 hover:text-amber-700"
                     onClick={handleGenerateInterest}
                     disabled={!!generatingCharge || !(parseFloat(interestRateInput) > 0)}
-                    title="Force-generate interest invoice now (bypass 30-day guard)"
+                    title="Auto-compute interest from terms & due dates"
                     data-testid="generate-interest-btn">
-                    <RefreshCw size={12} /> {generatingCharge === 'interest' ? 'Generating...' : 'Force INT'}
+                    <RefreshCw size={12} /> {generatingCharge === 'interest' ? 'Generating...' : 'Generate INT'}
                   </Button>
                   <Button variant="ghost" size="sm" className="text-xs gap-1 text-red-600 hover:text-red-700"
                     onClick={handleGeneratePenalty} disabled={!!generatingCharge}
@@ -916,10 +956,10 @@ export default function PaymentsPage() {
 
       {/* ── Payment History Dialog ── */}
       <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle style={{ fontFamily: 'Manrope' }}>Payment History — {selectedCustomer?.name}</DialogTitle>
-            <DialogDescription>All payments received from this customer</DialogDescription>
+            <DialogDescription>All payments received. Edit payments that haven't been included in a Z-Report yet.</DialogDescription>
           </DialogHeader>
           <ScrollArea className="max-h-[420px]">
             <Table>
@@ -931,13 +971,14 @@ export default function PaymentsPage() {
                 <TableHead className="text-xs">Reference</TableHead>
                 <TableHead className="text-xs text-right">Amount</TableHead>
                 <TableHead className="text-xs">By</TableHead>
+                <TableHead className="text-xs w-16"></TableHead>
               </TableRow></TableHeader>
               <TableBody>
                 {payHistory.length === 0 && (
-                  <TableRow><TableCell colSpan={7} className="text-center py-6 text-slate-400">No payment history</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={8} className="text-center py-6 text-slate-400">No payment history</TableCell></TableRow>
                 )}
                 {payHistory.map((p, i) => (
-                  <TableRow key={i} className={p.method === 'Discount' ? 'bg-blue-50/40' : ''}>
+                  <TableRow key={i} className={`${p.voided ? 'opacity-40 line-through' : ''} ${p.method === 'Discount' ? 'bg-blue-50/40' : ''}`}>
                     <TableCell className="text-xs">{p.date}</TableCell>
                     <TableCell className="font-mono text-xs">{p.invoice_number}</TableCell>
                     <TableCell><Badge variant="outline" className={`text-[9px] ${getTypeConfig(p.sale_type).cls}`}>{getTypeConfig(p.sale_type).label}</Badge></TableCell>
@@ -947,18 +988,126 @@ export default function PaymentsPage() {
                     <TableCell className="text-xs text-slate-400">{p.reference || '—'}</TableCell>
                     <TableCell className="text-right font-medium text-sm">{formatPHP(p.amount)}</TableCell>
                     <TableCell className="text-xs text-slate-400">{p.recorded_by}</TableCell>
+                    <TableCell>
+                      {!p.voided && p.method !== 'Discount' && (
+                        p.is_closed ? (
+                          <span className="text-[9px] text-slate-400 flex items-center gap-0.5" title="Included in Z-Report — cannot modify">
+                            <Ban size={9} /> Closed
+                          </span>
+                        ) : (
+                          <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px] text-blue-600 hover:text-blue-700 gap-0.5"
+                            onClick={() => {
+                              setEditPayment(p);
+                              setEditAmount(String(p.amount));
+                              setEditPin('');
+                              setEditReason('');
+                            }}
+                            data-testid={`edit-payment-${p.payment_id}`}>
+                            <PenLine size={10} /> Edit
+                          </Button>
+                        )
+                      )}
+                    </TableCell>
                   </TableRow>
                 ))}
-                {payHistory.length > 0 && (
+                {payHistory.filter(p => !p.voided).length > 0 && (
                   <TableRow className="bg-slate-50">
                     <TableCell colSpan={5} className="text-right text-xs font-semibold text-slate-500">Total Received</TableCell>
-                    <TableCell className="text-right font-bold">{formatPHP(payHistory.reduce((s, p) => s + (p.amount || 0), 0))}</TableCell>
-                    <TableCell />
+                    <TableCell className="text-right font-bold">{formatPHP(payHistory.filter(p => !p.voided).reduce((s, p) => s + (p.amount || 0), 0))}</TableCell>
+                    <TableCell colSpan={2} />
                   </TableRow>
                 )}
               </TableBody>
             </Table>
           </ScrollArea>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Edit Payment Dialog ── */}
+      <Dialog open={!!editPayment} onOpenChange={(o) => { if (!o) setEditPayment(null); }}>
+        <DialogContent className="sm:max-w-sm" data-testid="edit-payment-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <PenLine size={16} className="text-blue-600" /> Modify Payment
+            </DialogTitle>
+            <DialogDescription>
+              {editPayment?.invoice_number} — {editPayment?.date}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs space-y-1">
+              <div className="flex justify-between"><span className="text-slate-500">Original Amount</span><span className="font-mono font-bold">{formatPHP(editPayment?.amount || 0)}</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">Method</span><span>{editPayment?.method}</span></div>
+            </div>
+            <div>
+              <Label className="text-xs">New Amount</Label>
+              <Input type="text" inputMode="decimal" value={editAmount} onChange={e => setEditAmount(e.target.value)}
+                onFocus={e => e.target.select()} className="h-9 mt-1 font-mono text-lg text-right" autoFocus
+                data-testid="edit-payment-amount" />
+              <p className="text-[10px] text-slate-400 mt-0.5">Enter 0 to void without re-applying</p>
+            </div>
+            <div>
+              <Label className="text-xs">Reason</Label>
+              <Input value={editReason} onChange={e => setEditReason(e.target.value)}
+                placeholder="e.g. Wrong amount entered" className="h-8 mt-1 text-xs"
+                data-testid="edit-payment-reason" />
+            </div>
+            <div>
+              <Label className="text-xs flex items-center gap-1"><Shield size={11} /> Manager PIN</Label>
+              <Input type="password" value={editPin} onChange={e => setEditPin(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleModifyPayment()}
+                placeholder="Enter PIN" className="h-9 mt-1 font-mono text-center text-xl tracking-widest"
+                data-testid="edit-payment-pin" />
+            </div>
+            <div className="flex gap-2 pt-1">
+              <Button variant="outline" className="flex-1" onClick={() => setEditPayment(null)}>Cancel</Button>
+              <Button className="flex-1 bg-blue-600 hover:bg-blue-700 text-white" onClick={handleModifyPayment}
+                disabled={editSubmitting || !editPin || editPin.length < 4}
+                data-testid="edit-payment-confirm">
+                {editSubmitting ? 'Processing...' : 'Modify Payment'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Discount PIN Dialog ── */}
+      <Dialog open={discountPinOpen} onOpenChange={(o) => { if (!o) setDiscountPinOpen(false); }}>
+        <DialogContent className="sm:max-w-xs" data-testid="discount-pin-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Shield size={16} className="text-amber-600" /> Discount Authorization
+            </DialogTitle>
+            <DialogDescription>Manager PIN required to apply interest discount</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 text-xs text-blue-700">
+              <Tag size={11} className="inline mr-1" />
+              Total Discount: <strong>{formatPHP(totalDiscount)}</strong>
+            </div>
+            <Input type="password" value={discountPin} onChange={e => { setDiscountPin(e.target.value); setDiscountPinError(''); }}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && discountPin.length >= 4) {
+                  setDiscountPinOpen(false);
+                  handleApplyPayment(discountPin);
+                }
+              }}
+              placeholder="Enter Manager PIN" className="h-10 text-center text-xl tracking-widest font-mono" autoFocus
+              data-testid="discount-pin-input" />
+            {discountPinError && <p className="text-xs text-red-600">{discountPinError}</p>}
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => setDiscountPinOpen(false)}>Cancel</Button>
+              <Button className="flex-1 bg-amber-600 hover:bg-amber-700 text-white"
+                disabled={discountPin.length < 4}
+                onClick={() => {
+                  setDiscountPinOpen(false);
+                  handleApplyPayment(discountPin);
+                }}
+                data-testid="discount-pin-confirm">
+                Authorize & Apply
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 

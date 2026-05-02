@@ -1387,6 +1387,7 @@ async def generate_interest_invoice(customer_id: str, data: dict, user=Depends(g
 
     Minimum interval: interest can only be generated once every 30 days (auto-mode).
     Pass force=True to override the interval — manual button only, not auto-select.
+    Pass manual_amount > 0 to skip computation and create an INT invoice with the given amount.
     """
     check_perm(user, "accounting", "generate_interest")
     customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
@@ -1399,6 +1400,7 @@ async def generate_interest_invoice(customer_id: str, data: dict, user=Depends(g
     rate_override = data.get("rate_override")
     save_rate = data.get("save_rate", False)
     force = data.get("force", False)          # True = manual override button
+    manual_amount = float(data.get("manual_amount", 0))  # > 0 = skip computation
     MIN_INTERVAL_DAYS = 30
 
     # ── Minimum interval guard (prevents accumulation of many tiny INT invoices) ──
@@ -1425,6 +1427,42 @@ async def generate_interest_invoice(customer_id: str, data: dict, user=Depends(g
 
     # Use override if provided, else customer default
     default_rate = float(rate_override) if rate_override is not None else float(customer.get("interest_rate", 0))
+
+    # ── Manual amount shortcut: skip computation, create INT invoice with given amount ──
+    if manual_amount > 0:
+        # Find branch from any open invoice
+        any_inv = await db.invoices.find_one(
+            {"customer_id": customer_id, "balance": {"$gt": 0}, "status": {"$nin": ["voided", "paid"]}},
+            {"_id": 0, "branch_id": 1}
+        )
+        branch_id = any_inv.get("branch_id", "") if any_inv else ""
+        interest_lines = [{
+            "product_id": "", "product_name": f"Interest — Manual ({data.get('manual_note', 'Manually computed')})",
+            "description": f"Manual interest entry as of {as_of_str}",
+            "quantity": 1, "rate": manual_amount, "discount_type": "amount",
+            "discount_value": 0, "discount_amount": 0, "total": manual_amount,
+        }]
+        total_interest = manual_amount
+        # Create the invoice (skip to invoice creation below)
+        settings = await db.settings.find_one({"key": "invoice_prefixes"}, {"_id": 0})
+        prefix = settings.get("value", {}).get("interest_charge", "INT") if settings else "INT"
+        inv_number = await generate_next_number(prefix, branch_id)
+        interest_invoice = {
+            "id": new_id(), "invoice_number": inv_number, "prefix": prefix,
+            "customer_id": customer_id, "customer_name": customer.get("name", ""),
+            "branch_id": branch_id, "order_date": as_of_str, "invoice_date": as_of_str, "due_date": as_of_str,
+            "items": interest_lines, "subtotal": round(total_interest, 2), "freight": 0, "overall_discount": 0,
+            "grand_total": round(total_interest, 2), "amount_paid": 0, "balance": round(total_interest, 2),
+            "interest_rate": 0, "interest_accrued": 0, "penalties": 0, "last_interest_date": None,
+            "sale_type": "interest_charge", "status": "open", "payments": [],
+            "manual_interest": True,
+            "cashier_id": user["id"], "cashier_name": user.get("full_name", user["username"]), "created_at": now_iso(),
+        }
+        await db.invoices.insert_one(interest_invoice)
+        del interest_invoice["_id"]
+        await db.customers.update_one({"id": customer_id}, {"$inc": {"balance": round(total_interest, 2)}})
+        return {"message": "Manual interest invoice created", "invoice_number": inv_number,
+                "total_interest": round(total_interest, 2), "invoice": interest_invoice}
 
     if not default_rate or default_rate <= 0:
         return {"message": "No interest rate provided. Enter a rate to compute interest.", "total_interest": 0, "grace_period": grace_period}
@@ -1595,6 +1633,16 @@ async def receive_customer_payment(customer_id: str, data: dict, user=Depends(ge
     if total_amount <= 0 and total_discount <= 0:
         raise HTTPException(status_code=400, detail="Payment or discount amount must be > 0")
 
+    # PIN required when applying discounts on interest/penalty
+    if total_discount > 0:
+        discount_pin = data.get("discount_pin", "")
+        if not discount_pin:
+            raise HTTPException(status_code=400, detail="Manager PIN required for interest discount")
+        from routes.verify import verify_pin_for_action
+        verifier = await verify_pin_for_action(discount_pin, "interest_discount")
+        if not verifier:
+            raise HTTPException(status_code=403, detail="Invalid PIN — discount not authorized")
+
     method = data.get("method", "Cash")
     digital = is_digital_payment(method)
     fund_source = "digital" if digital else "cashier"
@@ -1697,22 +1745,173 @@ async def receive_customer_payment(customer_id: str, data: dict, user=Depends(ge
 
 @router.get("/customers/{customer_id}/payment-history")
 async def get_customer_payment_history(customer_id: str, user=Depends(get_current_user)):
-    """Get all payment records for a customer across all invoices."""
+    """Get all payment records for a customer across all invoices.
+    Includes payment_id and invoice_id for editing, plus closed-day status."""
     invoices = await db.invoices.find(
         {"customer_id": customer_id},
-        {"_id": 0, "invoice_number": 1, "sale_type": 1, "payments": 1}
+        {"_id": 0, "id": 1, "invoice_number": 1, "sale_type": 1, "payments": 1, "branch_id": 1}
     ).to_list(500)
+
+    # Collect all unique (date, branch_id) pairs to check closed days
+    date_branch_pairs = set()
+    for inv in invoices:
+        for p in inv.get("payments", []):
+            if not p.get("voided"):
+                date_branch_pairs.add((p.get("date", ""), inv.get("branch_id", "")))
+
+    # Check which dates are closed (Z-Report generated)
+    closed_dates = set()
+    for pay_date, branch_id in date_branch_pairs:
+        if pay_date and branch_id:
+            close_rec = await db.daily_closings.find_one(
+                {"date": pay_date, "branch_id": branch_id}, {"_id": 0, "date": 1}
+            )
+            if close_rec:
+                closed_dates.add((pay_date, branch_id))
+
     history = []
     for inv in invoices:
         for p in inv.get("payments", []):
+            is_closed = (p.get("date", ""), inv.get("branch_id", "")) in closed_dates
             history.append({
+                "payment_id": p.get("id", ""),
+                "invoice_id": inv.get("id", ""),
                 "date": p.get("date", ""), "invoice_number": inv.get("invoice_number", ""),
                 "sale_type": inv.get("sale_type", "regular"), "method": p.get("method", ""),
                 "reference": p.get("reference", ""), "amount": p.get("amount", 0),
                 "recorded_by": p.get("recorded_by", ""), "recorded_at": p.get("recorded_at", ""),
+                "voided": p.get("voided", False),
+                "is_closed": is_closed,
+                "fund_source": p.get("fund_source", ""),
             })
     history.sort(key=lambda x: x.get("recorded_at", ""), reverse=True)
     return history
+
+
+@router.post("/customers/{customer_id}/modify-payment")
+async def modify_customer_payment(customer_id: str, data: dict, user=Depends(get_current_user)):
+    """Modify a payment: void the original and re-apply with new amount.
+    Requires manager PIN. Blocked if the payment date is in a closed Z-Report day."""
+    check_perm(user, "accounting", "receive_payment")
+
+    invoice_id = data.get("invoice_id")
+    payment_id = data.get("payment_id")
+    new_amount = float(data.get("new_amount", 0))
+    manager_pin = data.get("manager_pin", "")
+    reason = data.get("reason", "Payment amount corrected")
+
+    if not invoice_id or not payment_id:
+        raise HTTPException(status_code=400, detail="invoice_id and payment_id required")
+    if new_amount < 0:
+        raise HTTPException(status_code=400, detail="New amount cannot be negative")
+    if not manager_pin:
+        raise HTTPException(status_code=400, detail="Manager PIN required")
+
+    from routes.verify import verify_pin_for_action
+    verifier = await verify_pin_for_action(manager_pin, "modify_payment")
+    if not verifier:
+        raise HTTPException(status_code=403, detail="Invalid PIN — modification not authorized")
+
+    inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    payment = next((p for p in inv.get("payments", []) if p.get("id") == payment_id), None)
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment record not found")
+    if payment.get("voided"):
+        raise HTTPException(status_code=400, detail="Payment already voided")
+
+    # Guard: check if the payment date is in a closed Z-Report day
+    branch_id = inv.get("branch_id", "")
+    pay_date = payment.get("date", "")
+    if pay_date and branch_id:
+        close_rec = await db.daily_closings.find_one(
+            {"date": pay_date, "branch_id": branch_id}, {"_id": 0}
+        )
+        if close_rec:
+            raise HTTPException(status_code=400, detail=f"Cannot modify — {pay_date} is already included in a Z-Report")
+
+    old_amount = float(payment.get("amount", 0))
+    method = payment.get("method", "Cash")
+    fund_source = payment.get("fund_source", "cashier")
+    reference = payment.get("reference", "")
+    authorized_name = verifier.get("verifier_name", "Manager")
+
+    # Step 1: Void the original payment (reverse wallet + balance)
+    if old_amount > 0:
+        pmt_method = payment.get("method", "Cash")
+        if fund_source == "digital" or is_digital_payment(pmt_method):
+            await update_digital_wallet(branch_id, -old_amount, reference=f"Payment voided: {reason}")
+        else:
+            await update_cashier_wallet(branch_id, -old_amount, f"Payment voided: {reason}")
+
+    old_paid = float(inv.get("amount_paid", 0))
+    grand_total = float(inv.get("grand_total", 0))
+    reversed_paid = max(0, round(old_paid - old_amount, 2))
+    reversed_balance = round(grand_total - reversed_paid, 2)
+
+    # Mark old payment as voided
+    await db.invoices.update_one(
+        {"id": invoice_id, "payments.id": payment_id},
+        {"$set": {
+            "payments.$.voided": True,
+            "payments.$.voided_at": now_iso(),
+            "payments.$.void_reason": f"Modified: {reason}",
+            "payments.$.voided_by": user.get("full_name", user["username"]),
+            "payments.$.void_authorized_by": authorized_name,
+        }}
+    )
+
+    # Step 2: Apply new payment (if amount > 0)
+    new_payment = None
+    if new_amount > 0:
+        actual_apply = min(new_amount, max(0, reversed_balance))
+        new_payment = {
+            "id": new_id(), "amount": actual_apply, "date": pay_date, "method": method,
+            "reference": reference, "fund_source": fund_source,
+            "applied_to_interest": 0, "applied_to_principal": actual_apply,
+            "recorded_by": user.get("full_name", user["username"]), "recorded_at": now_iso(),
+            "modified_from": payment_id, "modified_by": authorized_name,
+        }
+        final_paid = round(reversed_paid + actual_apply, 2)
+        final_balance = max(0, round(grand_total - final_paid, 2))
+        final_status = "paid" if final_balance <= 0 else ("partial" if final_paid > 0 else "open")
+
+        await db.invoices.update_one({"id": invoice_id}, {
+            "$set": {"amount_paid": final_paid, "balance": final_balance, "status": final_status},
+            "$push": {"payments": new_payment}
+        })
+
+        # Add to wallet
+        if actual_apply > 0:
+            if fund_source == "digital" or is_digital_payment(method):
+                await update_digital_wallet(branch_id, actual_apply, reference=f"Modified payment: {reason}")
+            else:
+                await update_cashier_wallet(branch_id, actual_apply, f"Modified payment: {reason}")
+    else:
+        # No new payment — just update the invoice balances after voiding
+        final_paid = reversed_paid
+        final_balance = max(0, reversed_balance)
+        final_status = "paid" if final_balance <= 0 else ("partial" if final_paid > 0 else "open")
+        await db.invoices.update_one({"id": invoice_id}, {
+            "$set": {"amount_paid": final_paid, "balance": final_balance, "status": final_status}
+        })
+        actual_apply = 0
+
+    # Update customer AR balance: net change = new_amount - old_amount
+    net_change = round(old_amount - actual_apply, 2)  # positive = they owe more
+    if net_change != 0 and inv.get("customer_id"):
+        await db.customers.update_one({"id": inv["customer_id"]}, {"$inc": {"balance": net_change}})
+
+    return {
+        "message": f"Payment modified: ₱{old_amount:,.2f} → ₱{actual_apply:,.2f}",
+        "old_amount": old_amount,
+        "new_amount": actual_apply,
+        "new_balance": final_balance,
+        "new_status": final_status,
+        "authorized_by": authorized_name,
+    }
 
 
 # ==================== CUSTOMER INTEREST/PENALTY GENERATION ====================

@@ -1,6 +1,12 @@
 # AgriBooks PRD
 
-## Iter 203 (May 2026) — PIN Session + Input UX ✅
+## Iter 203 (May 2026) — PIN Session + Input UX + Payments Improvements ✅
+
+### Payments Page Improvements
+- **Manual Interest**: Removed auto-generate at payment time. Users now explicitly generate interest via "Generate INT" button (auto-compute) or manual ₱ amount input.
+- **Interest Discount + PIN**: Discount on interest/penalty invoices now requires manager PIN authorization.
+- **Payment History Editing**: Edit button on each payment (blocked if date is in Z-Report). Modifying = void original + re-apply with new amount atomically.
+- Backend: new `modify-payment` endpoint, `manual_amount` on generate-interest, `discount_pin` on receive-payment.
 
 ### PIN Session (3-Minute Warm Window)
 - Once a manager/admin PIN is verified, cached for 3 minutes (per-sale scope).
