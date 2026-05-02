@@ -1,5 +1,51 @@
 # AgriBooks PRD
 
+## Iter 213 (May 2026) — Branch Transfer Receive: 3-Step Wizard + Scrollable List ✅
+
+### Why
+Two complaints from owner:
+1. Long transfer receipts (10+ items) — the qty-received list overflowed the dialog with no usable scrollbar; user couldn't reach all items or the Confirm button.
+2. Receipt upload was crammed into the same screen as qty entry. Owner wanted a clean wizard: verify quantities → upload receipt → see reference number to write on paper.
+
+### What shipped — Wizard Refactor
+
+**3-step wizard with progress indicator at top of dialog**
+
+**Step 1 — Verify Quantities**
+- Shortage / Excess legend banners (existing)
+- Products table inside `<ScrollArea>` — scrolls properly even with 20+ items, sticky table header
+- Live variance summary cards (Shortage / Excess capital + retail impact)
+- Receiving notes textarea
+- Footer: Cancel | **Continue → Upload Receipt**
+
+**Step 2 — Upload Receipt**
+- Blue intro banner explaining the QR-or-local upload options
+- `ReceiptUploadInline` component (already supports drag-drop on PC + QR for phone + 3-second polling auto-detection)
+- Live "✅ N photos uploaded — ready to continue" confirmation chip when phone upload arrives
+- Footer: ← Back | **Skip — No Receipt** (gray) | **Continue → Review** (disabled until upload OR user explicitly skips)
+
+**Step 3 — Confirm Summary**
+- Big emerald-bordered **Reference Card**: shows the BTO-XXXXX number in big mono type with "Write this on the paper receipt" label, so the manager can write the system reference back on the physical document for traceability later — exactly what user requested.
+- Compact recap of all items: ordered → received, capital per item, total
+- Variance recap if present
+- Receipt photo confirmation (✓ N attached / ✗ none — optional)
+- Footer: ← Back | **Confirm Receipt** (or "Yes, Submit Variance for Review" if shortages/excesses)
+
+### Bonus pre-existing fix
+While linting, found a corrupt JSX block in the View dialog timeline (`const lineColor = step<p ...>` — botched edit from a prior session that would have crashed on opening the View dialog). Reconstructed the proper timeline-step rendering: dot + label + date + connecting line.
+
+### Tested
+- Lint clean
+- Frontend serves /branch-transfers (HTTP 200)
+- Receipt upload component already verified end-to-end via curl in iter 208 (R2 storage, public token preview, multi-file upload all confirmed working)
+
+### Backwards compatible
+- Same backend endpoints; wizard is purely a frontend UX improvement
+- Existing variance double-check (`receiveConfirmStep`) still works inside Step 3
+- All data-testids preserved, plus new ones for wizard steps: `receive-wizard-stepper`, `receive-step-upload`, `receive-step-summary`, `receive-ref-number`, `continue-to-upload-btn`, `skip-receipt-btn`, `continue-to-summary-btn`
+
+---
+
 ## Iter 212 (May 2026) — Branch Transfer: Receipt Photo Now Optional ✅
 
 ### Why

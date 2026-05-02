@@ -774,7 +774,8 @@ export default function BranchTransferPage() {
   };
   const [receiveQtys, setReceiveQtys] = useState({});
   const [receiveNotes, setReceiveNotes] = useState('');
-  const [receiveConfirmStep, setReceiveConfirmStep] = useState(false); // double-check step
+  const [receiveConfirmStep, setReceiveConfirmStep] = useState(false); // double-check step (variance)
+  const [receiveStep, setReceiveStep] = useState('qty'); // 'qty' | 'upload' | 'summary'
   const [acceptDialog, setAcceptDialog] = useState(null); // order to accept
   const [disputeDialog, setDisputeDialog] = useState(null); // order to dispute
   const [disputeNote, setDisputeNote] = useState('');
@@ -794,6 +795,7 @@ export default function BranchTransferPage() {
     setReceiveNotes('');
     setReceiveConfirmStep(false);
     setReceiveReceiptData(null);
+    setReceiveStep('qty'); // reset wizard to first step
     setReceiveDialog(true);
   };
 
@@ -2253,13 +2255,13 @@ export default function BranchTransferPage() {
                   const dotColor = step.done
                     ? (step.variant ? variantColors[step.variant] : 'bg-emerald-500')
                     : 'bg-slate-300';
-                  const lineColor = step.done ? 'bg-emerald-400' : 'bg-slate-200';
+                  const lineColor = step.done ? 'bg-emerald-300' : 'bg-slate-200';
                   return (
-                    <div key={step.key} className="flex items-center flex-1 min-w-0">
+                    <div key={step.key} className="flex items-center min-w-0 shrink-0">
                       <div className="flex flex-col items-center">
-                        <div className={`w-3 h-3 rounded-full ${dotColor} ${isActive ? 'ring-2 ring-offset-1 ring-emerald-300' : ''}`} />
-                        <p className={`text-[10px] mt-1 text-center leading-tight whitespace-nowrap ${step.done ? 'text-slate-700 font-semibold' : 'text-slate-400'}`}>{step.label}</p>
-                        {step.done && step.date && <p className="text-[9px] text-slate-400">{step.date}</p>}
+                        <div className={`w-2.5 h-2.5 rounded-full ${dotColor} ${isActive ? 'ring-2 ring-offset-1 ring-emerald-400' : ''}`} />
+                        <p className={`text-[10px] font-medium mt-0.5 ${isActive ? 'text-slate-700' : 'text-slate-400'}`}>{step.label}</p>
+                        {step.date && <p className="text-[9px] text-slate-400">{step.date}</p>}
                       </div>
                       {i < filteredSteps.length - 1 && (
                         <div className={`flex-1 h-0.5 mx-1 ${lineColor} rounded`} />
@@ -2602,6 +2604,36 @@ export default function BranchTransferPage() {
             </DialogTitle>
           </DialogHeader>
 
+          {/* Wizard step indicator */}
+          <div className="flex items-center justify-center gap-1 px-1 pb-1" data-testid="receive-wizard-stepper">
+            {[
+              { key: 'qty', label: '1. Verify Quantities' },
+              { key: 'upload', label: '2. Upload Receipt' },
+              { key: 'summary', label: '3. Confirm' },
+            ].map((s, i, arr) => {
+              const stepIdx = ['qty', 'upload', 'summary'].indexOf(receiveStep);
+              const myIdx = ['qty', 'upload', 'summary'].indexOf(s.key);
+              const active = myIdx === stepIdx;
+              const done = myIdx < stepIdx;
+              return (
+                <div key={s.key} className="flex items-center">
+                  <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium transition-colors ${
+                    active ? 'bg-emerald-600 text-white shadow-sm' :
+                    done ? 'bg-emerald-100 text-emerald-700' :
+                    'bg-slate-100 text-slate-400'
+                  }`}>
+                    {done ? <Check size={12} /> : <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] ${active ? 'bg-white/20' : 'bg-white/60'}`}>{myIdx + 1}</span>}
+                    {s.label.replace(/^\d+\.\s/, '')}
+                  </div>
+                  {i < arr.length - 1 && <span className={`mx-1 ${myIdx < stepIdx ? 'text-emerald-300' : 'text-slate-200'}`}>—</span>}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* ── STEP 1: Verify Quantities ── */}
+          {receiveStep === 'qty' && (
+          <>
           {/* Explanation banner */}
           <div className="grid grid-cols-2 gap-3 px-1">
             <div className="flex gap-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200">
@@ -2762,11 +2794,28 @@ export default function BranchTransferPage() {
                 data-testid="receive-notes"
               />
             </div>
-            {/* Receipt upload — optional but recommended for audit trail */}
-            <div className="mx-3 mb-2">
+          </ScrollArea>
+          </>
+          )}
+
+          {/* ── STEP 2: Upload Receipt ── */}
+          {receiveStep === 'upload' && (
+            <div className="flex-1 overflow-y-auto px-1 py-2 space-y-3" data-testid="receive-step-upload">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <div className="flex items-start gap-2">
+                  <Upload size={16} className="text-blue-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-blue-800">Attach a photo of the paper receipt / DR</p>
+                    <p className="text-[11px] text-blue-600 mt-0.5">
+                      Recommended for audit trail. You can either drag-and-drop a photo from this computer below,
+                      or scan the QR code with your phone camera and upload there. The upload is detected automatically.
+                    </p>
+                  </div>
+                </div>
+              </div>
               <ReceiptUploadInline
                 required={false}
-                label="Upload Receipt / DR Photo (optional, but recommended for audit)"
+                label="Upload Receipt / DR Photo"
                 recordType="branch_transfer"
                 recordSummary={viewOrder ? {
                   type_label: 'Branch Transfer',
@@ -2776,35 +2825,142 @@ export default function BranchTransferPage() {
                 } : undefined}
                 onUploaded={(data) => setReceiveReceiptData(data)}
               />
+              {receiveReceiptData?.fileCount > 0 && (
+                <div className="flex items-center gap-2 p-3 rounded-lg bg-emerald-50 border border-emerald-200">
+                  <Check size={16} className="text-emerald-600" />
+                  <p className="text-sm text-emerald-800 font-medium">
+                    {receiveReceiptData.fileCount} {receiveReceiptData.fileCount === 1 ? 'photo' : 'photos'} uploaded — ready to continue
+                  </p>
+                </div>
+              )}
             </div>
-          </ScrollArea>
+          )}
 
+          {/* ── STEP 3: Confirm Summary ── */}
+          {receiveStep === 'summary' && (() => {
+            const items = viewOrder?.items || [];
+            const { hasVariance, shortages, excesses } = getVariances(items);
+            const totalReceivedCapital = items.reduce((sum, item) => {
+              const r = parseFloat(receiveQtys[item.product_id] ?? item.qty) || 0;
+              return sum + r * (item.transfer_capital || 0);
+            }, 0);
+            return (
+              <div className="flex-1 overflow-y-auto px-1 py-2 space-y-3" data-testid="receive-step-summary">
+                {/* Reference card — for writing on the paper receipt */}
+                <div className="border-2 border-emerald-300 bg-gradient-to-br from-emerald-50 to-white rounded-lg p-4">
+                  <p className="text-[10px] uppercase font-bold text-emerald-700 tracking-widest mb-1">Write this on the paper receipt</p>
+                  <p className="text-2xl font-mono font-black text-slate-800 select-all" data-testid="receive-ref-number">{viewOrder?.order_number}</p>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Reference for tracing this delivery in the system if there's a dispute later.
+                    From <span className="font-medium">{branches.find(b => b.id === viewOrder?.from_branch_id)?.name}</span> to <span className="font-medium">{branches.find(b => b.id === viewOrder?.to_branch_id)?.name}</span>.
+                  </p>
+                </div>
+
+                {/* Compact items recap */}
+                <div className="border rounded-lg overflow-hidden">
+                  <div className="bg-slate-50 px-3 py-2 text-[10px] uppercase tracking-wider text-slate-500 flex justify-between">
+                    <span>Receipt summary — {items.length} {items.length === 1 ? 'item' : 'items'}</span>
+                    <span className="font-mono font-bold text-emerald-700">{formatPHP(totalReceivedCapital)} total capital</span>
+                  </div>
+                  <div className="max-h-48 overflow-y-auto anchored-dropdown-scroll divide-y divide-slate-100">
+                    {items.map((item, i) => {
+                      const ordered = parseFloat(item.qty) || 0;
+                      const received = parseFloat(receiveQtys[item.product_id] ?? ordered) || 0;
+                      const diff = received - ordered;
+                      return (
+                        <div key={i} className="flex items-center justify-between px-3 py-1.5 text-xs">
+                          <div className="min-w-0 flex-1 truncate">
+                            <span className="font-medium">{item.product_name}</span>
+                            <span className="text-slate-400 ml-1.5">{item.sku}</span>
+                          </div>
+                          <div className="flex items-center gap-3 shrink-0 font-mono">
+                            <span className="text-slate-400">{ordered}→</span>
+                            <span className={`font-bold ${diff < 0 ? 'text-amber-700' : diff > 0 ? 'text-blue-700' : 'text-emerald-700'}`}>{received}</span>
+                            <span className="text-slate-500 w-20 text-right">{formatPHP(received * item.transfer_capital)}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Variance final warning */}
+                {hasVariance && (
+                  <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs">
+                    <p className="font-bold text-amber-800 flex items-center gap-1.5">
+                      <AlertTriangle size={12} /> Variance present — {shortages.length} shortage(s), {excesses.length} excess(es)
+                    </p>
+                    <p className="text-amber-700 mt-1">Source branch will be notified to verify their stock count.</p>
+                  </div>
+                )}
+
+                {/* Receipt photo confirmation */}
+                {receiveReceiptData?.fileCount > 0 ? (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-50 text-xs">
+                    <Check size={14} className="text-emerald-600" />
+                    <span className="text-emerald-800">{receiveReceiptData.fileCount} receipt photo(s) attached</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-50 text-xs">
+                    <X size={14} className="text-slate-400" />
+                    <span className="text-slate-500">No receipt photo attached (optional)</span>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* ── Footer with step-aware actions ── */}
           <div className="pt-3 border-t flex gap-2 justify-between items-center">
             <p className="text-xs text-slate-400">
               {receiveConfirmStep
                 ? 'Quantities differ from the order. Submitting will send to source for confirmation.'
-                : 'Inventory and branch prices update automatically on confirm.'}
+                : receiveStep === 'qty' ? 'Verify each quantity, then continue.'
+                : receiveStep === 'upload' ? 'Optional but recommended for audit trail.'
+                : 'Final review — write the reference number on the paper receipt before confirming.'}
             </p>
             <div className="flex gap-2">
-              <Button variant="outline" onClick={() => { setReceiveDialog(false); setReceiveConfirmStep(false); }}>Cancel</Button>
-              {receiveConfirmStep ? (
+              {receiveStep === 'qty' && (
                 <>
-                  <Button variant="outline" onClick={() => setReceiveConfirmStep(false)}>
-                    Back — Edit Quantities
-                  </Button>
-                  <Button onClick={handleReceive} disabled={receiveSaving}
-                    className="bg-amber-600 hover:bg-amber-700 text-white"
-                    data-testid="confirm-receive-variance-btn">
-                    {receiveSaving ? <RefreshCw size={14} className="animate-spin mr-1.5" /> : <AlertTriangle size={14} className="mr-1.5" />}
-                    Yes, Submit Variance for Review
+                  <Button variant="outline" onClick={() => { setReceiveDialog(false); setReceiveConfirmStep(false); }}>Cancel</Button>
+                  <Button onClick={() => setReceiveStep('upload')} className="bg-emerald-600 hover:bg-emerald-700 text-white" data-testid="continue-to-upload-btn">
+                    Continue → Upload Receipt
                   </Button>
                 </>
-              ) : (
-                <Button onClick={handleReceive} disabled={receiveSaving} className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                  data-testid="confirm-receive-btn">
-                  {receiveSaving ? <RefreshCw size={14} className="animate-spin mr-1.5" /> : <CheckCircle2 size={14} className="mr-1.5" />}
-                  Confirm Receipt
-                </Button>
+              )}
+              {receiveStep === 'upload' && (
+                <>
+                  <Button variant="outline" onClick={() => setReceiveStep('qty')}>← Back</Button>
+                  <Button variant="outline" onClick={() => setReceiveStep('summary')}
+                    className="text-slate-500"
+                    data-testid="skip-receipt-btn">
+                    Skip — No Receipt
+                  </Button>
+                  <Button onClick={() => setReceiveStep('summary')} className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                    data-testid="continue-to-summary-btn"
+                    disabled={!receiveReceiptData?.fileCount}>
+                    Continue → Review
+                  </Button>
+                </>
+              )}
+              {receiveStep === 'summary' && (
+                <>
+                  <Button variant="outline" onClick={() => setReceiveStep('upload')}>← Back</Button>
+                  {receiveConfirmStep ? (
+                    <Button onClick={handleReceive} disabled={receiveSaving}
+                      className="bg-amber-600 hover:bg-amber-700 text-white"
+                      data-testid="confirm-receive-variance-btn">
+                      {receiveSaving ? <RefreshCw size={14} className="animate-spin mr-1.5" /> : <AlertTriangle size={14} className="mr-1.5" />}
+                      Yes, Submit Variance for Review
+                    </Button>
+                  ) : (
+                    <Button onClick={handleReceive} disabled={receiveSaving} className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                      data-testid="confirm-receive-btn">
+                      {receiveSaving ? <RefreshCw size={14} className="animate-spin mr-1.5" /> : <CheckCircle2 size={14} className="mr-1.5" />}
+                      Confirm Receipt
+                    </Button>
+                  )}
+                </>
               )}
             </div>
           </div>
