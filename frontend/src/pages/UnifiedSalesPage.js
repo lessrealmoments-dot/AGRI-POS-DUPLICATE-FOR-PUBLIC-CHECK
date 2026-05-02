@@ -27,7 +27,7 @@ import {
 } from '../lib/offlineDB';
 import { syncPendingSales, startAutoSync, stopAutoSync, newEnvelopeId } from '../lib/syncManager';
 import {
-  buildParkPayload, parkSale, discardParkedSale, loadParkedSales, drainSyncQueue as drainParkQueue,
+  buildParkPayload, parkSale, discardParkedSale, consumeParkedSale, loadParkedSales, drainSyncQueue as drainParkQueue,
 } from '../lib/parkedSalesSync';
 import ReferenceNumberPrompt from '../components/ReferenceNumberPrompt';
 import CropCreditTypeDialog from '../components/CropCreditTypeDialog';
@@ -1266,30 +1266,51 @@ export default function UnifiedSalesPage() {
     }
   };
 
-  const resumeParkedSale = (park) => {
+  const resumeParkedSale = async (park) => {
+    // Consume = atomic fetch + delete server-side. The row immediately
+    // disappears from the branch list so no one else can resume it AND
+    // so this same cashier doesn't see it lingering and wonder if the
+    // customer came back. If the consume fails (race / network),
+    // we still rehydrate from the cached snapshot.
+    let snapshot = park;
+    try {
+      const fresh = await consumeParkedSale(park.id);
+      if (fresh) snapshot = fresh;
+    } catch (err) {
+      const msg = err?.response?.data?.detail || err?.message || '';
+      if (err?.response?.status === 410) {
+        toast.error(msg || 'Already resumed by another device');
+        refreshParkedSales();
+        setParkedDialogOpen(false);
+        return;
+      }
+      // Other errors: keep going with the local snapshot — UX shouldn't
+      // block resuming when offline / brief server hiccup.
+    }
     // Push the saved snapshot back into live state. We rehydrate based on
     // the park's stored mode so Quick/Order distinction round-trips.
-    if (park.mode === 'quick') {
+    if (snapshot.mode === 'quick') {
       setMode('quick');
-      setCart(park.cart || []);
+      setCart(snapshot.cart || []);
       setLines([{ ...EMPTY_LINE }]);
     } else {
       setMode('order');
-      const filled = (park.lines || []).filter(l => l.product_id);
+      const filled = (snapshot.lines || []).filter(l => l.product_id);
       setLines([...filled, { ...EMPTY_LINE }]);
       setCart([]);
     }
-    if (park.customer) {
-      setSelectedCustomer(park.customer);
-      setCustSearch(park.customer.name || '');
+    if (snapshot.customer) {
+      setSelectedCustomer(snapshot.customer);
+      setCustSearch(snapshot.customer.name || '');
     } else {
       setSelectedCustomer(null);
       setCustSearch('');
     }
-    if (park.active_scheme) setActiveScheme(park.active_scheme);
-    if (park.header) setHeader(h => ({ ...h, ...park.header }));
+    if (snapshot.active_scheme) setActiveScheme(snapshot.active_scheme);
+    if (snapshot.header) setHeader(h => ({ ...h, ...snapshot.header }));
     setParkedDialogOpen(false);
-    toast.success(`Resumed: ${park.label || 'Parked sale'}`);
+    refreshParkedSales();
+    toast.success(`Resumed: ${snapshot.label || 'Parked sale'}`);
   };
 
   const handleDiscardClick = async (park) => {

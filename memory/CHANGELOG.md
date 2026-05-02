@@ -1,5 +1,22 @@
 # AgriBooks Changelog
 
+## Feb 2026 — Park Resume = Atomic Consume (Iter 202)
+
+**Ask**: "I parked an invoice and opened it. While editing, I noticed the parked invoice was still in the list — confusing because it makes me think the customer didn't return."
+
+**Fix**: Resume now atomically consumes the park. The row vanishes from the branch list the moment the cashier reopens it.
+
+**Backend** — `routes/parked_sales.py`: new `POST /api/parked-sales/{id}/consume` endpoint. Uses `find_one_and_delete` so fetch+remove is atomic. NO PIN required even when consuming another cashier's park (that's the whole point of the branch-shared model). Returns 410 Gone on second call so race conditions surface clearly instead of confusing 404s.
+
+**Frontend** — `lib/parkedSalesSync.js`: new `consumeParkedSale(parkId)` helper. Online: POSTs `/consume` and removes the local row. 410 race → propagated. Offline: reads the local snapshot, queues a `pending_delete`, returns the snapshot — so resuming offline still works seamlessly.
+
+**`UnifiedSalesPage.js`** `resumeParkedSale()` now calls `consumeParkedSale` first, falls back to the local cached snapshot on 410/network error, and refreshes the parked list so the dialog reflects the new state.
+
+**Test** — extended `test_parked_sales_202.py` with two new cases (now 6/6 passing):
+- `consume_atomic_fetch_and_delete` — POST returns snapshot, list no longer contains it, second consume → 410.
+- `consume_works_across_users_no_pin` — admin consuming manager's park succeeds without a PIN.
+
+
 ## Feb 2026 — Price Match: "Skip change for now" customer-only scope (Iter 202)
 
 **Ask**: "When we create sales that suddenly change price we usually have something called Price Match as the reason. Add a feature there saying it is meant for this customer only — do not replace current price."

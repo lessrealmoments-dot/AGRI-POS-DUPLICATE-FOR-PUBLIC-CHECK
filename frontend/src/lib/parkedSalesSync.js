@@ -99,6 +99,38 @@ export async function discardParkedSale(parkId, opts = {}) {
   return { ok: true, queued: true };
 }
 
+/** Consume a parked sale = atomic fetch + delete. Use this for Resume so
+ *  the row immediately vanishes from the branch list (and no one else can
+ *  open the same draft). Offline path falls back to local read + queued
+ *  delete so the cashier can still resume without a network. */
+export async function consumeParkedSale(parkId) {
+  if (navigator.onLine) {
+    try {
+      const res = await api.post(`/parked-sales/${parkId}/consume`);
+      await removeParkedSaleLocal(parkId);
+      return res.data;
+    } catch (err) {
+      // 410 = race (already resumed elsewhere). Surface it.
+      if (err?.response?.status === 410) {
+        await removeParkedSaleLocal(parkId);
+        throw err;
+      }
+      // Network/server hiccup — fall through to offline path
+    }
+  }
+  // Offline fallback — read local snapshot, queue a delete, return snapshot
+  const all = await getAllParkedSalesIncludingPending();
+  const row = (all || []).find(r => r.id === parkId);
+  if (!row) {
+    throw new Error('Parked sale not found locally');
+  }
+  // Mark for delete so it won't show in the list anymore + will sync later
+  await putParkedSaleLocal({ ...row, _sync: 'pending_delete' });
+  // Strip the local-only sync flag before returning the snapshot
+  const { _sync, ...snapshot } = row; void _sync;
+  return snapshot;
+}
+
 /** Drain offline mutations against the server. Safe to call multiple
  *  times; each row is moved to 'synced' (or removed) on success. */
 export async function drainSyncQueue() {

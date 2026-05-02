@@ -165,3 +165,31 @@ async def discard_park(
 
     await db.parked_sales.delete_one({"id": park_id})
     return {"ok": True}
+
+
+@router.post("/{park_id}/consume")
+async def consume_park(park_id: str, user=Depends(get_current_user)):
+    """Atomically fetch + delete a parked sale.
+
+    This is the "Resume" action. Unlike discard, no PIN is required
+    even when consuming another cashier's park — that's the whole
+    point of the branch-shared model: any cashier on duty can pick up
+    a colleague's pending sale. The snapshot returns to the caller so
+    they can rehydrate their cart, and the row vanishes from the list
+    so no one else can resume the same draft (and the original cashier
+    isn't confused into thinking the customer never came back).
+
+    Idempotent: a 404 just means another device already consumed it
+    (race), so we return 410 Gone with a clear message instead of a
+    confusing 404.
+    """
+    check_perm(user, "sales", "create")
+    doc = await db.parked_sales.find_one_and_delete({"id": park_id})
+    if not doc:
+        raise HTTPException(
+            status_code=410,
+            detail="This parked sale was already resumed or discarded by someone else.",
+        )
+    doc.pop("_id", None)
+    doc.pop("organization_id", None)
+    return doc

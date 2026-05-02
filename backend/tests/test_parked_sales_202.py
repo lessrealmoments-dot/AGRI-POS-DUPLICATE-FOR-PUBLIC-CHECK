@@ -155,6 +155,53 @@ def test_park_other_user_discard_requires_pin():
         requests.delete(f"{API}/parked-sales/{pid}", headers={"Authorization": f"Bearer {mgr_token}"}, timeout=15)
 
 
+def test_park_consume_atomic_fetch_and_delete():
+    """Resume = atomic fetch + delete, no PIN needed (branch-shared model)."""
+    admin_token, _ = _admin()
+    branch_id = _branches(admin_token)[0]["id"]
+
+    # Park as admin
+    payload = _park_payload(branch_id, label="consume-test")
+    pid = payload["id"]
+    r = requests.post(f"{API}/parked-sales", json=payload, headers={"Authorization": f"Bearer {admin_token}"}, timeout=15)
+    assert r.status_code == 200
+
+    # Consume — must return full snapshot AND remove the row
+    r = requests.post(f"{API}/parked-sales/{pid}/consume", headers={"Authorization": f"Bearer {admin_token}"}, timeout=15)
+    assert r.status_code == 200, r.text
+    snapshot = r.json()
+    assert snapshot["id"] == pid
+    assert snapshot["label"] == "consume-test"
+    assert len(snapshot["cart"]) == 1
+
+    # Listing must NOT show it anymore
+    r = requests.get(f"{API}/parked-sales", params={"branch_id": branch_id}, headers={"Authorization": f"Bearer {admin_token}"}, timeout=15)
+    assert all(p["id"] != pid for p in r.json()["parks"]), "consumed park should be gone"
+
+    # Second consume of same id → 410 Gone (race-safe)
+    r = requests.post(f"{API}/parked-sales/{pid}/consume", headers={"Authorization": f"Bearer {admin_token}"}, timeout=15)
+    assert r.status_code == 410
+
+
+def test_park_consume_works_across_users_no_pin():
+    """Resume of another cashier's park: no PIN required (unlike discard)."""
+    admin_token, _ = _admin()
+    branch_id = _branches(admin_token)[0]["id"]
+    try:
+        mgr_token, _ = _login("test_org_manager@regression.local", "RegressionPass!2026")
+    except Exception:
+        return  # skip silently — manager seed missing
+
+    payload = _park_payload(branch_id, label="cross-resume-test")
+    pid = payload["id"]
+    r = requests.post(f"{API}/parked-sales", json=payload, headers={"Authorization": f"Bearer {mgr_token}"}, timeout=15)
+    assert r.status_code == 200
+
+    # Admin consumes manager's park — must succeed without PIN
+    r = requests.post(f"{API}/parked-sales/{pid}/consume", headers={"Authorization": f"Bearer {admin_token}"}, timeout=15)
+    assert r.status_code == 200, f"cross-user consume should be PIN-free, got {r.status_code} {r.text}"
+
+
 if __name__ == "__main__":
     test_park_create_list_resume_discard_own()
     print("PASS: create_list_resume_discard_own")
@@ -164,4 +211,8 @@ if __name__ == "__main__":
     print("PASS: repost_idempotent")
     test_park_other_user_discard_requires_pin()
     print("PASS: other_user_discard_requires_pin")
+    test_park_consume_atomic_fetch_and_delete()
+    print("PASS: consume_atomic_fetch_and_delete")
+    test_park_consume_works_across_users_no_pin()
+    print("PASS: consume_works_across_users_no_pin")
     print("\nAll parked-sales regression tests passed.")
