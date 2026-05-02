@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { api } from '../contexts/AuthContext';
 import { formatPHP } from '../lib/utils';
 import { Badge } from './ui/badge';
-import { Search, Package, ArrowUp, ArrowDown, PlusCircle } from 'lucide-react';
+import { Search, Package, ArrowUp, ArrowDown, PlusCircle, AlertTriangle } from 'lucide-react';
 
 export default function SmartProductSearch({ onSelect, branchId, onCreateNew }) {
   const [query, setQuery] = useState('');
@@ -10,6 +10,7 @@ export default function SmartProductSearch({ onSelect, branchId, onCreateNew }) 
   const [open, setOpen] = useState(false);
   const [noResults, setNoResults] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
+  const [fuzzyHint, setFuzzyHint] = useState(null);
   const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
   const inputRef = useRef(null);
   const dropdownRef = useRef(null);
@@ -35,17 +36,23 @@ export default function SmartProductSearch({ onSelect, branchId, onCreateNew }) 
   }, [open]);
 
   useEffect(() => {
-    if (!query || query.length < 1) { setResults([]); setOpen(false); setNoResults(false); return; }
+    if (!query || query.length < 1) { setResults([]); setOpen(false); setNoResults(false); setFuzzyHint(null); return; }
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
       try {
         const res = await api.get('/products/search-detail', { params: { q: query, branch_id: branchId } });
-        setResults(res.data);
-        setNoResults(res.data.length === 0 && query.length >= 2);
+        const data = res.data || [];
+        setResults(data);
+        // Backend attaches `_fuzzy_hint` to every item when fallback fired.
+        // Read from the first result; null otherwise.
+        setFuzzyHint(data.length > 0 && data[0]._fuzzy_hint ? data[0]._fuzzy_hint : null);
+        setNoResults(data.length === 0 && query.length >= 2);
         updateDropdownPos();
         setOpen(true);
-        setActiveIndex(-1);
-      } catch { setResults([]); setNoResults(true); }
+        // Pre-select the first result so Enter immediately picks the top match
+        // and Arrow-Down centers visibly from the start.
+        setActiveIndex(data.length > 0 ? 0 : -1);
+      } catch { setResults([]); setNoResults(true); setFuzzyHint(null); }
     }, 200);
     return () => clearTimeout(debounceRef.current);
   }, [query, branchId]);
@@ -79,13 +86,18 @@ export default function SmartProductSearch({ onSelect, branchId, onCreateNew }) 
     setResults([]);
     setOpen(false);
     setActiveIndex(-1);
+    setFuzzyHint(null);
     inputRef.current?.focus();
   };
 
+  // Keep the active row centered in the dropdown so similarly-named items
+  // (e.g. "Galimax 1, 2, 3, 4, 5") never disappear behind the expanded
+  // detail card. `block: 'center'` instead of 'nearest' guarantees the
+  // highlight is always visible regardless of the active row's height.
   useEffect(() => {
     if (activeIndex >= 0 && dropdownRef.current) {
       const item = dropdownRef.current.children[activeIndex];
-      item?.scrollIntoView({ block: 'nearest' });
+      item?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
   }, [activeIndex]);
 
@@ -109,11 +121,24 @@ export default function SmartProductSearch({ onSelect, branchId, onCreateNew }) 
 
       {open && (results.length > 0 || noResults) && (
         <div
-          ref={dropdownRef}
           style={{ position: 'fixed', top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width, zIndex: 9999 }}
           className="bg-white border border-slate-200 rounded-lg shadow-xl max-h-[400px] overflow-y-auto"
           data-testid="search-results-dropdown"
         >
+          {/* Did-you-mean chip when fuzzy fallback fired */}
+          {fuzzyHint && (
+            <div
+              data-testid="search-fuzzy-hint"
+              className="px-3 py-2 bg-amber-50 border-b border-amber-200 flex items-center gap-2 text-xs text-amber-800 sticky top-0 z-10"
+            >
+              <AlertTriangle size={12} className="text-amber-600 shrink-0" />
+              <span className="flex-1">
+                No exact match for <strong>"{fuzzyHint.query}"</strong> — showing closest {fuzzyHint.count === 1 ? 'match' : 'matches'}.
+              </span>
+            </div>
+          )}
+
+          <div ref={dropdownRef}>
           {results.map((p, i) => {
             const isDisabled = !!p.disabled_at_branch;
             return (
@@ -121,6 +146,7 @@ export default function SmartProductSearch({ onSelect, branchId, onCreateNew }) 
               key={p.id}
               data-testid={`search-result-${p.id}`}
               onMouseDown={() => selectProduct(p)}
+              onMouseEnter={() => !isDisabled && setActiveIndex(i)}
               className={`px-3 py-2.5 border-b border-slate-100 last:border-0 transition-colors ${
                 isDisabled ? 'opacity-50 bg-slate-50/60 cursor-not-allowed'
                 : (i === activeIndex ? 'bg-emerald-50 border-l-[3px] border-l-emerald-700 cursor-pointer' : 'hover:bg-slate-50 cursor-pointer')
@@ -181,6 +207,7 @@ export default function SmartProductSearch({ onSelect, branchId, onCreateNew }) 
             </div>
             );
           })}
+          </div>
 
           {noResults && query.length >= 2 && (
             <div className="px-3 py-3 border-t border-slate-100">
@@ -199,7 +226,7 @@ export default function SmartProductSearch({ onSelect, branchId, onCreateNew }) 
             </div>
           )}
           {results.length > 0 && (
-            <div className="px-3 py-1.5 bg-slate-50 text-[10px] text-slate-400 flex items-center gap-3 border-t">
+            <div className="px-3 py-1.5 bg-slate-50 text-[10px] text-slate-400 flex items-center gap-3 border-t sticky bottom-0">
               <span><ArrowUp size={10} className="inline" /><ArrowDown size={10} className="inline" /> navigate</span>
               <span>Enter to select</span>
               <span>Esc to close</span>

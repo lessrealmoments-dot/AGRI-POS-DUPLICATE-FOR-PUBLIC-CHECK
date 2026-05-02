@@ -531,6 +531,12 @@ export default function UnifiedSalesPage() {
   
   const searchRef = useRef(null);
   const qtyRefs = useRef([]);
+  // Refs to auto-scroll the most-recently added item into view, so cashiers
+  // can immediately see/edit the price of the latest add without manually
+  // scrolling. Quick mode → cart bottom; Order mode → newest line row.
+  const cartEndRef = useRef(null);
+  const orderLinesEndRef = useRef(null);
+  const orderLinesScrollRef = useRef(null);
 
   // ── Barcode Scanner Listener ─────────────────────────────────────────────
   // USB barcode scanners type characters rapidly and end with Enter.
@@ -1118,6 +1124,14 @@ export default function UnifiedSalesPage() {
         global_only_retail: product.is_repack && !repackBranchHasRetail(product) && price > 0,
       }];
     });
+    // Auto-scroll cart to the newest item so cashiers don't have to scroll
+    // manually when adding the 6th/7th/8th product. Two RAFs ensure layout
+    // settles after the new row mounts.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        cartEndRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+      });
+    });
   };
   // Keep ref in sync so WebSocket handler always calls latest addToCart
   addToCartRef.current = addToCart;
@@ -1295,6 +1309,13 @@ export default function UnifiedSalesPage() {
     if (index === lines.length - 1) newLines.push({ ...EMPTY_LINE });
     setLines(newLines);
     setTimeout(() => qtyRefs.current[index]?.focus(), 50);
+    // Auto-scroll the order-lines table to the newest filled row so the
+    // last addition is always visible (price/discount easy to verify).
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        orderLinesEndRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+      });
+    });
   };
 
   const updateLine = (index, field, value) => {
@@ -2673,6 +2694,8 @@ export default function UnifiedSalesPage() {
                           )}
                         </div>
                       ))}
+                      {/* Anchor for auto-scroll: keeps the latest cart item visible. */}
+                      <div ref={cartEndRef} aria-hidden="true" />
                     </div>
                   )}
                 </ScrollArea>
@@ -2879,6 +2902,8 @@ export default function UnifiedSalesPage() {
                       ))}
                     </tbody>
                   </table>
+                  {/* Anchor for auto-scroll: keeps the latest order line visible. */}
+                  <div ref={orderLinesEndRef} aria-hidden="true" />
                 </div>
 
                 {/* Order bottom — Notes + Totals */}

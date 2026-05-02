@@ -329,6 +329,14 @@ async def search_products_detail(q: str = "", branch_id: Optional[str] = None, a
       • Everything else (alphanumeric, longer numbers, alpha words) does the
         usual case-insensitive substring match across name + SKU + barcode.
     Order-independent: each token is its own AND condition.
+
+    Fuzzy fallback (when strict pass returns 0):
+      • RapidFuzz token_set_ratio + partial_ratio against name field.
+      • 80% similarity threshold (configurable).
+      • Numeric/short tokens still required to prefix-match exactly so
+        "1 kg" never silently maps to "2 kg".
+      • Response includes `_fuzzy_hint = {query, count}` on first item
+        when fallback fired, so the dropdown can render "Did you mean".
     """
     if not q or len(q) < 1:
         return []
@@ -369,6 +377,60 @@ async def search_products_detail(q: str = "", branch_id: Optional[str] = None, a
         query["$and"] = [_token_clause(t) for t in tokens]
 
     products = await db.products.find(query, {"_id": 0}).limit(20).to_list(20)
+
+    # ── Fuzzy fallback (typo tolerance) ─────────────────────────────
+    # Trigger only when strict search returned 0 hits AND the query has
+    # at least one fuzzable token (alpha, ≥4 chars). Numeric / short
+    # tokens MUST still prefix-match a name word literally so unit
+    # numbers ("1 kg" vs "2 kg") never get silently swapped.
+    fuzzy_hint = None
+    if not products:
+        fuzzable_tokens = [
+            t for t in tokens
+            if len(t) >= 4 and not re.fullmatch(r"[0-9]+", t)
+        ]
+        exact_required = [t for t in tokens if t not in fuzzable_tokens]
+        if fuzzable_tokens:
+            from rapidfuzz import fuzz
+            # Pull a candidate pool — capped at 1000 active rows for speed.
+            # For each candidate, compute token_set_ratio against the full
+            # query; keep ≥80% similarity, then enforce that every
+            # exact-required token still matches literally.
+            candidate_query = {"active": True}
+            if exact_required:
+                # Apply literal token clauses to narrow the pool first
+                exact_clauses = [_token_clause(t) for t in exact_required]
+                if len(exact_clauses) == 1:
+                    c = exact_clauses[0]
+                    if "$or" in c:
+                        candidate_query["$or"] = c["$or"]
+                    else:
+                        candidate_query.update(c)
+                else:
+                    candidate_query["$and"] = exact_clauses
+            candidates = await db.products.find(
+                candidate_query, {"_id": 0}
+            ).limit(1000).to_list(1000)
+
+            full_q = q.strip().lower()
+            scored = []
+            for p in candidates:
+                name = (p.get("name") or "").lower()
+                if not name:
+                    continue
+                # Use the higher of token_set_ratio (order-independent) and
+                # partial_ratio (handles "promex" vs "promix 50kg"). Both
+                # are 0-100; we want ≥80.
+                score = max(
+                    fuzz.token_set_ratio(full_q, name),
+                    fuzz.partial_ratio(full_q, name),
+                )
+                if score >= 80:
+                    scored.append((score, p))
+            if scored:
+                scored.sort(key=lambda s: (-s[0], len((s[1].get("name") or ""))))
+                products = [p for _, p in scored[:10]]
+                fuzzy_hint = {"query": q.strip(), "count": len(scored)}
 
     # Rank: prefer rows where the full phrase appears as a name prefix (most
     # specific), then a contiguous substring, then loose token-only hits.
@@ -521,6 +583,11 @@ async def search_products_detail(q: str = "", branch_id: Optional[str] = None, a
 
         results.append(result)
     
+    # Surface the fuzzy hint on every result so callers can detect it
+    # without changing the response shape (still a list of products).
+    if fuzzy_hint:
+        for r in results:
+            r["_fuzzy_hint"] = fuzzy_hint
     return results
 
 

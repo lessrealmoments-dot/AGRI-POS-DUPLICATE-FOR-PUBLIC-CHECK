@@ -1,5 +1,21 @@
 # AgriBooks Changelog
 
+## Feb 2026 — Sales-new Order-Mode Search + Cart UX (Iter 202)
+
+**Ask**: "/sales-new Order-mode search isn't as accurate as Quick mode. Arrow-down doesn't keep the highlighted result visible — useless when products have similar names like Galimax 1, 2, 3, 4, 5. Also, the Quick cart doesn't auto-scroll, so the latest add isn't visible without manual scrolling."
+
+**Fix** (backend + frontend + regression):
+- **`backend/routes/products.py`** — `/products/search-detail` now has a fuzzy fallback. When the strict token-AND pass returns 0 hits AND the query has a fuzzable token (≥4 chars, alpha), it runs **rapidfuzz** (`token_set_ratio` ∨ `partial_ratio`) at an 80% threshold against `name` over up to 1000 active candidates. Numeric / short tokens stay strict so "1 kg" never silently swaps to "2 kg". When fallback fires, every result item is tagged with `_fuzzy_hint = {query, count}` so the dropdown can render a "Did you mean" chip without a response-shape change.
+- **`frontend/src/components/SmartProductSearch.js`** — (a) Reads `_fuzzy_hint` from the first result and renders an amber sticky "No exact match — showing closest matches" chip at the top of the dropdown. (b) Pre-selects index 0 on every new query so Enter immediately picks the top match. (c) Switched `scrollIntoView({ block: 'nearest' })` to `'center'` with smooth behavior — guarantees the highlighted row is always visible regardless of the expanded detail card height. (d) Hover now updates active index too, so mouse + keyboard agree on what's selected.
+- **`frontend/src/pages/UnifiedSalesPage.js`** — Added `cartEndRef` / `orderLinesEndRef` anchors. `addToCart()` (Quick) and `handleProductSelect()` (Order) both auto-scroll to the newest item via double-RAF after state commits, so the latest add is always visible for price/discount verification.
+- **Dependency** — `rapidfuzz==3.14.5` added to `backend/requirements.txt`.
+- **Test** — `backend/tests/test_product_search_fuzzy_202.py` (4/4 passing):
+  1. Strict match returns no `_fuzzy_hint`
+  2. Typo "Promex" fuzzy-matches "Promix Starter" with hint
+  3. Garbage query returns []
+  4. "Galimax 1" MUST NOT fuzzy-match "Galimax 2" (numeric strict guard)
+
+
 ## Feb 2026 — Per-Branch Close-Day SMS Opt-Out (Iter 201 cont'd)
 
 **Ask**: "Some branches are merely used to transfer stocks, not actual money movement / not credit. Owner handles them personally. If I keep receiving texts for those branches, it becomes noise and I might ignore real alerts."
