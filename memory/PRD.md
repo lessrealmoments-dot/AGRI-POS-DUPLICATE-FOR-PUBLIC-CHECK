@@ -1,5 +1,12 @@
 # AgriBooks PRD
 
+## Iter 203 (May 2026) — Order Mode Input UX: Tab-Select + Leading Decimal ✅
+- Qty, Rate, Discount in Order mode now auto-select all text on Tab/focus for instant overwrite.
+- Changed from `type="number"` to `type="text" inputMode="decimal"` to allow `.5`, `.05` entry.
+- String-intermediate pattern prevents transient states (`.`, `0.`, empty) from snapping to `0`.
+- Quick mode price input also upgraded for consistency (qty was already done).
+- No backend changes.
+
 ## Iter 201b (Feb 2026) — Per-Branch Close-Day SMS Opt-Out ✅
 - Owners can mute automated close-day SMS on per-branch basis (warehouse / transfer-only branches).
 - New `branch.close_reminder_disabled` flag, new `PUT /api/sms/close-reminder/branch-toggle/:branch_id` endpoint.

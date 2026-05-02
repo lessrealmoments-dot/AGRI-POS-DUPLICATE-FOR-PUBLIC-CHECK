@@ -1174,8 +1174,14 @@ export default function UnifiedSalesPage() {
     // `price_match_pin` so the backend can re-validate and upsert
     // branch_prices when the connection is back. If no offline credentials
     // were ever cached, the modal will surface that and block submission.
-    const price = parseFloat(newPrice) || 0;
-    setCart(cart.map(c => c.product_id !== productId ? c : { ...c, price, total: price * c.quantity }));
+    const str = String(newPrice);
+    // Allow intermediate decimal input: ".", "0.", ".5", ""
+    if (str === '' || str === '.' || str.endsWith('.') || (str.match(/^\.\d*$/) && isNaN(Number(str)))) {
+      setCart(cart.map(c => c.product_id !== productId ? c : { ...c, _priceStr: str }));
+      return;
+    }
+    const price = parseFloat(str) || 0;
+    setCart(cart.map(c => c.product_id !== productId ? c : { ...c, price, total: price * c.quantity, _priceStr: undefined }));
   };
 
   const removeFromCart = (productId) => setCart(cart.filter(c => c.product_id !== productId));
@@ -1529,9 +1535,33 @@ export default function UnifiedSalesPage() {
   const updateLine = (index, field, value) => {
     // Price edits work offline: the PriceMatchModal verifies the
     // manager/admin PIN locally and the queued sale carries the change.
+    const numericFields = ['quantity', 'rate', 'discount_value'];
     const newLines = [...lines];
-    newLines[index] = { ...newLines[index], [field]: value };
+    if (numericFields.includes(field)) {
+      const str = String(value);
+      // Allow intermediate decimal input: ".", "0.", ".5", "" — commit only when parseable
+      if (str === '' || str === '.' || str.endsWith('.') || (str.match(/^\.\d*$/) && isNaN(Number(str)))) {
+        newLines[index] = { ...newLines[index], [`_${field}Str`]: str };
+        setLines(newLines);
+        return;
+      }
+      const numVal = parseFloat(str) || 0;
+      newLines[index] = { ...newLines[index], [field]: numVal, [`_${field}Str`]: undefined };
+    } else {
+      newLines[index] = { ...newLines[index], [field]: value };
+    }
     setLines(newLines);
+  };
+
+  // Finalize a numeric field on blur — clears intermediate string state
+  const finalizeLineField = (index, field) => {
+    const strKey = `_${field}Str`;
+    if (lines[index]?.[strKey] !== undefined) {
+      const numVal = parseFloat(lines[index][strKey]) || 0;
+      const newLines = [...lines];
+      newLines[index] = { ...newLines[index], [field]: numVal, [strKey]: undefined };
+      setLines(newLines);
+    }
   };
 
   const removeLine = (index) => {
@@ -2861,17 +2891,23 @@ export default function UnifiedSalesPage() {
                             <span className="text-xs text-slate-400">×</span>
                             {/* Price (editable) */}
                             <input
-                              type="number"
+                              type="text"
+                              inputMode="decimal"
                               className={`w-24 h-7 text-sm text-right px-2 border rounded focus:outline-none focus:ring-1 focus:ring-[#1A4D2E]/30 ${
                                 item.price <= 0 ? 'border-amber-400 bg-amber-50 text-amber-700'
                                 : !item.is_repack && parseFloat(item.original_price) > 0 && Math.abs(item.price - item.original_price) > 0.001 ? 'border-amber-500 bg-amber-50 text-amber-800 font-semibold'
                                 : canViewCost && (item.effective_capital || item.cost_price) > 0 && item.price < (item.effective_capital || item.cost_price) ? 'border-red-300 bg-red-50 text-red-600'
                                 : 'border-slate-200'
                               }`}
-                              value={item.price}
+                              value={item._priceStr ?? item.price}
                               onChange={e => updateCartPrice(item.product_id, e.target.value)}
                               onFocus={e => e.target.select()}
-                              min="0" step="0.01"
+                              onBlur={() => {
+                                if (item._priceStr !== undefined) {
+                                  const p = parseFloat(item._priceStr) || 0;
+                                  setCart(prev => prev.map(c => c.product_id !== item.product_id ? c : { ...c, price: p, total: p * c.quantity, _priceStr: undefined }));
+                                }
+                              }}
                               readOnly={!canDiscount}
                               title={!canDiscount ? 'No permission to change prices' : 'Edit to trigger Price Match (manager PIN required at checkout)'}
                             />
@@ -3064,24 +3100,30 @@ export default function UnifiedSalesPage() {
                           <td className="px-3 py-1">
                             <Input
                               ref={el => qtyRefs.current[i] = el}
-                              type="number"
+                              type="text"
+                              inputMode="decimal"
                               className="h-8 text-right w-16"
-                              value={line.quantity}
-                              onChange={e => updateLine(i, 'quantity', parseFloat(e.target.value) || 0)}
+                              value={line._quantityStr ?? line.quantity}
+                              onFocus={e => e.target.select()}
+                              onChange={e => updateLine(i, 'quantity', e.target.value)}
+                              onBlur={() => finalizeLineField(i, 'quantity')}
                             />
                           </td>
                           <td className="px-3 py-1">
                             <div>
                               <Input
-                                type="number"
+                                type="text"
+                                inputMode="decimal"
                                 className={`h-8 text-right w-24 ${
                                   line.product_id && line.rate <= 0 ? 'border-amber-400 bg-amber-50'
                                   : line.product_id && !line.is_repack && parseFloat(line.original_rate) > 0 && Math.abs(line.rate - line.original_rate) > 0.001 ? 'border-amber-500 bg-amber-50 text-amber-800 font-semibold'
                                   : canViewCost && line.product_id && (line.effective_capital || line.cost_price) > 0 && line.rate > 0 && line.rate < (line.effective_capital || line.cost_price) ? 'border-red-300 bg-red-50 text-red-700'
                                   : ''
                                 }`}
-                                value={line.rate}
-                                onChange={e => updateLine(i, 'rate', parseFloat(e.target.value) || 0)}
+                                value={line._rateStr ?? line.rate}
+                                onFocus={e => e.target.select()}
+                                onChange={e => updateLine(i, 'rate', e.target.value)}
+                                onBlur={() => finalizeLineField(i, 'rate')}
                                 readOnly={!canDiscount}
                                 title={!canDiscount ? 'No permission to change prices' : 'Edit to trigger Price Match (manager PIN required at checkout)'}
                               />
@@ -3136,10 +3178,13 @@ export default function UnifiedSalesPage() {
                               return (
                                 <div>
                                   <Input
-                                    type="number"
+                                    type="text"
+                                    inputMode="decimal"
                                     className={`h-8 text-right w-20 ${isBelowCap ? 'border-red-400 bg-red-50 text-red-700' : ''} ${!canDiscount ? 'bg-slate-100 cursor-not-allowed' : ''}`}
-                                    value={line.discount_value}
-                                    onChange={e => updateLine(i, 'discount_value', parseFloat(e.target.value) || 0)}
+                                    value={line._discount_valueStr ?? line.discount_value}
+                                    onFocus={e => e.target.select()}
+                                    onChange={e => updateLine(i, 'discount_value', e.target.value)}
+                                    onBlur={() => finalizeLineField(i, 'discount_value')}
                                     disabled={!canDiscount}
                                     title={!canDiscount ? 'No discount permission' : ''}
                                   />

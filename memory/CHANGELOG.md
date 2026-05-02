@@ -1,5 +1,24 @@
 # AgriBooks Changelog
 
+## May 2026 — Order Mode Input UX: Tab-Select + Leading Decimal (Iter 203)
+
+**Ask**: "When I press Tab on quantity and price in Order mode, I want it to select all text so I can type a new value immediately. Also let me type `.5` or `.05` without having to type `0.5` first."
+
+**Changes — `UnifiedSalesPage.js`:**
+
+**Order mode (lines table):**
+- Qty, Rate, and Discount inputs changed from `type="number"` to `type="text" inputMode="decimal"` — allows `.5` entry on all browsers.
+- Added `onFocus={e => e.target.select()}` — Tab now selects all text in the field.
+- String-intermediate pattern (`_quantityStr`, `_rateStr`, `_discount_valueStr`) — preserves transient strings like `.`, `0.`, empty while typing, finalized to numeric on blur via `finalizeLineField()`.
+- `updateLine()` refactored to handle numeric field intermediates (mirrors Quick mode's existing `setCartQty` pattern).
+
+**Quick mode (cart):**
+- Price input also upgraded from `type="number"` to `type="text" inputMode="decimal"` with `_priceStr` intermediate + blur finalize (qty was already done previously).
+- `updateCartPrice()` updated to match the same intermediate-string logic.
+
+**No backend changes.**
+
+
 ## Feb 2026 — Offline Price Match (Iter 202)
 
 **Ask**: "I want to do the price match even when offline. It only saves the reason offline first and eventually syncs when the internet is back. We require PINs for this regardless in Quick or Order — so we cache the admin and manager PINs to make it work even offline."
