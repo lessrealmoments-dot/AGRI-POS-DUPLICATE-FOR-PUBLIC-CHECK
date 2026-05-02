@@ -1,5 +1,29 @@
 # AgriBooks Changelog
 
+## May 2026 — Global & Customer Payment History + Close Wizard (Iter 204)
+
+**Global Payment History Tab on /payments:**
+- New "History" tab vs "Customer Payment" tab at top of /payments page
+- `GET /api/payments/history` backend endpoint — filters: date range, branch, method, customer search
+- Method breakdown chips (Cash: ₱X | GCash: ₱Y | Discount: ₱Z | Total: ₱N)
+- Table: Date, Customer, Invoice #, Type, Method, Amount, Reference, Recorded By
+- Customer name clickable → opens per-customer payment history modal
+
+**Customer Payment History in /customers:**
+- Clock icon button on each customer row → dedicated Payment History modal (7-column table + total row)
+
+**Close Wizard Step 3 Enhancements:**
+- Added Method column to AR payments table
+- AR payment method breakdown chips
+- Interest & Penalty Invoices Created Today section
+
+**Close Wizard Z-Report (Step 7) Enhancements:**
+- Interest collected + discount annotations under AR Cash Payments line
+- Enhanced AR Collections section with method chips + per-payment interest annotation + discount footer
+- Interest & Penalty Invoices Issued Today section
+
+**Backend daily-close-preview additions:** `interest_invoices_today`, `ar_payment_by_method`, `ar_interest_collected`, `ar_discount_today`
+
 ## May 2026 — Payments Page Improvements (Iter 203)
 
 **Ask**: "Disable auto-generate interest, add manual interest input, make discount inputable with PIN, and add payment history editing."

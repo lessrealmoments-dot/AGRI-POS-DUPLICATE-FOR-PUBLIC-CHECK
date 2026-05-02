@@ -1,5 +1,34 @@
 # AgriBooks PRD
 
+## Iter 204 (May 2026) — Global & Customer Payment History + Close Wizard Enhancements ✅
+
+### Global Payment History Tab (`/payments`)
+- New "History" tab beside "Customer Payment" on the `/payments` page
+- Backend: `GET /api/payments/history` — queries all invoice payment records across all customers with filters (date range, branch, method, customer search)
+- Method breakdown chips at top (Cash: ₱X | GCash: ₱Y | Total: ₱Z)
+- Table: Date, Customer, Invoice #, Type (badge), Method, Amount, Reference, Recorded By
+- Clicking a customer name opens per-customer payment history modal (shared state with existing customer history dialog)
+
+### Customer Payment History in `/customers` page
+- New Clock icon button on each customer row → opens dedicated Payment History modal
+- Shows all payment records: Date, Invoice #, Type, Method, Reference, Amount, Recorded By
+- Total Received summary row at bottom
+
+### Close Wizard Step 3 Enhancements
+- Added **Method** column to AR payments table (shows Cash/GCash/etc. per payment)
+- Added AR payment method breakdown chips (Cash: ₱X, GCash: ₱Y)
+- Added **Interest & Penalty Invoices Created Today** section showing INT/Penalty invoices issued today with Amount, Collected, Balance columns
+
+### Close Wizard Z-Report (Step 7) Enhancements
+- Added `↳ of which interest collected` annotation under AR Cash Payments line
+- Added `↳ discounts given on interest/penalty` annotation when AR discounts were given today
+- Enhanced AR Collections section: method breakdown chips, per-payment interest annotation, AR discounts footer row
+- Added **Interest & Penalty Invoices Issued Today** section in Z-Report
+
+### Backend
+- `GET /api/payments/history` (new) — org-scoped, paginated, filterable
+- `daily-close-preview` now returns 4 new fields: `interest_invoices_today`, `ar_payment_by_method`, `ar_interest_collected`, `ar_discount_today`
+
 ## Iter 203 (May 2026) — PIN Session + Input UX + Payments Improvements ✅
 
 ### Payments Page Improvements
