@@ -1,0 +1,36 @@
+{
+  "summary": "Frontend-only QA of Close Wizard inline-checkbox group-close rework. All 8 spec items verified LIVE end-to-end with branch=Main Warehouse pre-selected. No regressions; no bugs found.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "playwright_results": {
+    "login_and_branch_selection": "PASS — test_org_admin@regression.local / RegressionPass!2026 → /dashboard. Sidebar branch selector opens on click of 'All Branches'; the dropdown MENU is rendered outside <aside> as a portal-like floating panel (options: All Branches / Main Warehouse / Other Branch x2). Clicking 'Main Warehouse' updates sidebar header to 'Main Warehouse' and unlocks /close-wizard.",
+    "close_wizard_chips_structure": "PASS — /close-wizard renders 3 chips with data-testid=day-select-{YYYY-MM-DD} and 3 corresponding data-testid=batch-chip-{YYYY-MM-DD} checkboxes (2026-05-01, 2026-05-02, 2026-05-03). Header reads 'Main Warehouse — 2026-05-01 → 2026-05-02 (2 days)'. 'Please select a branch first…' guard correctly gone.",
+    "regression_check_removed_elements": "PASS — All old artifacts absent: close-as-group-btn, close-one-by-one-btn, confirm-batch-selection-btn, and text 'Pick the days you want to group above' / 'Close as Group' / 'Close One by One'.",
+    "tick_one_only": "PASS — After ticking batch-chip-2026-05-01 alone: group-mode-badge=absent, batch-reason-input=absent, 'Tip: tick the checkbox on 2+ days…' hint still visible. Subtitle still shows single-day step description.",
+    "tick_two_enters_group_mode": "PASS — After ticking the 2nd chip: group-mode-badge text = 'GROUP (2)' renders next to Step title; counter shows 'GROUP: 2 days selected'; batch-reason-input appears inside amber card; step subtitle switches to '2026-05-01 → 2026-05-02 · 2 days combined (oldest to newest)'. Step 1 Sales Log table re-renders with 5 aggregated rows; first-cell shows '05-02<seq#>' pattern (MM-DD pill + sequence) as required (2026-05-01 has 0 sales → only 2026-05-02 entries appear, which is data-correct).",
+    "untick_exits_group_mode": "PASS — After unticking 2nd chip: group-mode-badge removed, batch-reason-input removed, hint text returns. Fallback to single-day data happens without reload.",
+    "step7_button_label_and_disabled_state": "PASS — After re-entering group mode and clicking Step 7: only button matching /Close.*(Day|Group)/ is 'Close 2 Days as Group (2026-05-01 → 2026-05-02)' with disabled=true when reason empty. Button REMAINS disabled after filling reason only (because actual-cash + pinVerified are also required per Step 5/6 preconditions — expected per spec, not a bug).",
+    "no_destructive_action_performed": "Confirmed — no submit fired to /api/daily-close or /api/daily-close/batch."
+  },
+  "code_review_findings": {
+    "state_machine": "/app/frontend/src/pages/CloseWizardPage.js lines 52-58: inGroupMode derived from batchDates.length>=2 (no standalone batchMode). Clean, no dead state.",
+    "chip_row": "Lines 796-886: chip body uses data-testid=day-select-{date} (onClick=selectDay), inner checkbox uses data-testid=batch-chip-{date} with e.stopPropagation() so tick-vs-body-click are isolated. Correct per spec.",
+    "header_badge": "Line 930: GROUP badge renders only in group mode with data-testid=group-mode-badge. Subtitle switches correctly on line 933.",
+    "no_backwards_compat_leak": "grep of file confirms zero occurrences of: 'Close as Group', 'Close One by One', 'Pick the days you want to group', batchMode, close-as-group-btn, close-one-by-one-btn, confirm-batch-selection-btn."
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Close Wizard inline-checkbox UX reworked cleanly — no mode switch, no placeholder, no detour. State derived-from-data (inGroupMode = batchDates.length>=2) is the right pattern.",
+    "The chip body vs checkbox click-separation via stopPropagation is correct. Tick toggles group membership, body click focuses a single day — both verified live.",
+    "Data aggregation into Step 1 works; MM-DD pill rendering confirmed in first-cell pattern '05-02<n>'. Rows from empty day (2026-05-01: 0 sales) correctly contribute zero entries — sort order oldest→newest preserved."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (frontend-only per request)", "frontend": "100% — all 8 spec items pass live"},
+  "test_credentials": "test_org_admin@regression.local / RegressionPass!2026 (branch=Main Warehouse). Admin PIN 913712 from /app/memory/test_credentials.md (not exercised — submit is destructive).",
+  "seed_data_creation": "None — used existing regression-org seed.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Branch selector dropdown renders OUTSIDE <aside> via portal-like floating panel. DO NOT scope selector to 'aside [role=...]'. Correct pattern: (1) click aside button with text 'All Branches' to open, (2) use page.evaluate to click the element whose textContent.trim() === 'Main Warehouse' AND offsetParent && offsetHeight<80 (filters out the Branch Performance card that also contains 'Main Warehouse' text). After selection, the sidebar button text changes to 'Main Warehouse' and /close-wizard unlocks. Chip testids confirmed: batch-chip-{YYYY-MM-DD} is the CHECKBOX; day-select-{YYYY-MM-DD} is the CHIP BODY.",
+  "rca_of_the_issue": "N/A — feature validation pass."
+}

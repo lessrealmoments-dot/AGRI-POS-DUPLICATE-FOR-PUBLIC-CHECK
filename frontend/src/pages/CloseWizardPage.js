@@ -49,11 +49,13 @@ export default function CloseWizardPage() {
   const [lastCloseDate, setLastCloseDate] = useState(null);
   const [selectedDayIndex, setSelectedDayIndex] = useState(0);
 
-  // Batch closing mode
-  const [batchMode, setBatchMode] = useState(false);
+  // Group closing — when user ticks checkboxes on 2+ unclosed-day chips,
+  // the wizard auto-aggregates data across those dates. No separate mode
+  // switch; `inGroupMode` is derived from `batchDates.length >= 2`.
   const [batchDates, setBatchDates] = useState([]);
   const [batchReason, setBatchReason] = useState('');
   const [batchPreview, setBatchPreview] = useState(null);
+  const inGroupMode = batchDates.length >= 2;
 
   // Wizard data
   const [dailyLog, setDailyLog] = useState(null);
@@ -287,70 +289,141 @@ export default function CloseWizardPage() {
   const selectDay = async (index) => {
     if (index < 0 || index >= unclosedDays.length) return;
     setSelectedDayIndex(index);
-    setBatchMode(false);
+    // Leaving group mode: user picked a specific day to focus on.
+    setBatchDates([]);
+    setBatchReason('');
+    setBatchPreview(null);
     await loadWizardData(unclosedDays[index].date);
   };
 
-  // Enter batch mode — user picks a subset of unclosed days to combine.
-  // Starts with NO days selected so the user explicitly chooses which days
-  // to group (e.g., group Day 1-5 for inventory week, then regular-close
-  // Day 6-7 individually).
-  const enterBatchMode = () => {
-    if (unclosedDays.length < 2) return;
-    setBatchDates([]);
-    setBatchPreview(null);
-    setPreview(null);
-    setBatchMode(true);
-    setStep(1);
-    setCompleted(new Set());
-    setActualCash('');
-    setCashToSafe('');
-    setCashToDrawer('');
-    setManagerPin('');
-    setPinVerified(false);
-    setManagerName('');
-    setBatchReason('');
-  };
-
-  // Toggle a single date in/out of the batch selection.
-  const toggleBatchDate = (d) => {
-    setBatchDates(prev => {
-      const has = prev.includes(d);
-      const next = has ? prev.filter(x => x !== d) : [...prev, d];
-      return next.sort();
+  // Merge N daily-log responses into a single one sorted oldest → newest.
+  // Each row carries `_date` so the Sales Log table can show which day it
+  // came from. Cash running totals are recomputed across the merged stream.
+  const mergeDailyLogs = (logs, dates) => {
+    const tagged = logs.map((log, i) => ({ log: log || {}, date: dates[i] }));
+    // entries: sort by (date, sequence) ascending
+    const entries = tagged.flatMap(({ log, date }) =>
+      (log.entries || []).map(e => ({ ...e, _date: date }))
+    ).sort((a, b) => {
+      const byDate = (a._date || '').localeCompare(b._date || '');
+      if (byDate !== 0) return byDate;
+      return (a.sequence || 0) - (b.sequence || 0);
     });
-    // Invalidate preview whenever selection changes; user must re-confirm.
-    setBatchPreview(null);
-    setPreview(null);
+    const credit_invoices = tagged.flatMap(({ log, date }) =>
+      (log.credit_invoices || []).map(inv => ({ ...inv, _date: date }))
+    ).sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
+    // Recompute cash_entries + cash_running_total across the merged stream
+    const cash_entries = tagged.flatMap(({ log, date }) =>
+      (log.cash_entries || []).map(e => ({ ...e, _date: date }))
+    ).sort((a, b) => {
+      const byDate = (a._date || '').localeCompare(b._date || '');
+      if (byDate !== 0) return byDate;
+      return (a.sequence || 0) - (b.sequence || 0);
+    });
+    let running = 0;
+    for (const e of cash_entries) {
+      const pm = (e.payment_method || 'cash').toLowerCase();
+      let amt = 0;
+      if (pm === 'split') amt = e._split_cash_portion || 0;
+      else if (pm === 'partial') amt = e._partial_cash_portion || 0;
+      else amt = e.line_total || 0;
+      running = Math.round((running + amt) * 100) / 100;
+      e.cash_running_total = running;
+    }
+    // Summary: sum numeric totals, merge by_payment_method + cash_by_category
+    const sumKeys = ['total_cash', 'total_partial_cash', 'total_cash_all', 'total_credit',
+      'total_credit_balance', 'total_all', 'grand_total', 'cash_count', 'credit_invoice_count'];
+    const summary = {};
+    for (const k of sumKeys) {
+      summary[k] = tagged.reduce((a, { log }) => a + (log.summary?.[k] || 0), 0);
+      if (k === 'cash_count' || k === 'credit_invoice_count') summary[k] = Math.round(summary[k]);
+      else summary[k] = Math.round(summary[k] * 100) / 100;
+    }
+    const mergeMap = (getter) => {
+      const out = {};
+      for (const { log } of tagged) {
+        const src = getter(log) || {};
+        for (const [k, v] of Object.entries(src)) {
+          if (typeof v === 'object' && v !== null && 'total' in v) {
+            if (!out[k]) out[k] = { total: 0, count: 0 };
+            out[k].total = Math.round((out[k].total + (v.total || 0)) * 100) / 100;
+            out[k].count += (v.count || 0);
+          } else {
+            out[k] = Math.round(((out[k] || 0) + (v || 0)) * 100) / 100;
+          }
+        }
+      }
+      return out;
+    };
+    summary.by_payment_method = mergeMap(l => l.summary?.by_payment_method);
+    summary.cash_by_category = mergeMap(l => l.summary?.cash_by_category);
+    return { entries, cash_entries, credit_invoices, summary, date: `${dates[0]} → ${dates[dates.length-1]}`, count: entries.length };
   };
 
-  // Confirm the current batch selection → load preview + enter wizard steps.
-  const confirmBatchSelection = async () => {
-    if (batchDates.length < 2) { toast.error('Select at least 2 days to group'); return; }
+  // Merge daily-report responses: concat ar_credits_today + sum total_ar_credits_today.
+  const mergeReports = (reports) => {
+    const ar_credits_today = reports.flatMap(r => (r?.ar_credits_today || []))
+      .sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
+    const total_ar_credits_today = Math.round(
+      reports.reduce((a, r) => a + (r?.total_ar_credits_today || 0), 0) * 100
+    ) / 100;
+    return { ...(reports[0] || {}), ar_credits_today, total_ar_credits_today };
+  };
+
+  // Load aggregated data for group-close mode: batch preview + parallel
+  // daily-log + daily-report per selected date, merged oldest → newest.
+  const loadAggregatedWizardData = useCallback(async (dates) => {
+    if (!currentBranch || dates.length < 2) return;
     setLoading(true);
     try {
-      const dateStr = batchDates.join(',');
-      const [bpRes, logRes] = await Promise.all([
-        api.get('/daily-close-preview/batch', { params: { branch_id: currentBranch.id, dates: dateStr } }),
-        api.get('/daily-log', { params: { date: batchDates[batchDates.length - 1], branch_id: currentBranch.id } }),
+      const sorted = [...dates].sort();
+      const [bpRes, ...rest] = await Promise.all([
+        api.get('/daily-close-preview/batch', { params: { branch_id: currentBranch.id, dates: sorted.join(',') } }),
+        ...sorted.map(d => api.get('/daily-log',    { params: { date: d, branch_id: currentBranch.id } })),
+        ...sorted.map(d => api.get('/daily-report', { params: { date: d, branch_id: currentBranch.id } })),
       ]);
+      const logResponses = rest.slice(0, sorted.length).map(r => r.data);
+      const reportResponses = rest.slice(sorted.length).map(r => r.data);
       setBatchPreview(bpRes.data);
       setPreview(bpRes.data);
-      setDailyLog(logRes.data);
-      setDate(`${batchDates[0]} to ${batchDates[batchDates.length - 1]}`);
+      setDailyLog(mergeDailyLogs(logResponses, sorted));
+      setReport(mergeReports(reportResponses));
+      setDate(`${sorted[0]} → ${sorted[sorted.length - 1]} (${sorted.length} days)`);
       setIsClosed(false);
       setClosingRecord(null);
-      setStep(1);
-      setCompleted(new Set());
-    } catch (e) { toast.error('Failed to load batch preview'); }
+    } catch (e) {
+      toast.error('Failed to load group data');
+    }
     setLoading(false);
+  }, [currentBranch]);
+
+  // Toggle a date in/out of the group selection. Auto-loads aggregated data
+  // when 2+ selected; when dropping below 2, falls back to single-day flow
+  // with whichever chip is active.
+  const toggleBatchDate = (d) => {
+    const next = batchDates.includes(d)
+      ? batchDates.filter(x => x !== d)
+      : [...batchDates, d].sort();
+    setBatchDates(next);
+    if (next.length >= 2) {
+      loadAggregatedWizardData(next);
+    } else if (next.length === 1) {
+      // Single date ticked: treat as normal single-day focus on that date.
+      const idx = unclosedDays.findIndex(u => u.date === next[0]);
+      if (idx >= 0) setSelectedDayIndex(idx);
+      loadWizardData(next[0]);
+    } else {
+      // No dates ticked — re-load whichever day is currently the active one.
+      const activeDay = unclosedDays[selectedDayIndex]?.date || today;
+      loadWizardData(activeDay);
+    }
   };
 
   // Handle batch close
   const handleBatchClose = async () => {
     if (!pinVerified) { toast.error('Manager PIN required'); return; }
     if (!actualCash) { toast.error('Enter actual cash count'); return; }
-    if (!batchReason.trim()) { toast.error('Please provide a reason for batch closing'); return; }
+    if (!batchReason.trim()) { toast.error('Please provide a reason for group closing'); return; }
     const safe = parseFloat(cashToSafe) || 0;
     const drawer = parseFloat(cashToDrawer) || 0;
     const actual = parseFloat(actualCash);
@@ -720,7 +793,10 @@ export default function CloseWizardPage() {
         </div>
       </div>
 
-      {/* Multi-Day Selector — shown when there are multiple unclosed days */}
+      {/* Multi-Day Selector — unified chip row. Click body to focus a single
+          day; tick checkbox to add it to the group. When 2+ chips are ticked,
+          an amber "GROUP (N days)" badge appears in the wizard header and the
+          steps auto-aggregate data across those dates (oldest → newest). */}
       {unclosedDays.length > 1 && (
         <Card className="border-amber-200 bg-amber-50/50">
           <CardContent className="p-3">
@@ -734,143 +810,80 @@ export default function CloseWizardPage() {
                   {lastCloseDate ? `Since ${lastCloseDate}` : 'No previous closing found'}
                 </span>
               </div>
-              <div className="flex gap-2">
-                {batchMode ? (
-                  <Button size="sm" variant="outline" onClick={() => { setBatchMode(false); setBatchDates([]); setBatchPreview(null); setBatchReason(''); selectDay(0); }}
-                    className="text-xs border-amber-300 text-amber-700 hover:bg-amber-100" data-testid="close-one-by-one-btn">
-                    Close One by One
-                  </Button>
-                ) : (
-                  <Button size="sm" onClick={enterBatchMode}
-                    className="text-xs bg-amber-600 text-white hover:bg-amber-700" data-testid="close-as-group-btn">
-                    Close as Group
-                  </Button>
-                )}
-              </div>
+              {inGroupMode && (
+                <span className="text-[11px] font-semibold text-amber-700" data-testid="batch-selection-counter">
+                  GROUP: {batchDates.length} days selected
+                </span>
+              )}
             </div>
 
-            {batchMode ? (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] text-amber-700 font-semibold" data-testid="batch-selection-counter">
-                    Selected: {batchDates.length} of {unclosedDays.length} day{unclosedDays.length === 1 ? '' : 's'}
-                  </span>
-                  {batchDates.length >= 2 && !batchPreview && (
-                    <Button size="sm" onClick={confirmBatchSelection} disabled={loading}
-                      data-testid="confirm-batch-selection-btn"
-                      className="h-7 text-xs bg-[#1A4D2E] text-white hover:bg-[#163d25]">
-                      Confirm Selection & Preview
-                    </Button>
-                  )}
-                  {batchDates.length >= 2 && batchPreview && (
-                    <span className="text-[10px] text-emerald-700 font-medium">
-                      Preview loaded — scroll down to continue
-                    </span>
-                  )}
+            <div className="flex gap-1.5 overflow-x-auto pb-1">
+              {unclosedDays.map((day, idx) => {
+                const isActive = !inGroupMode && date === day.date;
+                const isTicked = batchDates.includes(day.date);
+                const isInGroupHighlight = inGroupMode && isTicked;
+                const dayLabel = new Date(day.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                return (
+                  <div
+                    key={day.date}
+                    className={`relative flex flex-col items-center px-3 py-2 pr-7 rounded-lg border text-xs shrink-0 transition-all cursor-pointer ${
+                      isActive || isInGroupHighlight
+                        ? 'bg-[#1A4D2E] text-white border-[#1A4D2E] shadow-sm'
+                        : day.has_activity
+                        ? 'bg-white border-amber-300 hover:border-[#1A4D2E]/50 hover:bg-slate-50'
+                        : 'bg-white border-slate-200 hover:bg-slate-50 opacity-60'
+                    }`}
+                    onClick={() => selectDay(idx)}
+                    data-testid={`day-select-${day.date}`}
+                  >
+                    <span className="font-semibold">{dayLabel}</span>
+                    {day.has_activity ? (
+                      <span className={`text-[10px] mt-0.5 ${isActive || isInGroupHighlight ? 'text-emerald-200' : 'text-slate-400'}`}>
+                        {day.sales_count} sales &middot; {formatPHP(day.cash_sales_total)}
+                      </span>
+                    ) : (
+                      <span className={`text-[10px] mt-0.5 ${isActive || isInGroupHighlight ? 'text-slate-300' : 'text-slate-400'}`}>No activity</span>
+                    )}
+                    {/* Checkbox for group selection — stopPropagation so the
+                        chip's onClick (selectDay) doesn't also fire. */}
+                    <input
+                      type="checkbox"
+                      checked={isTicked}
+                      onChange={() => toggleBatchDate(day.date)}
+                      onClick={(e) => e.stopPropagation()}
+                      title="Add to group close"
+                      data-testid={`batch-chip-${day.date}`}
+                      className="absolute top-1.5 right-1.5 w-3 h-3 rounded border-slate-400 cursor-pointer accent-amber-600"
+                    />
+                  </div>
+                );
+              })}
+            </div>
+
+            {inGroupMode ? (
+              <div className="mt-2 space-y-2">
+                <div>
+                  <Label className="text-xs text-amber-700 font-semibold">Reason for group close *</Label>
+                  <Input
+                    data-testid="batch-reason-input"
+                    value={batchReason}
+                    onChange={e => setBatchReason(e.target.value)}
+                    placeholder="e.g., Annual inventory week, store audit, power outage..."
+                    className="mt-1 h-8 text-sm bg-white border-amber-200"
+                  />
                 </div>
-                <div className="flex gap-1.5 flex-wrap">
-                  {unclosedDays.map((day) => {
-                    const dayLabel = new Date(day.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-                    const isSelected = batchDates.includes(day.date);
-                    return (
-                      <button
-                        key={day.date}
-                        type="button"
-                        onClick={() => toggleBatchDate(day.date)}
-                        data-testid={`batch-chip-${day.date}`}
-                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all border ${
-                          isSelected
-                            ? 'bg-[#1A4D2E] text-white border-[#1A4D2E] hover:bg-[#163d25]'
-                            : 'bg-white text-slate-700 border-slate-300 hover:border-[#1A4D2E]/60 hover:bg-slate-50'
-                        }`}
-                      >
-                        {isSelected ? <Check size={10} /> : <span className="w-2.5" />}
-                        <span>{dayLabel}</span>
-                        {day.has_activity && <span className={`text-[10px] ${isSelected ? 'text-emerald-200' : 'text-slate-400'}`}>{day.sales_count}s</span>}
-                      </button>
-                    );
-                  })}
-                </div>
-                {batchDates.length < 2 ? (
-                  <p className="text-[10px] text-amber-700">
-                    Tip: click any day to include it in the group. Select at least 2 days. Days you leave unchecked can still be closed individually afterward.
-                  </p>
-                ) : (
-                  <>
-                    <div>
-                      <Label className="text-xs text-amber-700 font-semibold">Reason for batch close *</Label>
-                      <Input
-                        data-testid="batch-reason-input"
-                        value={batchReason}
-                        onChange={e => setBatchReason(e.target.value)}
-                        placeholder="e.g., Annual inventory week, store audit, power outage..."
-                        className="mt-1 h-8 text-sm bg-white border-amber-200"
-                      />
-                    </div>
-                    <p className="text-[10px] text-amber-600">
-                      Sales, credits, and expenses from the {batchDates.length} selected days ({batchDates[0]} → {batchDates[batchDates.length-1]}) will be combined into a single closing.
-                    </p>
-                  </>
-                )}
+                <p className="text-[10px] text-amber-600">
+                  Sales, credits, and expenses from {batchDates.length} selected days ({batchDates[0]} → {batchDates[batchDates.length-1]}) are combined below — sorted oldest to newest.
+                </p>
               </div>
             ) : (
-              <>
-                <div className="flex gap-1.5 overflow-x-auto pb-1">
-                  {unclosedDays.map((day, idx) => {
-                    const isSelected = date === day.date;
-                    const dayLabel = new Date(day.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-                    return (
-                      <button
-                        key={day.date}
-                        onClick={() => selectDay(idx)}
-                        data-testid={`day-select-${day.date}`}
-                        className={`flex flex-col items-center px-3 py-2 rounded-lg border text-xs shrink-0 transition-all ${
-                          isSelected
-                            ? 'bg-[#1A4D2E] text-white border-[#1A4D2E] shadow-sm'
-                            : day.has_activity
-                            ? 'bg-white border-amber-300 hover:border-[#1A4D2E]/50 hover:bg-slate-50'
-                            : 'bg-white border-slate-200 hover:bg-slate-50 opacity-60'
-                        }`}
-                      >
-                        <span className="font-semibold">{dayLabel}</span>
-                        {day.has_activity ? (
-                          <span className={`text-[10px] mt-0.5 ${isSelected ? 'text-emerald-200' : 'text-slate-400'}`}>
-                            {day.sales_count} sales &middot; {formatPHP(day.cash_sales_total)}
-                          </span>
-                        ) : (
-                          <span className={`text-[10px] mt-0.5 ${isSelected ? 'text-slate-300' : 'text-slate-400'}`}>No activity</span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-                <p className="text-[10px] text-amber-600 mt-1.5">
-                  Close days in order. Each day's opening float chains from the previous closing.
-                </p>
-              </>
+              <p className="text-[10px] text-amber-600 mt-1.5">
+                Tip: tick the checkbox on 2+ days to close them together as a group. Close days in order — each day's opening float chains from the previous closing.
+              </p>
             )}
           </CardContent>
         </Card>
       )}
-
-      {/* In batch mode, hide the wizard steps until the user confirms their
-          date selection. Prevents stepping through an empty/stale preview. */}
-      {batchMode && !batchPreview ? (
-        <Card className="border-dashed border-slate-300 bg-slate-50/50">
-          <CardContent className="p-8 text-center">
-            <Calendar size={28} className="text-slate-400 mx-auto mb-2" />
-            <p className="text-sm text-slate-600 font-medium">
-              {batchDates.length < 2
-                ? 'Pick the days you want to group above'
-                : 'Click "Confirm Selection & Preview" above to continue'}
-            </p>
-            <p className="text-[11px] text-slate-400 mt-1">
-              Selected {batchDates.length} day{batchDates.length === 1 ? '' : 's'} &middot; minimum 2 required
-            </p>
-          </CardContent>
-        </Card>
-      ) : (
-        <>
 
       {/* Stepper */}
       <div className="flex items-center gap-0 overflow-x-auto pb-1">
@@ -914,10 +927,10 @@ export default function CloseWizardPage() {
               <div>
                 <CardTitle className="text-base font-bold" style={{ fontFamily: 'Manrope' }}>
                   Step {step}: {STEPS[step-1].title}
-                  {batchMode && <Badge className="ml-2 bg-amber-100 text-amber-700 border-amber-300 text-[10px]">BATCH</Badge>}
+                  {inGroupMode && <Badge className="ml-2 bg-amber-100 text-amber-700 border-amber-300 text-[10px]" data-testid="group-mode-badge">GROUP ({batchDates.length})</Badge>}
                 </CardTitle>
                 <p className="text-xs text-slate-500">
-                  {batchMode ? `${batchDates[0]} to ${batchDates[batchDates.length-1]} (${batchDates.length} days combined)` : STEPS[step-1].desc}
+                  {inGroupMode ? `${batchDates[0]} → ${batchDates[batchDates.length-1]} · ${batchDates.length} days combined (oldest to newest)` : STEPS[step-1].desc}
                 </p>
               </div>
             </div>
@@ -1075,7 +1088,14 @@ export default function CloseWizardPage() {
                               }
                               return (
                                 <tr key={i} className="border-b border-slate-50 hover:bg-slate-50/50">
-                                  <td className="px-3 py-1.5 text-xs text-slate-400">{e.sequence || i+1}</td>
+                                  <td className="px-3 py-1.5 text-xs text-slate-400">
+                                    {inGroupMode && e._date && (
+                                      <span className="inline-block mr-1 px-1 rounded bg-amber-100 text-amber-700 text-[9px] font-mono" title={e._date}>
+                                        {e._date.slice(5)}
+                                      </span>
+                                    )}
+                                    {e.sequence || i+1}
+                                  </td>
                                   <td className="px-3 py-1.5">
                                     <span className="font-medium">{e.product_name}</span>
                                     {e.customer_name && e.customer_name !== 'Walk-in' && (
@@ -2112,7 +2132,7 @@ export default function CloseWizardPage() {
               )}
 
               {/* Batch Mode: Per-Day Breakdown */}
-              {batchMode && batchPreview?.daily_breakdown && (
+              {inGroupMode && batchPreview?.daily_breakdown && (
                 <div className="rounded-xl border border-slate-200 overflow-hidden">
                   <div className="px-4 py-2 bg-slate-100 text-xs font-bold uppercase tracking-wider text-slate-600">Per-Day Breakdown</div>
                   <div className="divide-y divide-slate-100">
@@ -2137,10 +2157,10 @@ export default function CloseWizardPage() {
                 </div>
               )}
 
-              {/* Batch Mode: Reason */}
-              {batchMode && (
+              {/* Group Mode: Reason (same state as the top input; editable here too) */}
+              {inGroupMode && (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-                  <Label className="text-sm font-semibold text-amber-800">Batch Close Reason *</Label>
+                  <Label className="text-sm font-semibold text-amber-800">Group Close Reason *</Label>
                   <Input
                     data-testid="batch-reason-zreport"
                     value={batchReason}
@@ -2185,17 +2205,17 @@ export default function CloseWizardPage() {
               {/* Close Day Button */}
               <Button
                 data-testid="close-day-btn"
-                onClick={batchMode ? handleBatchClose : handleCloseDay}
-                disabled={!pinVerified || !canProceedToClose || closing || isClosed || (batchMode && !batchReason.trim())}
+                onClick={inGroupMode ? handleBatchClose : handleCloseDay}
+                disabled={!pinVerified || !canProceedToClose || closing || isClosed || (inGroupMode && !batchReason.trim())}
                 className="w-full h-12 bg-red-600 hover:bg-red-700 text-white text-base font-semibold"
               >
                 {closing ? <><RefreshCw size={16} className="animate-spin mr-2" />Closing...</>
                   : isClosed ? <><CheckCircle2 size={16} className="mr-2" /> Already Closed</>
-                  : batchMode ? <><Lock size={16} className="mr-2" /> Batch Close {batchDates.length} Days ({batchDates[0]} to {batchDates[batchDates.length-1]})</>
+                  : inGroupMode ? <><Lock size={16} className="mr-2" /> Close {batchDates.length} Days as Group ({batchDates[0]} → {batchDates[batchDates.length-1]})</>
                   : <><Lock size={16} className="mr-2" /> Close Accounts for {date}</>}
               </Button>
               <p className="text-xs text-slate-400 text-center">
-                {batchMode ? `This will close ${batchDates.length} days as a single entry. This action is permanent.` : 'This action is permanent. The day will be locked and the Z-Report saved.'}
+                {inGroupMode ? `This will close ${batchDates.length} days as a single entry. This action is permanent.` : 'This action is permanent. The day will be locked and the Z-Report saved.'}
               </p>
             </div>
           )}
@@ -2240,7 +2260,7 @@ export default function CloseWizardPage() {
                   <div className="flex gap-3 justify-center mt-4">
                     <Button variant="outline" onClick={() => window.print()}>Print Z-Report</Button>
                     <Button variant="outline" onClick={() => {
-                      const url = `${process.env.REACT_APP_BACKEND_URL}/api/reports/z-report-pdf?date=${batchMode ? selectedDays[0] : preview?.date || ''}&branch_id=${preview?.branch_id || ''}`;
+                      const url = `${process.env.REACT_APP_BACKEND_URL}/api/reports/z-report-pdf?date=${inGroupMode ? batchDates[0] : preview?.date || ''}&branch_id=${preview?.branch_id || ''}`;
                       window.open(url, '_blank');
                     }}>
                       <Download size={14} className="mr-1.5" /> Download PDF
@@ -2280,8 +2300,6 @@ export default function CloseWizardPage() {
           {step === 7 ? (isClosed ? 'Next' : 'Close First') : 'Next'} <ChevronRight size={15} className="ml-1" />
         </Button>
       </div>
-        </>
-      )}
 
       {/* ── Quick Add Sale Dialog ── */}
       <Dialog open={saleDialog} onOpenChange={setSaleDialog}>
