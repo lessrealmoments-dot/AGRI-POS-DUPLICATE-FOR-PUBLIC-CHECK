@@ -12,6 +12,55 @@ from utils import get_current_user, check_perm, now_iso, new_id
 router = APIRouter(prefix="/sms", tags=["SMS"])
 
 
+# ── Gateway-dispatch tuning (spam-storm prevention) ─────────────────────────
+#
+# Problem (Iter 216, user-reported):
+#   During a power outage the gateway phone lost DNS. The phone SENT the SMS
+#   via GSM but its HTTP `mark-sent` ack to the server failed. On the next
+#   poll the server handed out the SAME row again → the recipient was spammed
+#   with the same "URGENT" message over and over.
+#
+# Strategy:
+#   1. LEASE — when we hand a row to the gateway, lock it for `DISPATCH_LEASE_SECONDS`.
+#      Other polls skip leased rows. Lease is released on ack (`mark-sent` /
+#      `mark-failed`) OR when it expires (legitimate retry path).
+#   2. 3 STRIKES / DAY — every dispatch bumps `dispatch_count`. Once it hits
+#      `MAX_DISPATCHES_PER_DAY` without a `mark-sent`, the row flips to
+#      `deferred` with `deferred_until = tomorrow 00:00 org-tz`. Stops the
+#      spiral dead within a day, even if the gateway never acks again.
+#   3. DAILY SELF-HEAL — on each `GET /queue/pending` call, any `deferred`
+#      row whose `deferred_until` has passed is flipped back to `pending` with
+#      `dispatch_count=0`, giving it a fresh 3 strikes tomorrow.
+#   4. PER-RECIPIENT THROTTLE — `queue_sms` refuses to enqueue the same
+#      (template_key, phone) combo within `ENQUEUE_THROTTLE_SECONDS`. Prevents
+#      the scheduler from piling on while the gateway is offline.
+DISPATCH_LEASE_SECONDS = 300          # 5 min
+MAX_DISPATCHES_PER_DAY = 3            # 3 handouts/day per row; then defer
+ENQUEUE_THROTTLE_SECONDS = 600        # 10 min per-recipient per-template
+MAX_GATEWAY_RETRIES = 3               # existing cap for mark-failed path
+
+
+async def _tomorrow_midnight_iso(org_id: str) -> str:
+    """Return tomorrow 00:00:00 in the org's timezone, as an ISO-8601 string.
+    Used as `deferred_until` so deferred rows re-arm at the start of the next
+    local business day. Imports locally to avoid a circular module import.
+    """
+    from routes.close_reminder import _resolve_org_timezone
+    try:
+        from zoneinfo import ZoneInfo
+        tz_name = await _resolve_org_timezone(org_id)
+        now_local = datetime.now(ZoneInfo(tz_name))
+        tomorrow = (now_local + timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        # Store as UTC-ISO so Mongo string comparisons are monotonic.
+        return tomorrow.astimezone(timezone.utc).isoformat()
+    except Exception:
+        return (datetime.now(timezone.utc) + timedelta(days=1)).replace(
+            hour=16, minute=0, second=0, microsecond=0
+        ).isoformat()
+
+
 # ── Org-scoped company-name resolver (no cross-tenant bleed) ──────────────
 # Falls back to the immutable organizations.name when the settings doc is
 # missing (e.g. after Reset Company before the user re-saves Settings).
@@ -648,6 +697,32 @@ async def queue_sms(
             sms_log.info(f"queue_sms skipped — duplicate dedup_key={dedup_key} (already queued)")
             return None
 
+    # Per-recipient throttle (Iter 216) — stops scheduler-storms during gateway
+    # outages from piling multiple copies of the same reminder onto the same
+    # phone. Only applies to `auto`-trigger templates; manual sends are always
+    # honoured so the user can urgently SMS a customer again.
+    if trigger == "auto":
+        throttle_cutoff = (
+            datetime.now(timezone.utc) - timedelta(seconds=ENQUEUE_THROTTLE_SECONDS)
+        ).isoformat()
+        recent = await _raw_db.sms_queue.find_one(
+            {
+                "template_key": template_key,
+                "phone": phone.strip(),
+                "status": {"$in": ["pending", "sent", "deferred"]},
+                "created_at": {"$gte": throttle_cutoff},
+                **org_filter,
+            },
+            {"_id": 0, "id": 1, "created_at": 1},
+        )
+        if recent:
+            sms_log.info(
+                f"queue_sms skipped — throttled (same template+phone within "
+                f"{ENQUEUE_THROTTLE_SECONDS//60}min) | template={template_key} "
+                f"phone={phone} recent_id={recent.get('id')}"
+            )
+            return None
+
     message = render_template(template["body"], variables)
     doc = {
         "id": new_id(),
@@ -668,6 +743,10 @@ async def queue_sms(
         "failed_at": None,
         "error": None,
         "retry_count": 0,
+        # Spam-storm protection (Iter 216)
+        "dispatch_count": 0,
+        "leased_until": None,
+        "deferred_until": None,
     }
     await _raw_db.sms_queue.insert_one(doc)
     del doc["_id"]
@@ -886,21 +965,95 @@ async def diagnose_sms_trigger(
 # the SIM/network is rejecting outbound SMS (Android error code 124 etc).
 # After this many failures, the message is moved to status="failed_permanent"
 # and the gateway will stop trying. Admin can manually re-queue if needed.
-MAX_GATEWAY_RETRIES = 3
+# (MAX_GATEWAY_RETRIES is declared once at the top of this module; the
+# duplicate constant here is intentionally removed to prevent drift.)
 
 
 @router.get("/queue/pending")
 async def get_pending_sms(limit: int = 50, user=Depends(get_current_user)):
     """Get pending SMS for the gateway app to send.
 
-    Excludes messages whose retry_count has already hit the cap — defensive
-    against any code path that might have left a poisoned message in 'pending'
-    state. The gateway must never poll a message we've decided to abandon.
+    Spam-storm protection (Iter 216):
+      • LEASE — every row handed out is locked for DISPATCH_LEASE_SECONDS so
+        the same row is never served to two concurrent polls AND a failed-ack
+        poll doesn't immediately re-fire the same SMS via GSM.
+      • 3-STRIKES-PER-DAY — each hand-out bumps `dispatch_count`. At
+        MAX_DISPATCHES_PER_DAY the row flips to `deferred` with
+        `deferred_until = tomorrow 00:00 org-tz`. This stops the recipient
+        from being spammed during DNS / data outages.
+      • SELF-HEAL — expired `deferred` rows and stale leases are re-armed on
+        every poll so the queue recovers automatically without a cron.
     """
-    items = await db.sms_queue.find(
-        {"status": "pending", "retry_count": {"$lt": MAX_GATEWAY_RETRIES}},
+    now = now_iso()
+
+    # 1. Self-heal expired deferrals (tomorrow's first poll picks them back up
+    #    with a fresh 3-strike budget).
+    await db.sms_queue.update_many(
+        {"status": "deferred", "deferred_until": {"$lte": now}},
+        {"$set": {
+            "status": "pending",
+            "dispatch_count": 0,
+            "leased_until": None,
+            "deferred_until": None,
+            "re_armed_at": now,
+        }},
+    )
+
+    # 2. Pull candidates whose lease (if any) has expired.
+    candidates = await db.sms_queue.find(
+        {
+            "status": "pending",
+            "retry_count": {"$lt": MAX_GATEWAY_RETRIES},
+            "$or": [
+                {"leased_until": {"$exists": False}},
+                {"leased_until": None},
+                {"leased_until": {"$lte": now}},
+            ],
+        },
         {"_id": 0},
     ).sort("created_at", 1).limit(limit).to_list(limit)
+
+    # 3. Atomically claim each (prevents two pollers racing on the same row).
+    lease_until = (datetime.now(timezone.utc) + timedelta(seconds=DISPATCH_LEASE_SECONDS)).isoformat()
+    items = []
+    for c in candidates:
+        new_dispatch_count = (c.get("dispatch_count") or 0) + 1
+
+        # Over the per-day cap → defer instead of dispatching.
+        if new_dispatch_count > MAX_DISPATCHES_PER_DAY:
+            deferred_until = await _tomorrow_midnight_iso(c.get("organization_id", ""))
+            await db.sms_queue.update_one(
+                {"id": c["id"], "status": "pending"},
+                {"$set": {
+                    "status": "deferred",
+                    "deferred_until": deferred_until,
+                    "leased_until": None,
+                    "deferred_reason": "daily_dispatch_cap",
+                }},
+            )
+            continue
+
+        # Atomic claim — only succeeds if the row is still pending + unleased.
+        claimed = await db.sms_queue.find_one_and_update(
+            {
+                "id": c["id"],
+                "status": "pending",
+                "$or": [
+                    {"leased_until": {"$exists": False}},
+                    {"leased_until": None},
+                    {"leased_until": {"$lte": now}},
+                ],
+            },
+            {"$set": {
+                "leased_until": lease_until,
+                "last_dispatched_at": now,
+                "dispatch_count": new_dispatch_count,
+            }},
+            projection={"_id": 0},
+            return_document=True,
+        )
+        if claimed:
+            items.append(claimed)
     return items
 
 
@@ -918,7 +1071,12 @@ async def mark_sms_sent(sms_id: str, user=Depends(get_current_user)):
         return {"status": "sent", "idempotent": True}
     result = await db.sms_queue.update_one(
         {"id": sms_id, "status": {"$in": ["pending", "failed"]}},
-        {"$set": {"status": "sent", "sent_at": now_iso(), "error": None}},
+        {"$set": {
+            "status": "sent", "sent_at": now_iso(), "error": None,
+            # Release any active lease so future re-queues (via /retry) aren't
+            # blocked by a stale claim.
+            "leased_until": None,
+        }},
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="SMS not found or already in terminal state")
@@ -952,6 +1110,9 @@ async def mark_sms_failed(sms_id: str, data: dict = None, user=Depends(get_curre
             "failed_at": now_iso(),
             "error": error,
             "retry_count": new_retry,
+            # Release lease: a 'failed' row is eligible to be re-dispatched
+            # after the lease expires / after admin hits /retry.
+            "leased_until": None,
         }},
     )
     return {
@@ -982,19 +1143,32 @@ async def retry_sms(sms_id: str, user=Depends(get_current_user)):
 
 
 @router.post("/queue/clear-stuck")
-async def clear_stuck_queue(user=Depends(get_current_user)):
-    """Admin: mark every failed/failed_permanent SMS in this org as 'skipped'.
+async def clear_stuck_queue(data: dict = None, user=Depends(get_current_user)):
+    """Admin: mark queued SMS rows as 'skipped' in one batch.
 
-    Use this when the carrier/SIM is rejecting outbound SMS and the gateway has
-    accumulated a backlog of stuck messages. The skipped items remain in the
-    queue history (auditable) but are no longer pollable by the gateway.
+    Default: skip `failed` + `failed_permanent` (existing behaviour).
+    Pass `{"include_pending": true}` to ALSO skip every `pending` + `deferred`
+    row — this is the emergency "Stop All Pending" button used during a
+    gateway DNS / power outage where the phone is replaying the same SMS.
+
+    The skipped items remain in queue history (auditable) but are no longer
+    pollable by the gateway.
     """
     check_perm(user, "settings", "edit")
+    data = data or {}
+    statuses = ["failed", "failed_permanent"]
+    if data.get("include_pending"):
+        statuses.extend(["pending", "deferred"])
     result = await db.sms_queue.update_many(
-        {"status": {"$in": ["failed", "failed_permanent"]}},
-        {"$set": {"status": "skipped", "skipped_at": now_iso()}},
+        {"status": {"$in": statuses}},
+        {"$set": {
+            "status": "skipped",
+            "skipped_at": now_iso(),
+            "skip_reason": "admin_stop_all" if data.get("include_pending") else "admin_clear_stuck",
+            "leased_until": None,
+        }},
     )
-    return {"cleared": result.modified_count}
+    return {"cleared": result.modified_count, "statuses_cleared": statuses}
 
 
 @router.post("/queue/{sms_id}/skip")
@@ -2002,6 +2176,15 @@ async def list_conversations(
         return sorted(result, key=lambda x: x.get("last_time", ""), reverse=True)
 
     # ── Customers section — grouped by customer_id (multi-phone safe) ────────
+    # SECURITY (Iter 216): non-admin users see ONLY their assigned branch's
+    # customers. Managers/cashiers can thus follow up with their branch's
+    # customers via SMS without being able to read other branches' convos.
+    if user.get("role") != "admin":
+        user_branch = user.get("branch_id") or ""
+        # Force the branch filter to the user's own branch, overriding any
+        # client-supplied branch_id (defense-in-depth against URL tampering).
+        branch_id = user_branch
+
     # Branch filter: collect customer_ids that have activity in this branch
     cid_filter: dict = {"customer_id": {"$ne": ""}}
     if branch_id:
@@ -2102,6 +2285,22 @@ async def list_conversations(
 @router.get("/conversation/customer/{customer_id}")
 async def get_conversation_by_customer(customer_id: str, user=Depends(get_current_user)):
     """Full message thread for a customer — all their phone numbers merged into one thread."""
+    # SECURITY (Iter 216): non-admin users can only open a customer thread when
+    # that customer has activity in their assigned branch. Prevents a manager
+    # from seeing another branch's customer history by guessing IDs.
+    if user.get("role") != "admin":
+        user_branch = user.get("branch_id") or ""
+        if not user_branch:
+            raise HTTPException(status_code=403, detail="Your user has no branch assigned — contact admin")
+        in_branch_queue = await db.sms_queue.find_one(
+            {"customer_id": customer_id, "branch_id": user_branch}, {"_id": 0, "id": 1}
+        )
+        in_branch_inbox = await db.sms_inbox.find_one(
+            {"customer_id": customer_id, "branch_id": user_branch}, {"_id": 0, "id": 1}
+        )
+        if not (in_branch_queue or in_branch_inbox):
+            raise HTTPException(status_code=403, detail="Customer not in your branch")
+
     # All phones this customer has ever used (from messages + customer record)
     queue_phones = await db.sms_queue.distinct("phone", {"customer_id": customer_id})
     inbox_phones = await db.sms_inbox.distinct("phone", {"customer_id": customer_id})

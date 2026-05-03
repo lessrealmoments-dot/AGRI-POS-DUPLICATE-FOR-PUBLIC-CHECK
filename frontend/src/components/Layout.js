@@ -26,7 +26,7 @@ const NAV_SECTIONS = [
     items: [
       { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, perm: null, offlineOk: 'readonly' },
       { path: '/find-transaction', label: 'Find Transaction', icon: Search, perm: null },
-      { path: '/messages', label: 'SMS Messages', icon: MessageSquare, perm: 'settings.edit', adminOnly: true },
+      { path: '/messages', label: 'SMS Messages', icon: MessageSquare, perm: null },
     ],
   },
   {

@@ -984,6 +984,32 @@ export default function MessagesPage() {
               className="text-slate-400 hover:text-slate-600 p-1" data-testid="refresh-queue-btn">
               <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
             </button>
+            {stats.pending > 0 && (
+              <button
+                onClick={async () => {
+                  const n = stats.pending;
+                  if (!window.confirm(
+                    `🛑 Stop ALL ${n} pending SMS right now?\n\n` +
+                    `Use this when the gateway phone is offline and is ` +
+                    `spamming recipients with the same message. All pending ` +
+                    `rows will be marked "skipped" and the gateway will stop ` +
+                    `replaying them.\n\nThis cannot be undone.`
+                  )) return;
+                  try {
+                    const r = await api.post('/sms/queue/clear-stuck', { include_pending: true });
+                    toast.success(`Stopped ${r.data.cleared || 0} pending message(s)`);
+                    loadQueue(); loadStats();
+                  } catch (e) {
+                    toast.error(e.response?.data?.detail || 'Failed to stop pending');
+                  }
+                }}
+                className="ml-1 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider rounded-full bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 flex items-center gap-1"
+                title="Emergency: mark every pending + deferred SMS as skipped. Use during gateway/DNS outages to stop spam replays."
+                data-testid="stop-all-pending-btn"
+              >
+                🛑 Stop All Pending
+              </button>
+            )}
           </div>
 
           <div className="divide-y divide-slate-100 max-h-[calc(100vh-320px)] overflow-y-auto">

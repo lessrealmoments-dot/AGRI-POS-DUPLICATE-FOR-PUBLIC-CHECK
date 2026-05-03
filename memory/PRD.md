@@ -1,5 +1,63 @@
 # AgriBooks PRD
 
+## Iter 216 (May 2026) — 🚨 SMS Spam-Storm Fix + Manager SMS Access ✅
+
+### What the user saw
+Hundreds of log lines like:
+```
+Outbound WEB/queue -> to=+63995... msg=URGENT: SAMPOLI BRANCH is 2 days overdue...
+mark-failed failed: Unable to resolve host "agri-books.com"
+[same queueId repeats over and over]
+```
+Recipients received the **same** "URGENT closing" SMS 5–20 times during a power outage. Also: manager logins had no access to the SMS feature; muted branches appeared to keep firing.
+
+### Root cause
+`GET /api/sms/queue/pending` had no lease/claim and no dispatch cap. When the gateway phone lost DNS it could still SEND the SMS via GSM but could NOT post `mark-sent` back → server kept seeing the same row as `pending` → re-handed it to the phone on every poll → phone re-sent via GSM again. Combined with a scheduler that kept enqueueing new "overdue" reminders, the queue became a storm amplifier. Mute WAS working for new rows — the SMS user saw had been queued days earlier and were just stuck replaying.
+
+### What shipped
+
+**Backend** (`routes/sms.py`):
+- **Lease-on-dispatch** — each `GET /queue/pending` claim sets `leased_until = now + 5min` with `find_one_and_update`. Concurrent polls can't grab the same row. Existing `mark-sent` / `mark-failed` endpoints now release the lease so retries still work.
+- **3-strikes-per-day cap** — every hand-out bumps `dispatch_count`. At the 4th attempt with no ack, the row flips to `deferred` with `deferred_until = tomorrow 00:00 org-tz` — stops spamming the recipient dead, even if DNS stays broken all day.
+- **Auto self-heal** — on each poll, `deferred` rows whose `deferred_until` has passed are flipped back to `pending` with a fresh 3-strike budget.
+- **Per-recipient throttle** (`queue_sms`) — refuses the same `(template_key, phone)` within 10 min for `auto`-trigger templates. `manual` sends always go through. Stops the close-reminder scheduler from piling on during outages.
+- **Emergency admin endpoint** — `POST /api/sms/queue/clear-stuck` now accepts `{"include_pending": true}` to mass-skip every `pending`/`deferred` row for the org. Stop-the-bleeding button.
+- **Constants**: `DISPATCH_LEASE_SECONDS=300`, `MAX_DISPATCHES_PER_DAY=3`, `ENQUEUE_THROTTLE_SECONDS=600`. All in one place at the top of `sms.py` (dead duplicate `MAX_GATEWAY_RETRIES=3` removed).
+
+**Manager SMS access** (per user — "manager + branch can only interact with their branch customer's saved number, the rest goes to unknown"):
+- `App.js`: `/messages` route: `AdminRoute` → `ProtectedRoute`.
+- `Layout.js`: sidebar item: `adminOnly: true` → visible to all.
+- `sms.py::list_conversations`: non-admin users have `branch_id` force-overridden to their assigned branch (defense-in-depth — URL tampering can't escape).
+- `sms.py::get_conversation_by_customer`: non-admin users get 403 if the customer has no activity in their branch. Also 403 if their user has no branch assigned.
+- Unknown numbers tab stays admin-only (customers that don't match any saved number — managers should not see these cross-branch).
+
+**Frontend** (`MessagesPage.js`):
+- Emergency **"🛑 Stop All Pending"** red pill button next to queue filter when `stats.pending > 0`. Confirm-dialog with a warning, then calls `/sms/queue/clear-stuck` with `include_pending:true`.
+
+### Tested
+- 6/6 pytest in `backend/tests/test_sms_spam_protection_216.py` pass:
+  - lease blocks immediate re-poll
+  - 3 strikes + expired-lease-between flips to `deferred`
+  - past-due `deferred` self-heals back to `pending`
+  - `clear-stuck` with `include_pending:true` skips pending rows
+  - `clear-stuck` default leaves pending untouched (backwards-compat)
+  - constants are exactly as specified (5 min / 3 / 10 min)
+- `/api/sms/conversations` smoke: admin still returns both `customers` + `unknown` sections.
+
+### Emergency one-liner for the user (this outage, run on the VPS):
+```bash
+mongosh "$MONGO_URL" --eval \
+  'db.getSiblingDB("test_database").sms_queue.updateMany(
+     {status:"pending"},
+     {$set:{status:"skipped",skipped_at:new Date().toISOString(),skip_reason:"emergency_purge_dns_outage"}})'
+```
+After shipping this build they can also just click **🛑 Stop All Pending** in `/messages`.
+
+### Why mute looked broken
+Close reminders for muted branches were queued BEFORE the mute toggle. The `close_reminder_disabled` flag correctly blocks NEW enqueues (verified by `test_branch_close_reminder_opt_out_201.py`). Once the lease+cap ships, those pre-mute rows will hit the 3-strikes cap and defer to tomorrow instead of re-firing forever. Combined with **🛑 Stop All Pending**, the user has a 1-click kill switch.
+
+---
+
 ## Iter 215 (May 2026) — Manager-Initiated Transfer with Admin Approval ✅
 
 ### Why
