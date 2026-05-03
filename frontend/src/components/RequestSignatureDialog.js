@@ -294,10 +294,10 @@ export default function RequestSignatureDialog({
             {!showBypass ? (
               <button
                 onClick={() => setShowBypass(true)}
-                className="w-full text-xs text-slate-500 hover:text-slate-700 flex items-center justify-center gap-1 py-1"
+                className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg border-2 border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-800 text-sm font-semibold transition-colors shadow-sm"
                 data-testid="show-bypass-btn"
               >
-                <ShieldAlert size={12} /> Customer can't sign? Manager bypass
+                <ShieldAlert size={15} /> Customer can't sign? Skip with Manager PIN
               </button>
             ) : (
               <BypassPanel
@@ -349,8 +349,14 @@ export default function RequestSignatureDialog({
 
             <div className="flex gap-2">
               {!showBypass && (
-                <Button variant="outline" size="sm" className="text-xs" onClick={() => setShowBypass(true)} data-testid="show-bypass-btn">
-                  <ShieldAlert size={11} className="mr-1" /> Bypass
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-sm border-2 border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-800 font-semibold h-10"
+                  onClick={() => setShowBypass(true)}
+                  data-testid="show-bypass-btn"
+                >
+                  <ShieldAlert size={14} className="mr-1" /> Skip (PIN)
                 </Button>
               )}
               <Button

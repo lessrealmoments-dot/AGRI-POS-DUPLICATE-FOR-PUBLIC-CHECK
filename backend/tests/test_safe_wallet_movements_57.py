@@ -22,7 +22,7 @@ import requests
 import os
 import time
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://sms-scheduler-8.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://multi-branch-pos-14.preview.emergentagent.com').rstrip('/')
 
 # Test credentials
 SUPER_ADMIN_EMAIL = "janmarkeahig@gmail.com"

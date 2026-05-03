@@ -4673,8 +4673,18 @@ export default function UnifiedSalesPage() {
           startPinSession(pin, 'manager_pin', '');
           setPriceMatchSubmitting(false);
           setPriceMatchModal(false);
-          // Re-trigger checkout — with priceMatchApproved set the modal is skipped.
-          setTimeout(() => openCheckout(), 30);
+          // Continue directly to the next checkout step. Calling openCheckout()
+          // here would capture a stale closure where priceMatchApproved is still
+          // null, causing the modal to re-open on first click (Iter 220 fix).
+          setPaymentType('cash');
+          setAmountTendered(grandTotal);
+          setPartialPayment(0);
+          setReleaseMode('full');
+          if (selectedCustomer && custEdited) {
+            setCustSaveDialog(true);
+          } else {
+            setCheckoutDialog(true);
+          }
         }}
       />
 

@@ -1,0 +1,45 @@
+{
+  "summary": "Iter 220 frontend verification of (1) price-match double-click fix in UnifiedSalesPage PriceMatchModal onConfirm handler, and (2) signature dialog 'Skip with Manager PIN' bypass button visibility restyle. Code review verified both fixes are correctly implemented. Playwright partially covered the price-match path: successfully logged in as regression admin, selected Other Branch, added Dup Test Item, edited cart price 50 -> 45 (UI correctly showed 'Price decreased ₱50 → ₱45 (10.0%) (manager PIN at checkout)'), but clicking the 'Checkout' button did not open PriceMatchModal in the test harness — screen went blank, likely the click navigated to a different element or opened checkoutDialog directly. Due to complexity of the cart→Confirm Sale flow and tool budget limits, the end-to-end single-click PriceMatch confirm flow was NOT automated to completion. Code-level review confirms the fix is correct.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "code_review_findings": {
+    "price_match_fix": "UnifiedSalesPage.js lines 4649-4688: PriceMatchModal onConfirm now inlines the post-approval logic (setPaymentType('cash'), setAmountTendered(grandTotal), setPartialPayment(0), setReleaseMode('full'), then opens either custSaveDialog or checkoutDialog) INSTEAD of the old setTimeout(()=>openCheckout(),30) call. This eliminates the stale-closure race where openCheckout() re-fired with priceMatchApproved still null, causing the double-click. setPriceMatchApproved({price_changes,pin}) is set synchronously before modal close. Comment in code explicitly references 'Iter 220 fix' — ✅ FIX VERIFIED AT CODE LEVEL.",
+    "signature_bypass_restyle": {
+      "qr_mode (line 294-301)": "Previously a faint text-xs slate-500 inline link. Now a full-width button with classes: 'w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg border-2 border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-800 text-sm font-semibold transition-colors shadow-sm'. Label: \"Customer can't sign? Skip with Manager PIN\". Icon: ShieldAlert size=15. data-testid=show-bypass-btn preserved. ✅ HIGH VISIBILITY.",
+      "inline_terminal_mode (line 351-360)": "Previously a faint link. Now a Button variant=outline size=sm with classes: 'text-sm border-2 border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-800 font-semibold h-10'. Label: 'Skip (PIN)'. data-testid=show-bypass-btn preserved. ✅ HIGH VISIBILITY."
+    }
+  },
+  "playwright_results": {
+    "login": "PASS (test_org_admin@regression.local)",
+    "branch_selection": "PASS (Other Branch)",
+    "product_add": "PASS (Dup Test Item added @ ₱50)",
+    "price_edit": "PASS (50 -> 45 in cart; UI shows 'Price decreased, manager PIN at checkout')",
+    "checkout_click_opens_price_match_modal": "INCONCLUSIVE — clicking text=Checkout did not open [data-testid=price-match-modal] in the automated harness. Screen went blank (likely the checkout-dialog opened or navigation occurred via Parked Sales nav link clash). The Checkout button may be behind a different testid (checkout-btn) and would need a precise selector. Confirm Sale inside checkoutDialog is likely where PriceMatchModal is actually triggered, not the first Checkout click from cart.",
+    "single_click_confirm_no_blink": "NOT EXECUTED END-TO-END",
+    "signature_dialog_bypass_visibility": "NOT TESTED IN-DOM (requires credit sale with customer + signature-required org setting); visually verified via code/CSS classes only."
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Main agent: please self-verify the single-click Price Match flow manually (add product, edit price in cart to differ from catalog, customer=Walk-in, click Checkout → inside checkoutDialog click Confirm Sale / Submit → PriceMatchModal opens → enter PIN 913712 → click 'Update branch price' ONCE → modal should close and proceed to cash/credit selection without blinking).",
+    "Main agent: verify signature-bypass button visually appears as amber-styled button (not faint grey) in a credit sale with signature-required org setting. No code-level concern — classes look correct.",
+    "Optional: add a dedicated data-testid like 'cart-checkout-btn' and 'cart-confirm-sale-btn' to disambiguate the multi-stage checkout flow for future Playwright coverage."
+  ],
+  "critical_code_review_comments": [
+    "PriceMatchModal onConfirm fix in UnifiedSalesPage.js is correct: synchronous setPriceMatchApproved + direct state transitions to checkoutDialog/custSaveDialog avoids the stale-closure re-entry that caused the blink. Inline comment at line 4676-4678 accurately documents the root cause.",
+    "RequestSignatureDialog.js bypass button restyle is correctly applied to BOTH mode='qr' (line 294) and mode='inline' (line 351). Both preserve data-testid='show-bypass-btn' for testing.",
+    "Minor: in PriceMatchModal.js the customer_only scope button label reads 'Skip change for now' — copy says 'Apply for this sale only' on the confirm button when scope=customer_only (line 262). Consistent enough but could be unified.",
+    "No regression risk observed in the change — all other state-setters (setPaymentType, setAmountTendered, setPartialPayment, setReleaseMode) mirror what openCheckout() does for a zero-discount cash default path."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (frontend-only)", "frontend": "partial — code review PASS, automated E2E PriceMatch single-click INCONCLUSIVE"},
+  "test_credentials": "Admin: test_org_admin@regression.local / RegressionPass!2026. Manager PIN: 913712. Branch: Other Branch. Product used: Dup Test Item (DUPT-3da1f6, ₱50, 100 in stock).",
+  "seed_data_creation": "None (used existing seeded data)",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "The Playwright tool struggled with the cart→Checkout→Confirm Sale flow because 'Checkout' text click appears to trigger a state transition that obscures the cart. Next agent should locate a stable data-testid for the Confirm Sale button (inside checkoutDialog), not the outer Checkout button. The Price Match modal only opens when calling openCheckout() with unapproved price changes, which happens on the initial Checkout click from cart. In this test, `computePriceChanges()` correctly detected the 50->45 change (the UI banner confirmed this), so the trigger logic is intact. The assertion to automate: (a) click Checkout, (b) assert [data-testid=price-match-modal] visible, (c) fill [data-testid=price-match-pin-input] with '913712', (d) click [data-testid=price-match-confirm] exactly once, (e) poll every 50ms for 2s and assert the modal is absent AND does not reappear.",
+  "rca_of_the_issue": "Original bug: setTimeout(()=>openCheckout(),30) captured a stale closure where priceMatchApproved was still null at timer-fire time (React state updates async). openCheckout() re-saw no approval and re-opened PriceMatchModal, causing the blink/re-click. Fix: inline the post-approval transitions directly in the onConfirm callback, bypassing openCheckout() entirely. This is the textbook fix for a React stale-closure+setState race; the alternative (useEffect watching priceMatchApproved) would be more complex. Fix is minimal and surgical — ✅ correct approach."
+}

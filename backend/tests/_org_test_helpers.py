@@ -14,7 +14,7 @@ from pymongo import MongoClient
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "test_database")
 API = os.environ.get(
-    "API_URL", "https://sms-scheduler-8.preview.emergentagent.com"
+    "API_URL", "https://multi-branch-pos-14.preview.emergentagent.com"
 ).rstrip("/") + "/api"
 
 TEST_ORG_ADMIN_EMAIL = "test_org_admin@regression.local"
