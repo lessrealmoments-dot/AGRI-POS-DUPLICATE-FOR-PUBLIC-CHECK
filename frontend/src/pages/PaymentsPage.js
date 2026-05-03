@@ -14,7 +14,7 @@ import {
   Search, AlertTriangle, Percent, Receipt, Clock,
   Info, Zap, Edit3, Banknote, CreditCard, FileText, RefreshCw,
   Building2, Smartphone, X, Tag, Users, ArrowDownAZ, ArrowDown01, GhostIcon,
-  Shield, PenLine, Ban, History, ChevronDown
+  Shield, PenLine, Ban, History, ChevronDown, Printer, DollarSign
 } from 'lucide-react';
 import { toast } from 'sonner';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
@@ -39,6 +39,47 @@ const isDiscountable = (t) => t === 'interest_charge' || t === 'penalty_charge';
 
 function round2(n) { return Math.round(n * 100) / 100; }
 
+// ── Date preset helpers (Payment History) ─────────────────────────────
+const isoDate = (d) => d.toISOString().slice(0, 10);
+const DATE_PRESETS = [
+  { key: 'today',    label: 'Today' },
+  { key: 'last7',    label: 'Last 7 Days' },
+  { key: 'last30',   label: 'Last 30 Days' },
+  { key: 'thisMo',   label: 'This Month' },
+  { key: 'lastMo',   label: 'Last Month' },
+  { key: 'q1',       label: 'Q1' },
+  { key: 'q2',       label: 'Q2' },
+  { key: 'q3',       label: 'Q3' },
+  { key: 'q4',       label: 'Q4' },
+  { key: 'thisYear', label: 'This Year' },
+  { key: 'lastYear', label: 'Last Year' },
+  { key: 'custom',   label: 'Custom' },
+];
+function rangeForPreset(key) {
+  const now = new Date();
+  const y = now.getFullYear();
+  const startOfDay = (d) => { const x = new Date(d); x.setHours(0,0,0,0); return x; };
+  const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+  switch (key) {
+    case 'today':    return [isoDate(startOfDay(now)), isoDate(now)];
+    case 'last7':    return [isoDate(addDays(now, -6)), isoDate(now)];
+    case 'last30':   return [isoDate(addDays(now, -29)), isoDate(now)];
+    case 'thisMo':   return [isoDate(new Date(y, now.getMonth(), 1)), isoDate(now)];
+    case 'lastMo': {
+      const start = new Date(y, now.getMonth() - 1, 1);
+      const end   = new Date(y, now.getMonth(), 0);
+      return [isoDate(start), isoDate(end)];
+    }
+    case 'q1':       return [`${y}-01-01`, `${y}-03-31`];
+    case 'q2':       return [`${y}-04-01`, `${y}-06-30`];
+    case 'q3':       return [`${y}-07-01`, `${y}-09-30`];
+    case 'q4':       return [`${y}-10-01`, `${y}-12-31`];
+    case 'thisYear': return [`${y}-01-01`, `${y}-12-31`];
+    case 'lastYear': return [`${y - 1}-01-01`, `${y - 1}-12-31`];
+    default:         return null;
+  }
+}
+
 export default function PaymentsPage() {
   const { currentBranch } = useAuth();
 
@@ -48,8 +89,10 @@ export default function PaymentsPage() {
   // ── Global payment history ──
   const [histGlobalData, setHistGlobalData] = useState(null);
   const [histGlobalLoading, setHistGlobalLoading] = useState(false);
-  const [histGlobalDateFrom, setHistGlobalDateFrom] = useState(new Date().toISOString().slice(0, 10));
-  const [histGlobalDateTo, setHistGlobalDateTo] = useState(new Date().toISOString().slice(0, 10));
+  const _initialHistRange = rangeForPreset('last30');
+  const [histGlobalDateFrom, setHistGlobalDateFrom] = useState(_initialHistRange[0]);
+  const [histGlobalDateTo, setHistGlobalDateTo] = useState(_initialHistRange[1]);
+  const [histPreset, setHistPreset] = useState('last30');
   const [histGlobalMethod, setHistGlobalMethod] = useState('All');
   const [histGlobalSearch, setHistGlobalSearch] = useState('');
   const [histCustomerName, setHistCustomerName] = useState('');
@@ -102,6 +145,9 @@ export default function PaymentsPage() {
   const [payMethod, setPayMethod] = useState('Cash');
   const [payRef, setPayRef] = useState('');
   const [payMemo, setPayMemo] = useState('');
+  // Controlled "Payment Amt" input — reset on customer change to prevent
+  // accidental application of a leftover amount to the next customer.
+  const [paymentAmtInput, setPaymentAmtInput] = useState('');
 
   // Interest/penalty
   const [penaltyRate, setPenaltyRate] = useState(5);
@@ -221,6 +267,7 @@ export default function PaymentsPage() {
     setDiscountModes({});
     setPayRef('');
     setPayMemo('');
+    setPaymentAmtInput(''); // reset to prevent accidental application
     setInterestRateInput(c.interest_rate > 0 ? String(c.interest_rate) : '');
     setRatePromptOpen(false);
     setRatePromptInput('');
@@ -252,6 +299,7 @@ export default function PaymentsPage() {
     setRowDiscounts({});
     setDiscountModes({});
     setChargesPreview(null);
+    setPaymentAmtInput('');
   };
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -311,6 +359,7 @@ export default function PaymentsPage() {
 
   // ── Auto-apply ──
   const autoApply = (totalAmt) => {
+    setPaymentAmtInput(String(totalAmt ?? ''));
     const amt = parseFloat(totalAmt) || 0;
     if (amt <= 0) { setRowAmounts({}); return; }
     let remaining = amt;
@@ -450,6 +499,7 @@ export default function PaymentsPage() {
       setDiscountModes({});
       setPayRef('');
       setPayMemo('');
+      setPaymentAmtInput('');
       await loadInvoices(selectedCustomer.id);
       await loadChargesPreview(selectedCustomer.id);
       invalidateBalanceCache();
@@ -469,6 +519,119 @@ export default function PaymentsPage() {
       setHistCustomerName(selectedCustomer?.name || '');
       setHistoryOpen(true);
     } catch { toast.error('Failed to load history'); }
+  };
+
+  // ── Print: Customer Payment History (single customer dialog) ──
+  const handlePrintCustomerHistory = () => {
+    if (!payHistory || payHistory.length === 0) {
+      toast.error('Nothing to print');
+      return;
+    }
+    const w = window.open('', '_blank', 'width=900,height=700');
+    if (!w) { toast.error('Pop-up blocked — allow pop-ups to print'); return; }
+    const totalReceived = payHistory.filter(p => !p.voided && p.method !== 'Discount').reduce((s, p) => s + (p.amount || 0), 0);
+    const totalDiscount = payHistory.filter(p => !p.voided && p.method === 'Discount').reduce((s, p) => s + (p.amount || 0), 0);
+    const rows = payHistory.map(p => `
+      <tr style="${p.voided ? 'opacity:0.45;text-decoration:line-through;' : ''}${p.method === 'Discount' ? 'background:#eff6ff;' : ''}">
+        <td>${p.date || ''}</td>
+        <td>${p.invoice_number || ''}</td>
+        <td>${getTypeConfig(p.sale_type).label}</td>
+        <td>${p.method || ''}</td>
+        <td>${p.reference || '—'}</td>
+        <td style="text-align:right;font-family:monospace;font-weight:600;">${formatPHP(p.amount || 0)}</td>
+        <td>${p.recorded_by || ''}</td>
+      </tr>`).join('');
+    w.document.write(`
+      <html><head><title>Payment History — ${histCustomerName}</title>
+      <style>
+        body{font-family:Arial,sans-serif;padding:24px;color:#0f172a;}
+        h1{font-size:18px;margin:0 0 4px;}
+        .sub{font-size:12px;color:#64748b;margin-bottom:16px;}
+        table{width:100%;border-collapse:collapse;font-size:12px;}
+        th,td{border-bottom:1px solid #e2e8f0;padding:6px 8px;text-align:left;}
+        th{background:#f1f5f9;text-transform:uppercase;font-size:10px;letter-spacing:.04em;color:#475569;}
+        .totals{margin-top:18px;font-size:13px;display:flex;gap:24px;justify-content:flex-end;}
+        .totals b{font-family:monospace;}
+      </style></head><body onload="window.print();setTimeout(()=>window.close(),300)">
+        <h1>Payment History — ${histCustomerName}</h1>
+        <div class="sub">Generated ${new Date().toLocaleString()}</div>
+        <table>
+          <thead><tr><th>Date</th><th>Invoice #</th><th>Type</th><th>Method</th><th>Reference</th><th style="text-align:right">Amount</th><th>By</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div class="totals">
+          <div>Total Received: <b>${formatPHP(totalReceived)}</b></div>
+          ${totalDiscount > 0 ? `<div>Discounts: <b>${formatPHP(totalDiscount)}</b></div>` : ''}
+        </div>
+      </body></html>
+    `);
+    w.document.close();
+  };
+
+  // ── Print: Global Payment History (Payment History tab) ──
+  const handlePrintGlobalHistory = () => {
+    if (!histGlobalData || !histGlobalData.payments || histGlobalData.payments.length === 0) {
+      toast.error('Nothing to print');
+      return;
+    }
+    const w = window.open('', '_blank', 'width=1100,height=750');
+    if (!w) { toast.error('Pop-up blocked — allow pop-ups to print'); return; }
+    const presetLabel = (DATE_PRESETS.find(p => p.key === histPreset)?.label) || 'Custom';
+    const rows = histGlobalData.payments.map(p => {
+      const isDiscount = p.method === 'Discount' || p.fund_source === 'discount';
+      return `<tr style="${isDiscount ? 'background:#eff6ff;' : ''}">
+        <td>${p.date || ''}</td>
+        <td>${p.customer_name || ''}</td>
+        <td>${p.invoice_number || ''}</td>
+        <td>${getTypeConfig(p.sale_type).label}</td>
+        <td>${p.method || ''}</td>
+        <td style="text-align:right;font-family:monospace;font-weight:600;">${formatPHP(p.amount || 0)}</td>
+        <td>${p.reference || '—'}</td>
+        <td>${p.recorded_by || ''}</td>
+      </tr>`;
+    }).join('');
+    const breakdown = (histGlobalData.method_breakdown || []).map(m =>
+      `<span style="display:inline-block;border:1px solid #e2e8f0;border-radius:99px;padding:3px 10px;margin:0 4px 4px 0;font-size:11px;">
+        <b>${m.method}</b> ${formatPHP(m.total)} (${m.count})
+       </span>`).join('');
+    w.document.write(`
+      <html><head><title>Payment History — ${presetLabel}</title>
+      <style>
+        body{font-family:Arial,sans-serif;padding:24px;color:#0f172a;}
+        h1{font-size:18px;margin:0 0 4px;}
+        .sub{font-size:12px;color:#64748b;margin-bottom:8px;}
+        .breakdown{margin:8px 0 16px;}
+        table{width:100%;border-collapse:collapse;font-size:11px;}
+        th,td{border-bottom:1px solid #e2e8f0;padding:5px 7px;text-align:left;}
+        th{background:#f1f5f9;text-transform:uppercase;font-size:10px;letter-spacing:.04em;color:#475569;}
+        .totals{margin-top:18px;font-size:13px;display:flex;gap:24px;justify-content:flex-end;}
+        .totals b{font-family:monospace;}
+      </style></head><body onload="window.print();setTimeout(()=>window.close(),300)">
+        <h1>Payment History — ${presetLabel}</h1>
+        <div class="sub">${histGlobalDateFrom} → ${histGlobalDateTo} · Method: ${histGlobalMethod}${histGlobalSearch ? ` · Search: "${histGlobalSearch}"` : ''}</div>
+        <div class="breakdown">${breakdown}</div>
+        <table>
+          <thead><tr><th>Date</th><th>Customer</th><th>Invoice #</th><th>Type</th><th>Method</th><th style="text-align:right">Amount</th><th>Reference</th><th>By</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div class="totals">
+          <div>Total Received: <b>${formatPHP(histGlobalData.total_received || 0)}</b></div>
+          ${histGlobalData.total_discount > 0 ? `<div>Discounts: <b>${formatPHP(histGlobalData.total_discount)}</b></div>` : ''}
+        </div>
+      </body></html>
+    `);
+    w.document.close();
+  };
+
+  // ── Apply a date preset to the global history filters ──
+  const applyHistPreset = (key) => {
+    setHistPreset(key);
+    if (key === 'custom') return;
+    const r = rangeForPreset(key);
+    if (!r) return;
+    setHistGlobalDateFrom(r[0]);
+    setHistGlobalDateTo(r[1]);
+    loadGlobalHistory(r[0], r[1], histGlobalMethod, histGlobalSearch);
   };
 
   const handleModifyPayment = async () => {
@@ -591,16 +754,40 @@ export default function PaymentsPage() {
       {/* ══════════ GLOBAL PAYMENT HISTORY TAB ══════════ */}
       {pageTab === 'history' && (
         <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Date preset chips */}
+          <div className="px-4 pt-3 pb-2 border-b border-slate-100 bg-white shrink-0 flex items-center gap-1.5 flex-wrap" data-testid="hist-presets-bar">
+            <Label className="text-[10px] text-slate-400 uppercase shrink-0 mr-1">Period</Label>
+            {DATE_PRESETS.map(p => {
+              const active = histPreset === p.key;
+              return (
+                <button
+                  key={p.key}
+                  onClick={() => applyHistPreset(p.key)}
+                  data-testid={`hist-preset-${p.key}`}
+                  className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-all ${
+                    active
+                      ? 'bg-[#1A4D2E] text-white shadow-sm'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              );
+            })}
+          </div>
+
           {/* Filters */}
           <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-3 flex-wrap shrink-0 bg-white">
             <div className="flex items-center gap-1.5">
               <Label className="text-[10px] text-slate-400 uppercase shrink-0">From</Label>
-              <Input type="date" value={histGlobalDateFrom} onChange={e => setHistGlobalDateFrom(e.target.value)}
+              <Input type="date" value={histGlobalDateFrom}
+                onChange={e => { setHistGlobalDateFrom(e.target.value); setHistPreset('custom'); }}
                 className="h-8 w-36 text-sm" data-testid="hist-date-from" />
             </div>
             <div className="flex items-center gap-1.5">
               <Label className="text-[10px] text-slate-400 uppercase shrink-0">To</Label>
-              <Input type="date" value={histGlobalDateTo} onChange={e => setHistGlobalDateTo(e.target.value)}
+              <Input type="date" value={histGlobalDateTo}
+                onChange={e => { setHistGlobalDateTo(e.target.value); setHistPreset('custom'); }}
                 className="h-8 w-36 text-sm" data-testid="hist-date-to" />
             </div>
             <div className="flex items-center gap-1.5">
@@ -626,6 +813,17 @@ export default function PaymentsPage() {
               onClick={() => loadGlobalHistory(histGlobalDateFrom, histGlobalDateTo, histGlobalMethod, histGlobalSearch)}
               data-testid="hist-refresh-btn">
               <RefreshCw size={13} /> Refresh
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1"
+              onClick={handlePrintGlobalHistory}
+              disabled={!histGlobalData || !histGlobalData.payments || histGlobalData.payments.length === 0}
+              data-testid="hist-print-btn"
+              title="Print this payment history"
+            >
+              <Printer size={13} /> Print
             </Button>
           </div>
 
@@ -839,24 +1037,32 @@ export default function PaymentsPage() {
                   isSelected ? 'bg-[#1A4D2E]/5 border-l-2 border-l-[#1A4D2E]' : ''
                 }`}
                 data-testid={`customer-row-${c.id}`}>
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium text-slate-800 truncate max-w-[140px]">{c.name}</p>
-                  <span className={`text-xs font-bold font-mono ml-1 shrink-0 ${c.balance > 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                {/* Row 1: Full name (wraps to 2 lines) */}
+                <p
+                  className="text-sm font-semibold text-slate-800 leading-tight break-words"
+                  style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+                  title={c.name}
+                >
+                  {c.name}
+                </p>
+                {/* Row 2: Balance (right) + meta chips (left) */}
+                <div className="flex items-center justify-between gap-2 mt-1">
+                  <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                    <span className="text-[10px] text-slate-400 shrink-0">
+                      {c.invoice_count} inv{c.invoice_count !== 1 ? 's' : ''}
+                    </span>
+                    {c.overdue_balance > 0 && (
+                      <Badge className="text-[9px] bg-red-100 text-red-700 px-1 py-0 h-4">
+                        {formatPHP(c.overdue_balance)} DUE
+                      </Badge>
+                    )}
+                    {c.interest_rate > 0 && (
+                      <span className="text-[9px] text-amber-500">{c.interest_rate}%</span>
+                    )}
+                  </div>
+                  <span className={`text-xs font-bold font-mono shrink-0 ${c.balance > 0 ? 'text-red-600' : 'text-slate-400'}`}>
                     {formatPHP(c.balance)}
                   </span>
-                </div>
-                <div className="flex items-center gap-1.5 mt-0.5">
-                  <span className="text-[10px] text-slate-400">
-                    {c.invoice_count} inv{c.invoice_count !== 1 ? 's' : ''}
-                  </span>
-                  {c.overdue_balance > 0 && (
-                    <Badge className="text-[9px] bg-red-100 text-red-700 px-1 py-0 h-4">
-                      {formatPHP(c.overdue_balance)} DUE
-                    </Badge>
-                  )}
-                  {c.interest_rate > 0 && (
-                    <span className="text-[9px] text-amber-500">{c.interest_rate}%</span>
-                  )}
                 </div>
               </button>
             );
@@ -867,44 +1073,85 @@ export default function PaymentsPage() {
       {/* ══════════ RIGHT: Payment Form ══════════ */}
       <div className="flex-1 flex flex-col overflow-hidden">
 
-        {/* ── Compact Header (~110px) ── */}
+        {/* ── Compact Header ── */}
         <div className="border-b border-slate-200 px-5 py-3 shrink-0 bg-white">
-          {/* Row 1: Title + Received From + Total Amount Due */}
-          <div className="flex items-center gap-4 mb-2.5">
-            <h1 className="text-base font-bold tracking-tight shrink-0" style={{ fontFamily: 'Manrope' }} data-testid="payments-title">
-              Customer Payment
-            </h1>
-            <div className="flex-1 relative max-w-md">
-              <Users size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-              <Input
-                value={selectedCustomer ? selectedCustomer.name : ''}
-                readOnly
-                placeholder="Select a customer from the left panel"
-                className="pl-8 pr-8 h-9 font-medium bg-white cursor-default"
-                data-testid="payment-customer-display"
-              />
+          {/* Row 1: Title + Selected customer (2-line allowed) + Total Amount Due */}
+          <div className="flex items-start gap-4 mb-3">
+            <div className="shrink-0 pt-1">
+              <h1 className="text-base font-bold tracking-tight" style={{ fontFamily: 'Manrope' }} data-testid="payments-title">
+                Customer Payment
+              </h1>
+            </div>
+            <div className={`flex-1 min-w-0 rounded-xl border px-3 py-2 transition-colors ${selectedCustomer ? 'bg-[#1A4D2E]/5 border-[#1A4D2E]/30' : 'bg-slate-50 border-slate-200'}`}>
+              <div className="flex items-center gap-2">
+                <Users size={14} className={selectedCustomer ? 'text-[#1A4D2E] shrink-0' : 'text-slate-400 shrink-0'} />
+                {selectedCustomer ? (
+                  <p
+                    className="text-base font-bold text-slate-800 leading-tight break-words flex-1"
+                    style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', fontFamily: 'Manrope' }}
+                    data-testid="payment-customer-display"
+                    title={selectedCustomer.name}
+                  >
+                    {selectedCustomer.name}
+                  </p>
+                ) : (
+                  <p className="text-sm text-slate-400 italic flex-1" data-testid="payment-customer-display">
+                    Select a customer from the left panel
+                  </p>
+                )}
+                {selectedCustomer && (
+                  <button onClick={clearCustomer} className="text-slate-400 hover:text-slate-600 shrink-0" title="Clear selection">
+                    <X size={15} />
+                  </button>
+                )}
+              </div>
               {selectedCustomer && (
-                <button onClick={clearCustomer} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                  <X size={14} />
-                </button>
+                <div className="flex items-center gap-3 mt-1 ml-6 text-[11px] text-slate-500">
+                  <span>{invoices.length} open invoice{invoices.length !== 1 ? 's' : ''}</span>
+                  {selectedCustomer.interest_rate > 0 && (
+                    <span className="text-amber-600 font-medium">{selectedCustomer.interest_rate}%/mo interest</span>
+                  )}
+                </div>
               )}
             </div>
             {selectedCustomer && (
-              <div className="text-right ml-auto" data-testid="customer-balance-display">
+              <div className="text-right shrink-0" data-testid="customer-balance-display">
                 <p className="text-[9px] text-slate-400 uppercase tracking-wide leading-tight">Total Amount Due</p>
-                <p className="text-xl font-bold text-red-600 font-mono leading-tight" style={{ fontFamily: 'Manrope' }}>
+                <p className="text-2xl font-bold text-red-600 font-mono leading-tight" style={{ fontFamily: 'Manrope' }}>
                   {formatPHP(totalAmountDue)}
                 </p>
               </div>
             )}
           </div>
 
-          {/* Row 2: Payment Amt + Date + Ref + Payment Methods */}
+          {/* Row 2: Prominent Payment Amount + Date + Ref + Methods */}
           <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-1.5">
-              <Label className="text-[10px] text-slate-400 uppercase">Payment Amt</Label>
-              <Input type="number" placeholder="0.00" className="h-9 w-32 text-base font-bold font-mono" data-testid="receive-amount"
-                onChange={e => autoApply(e.target.value)} />
+            {/* Prominent Payment Amount card */}
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border-2 transition-all ${
+              parseFloat(paymentAmtInput) > 0
+                ? 'bg-emerald-50 border-emerald-400 ring-2 ring-emerald-100'
+                : 'bg-white border-[#1A4D2E]/40 ring-2 ring-[#1A4D2E]/10'
+            }`}>
+              <div className={`flex items-center justify-center w-8 h-8 rounded-lg shrink-0 ${
+                parseFloat(paymentAmtInput) > 0 ? 'bg-emerald-500 text-white' : 'bg-[#1A4D2E] text-white'
+              }`}>
+                <DollarSign size={16} />
+              </div>
+              <div className="flex flex-col">
+                <Label className="text-[9px] font-semibold text-slate-500 uppercase tracking-wide leading-none">
+                  Payment Amount
+                </Label>
+                <Input
+                  type="number"
+                  placeholder="0.00"
+                  value={paymentAmtInput}
+                  className="h-7 w-36 text-xl font-bold font-mono border-0 px-0 py-0 shadow-none focus-visible:ring-0"
+                  data-testid="receive-amount"
+                  disabled={!selectedCustomer}
+                  onFocus={e => e.target.select()}
+                  onChange={e => autoApply(e.target.value)}
+                />
+              </div>
             </div>
             <div className="flex items-center gap-1.5">
               <Label className="text-[10px] text-slate-400 uppercase">Date</Label>
@@ -983,69 +1230,89 @@ export default function PaymentsPage() {
 
             {/* ── Outstanding Transactions Table ── */}
             <Card className="border-slate-200 flex-1 min-h-0 flex flex-col">
-              <div className="flex items-center justify-between px-4 py-2 border-b border-slate-100 gap-3 flex-wrap">
-                <div className="flex items-center gap-3 flex-wrap">
-                  <span className="text-sm font-semibold" style={{ fontFamily: 'Manrope' }}>Outstanding Transactions</span>
-                  {invoices.length > 0 && (
-                    <button onClick={() => autoApply(totalAmountDue)} className="text-xs text-[#1A4D2E] hover:underline flex items-center gap-1 font-medium" data-testid="auto-apply-all-btn">
-                      <Zap size={11} /> Auto-apply all
-                    </button>
-                  )}
-                  {/* Inline interest rate field — saved to customer if not already set */}
-                  <div className="flex items-center gap-1 bg-amber-50 border border-amber-200 rounded-md px-2 py-0.5">
-                    <Percent size={10} className="text-amber-600" />
-                    <Input type="number" min="0" step="0.5" value={interestRateInput}
-                      onChange={e => setInterestRateInput(e.target.value)}
-                      placeholder="Rate"
-                      className="w-12 h-6 text-xs text-center border-0 bg-transparent p-0 font-bold text-amber-700"
-                      data-testid="interest-rate-input" />
-                    <span className="text-[10px] text-amber-600 font-medium">%/mo</span>
+              <div className="px-4 py-2 border-b border-slate-100">
+                {/* Title row */}
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <span className="text-sm font-semibold" style={{ fontFamily: 'Manrope' }}>Outstanding Transactions</span>
+                    {invoices.length > 0 && (
+                      <button onClick={() => autoApply(totalAmountDue)} className="text-xs text-[#1A4D2E] hover:underline flex items-center gap-1 font-medium" data-testid="auto-apply-all-btn">
+                        <Zap size={11} /> Auto-apply all
+                      </button>
+                    )}
                   </div>
-                  {chargesPreview?.total_interest > 0 && (
-                    <Badge className="text-[9px] bg-amber-100 text-amber-700 gap-1">
-                      <Info size={9} /> {formatPHP(chargesPreview.total_interest)} accrued (preview)
-                    </Badge>
-                  )}
-                </div>
-                <div className="flex items-center gap-1 flex-wrap">
-                  {/* Manual interest amount input */}
-                  <div className="flex items-center gap-0.5 bg-amber-50 border border-amber-200 rounded-md px-1.5 py-0.5">
-                    <span className="text-[9px] text-amber-600 font-medium">₱</span>
-                    <input
-                      type="text" inputMode="decimal"
-                      value={manualInterestAmt}
-                      onChange={e => setManualInterestAmt(e.target.value)}
-                      onFocus={e => e.target.select()}
-                      placeholder="Manual INT"
-                      className="w-20 h-6 text-xs text-right border-0 bg-transparent outline-none font-bold text-amber-700"
-                      data-testid="manual-interest-input"
-                    />
-                    <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px] text-amber-700 hover:text-amber-800"
-                      onClick={handleManualInterest}
-                      disabled={!!generatingCharge || !(parseFloat(manualInterestAmt) > 0)}
-                      data-testid="apply-manual-interest-btn">
-                      {generatingCharge === 'manual' ? <RefreshCw size={10} className="animate-spin" /> : <Zap size={10} />}
+                  <div className="flex items-center gap-1 flex-wrap">
+                    <Button variant="ghost" size="sm" className="text-xs gap-1" onClick={() => setStatementOpen(true)}
+                      disabled={invoices.length === 0} data-testid="view-statement-btn">
+                      <FileText size={12} /> Statement
+                    </Button>
+                    <Button variant="ghost" size="sm" className="text-xs gap-1" onClick={loadHistory} data-testid="payment-history-btn">
+                      <Clock size={12} /> History
                     </Button>
                   </div>
-                  <Button variant="ghost" size="sm" className="text-xs gap-1" onClick={() => setStatementOpen(true)}
-                    disabled={invoices.length === 0} data-testid="view-statement-btn">
-                    <FileText size={12} /> Statement
-                  </Button>
-                  <Button variant="ghost" size="sm" className="text-xs gap-1 text-amber-600 hover:text-amber-700"
+                </div>
+
+                {/* Charges & Adjustments row — clearer, distinct section */}
+                <div className="mt-2 pt-2 border-t border-amber-100 bg-amber-50/40 -mx-4 px-4 py-2 rounded-b-md flex items-center gap-3 flex-wrap" data-testid="charges-bar">
+                  <div className="flex items-center gap-1.5">
+                    <Percent size={13} className="text-amber-600" />
+                    <Label className="text-[10px] font-semibold text-amber-700 uppercase tracking-wide">Interest Rate</Label>
+                    <div className="flex items-center bg-white border border-amber-300 rounded-md px-2 py-0.5">
+                      <Input type="number" min="0" step="0.5" value={interestRateInput}
+                        onChange={e => setInterestRateInput(e.target.value)}
+                        placeholder="0"
+                        className="w-12 h-6 text-sm text-center border-0 bg-transparent p-0 font-bold text-amber-700"
+                        data-testid="interest-rate-input" />
+                      <span className="text-[10px] text-amber-600 font-medium">%/mo</span>
+                    </div>
+                    {chargesPreview?.total_interest > 0 && (
+                      <Badge className="text-[9px] bg-amber-100 text-amber-700 gap-1 ml-1" title="Estimated interest based on rate × overdue days">
+                        <Info size={9} /> {formatPHP(chargesPreview.total_interest)} preview
+                      </Badge>
+                    )}
+                  </div>
+
+                  <Button size="sm" className="h-7 px-2.5 text-xs gap-1 bg-amber-500 hover:bg-amber-600 text-white shadow-sm"
                     onClick={handleGenerateInterest}
                     disabled={!!generatingCharge || !(parseFloat(interestRateInput) > 0)}
                     title="Auto-compute interest from terms & due dates"
                     data-testid="generate-interest-btn">
-                    <RefreshCw size={12} /> {generatingCharge === 'interest' ? 'Generating...' : 'Generate INT'}
+                    <RefreshCw size={12} className={generatingCharge === 'interest' ? 'animate-spin' : ''} />
+                    {generatingCharge === 'interest' ? 'Generating…' : 'Generate Interest'}
                   </Button>
-                  <Button variant="ghost" size="sm" className="text-xs gap-1 text-red-600 hover:text-red-700"
+
+                  <Separator orientation="vertical" className="h-6" />
+
+                  <div className="flex items-center gap-1.5">
+                    <Label className="text-[10px] font-semibold text-amber-700 uppercase tracking-wide">Manual Interest</Label>
+                    <div className="flex items-center bg-white border border-amber-300 rounded-md px-2 py-0.5">
+                      <span className="text-[10px] text-amber-600 font-medium mr-0.5">₱</span>
+                      <input
+                        type="text" inputMode="decimal"
+                        value={manualInterestAmt}
+                        onChange={e => setManualInterestAmt(e.target.value)}
+                        onFocus={e => e.target.select()}
+                        placeholder="0.00"
+                        className="w-20 h-6 text-sm text-right border-0 bg-transparent outline-none font-bold text-amber-700"
+                        data-testid="manual-interest-input"
+                      />
+                    </div>
+                    <Button size="sm" className="h-7 px-2.5 text-xs gap-1 bg-amber-500 hover:bg-amber-600 text-white shadow-sm"
+                      onClick={handleManualInterest}
+                      disabled={!!generatingCharge || !(parseFloat(manualInterestAmt) > 0)}
+                      data-testid="apply-manual-interest-btn">
+                      <Zap size={12} />
+                      {generatingCharge === 'manual' ? 'Applying…' : 'Apply'}
+                    </Button>
+                  </div>
+
+                  <Separator orientation="vertical" className="h-6" />
+
+                  <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs gap-1 border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
                     onClick={handleGeneratePenalty} disabled={!!generatingCharge}
                     title={`Apply ${penaltyRate}% penalty on overdue invoices`}
                     data-testid="generate-penalty-btn">
-                    <AlertTriangle size={12} /> {generatingCharge === 'penalty' ? 'Applying...' : `Penalty ${penaltyRate}%`}
-                  </Button>
-                  <Button variant="ghost" size="sm" className="text-xs gap-1" onClick={loadHistory} data-testid="payment-history-btn">
-                    <Clock size={12} /> History
+                    <AlertTriangle size={12} /> {generatingCharge === 'penalty' ? 'Applying…' : `Penalty ${penaltyRate}%`}
                   </Button>
                 </div>
               </div>
@@ -1224,8 +1491,23 @@ export default function PaymentsPage() {
       <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
         <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle style={{ fontFamily: 'Manrope' }}>Payment History — {histCustomerName}</DialogTitle>
-            <DialogDescription>All payments received. Edit payments that haven't been included in a Z-Report yet.</DialogDescription>
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <DialogTitle style={{ fontFamily: 'Manrope' }}>Payment History — {histCustomerName}</DialogTitle>
+                <DialogDescription>All payments received. Edit payments that haven't been included in a Z-Report yet.</DialogDescription>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 shrink-0 mr-6"
+                onClick={handlePrintCustomerHistory}
+                disabled={!payHistory || payHistory.length === 0}
+                data-testid="print-customer-history-btn"
+                title="Print invoice & payment history"
+              >
+                <Printer size={13} /> Print
+              </Button>
+            </div>
           </DialogHeader>
           <ScrollArea className="max-h-[420px]">
             <Table>
