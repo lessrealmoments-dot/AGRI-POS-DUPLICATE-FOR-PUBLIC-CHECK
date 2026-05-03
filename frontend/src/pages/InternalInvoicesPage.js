@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth, api } from '../contexts/AuthContext';
-import { formatPHP } from '../lib/utils';
+import { formatPHP, fmtDate } from '../lib/utils';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -208,7 +208,7 @@ export default function InternalInvoicesPage() {
                         )}
                         {inv.payment_status === 'paid' && (
                           <span className="flex items-center gap-1 text-xs text-emerald-600">
-                            <CheckCircle2 size={12} /> Paid {inv.paid_at?.slice(0, 10)}
+                            <CheckCircle2 size={12} /> Paid {fmtDate(inv.paid_at)}
                           </span>
                         )}
                       </TableCell>

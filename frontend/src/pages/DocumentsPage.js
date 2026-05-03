@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { fmtDate } from '../lib/utils';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -1114,7 +1115,7 @@ function PreviewDialog({ doc, token, onClose, onEdit, onDelete, userRole }) {
             )}
             {doc.description && <div className="col-span-2"><span className="text-muted-foreground">Notes:</span> <span className="ml-1">{doc.description}</span></div>}
             <div><span className="text-muted-foreground">Uploaded by:</span> <span className="font-medium ml-1">{doc.uploaded_by_name}</span></div>
-            <div><span className="text-muted-foreground">Date:</span> <span className="font-medium ml-1">{doc.created_at?.slice(0, 10)}</span></div>
+            <div><span className="text-muted-foreground">Date:</span> <span className="font-medium ml-1">{fmtDate(doc.created_at)}</span></div>
           </div>
 
           {doc.tags?.length > 0 && (

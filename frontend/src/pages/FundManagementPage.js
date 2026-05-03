@@ -25,7 +25,7 @@ import {
   ArrowRightLeft, Shield, EyeOff, History, AlertTriangle
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { formatPHP } from '../lib/utils';
+import { formatPHP, fmtDateTime } from '../lib/utils';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -245,7 +245,7 @@ export default function FundManagementPage() {
                 {movements.map(m => (
                   <div key={m.id} className="flex items-center justify-between text-xs py-1.5 border-b border-slate-50 last:border-0">
                     <div>
-                      <span className="text-slate-400 mr-2">{m.created_at?.slice(0, 16)?.replace('T', ' ')}</span>
+                      <span className="text-slate-400 mr-2">{fmtDateTime(m.created_at)}</span>
                       <span className="text-slate-600 truncate max-w-[220px]">{m.reference || m.type}</span>
                       {m.platform && <span className="ml-1.5 text-blue-500 text-[10px]">{m.platform}</span>}
                       {m.ref_number && <span className="ml-1 text-slate-400 font-mono text-[10px]">#{m.ref_number}</span>}
@@ -306,7 +306,7 @@ export default function FundManagementPage() {
                     <span className="font-medium text-slate-700">{t.description}</span>
                     {t.note && <span className="text-slate-400 ml-2">— {t.note}</span>}
                     <p className="text-[10px] text-slate-400 mt-0.5">
-                      By {t.performed_by_name} · Auth: {t.authorized_by} · {t.created_at?.slice(0, 16)?.replace('T', ' ')}
+                      By {t.performed_by_name} · Auth: {t.authorized_by} · {fmtDateTime(t.created_at)}
                     </p>
                   </div>
                   <span className="font-bold font-mono text-[#1A4D2E] shrink-0 ml-3">{formatPHP(t.amount)}</span>

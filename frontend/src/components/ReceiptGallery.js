@@ -4,6 +4,7 @@
  */
 import { useState, useEffect } from 'react';
 import { api } from '../contexts/AuthContext';
+import { fmtDateTime } from '../lib/utils';
 import { Button } from './ui/button';
 import { Dialog, DialogContent } from './ui/dialog';
 import { ImageIcon, X, ChevronLeft, ChevronRight, ZoomIn, FileText } from 'lucide-react';
@@ -57,7 +58,7 @@ export default function ReceiptGallery({ recordType, recordId, onClose }) {
             session.files?.length > 0 && (
               <div key={si}>
                 <p className="text-[10px] text-slate-400 mb-1.5">
-                  Uploaded by {session.created_by_name} · {session.created_at?.slice(0, 16)?.replace('T', ' ')}
+                  Uploaded by {session.created_by_name} · {fmtDateTime(session.created_at)}
                 </p>
                 <div className="grid grid-cols-4 gap-2">
                   {session.files.map((file, fi) => {

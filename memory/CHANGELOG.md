@@ -1,5 +1,25 @@
 # AgriBooks Changelog
 
+## Feb 2026 — Timezone-Aware Timestamp Display (Iter 221)
+
+**Bug**: A sale created at 3pm Philippine time was showing as "07:00" (early morning) on the cashier wallet movements list. Same anti-pattern affected ~30 places across the frontend.
+
+**Root cause**: Frontend was naively slicing UTC ISO strings without converting to local time:
+- `m.created_at?.slice(0, 16)?.replace('T', ' ')` → for a 3pm PH sale stored as `2026-02-03T07:00:00+00:00`, this displayed `"2026-02-03 07:00"` — pure UTC wall-clock, no conversion.
+
+**Fix**:
+- New centralized helpers in `frontend/src/lib/utils.js`:
+  - `fmtDateTime(iso)` → returns `YYYY-MM-DD HH:MM` in the org's configured timezone (read from `localStorage['agribooks.org_tz']`, falls back to browser-local).
+  - `fmtDate(iso)` → returns `YYYY-MM-DD` (passes through plain `YYYY-MM-DD` strings unchanged so `order_date` / `purchase_date` aren't double-converted).
+  - `fmtTime(iso)` → returns `HH:MM`.
+  - All helpers tolerate null / undefined / non-ISO inputs without throwing.
+- Replaced ~30 instances of `.slice(0, 16).replace('T', ' ')` and `.slice(0, 10)` patterns on UTC `*_at` fields across:
+  - `pages/`: FundManagementPage, UnifiedSalesPage, BranchTransferPage, PurchaseOrderPage, ViewReceiptsPage, AuditCenterPage, ApproveTransferPage, JournalEntriesPage, CustomersPage, IncidentTicketsPage, InternalInvoicesPage, SuppliersPage, DocumentsPage, SettingsPage, terminal/TerminalPOCheck, terminal/TerminalTransfers
+  - `components/`: ReceiptGallery, InvoiceDetailModal, TransferDetailModal, ExpenseDetailModal, ReviewDetailDialog, CustomerDedupeManager
+- The org timezone is fetched from `/api/settings/timezone` on login and cached locally; default `Asia/Manila` for new orgs.
+
+**Why**: A 3pm sale appearing as 07:00 on audit logs is a serious correctness/compliance bug — staff can't trust timestamps for shift accounting, theft investigation, or close-day reconciliation. This fix is also a one-time correctness payoff: any future date/time display added via the helpers will be timezone-correct by default.
+
 ## Feb 2026 — Price Match Double-Click Fix + Signature Bypass Visibility (Iter 220)
 
 **Price Match Modal — single-click confirm fix:**

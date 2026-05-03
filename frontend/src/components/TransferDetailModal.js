@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { formatPHP } from '../lib/utils';
+import { formatPHP, fmtDateTime, fmtDate } from '../lib/utils';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
@@ -28,17 +28,17 @@ export default function TransferDetailModal({ transfer, open, onOpenChange, bran
   // ── Status Timeline ──
   const status = transfer.status;
   const timelineSteps = [
-    { key: 'requested', label: 'Requested', done: true, date: transfer.created_at?.slice(0, 10), by: transfer.created_by_name },
-    { key: 'draft', label: 'Transfer Created', done: ['draft', 'sent', 'received_pending', 'received', 'disputed'].includes(status), date: transfer.created_at?.slice(0, 10), by: transfer.created_by_name },
+    { key: 'requested', label: 'Requested', done: true, date: fmtDate(transfer.created_at), by: transfer.created_by_name },
+    { key: 'draft', label: 'Transfer Created', done: ['draft', 'sent', 'received_pending', 'received', 'disputed'].includes(status), date: fmtDate(transfer.created_at), by: transfer.created_by_name },
     { key: 'sent', label: status === 'sent_to_terminal' ? 'On Terminal' : 'Sent',
-      done: ['sent', 'sent_to_terminal', 'received_pending', 'received', 'disputed'].includes(status), date: transfer.sent_at?.slice(0, 10),
+      done: ['sent', 'sent_to_terminal', 'received_pending', 'received', 'disputed'].includes(status), date: fmtDate(transfer.sent_at),
       variant: status === 'sent_to_terminal' ? 'warning' : undefined },
     { key: 'received', label: status === 'received_pending' ? 'Pending Review' : status === 'disputed' ? 'Disputed' : 'Received',
       done: ['received_pending', 'received', 'disputed'].includes(status),
-      date: transfer.received_at?.slice(0, 10) || transfer.pending_receipt_at?.slice(0, 10),
+      date: fmtDate(transfer.received_at) || fmtDate(transfer.pending_receipt_at),
       by: transfer.received_by_name || transfer.pending_receipt_by_name,
       variant: status === 'disputed' ? 'error' : status === 'received_pending' ? 'warning' : 'success' },
-    { key: 'settled', label: 'Settled', done: status === 'received' && !transfer.has_shortage, date: transfer.received_at?.slice(0, 10) },
+    { key: 'settled', label: 'Settled', done: status === 'received' && !transfer.has_shortage, date: fmtDate(transfer.received_at) },
   ];
   const filteredSteps = transfer.request_po_id ? timelineSteps : timelineSteps.filter(s => s.key !== 'requested');
   const currentIdx = filteredSteps.findIndex(s => !s.done) - 1;
@@ -156,7 +156,7 @@ export default function TransferDetailModal({ transfer, open, onOpenChange, bran
                       <p className="text-xs font-semibold text-slate-700">{ev.label}</p>
                       <p className="text-[10px] text-slate-500">
                         {ev.by && <span>{ev.by} &middot; </span>}
-                        {ev.at?.slice(0, 16)?.replace('T', ' ')}
+                        {fmtDateTime(ev.at)}
                       </p>
                       {ev.note && <p className="text-[10px] text-slate-500 mt-0.5 italic">&quot;{ev.note}&quot;</p>}
                       {ev.ticket && (
@@ -222,8 +222,8 @@ export default function TransferDetailModal({ transfer, open, onOpenChange, bran
               <div className="text-xs text-slate-500 bg-slate-50 rounded px-3 py-2 flex justify-between">
                 <span>
                   {transfer.status === 'received_pending'
-                    ? <>Counted by: <b>{transfer.pending_receipt_by_name}</b> &middot; {transfer.pending_receipt_at?.slice(0, 16).replace('T', ' ')}</>
-                    : <>Received by: <b>{transfer.received_by_name}</b> &middot; {transfer.received_at?.slice(0, 10)}</>
+                    ? <>Counted by: <b>{transfer.pending_receipt_by_name}</b> &middot; {fmtDateTime(transfer.pending_receipt_at)}</>
+                    : <>Received by: <b>{transfer.received_by_name}</b> &middot; {fmtDate(transfer.received_at)}</>
                   }
                 </span>
                 {transfer.has_shortage && (

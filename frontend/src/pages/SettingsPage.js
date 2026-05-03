@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth, api } from '../contexts/AuthContext';
+import { fmtDate } from '../lib/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -333,7 +334,7 @@ function ConnectTerminalPanel({ branches }) {
                 <div key={t.terminal_id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-200" data-testid={`terminal-${t.terminal_id}`}>
                   <div>
                     <p className="text-sm font-medium text-slate-800">{t.branch_name || 'Unknown Branch'}</p>
-                    <p className="text-xs text-slate-500">Paired by {t.user_name} · {t.paired_at?.slice(0, 10)}</p>
+                    <p className="text-xs text-slate-500">Paired by {t.user_name} · {fmtDate(t.paired_at)}</p>
                   </div>
                   <Button variant="outline" size="sm" onClick={() => disconnectTerminal(t.terminal_id)} className="text-red-500 hover:text-red-700 hover:bg-red-50" data-testid={`disconnect-${t.terminal_id}`}>
                     <Trash2 size={14} className="mr-1" /> Disconnect

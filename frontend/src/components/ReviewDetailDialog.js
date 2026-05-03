@@ -12,7 +12,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { formatPHP } from '../lib/utils';
+import { formatPHP, fmtDate } from '../lib/utils';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
@@ -251,7 +251,7 @@ export default function ReviewDetailDialog({
                       </div>
                       {d.verified && (
                         <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 bg-emerald-50 rounded-lg px-2 py-1">
-                          <ShieldCheck size={11} /> Verified by {d.verified_by} {d.verified_at ? `on ${d.verified_at.slice(0, 10)}` : ''}
+                          <ShieldCheck size={11} /> Verified by {d.verified_by} {d.verified_at ? `on ${fmtDate(d.verified_at)}` : ''}
                         </div>
                       )}
                       {isReviewed && (
@@ -280,8 +280,8 @@ export default function ReviewDetailDialog({
                       </div>
                       <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500 pt-1 border-t border-emerald-100">
                         <span>Status: <Badge className="text-[9px] bg-slate-200 text-slate-600">{d.status}</Badge></span>
-                        {d.sent_at && <span>Sent: {d.sent_at.slice(0, 10)}</span>}
-                        {d.received_at && <span>Received: {d.received_at.slice(0, 10)}</span>}
+                        {d.sent_at && <span>Sent: {fmtDate(d.sent_at)}</span>}
+                        {d.received_at && <span>Received: {fmtDate(d.received_at)}</span>}
                         {d.received_by && <span>By: {d.received_by}</span>}
                         {d.has_shortage && <Badge className="text-[9px] bg-red-100 text-red-700">Shortage</Badge>}
                       </div>

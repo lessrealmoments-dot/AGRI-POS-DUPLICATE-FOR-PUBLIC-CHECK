@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth, api } from '../contexts/AuthContext';
-import { formatPHP } from '../lib/utils';
+import { formatPHP, fmtDate } from '../lib/utils';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -512,7 +512,7 @@ export default function IncidentTicketsPage() {
                               {item.shortages_count > 0 && <span className="text-amber-600 font-medium">{item.shortages_count} shortage(s)</span>}
                               {item.excesses_count > 0 && <span className="text-blue-600 font-medium">{item.excesses_count} excess(es)</span>}
                             </div>
-                            <p className="text-[10px] text-slate-400 mt-0.5">{item.accepted_at?.slice(0, 10)}</p>
+                            <p className="text-[10px] text-slate-400 mt-0.5">{fmtDate(item.accepted_at)}</p>
                             <Button size="sm" variant="outline" className="h-7 text-xs mt-1.5"
                               onClick={() => openVarianceDetail(item.transfer_id)} data-testid={`view-variance-${item.transfer_id}`}
                               disabled={varianceViewLoading === item.transfer_id}>

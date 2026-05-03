@@ -5,7 +5,7 @@ import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog';
 import { toast } from 'sonner';
-import { formatPHP } from '../../lib/utils';
+import { formatPHP, fmtDate } from '../../lib/utils';
 
 const STATUS_COLORS = {
   draft: 'bg-slate-100 text-slate-600',
@@ -210,7 +210,7 @@ export default function TerminalPOCheck({ api, session, isOnline, onRefreshRef }
                 </div>
                 {po.sent_to_terminal_at && (
                   <p className="text-[10px] text-amber-600 mt-1">
-                    Sent by {po.sent_to_terminal_by || 'admin'} · {po.sent_to_terminal_at?.slice(0, 10)}
+                    Sent by {po.sent_to_terminal_by || 'admin'} · {fmtDate(po.sent_to_terminal_at)}
                   </p>
                 )}
               </button>
@@ -335,7 +335,7 @@ export default function TerminalPOCheck({ api, session, isOnline, onRefreshRef }
                     <Badge className="text-[10px] bg-blue-100 text-blue-700">{po.status}</Badge>
                   </div>
                   <p className="text-xs text-slate-500 mt-0.5">{po.vendor || 'Unknown vendor'}</p>
-                  <p className="text-xs text-slate-400 mt-1">{po.item_count} items · {po.purchase_date || po.created_at?.slice(0,10)}</p>
+                  <p className="text-xs text-slate-400 mt-1">{po.item_count} items · {po.purchase_date || fmtDate(po.created_at)}</p>
                 </button>
               ))}
             </div>

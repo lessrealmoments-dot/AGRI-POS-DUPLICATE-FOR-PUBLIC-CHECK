@@ -8,7 +8,7 @@
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth, api } from '../contexts/AuthContext';
-import { formatPHP } from '../lib/utils';
+import { formatPHP, fmtDate } from '../lib/utils';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Badge } from './ui/badge';
@@ -337,7 +337,7 @@ export default function CustomerDedupeManager() {
                             {m.invoice_count}
                           </TableCell>
                           <TableCell className="text-xs text-slate-400">
-                            {(m.created_at || '').slice(0, 10) || '—'}
+                            {fmtDate(m.created_at) || '—'}
                           </TableCell>
                         </TableRow>
                       ))}

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useAuth, api } from '../contexts/AuthContext';
-import { formatPHP } from '../lib/utils';
+import { formatPHP, fmtDateTime, fmtDate } from '../lib/utils';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
@@ -4117,7 +4117,7 @@ export default function UnifiedSalesPage() {
                   {selectedInvoice.status === 'voided' && (
                     <div className="mt-2 rounded-lg bg-red-50 border border-red-200 px-3 py-2">
                       <p className="text-xs text-red-700 font-semibold">Voided: {selectedInvoice.void_reason}</p>
-                      <p className="text-[10px] text-red-500">By {selectedInvoice.void_authorized_by} · {selectedInvoice.voided_at?.slice(0, 16)?.replace('T', ' ')}</p>
+                      <p className="text-[10px] text-red-500">By {selectedInvoice.void_authorized_by} · {fmtDateTime(selectedInvoice.voided_at)}</p>
                     </div>
                   )}
                   {selectedInvoice.interest_accrued > 0 && (

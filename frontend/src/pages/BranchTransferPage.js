@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth, api } from '../contexts/AuthContext';
-import { formatPHP } from '../lib/utils';
+import { formatPHP, fmtDateTime, fmtDate } from '../lib/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import UploadQRDialog from '../components/UploadQRDialog';
 import ReceiptUploadInline from '../components/ReceiptUploadInline';
@@ -1965,7 +1965,7 @@ export default function BranchTransferPage() {
                         </div>
                         {req.notes && <p className="text-sm text-slate-500 mt-2 italic">&quot;{req.notes}&quot;</p>}
                         <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
-                          <span className="text-xs text-slate-400">by {req.created_by_name} · {req.created_at?.slice(0, 10)}</span>
+                          <span className="text-xs text-slate-400">by {req.created_by_name} · {fmtDate(req.created_at)}</span>
                           <div className="flex items-center gap-2">
                             {req.status === 'fulfilled' && (
                               <div className="flex items-center gap-2">
@@ -2116,7 +2116,7 @@ export default function BranchTransferPage() {
                             </p>
                           )}
                         </div>
-                        <span className="text-sm text-slate-400 whitespace-nowrap shrink-0">{o.created_at?.slice(0, 10)}</span>
+                        <span className="text-sm text-slate-400 whitespace-nowrap shrink-0">{fmtDate(o.created_at)}</span>
                       </div>
 
                       {/* Returned reason banner */}
@@ -2316,17 +2316,17 @@ export default function BranchTransferPage() {
             const status = viewOrder.status;
             const order_status = status;
             const steps = [
-              { key: 'requested', label: 'Requested', done: true, date: viewOrder.created_at?.slice(0,10), by: viewOrder.created_by_name },
-              { key: 'draft', label: 'Transfer Created', done: ['draft','sent','received_pending','received','disputed'].includes(status), date: viewOrder.created_at?.slice(0,10), by: viewOrder.created_by_name },
+              { key: 'requested', label: 'Requested', done: true, date: fmtDate(viewOrder.created_at), by: viewOrder.created_by_name },
+              { key: 'draft', label: 'Transfer Created', done: ['draft','sent','received_pending','received','disputed'].includes(status), date: fmtDate(viewOrder.created_at), by: viewOrder.created_by_name },
               { key: 'sent', label: order_status === 'sent_to_terminal' ? 'On Terminal' : 'Sent',
-                done: ['sent','sent_to_terminal','received_pending','received','disputed'].includes(status), date: viewOrder.sent_at?.slice(0,10),
+                done: ['sent','sent_to_terminal','received_pending','received','disputed'].includes(status), date: fmtDate(viewOrder.sent_at),
                 variant: status === 'sent_to_terminal' ? 'warning' : undefined },
               { key: 'received', label: status === 'received_pending' ? 'Pending Review' : status === 'disputed' ? 'Disputed' : 'Received',
                 done: ['received_pending','received','disputed'].includes(status),
-                date: viewOrder.received_at?.slice(0,10) || viewOrder.pending_receipt_at?.slice(0,10),
+                date: fmtDate(viewOrder.received_at) || fmtDate(viewOrder.pending_receipt_at),
                 by: viewOrder.received_by_name || viewOrder.pending_receipt_by_name,
                 variant: status === 'disputed' ? 'error' : status === 'received_pending' ? 'warning' : 'success' },
-              { key: 'settled', label: 'Settled', done: status === 'received' && !viewOrder.has_shortage, date: viewOrder.received_at?.slice(0,10) },
+              { key: 'settled', label: 'Settled', done: status === 'received' && !viewOrder.has_shortage, date: fmtDate(viewOrder.received_at) },
             ];
             // Filter out "requested" if not from a stock request
             const filteredSteps = viewOrder.request_po_id ? steps : steps.filter(s => s.key !== 'requested');
@@ -2451,7 +2451,7 @@ export default function BranchTransferPage() {
                           <p className="text-xs font-semibold text-slate-700">{ev.label}</p>
                           <p className="text-[10px] text-slate-500">
                             {ev.by && <span>{ev.by} · </span>}
-                            {ev.at?.slice(0, 16)?.replace('T', ' ')}
+                            {fmtDateTime(ev.at)}
                           </p>
                           {ev.note && <p className="text-[10px] text-slate-500 mt-0.5 italic">&quot;{ev.note}&quot;</p>}
                           {ev.ticket && (
@@ -2523,8 +2523,8 @@ export default function BranchTransferPage() {
                 <div className="text-xs text-slate-500 bg-slate-50 rounded px-3 py-2 flex justify-between">
                   <span>
                     {viewOrder?.status === 'received_pending'
-                      ? <>Counted by: <b>{viewOrder.pending_receipt_by_name}</b> · {viewOrder.pending_receipt_at?.slice(0,16).replace('T',' ')}</>
-                      : <>Received by: <b>{viewOrder.received_by_name}</b> · {viewOrder.received_at?.slice(0,10)}</>
+                      ? <>Counted by: <b>{viewOrder.pending_receipt_by_name}</b> · {fmtDateTime(viewOrder.pending_receipt_at)}</>
+                      : <>Received by: <b>{viewOrder.received_by_name}</b> · {fmtDate(viewOrder.received_at)}</>
                     }
                   </span>
                   {viewOrder.has_shortage && (
@@ -3110,7 +3110,7 @@ export default function BranchTransferPage() {
               {/* Receiver info */}
               {acceptDialog.pending_receipt_by_name && (
                 <div className="text-xs text-slate-500 bg-slate-50 rounded px-3 py-2">
-                  Counted by: <b>{acceptDialog.pending_receipt_by_name}</b> · {acceptDialog.pending_receipt_at?.slice(0,16).replace('T',' ')}
+                  Counted by: <b>{acceptDialog.pending_receipt_by_name}</b> · {fmtDateTime(acceptDialog.pending_receipt_at)}
                   {acceptDialog.receive_notes && <span className="ml-2 text-slate-400">Note: "{acceptDialog.receive_notes}"</span>}
                 </div>
               )}

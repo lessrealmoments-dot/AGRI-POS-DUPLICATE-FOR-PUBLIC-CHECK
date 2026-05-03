@@ -6,7 +6,7 @@ import ReceiptGallery from '../components/ReceiptGallery';
 import VerificationBadge from '../components/VerificationBadge';
 import VerifyPinDialog from '../components/VerifyPinDialog';
 import ViewQRDialog from '../components/ViewQRDialog';
-import { formatPHP } from '../lib/utils';
+import { formatPHP, fmtDateTime, fmtDate } from '../lib/utils';
 import PrintEngine from '../lib/PrintEngine';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -1347,7 +1347,7 @@ export default function PurchaseOrderPage() {
                 <VerificationBadge doc={detailPO} />
                 {detailPO.verified_at && (
                   <span className="text-[10px] text-slate-400">
-                    {detailPO.verified_at?.slice(0, 16)?.replace('T', ' ')}
+                    {fmtDateTime(detailPO.verified_at)}
                   </span>
                 )}
               </div>
@@ -1416,7 +1416,7 @@ export default function PurchaseOrderPage() {
                           <div>
                             <p className="text-xs font-semibold text-emerald-700">Receipts Reviewed</p>
                             <p className="text-[10px] text-emerald-600">
-                              by {detailPO.receipt_reviewed_by_name} {detailPO.receipt_reviewed_at ? `on ${detailPO.receipt_reviewed_at.slice(0, 10)}` : ''}
+                              by {detailPO.receipt_reviewed_by_name} {detailPO.receipt_reviewed_at ? `on ${fmtDate(detailPO.receipt_reviewed_at)}` : ''}
                             </p>
                           </div>
                         </>
@@ -1552,7 +1552,7 @@ export default function PurchaseOrderPage() {
                         <div key={i} className="text-xs p-2 bg-amber-50 rounded mb-1.5 border border-amber-100">
                           <div className="flex items-center justify-between mb-0.5">
                             <span className="font-semibold text-amber-800">{edit.changed_by}</span>
-                            <span className="text-slate-400">{edit.changed_at?.slice(0, 10)}</span>
+                            <span className="text-slate-400">{fmtDate(edit.changed_at)}</span>
                           </div>
                           <p className="text-slate-600 italic">"{edit.reason}"</p>
                           <p className="text-slate-500 mt-0.5">{edit.change_summary}</p>

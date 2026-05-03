@@ -7,6 +7,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
+import { fmtDateTime } from '../lib/utils';
 import { ShieldCheck, ShieldAlert, ChevronLeft, ChevronRight, X, ZoomIn, FileText, RefreshCw, Shield } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -143,7 +144,7 @@ export default function ViewReceiptsPage() {
 
         {verification.verified && (
           <p className="text-[10px] text-slate-500 mt-1">
-            By {verification.verified_by_name} · {verification.verified_at?.slice(0, 16)?.replace('T', ' ')}
+            By {verification.verified_by_name} · {fmtDateTime(verification.verified_at)}
           </p>
         )}
         {verification.has_discrepancy && verification.discrepancy && (

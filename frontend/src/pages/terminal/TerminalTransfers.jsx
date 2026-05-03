@@ -5,7 +5,7 @@ import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog';
 import { toast } from 'sonner';
-import { formatPHP } from '../../lib/utils';
+import { formatPHP, fmtDate } from '../../lib/utils';
 
 const STATUS_COLORS = {
   sent: 'bg-blue-100 text-blue-700',
@@ -236,11 +236,11 @@ export default function TerminalTransfers({ api, session, isOnline, onRefreshRef
                 </div>
                 <div className="flex items-center justify-between mt-2">
                   <span className="text-xs text-slate-400">{(t.items || []).length} items</span>
-                  <span className="text-xs text-slate-400">{t.created_at?.slice(0, 10) || ''}</span>
+                  <span className="text-xs text-slate-400">{fmtDate(t.created_at) || ''}</span>
                 </div>
                 {t.sent_to_terminal_at && (
                   <p className="text-[10px] text-amber-600 mt-1">
-                    Sent by {t.sent_to_terminal_by || 'admin'} · {t.sent_to_terminal_at?.slice(0, 10)}
+                    Sent by {t.sent_to_terminal_by || 'admin'} · {fmtDate(t.sent_to_terminal_at)}
                   </p>
                 )}
               </button>
@@ -450,7 +450,7 @@ export default function TerminalTransfers({ api, session, isOnline, onRefreshRef
                     <Badge className="text-[10px] bg-blue-100 text-blue-700">Sent</Badge>
                   </div>
                   <p className="text-xs text-slate-500 mt-0.5">From: {t.from_branch_name}</p>
-                  <p className="text-xs text-slate-400 mt-1">{t.item_count} items · {t.created_at?.slice(0,10)}</p>
+                  <p className="text-xs text-slate-400 mt-1">{t.item_count} items · {fmtDate(t.created_at)}</p>
                 </button>
               ))}
             </div>

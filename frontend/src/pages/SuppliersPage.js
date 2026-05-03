@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api, useAuth } from '../contexts/AuthContext';
-import { formatPHP } from '../lib/utils';
+import { formatPHP, fmtDate } from '../lib/utils';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -359,7 +359,7 @@ export default function SuppliersPage() {
                               data-testid={`po-row-${po.id}`}
                             >
                               <TableCell className="font-mono text-xs text-blue-600 font-semibold">{po.po_number}</TableCell>
-                              <TableCell className="text-xs text-slate-500">{po.purchase_date || po.created_at?.slice(0, 10)}</TableCell>
+                              <TableCell className="text-xs text-slate-500">{po.purchase_date || fmtDate(po.created_at)}</TableCell>
                               <TableCell className="text-sm">{po.items?.length || 0}</TableCell>
                               <TableCell className="text-right font-semibold">{formatPHP(po.subtotal)}</TableCell>
                               <TableCell className="text-right text-emerald-600">{formatPHP(po.amount_paid || 0)}</TableCell>

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api, useAuth } from '../contexts/AuthContext';
-import { formatPHP } from '../lib/utils';
+import { formatPHP, fmtDateTime, fmtDate } from '../lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -143,7 +143,7 @@ export default function InvoiceDetailModal({
   const isInvoice = !isPO && !isExpense;
   const docNumber = invoice?.invoice_number || invoice?.sale_number || invoice?.po_number || invoice?.reference_number || invoice?.linked_invoice_number || '';
   const docName = isPO ? (invoice?.vendor || '') : isExpense ? (invoice?.description || invoice?.category || '') : (invoice?.customer_name || 'Walk-in');
-  const docDate = invoice?.order_date || invoice?.purchase_date || invoice?.date || invoice?.created_at?.slice(0, 10) || '';
+  const docDate = invoice?.order_date || invoice?.purchase_date || invoice?.date || fmtDate(invoice?.created_at) || '';
   const isVerified = invoice?.verified === true;
   const isVoided = invoice?.status === 'voided' || invoice?.status === 'cancelled';
   const payments = invoice?.payments || [];
@@ -281,7 +281,7 @@ export default function InvoiceDetailModal({
       overall_discount: invoice.overall_discount || 0,
     });
     setEditReason('');
-    setEditOrderDate(invoice.order_date || invoice.created_at?.slice(0, 10) || '');
+    setEditOrderDate(invoice.order_date || fmtDate(invoice.created_at) || '');
     const branchId = invoice.branch_id || currentBranch?.id;
     if (branchId && invoice.order_date) {
       api.get('/invoices/check-date-closed', { params: { date: invoice.order_date, branch_id: branchId } })
@@ -301,7 +301,7 @@ export default function InvoiceDetailModal({
         overall_discount: editData.overall_discount || 0,
         branch_id: invoice.branch_id || currentBranch?.id,
       };
-      if (editOrderDate && editOrderDate !== (invoice.order_date || invoice.created_at?.slice(0, 10))) {
+      if (editOrderDate && editOrderDate !== (invoice.order_date || fmtDate(invoice.created_at))) {
         payload.order_date = editOrderDate;
         payload.invoice_date = editOrderDate;
       }
@@ -368,7 +368,7 @@ export default function InvoiceDetailModal({
                 {invoice?.verified && (
                   <>
                     <VerificationBadge doc={invoice} />
-                    {invoice.verified_at && <span className="text-[10px] text-slate-400">{invoice.verified_at?.slice(0, 16)?.replace('T', ' ')}</span>}
+                    {invoice.verified_at && <span className="text-[10px] text-slate-400">{fmtDateTime(invoice.verified_at)}</span>}
                   </>
                 )}
                 {(invoice?.has_signature || signatures.length > 0) && (
@@ -440,7 +440,7 @@ export default function InvoiceDetailModal({
                   {/* Header info */}
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <div><span className="text-slate-500">Customer:</span> <b>{invoice.customer_name || 'Walk-in'}</b></div>
-                    <div><span className="text-slate-500">Date:</span> {invoice.order_date || invoice.created_at?.slice(0, 10)}</div>
+                    <div><span className="text-slate-500">Date:</span> {invoice.order_date || fmtDate(invoice.created_at)}</div>
                     <div><span className="text-slate-500">Cashier:</span> {invoice.cashier_name || '—'}</div>
                     <div><span className="text-slate-500">Payment:</span> <Badge variant="outline" className="text-[10px]">{invoice.payment_method || 'Cash'}</Badge></div>
                     <div><span className="text-slate-500">Status:</span>
@@ -492,7 +492,7 @@ export default function InvoiceDetailModal({
                           <Input type="date" value={editOrderDate}
                             onChange={e => setEditOrderDate(e.target.value)}
                             className="mt-1 h-9 text-sm" />
-                          {editDateClosed && editOrderDate === (invoice.order_date || invoice.created_at?.slice(0, 10)) && (
+                          {editDateClosed && editOrderDate === (invoice.order_date || fmtDate(invoice.created_at)) && (
                             <p className="text-[9px] text-amber-600 mt-0.5">This date is closed. PIN required to save changes.</p>
                           )}
                         </div>
@@ -588,7 +588,7 @@ export default function InvoiceDetailModal({
                             <div key={i} className="text-xs p-2 bg-amber-50 rounded mb-1.5 border border-amber-100">
                               <div className="flex items-center justify-between mb-0.5">
                                 <span className="font-semibold text-amber-800">{edit.edited_by_name || edit.changed_by}</span>
-                                <span className="text-slate-400">{(edit.edited_at || edit.changed_at)?.slice(0, 10)}</span>
+                                <span className="text-slate-400">{fmtDate(edit.edited_at || edit.changed_at)}</span>
                               </div>
                               <p className="text-slate-600 italic">"{edit.reason}"</p>
                               {edit.change_summary && <p className="text-slate-500 mt-0.5">{edit.change_summary}</p>}
@@ -842,7 +842,7 @@ export default function InvoiceDetailModal({
                           <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
                             <CheckCircle2 size={16} className="text-emerald-600" />
                             <span className="text-sm text-emerald-700">
-                              Verified by <strong>{invoice.verified_by_name}</strong> on {invoice.verified_at?.slice(0, 10)}
+                              Verified by <strong>{invoice.verified_by_name}</strong> on {fmtDate(invoice.verified_at)}
                             </span>
                           </div>
                         )}
@@ -917,7 +917,7 @@ export default function InvoiceDetailModal({
                       <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
                         <CheckCircle2 size={16} className="text-emerald-600" />
                         <span className="text-sm text-emerald-700">
-                          Verified by <strong>{invoice.verified_by_name}</strong> on {invoice.verified_at?.slice(0, 10)}
+                          Verified by <strong>{invoice.verified_by_name}</strong> on {fmtDate(invoice.verified_at)}
                           {invoice.verification_status === 'discrepancy' && <span className="text-amber-600 ml-2">(with discrepancy)</span>}
                         </span>
                       </div>

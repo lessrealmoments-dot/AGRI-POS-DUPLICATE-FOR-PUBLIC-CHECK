@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api, useAuth } from '../contexts/AuthContext';
-import { formatPHP } from '../lib/utils';
+import { formatPHP, fmtDate } from '../lib/utils';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -541,10 +541,10 @@ export default function JournalEntriesPage() {
                 <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">
                   <p className="font-semibold">Voided</p>
                   <p>Reason: {detailEntry.void_reason}</p>
-                  <p>By: {detailEntry.voided_by} on {detailEntry.voided_at?.slice(0, 10)}</p>
+                  <p>By: {detailEntry.voided_by} on {fmtDate(detailEntry.voided_at)}</p>
                 </div>
               )}
-              <p className="text-[10px] text-slate-400">Created by {detailEntry.created_by_name} on {detailEntry.created_at?.slice(0, 10)}</p>
+              <p className="text-[10px] text-slate-400">Created by {detailEntry.created_by_name} on {fmtDate(detailEntry.created_at)}</p>
             </div>
           </DialogContent>
         </Dialog>

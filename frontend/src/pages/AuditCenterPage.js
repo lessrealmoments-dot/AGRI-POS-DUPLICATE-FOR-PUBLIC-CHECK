@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth, api } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { formatPHP } from '../lib/utils';
+import { formatPHP, fmtDateTime, fmtDate } from '../lib/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -1553,7 +1553,7 @@ export default function AuditCenterPage() {
                         {auditData.sales.edited_invoices.map((e, i) => (
                           <div key={i} className="text-xs p-2 bg-amber-50 rounded">
                             <button className="font-mono text-blue-600 hover:underline" onClick={() => openDetailModal(e.invoice_number)}>{e.invoice_number}</button>
-                            <span className="text-slate-500 ml-2">{e.edited_by_name} · {e.edited_at?.slice(0, 10)}</span>
+                            <span className="text-slate-500 ml-2">{e.edited_by_name} · {fmtDate(e.edited_at)}</span>
                           </div>
                         ))}
                       </div>
@@ -2132,7 +2132,7 @@ export default function AuditCenterPage() {
                             <p className="text-slate-500 mt-1">{disc.note}</p>
                           </div>
                         )}
-                        <p className="text-[10px] text-slate-400 mt-1.5">Verified by {disc.verified_by_name} · {disc.verified_at?.slice(0, 16)?.replace('T', ' ')}</p>
+                        <p className="text-[10px] text-slate-400 mt-1.5">Verified by {disc.verified_by_name} · {fmtDateTime(disc.verified_at)}</p>
                       </div>
                       <Button size="sm" onClick={() => { setResolveDialog(disc); setResolveAction('dismiss'); setResolveNote(''); }}
                         className="shrink-0 h-8 text-xs bg-slate-800 hover:bg-slate-900 text-white">
@@ -2266,7 +2266,7 @@ export default function AuditCenterPage() {
                           </div>
                           <p className="font-semibold text-sm">{session.branch_name}</p>
                           <p className="text-xs text-slate-500">{session.period_from} → {session.period_to}</p>
-                          <p className="text-xs text-slate-400">{session.created_by_name} · {session.created_at?.slice(0, 10)}</p>
+                          <p className="text-xs text-slate-400">{session.created_by_name} · {fmtDate(session.created_at)}</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-3">

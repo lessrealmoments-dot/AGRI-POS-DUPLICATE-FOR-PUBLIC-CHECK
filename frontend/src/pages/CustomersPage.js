@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api, useAuth } from '../contexts/AuthContext';
-import { formatPHP } from '../lib/utils';
+import { formatPHP, fmtDate } from '../lib/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -599,7 +599,7 @@ export default function CustomersPage() {
                           {transactions.receivables.map(rec => (
                             <TableRow key={rec.id}>
                               <TableCell className="font-medium text-sm">{rec.sale_id?.slice(0, 8) || '—'}</TableCell>
-                              <TableCell className="text-sm text-slate-500">{rec.created_at?.slice(0, 10)}</TableCell>
+                              <TableCell className="text-sm text-slate-500">{fmtDate(rec.created_at)}</TableCell>
                               <TableCell className="text-sm text-right">{formatPHP(rec.amount)}</TableCell>
                               <TableCell className="text-sm text-right text-emerald-600">{formatPHP(rec.paid)}</TableCell>
                               <TableCell className="text-sm text-right text-red-600 font-medium">{formatPHP(rec.balance)}</TableCell>

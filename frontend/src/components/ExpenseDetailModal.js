@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api, useAuth } from '../contexts/AuthContext';
-import { formatPHP } from '../lib/utils';
+import { formatPHP, fmtDateTime } from '../lib/utils';
 import UploadQRDialog from './UploadQRDialog';
 import ReceiptGallery from './ReceiptGallery';
 import VerificationBadge from './VerificationBadge';
@@ -133,7 +133,7 @@ export default function ExpenseDetailModal({ open, onOpenChange, expenseId, onUp
             {expense?.verified && (
               <div className="mt-1.5 flex items-center gap-2">
                 <VerificationBadge doc={expense} />
-                {expense.verified_at && <span className="text-[10px] text-slate-400">{expense.verified_at?.slice(0, 16)?.replace('T', ' ')}</span>}
+                {expense.verified_at && <span className="text-[10px] text-slate-400">{fmtDateTime(expense.verified_at)}</span>}
               </div>
             )}
           </DialogHeader>

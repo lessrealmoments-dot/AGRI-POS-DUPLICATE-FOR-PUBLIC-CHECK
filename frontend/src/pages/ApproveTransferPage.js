@@ -12,7 +12,7 @@ import {
   ArrowLeft, Shield, Check, X, AlertTriangle, Building2, ArrowRight, Clock, Loader2, KeyRound,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { formatPHP } from '../lib/utils';
+import { formatPHP, fmtDateTime } from '../lib/utils';
 
 // 3-min warm PIN cache per ApproveTransferPage session.
 const PIN_TTL_MS = 3 * 60 * 1000;
@@ -211,7 +211,7 @@ export default function ApproveTransferPage() {
               <p className="text-slate-500 text-sm mt-1">
                 <span className="font-mono font-semibold">{order.order_number}</span>
                 {' · '}submitted by <span className="font-semibold">{order.created_by_name}</span>
-                {' · '}{order.created_at?.slice(0, 16).replace('T', ' ')}
+                {' · '}{fmtDateTime(order.created_at)}
               </p>
             </div>
             <Badge className="bg-amber-100 text-amber-800 px-3 py-1">Pending Approval</Badge>
