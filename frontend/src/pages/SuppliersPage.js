@@ -15,7 +15,9 @@ import { toast } from 'sonner';
 import ReviewDetailDialog from '../components/ReviewDetailDialog';
 
 export default function SuppliersPage() {
-  const { currentBranch } = useAuth();
+  const { currentBranch, hasPerm } = useAuth();
+  const canCreateSupplier = hasPerm('suppliers', 'create');
+  const canEditSupplier = hasPerm('suppliers', 'edit');
   const [vendors, setVendors] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -177,9 +179,11 @@ export default function SuppliersPage() {
         {/* Vendor List Panel */}
         <Card className="border-slate-200 lg:col-span-1">
           <CardContent className="p-4 space-y-3">
-            <Button onClick={openNewSupplier} className="w-full bg-[#1A4D2E] hover:bg-[#14532d] text-white" data-testid="new-supplier-btn">
-              <Plus size={14} className="mr-2" /> New Supplier
-            </Button>
+            {canCreateSupplier && (
+              <Button onClick={openNewSupplier} className="w-full bg-[#1A4D2E] hover:bg-[#14532d] text-white" data-testid="new-supplier-btn">
+                <Plus size={14} className="mr-2" /> New Supplier
+              </Button>
+            )}
             <div className="relative">
               <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
               <Input
@@ -245,9 +249,11 @@ export default function SuppliersPage() {
                           )}
                         </div>
                       </div>
-                      <Button variant="outline" size="sm" onClick={() => openEditSupplier(selectedSupplierDetails)}>
-                        <Edit2 size={12} className="mr-1" /> Edit
-                      </Button>
+                      {canEditSupplier && (
+                        <Button variant="outline" size="sm" onClick={() => openEditSupplier(selectedSupplierDetails)} data-testid="edit-supplier-btn">
+                          <Edit2 size={12} className="mr-1" /> Edit
+                        </Button>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -299,8 +305,8 @@ export default function SuppliersPage() {
                   <div className="p-4 border-b border-slate-100 flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <h2 className="font-bold text-lg" style={{ fontFamily: 'Manrope' }}>{selectedVendor}</h2>
-                      {!selectedSupplierDetails && (
-                        <Button variant="outline" size="sm" onClick={() => {
+                      {!selectedSupplierDetails && canCreateSupplier && (
+                        <Button variant="outline" size="sm" data-testid="save-as-supplier-btn" onClick={() => {
                           setSupplierForm({ ...supplierForm, name: selectedVendor });
                           setEditMode(false);
                           setSupplierDialog(true);

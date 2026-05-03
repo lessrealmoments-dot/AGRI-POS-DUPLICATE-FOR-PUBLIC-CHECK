@@ -50,7 +50,10 @@ function getErrorMessage(e, fallback = 'Something went wrong') {
 }
 
 export default function AccountingPage() {
-  const { currentBranch } = useAuth();
+  const { currentBranch, hasPerm } = useAuth();
+  const canCreateExpense = hasPerm('accounting', 'create_expense');
+  const canEditExpense = hasPerm('accounting', 'edit_expense');
+  const canReceivePayment = hasPerm('accounting', 'receive_payment');
   const [expenses, setExpenses] = useState([]);
   const [receivables, setReceivables] = useState([]);
   const [payables, setPayables] = useState([]);
@@ -426,15 +429,21 @@ export default function AccountingPage() {
               )}
             </div>
             <div className="flex gap-2">
-              <Button onClick={openCashOut} variant="outline" className="border-blue-300 text-blue-700 hover:bg-blue-50" data-testid="cashout-btn">
-                <Banknote size={16} className="mr-2" /> Customer Cash Out
-              </Button>
-              <Button onClick={openFarmExpense} variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-50" data-testid="farm-expense-btn">
-                <Tractor size={16} className="mr-2" /> Farm Expense
-              </Button>
-              <Button onClick={openNewExpense} className="bg-[#1A4D2E] hover:bg-[#14532d] text-white" data-testid="create-expense-btn">
-                <Plus size={16} className="mr-2" /> Record Expense
-              </Button>
+              {canCreateExpense && (
+                <Button onClick={openCashOut} variant="outline" className="border-blue-300 text-blue-700 hover:bg-blue-50" data-testid="cashout-btn">
+                  <Banknote size={16} className="mr-2" /> Customer Cash Out
+                </Button>
+              )}
+              {canCreateExpense && (
+                <Button onClick={openFarmExpense} variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-50" data-testid="farm-expense-btn">
+                  <Tractor size={16} className="mr-2" /> Farm Expense
+                </Button>
+              )}
+              {canCreateExpense && (
+                <Button onClick={openNewExpense} className="bg-[#1A4D2E] hover:bg-[#14532d] text-white" data-testid="create-expense-btn">
+                  <Plus size={16} className="mr-2" /> Record Expense
+                </Button>
+              )}
             </div>
           </div>
 
@@ -547,25 +556,31 @@ export default function AccountingPage() {
                       <TableCell className="text-xs text-slate-500">{e.created_by_name}</TableCell>
                       <TableCell>
                         <div className="flex gap-1">
-                          <Button variant="ghost" size="sm" onClick={() => openEditExpense(e)} className="text-slate-500 h-7 px-2">
-                            <Edit2 size={12} />
-                          </Button>
-                          <Button variant="ghost" size="sm" onClick={() => { setUploadExpenseId(e.id); setUploadQROpen(true); }}
-                            className="text-blue-500 h-7 px-2" title="Upload Receipt">
-                            <Upload size={12} />
-                          </Button>
+                          {canEditExpense && (
+                            <Button variant="ghost" size="sm" onClick={() => openEditExpense(e)} className="text-slate-500 h-7 px-2" data-testid={`edit-expense-${e.id}`}>
+                              <Edit2 size={12} />
+                            </Button>
+                          )}
+                          {canEditExpense && (
+                            <Button variant="ghost" size="sm" onClick={() => { setUploadExpenseId(e.id); setUploadQROpen(true); }}
+                              className="text-blue-500 h-7 px-2" title="Upload Receipt" data-testid={`upload-expense-${e.id}`}>
+                              <Upload size={12} />
+                            </Button>
+                          )}
                           <Button variant="ghost" size="sm" onClick={() => { setViewQRExpenseId(e.id); setViewQRExpenseOpen(true); }}
                             className="text-slate-500 h-7 px-2" title="View on Phone">
                             <span className="text-xs">📱</span>
                           </Button>
-                          {!e.verified && (
+                          {!e.verified && canEditExpense && (
                             <Button variant="ghost" size="sm" onClick={() => { setVerifyExpenseId(e.id); setVerifyExpenseLabel(e.description); setVerifyExpenseOpen(true); }}
-                              className="text-[#1A4D2E] h-7 px-2" title="Verify">
+                              className="text-[#1A4D2E] h-7 px-2" title="Verify" data-testid={`verify-expense-${e.id}`}>
                               <Shield size={12} />
                             </Button>
                           )}
                           <VerificationBadge doc={e} compact />
-                          <Button variant="ghost" size="sm" onClick={() => deleteExpense(e.id)} className="text-red-500 h-7 px-2">Del</Button>
+                          {canEditExpense && (
+                            <Button variant="ghost" size="sm" onClick={() => deleteExpense(e.id)} className="text-red-500 h-7 px-2" data-testid={`delete-expense-${e.id}`}>Del</Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -634,8 +649,8 @@ export default function AccountingPage() {
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          {r.status !== 'paid' && (
-                            <Button size="sm" variant="outline" onClick={() => openPayment(r, 'receivable')}>
+                          {r.status !== 'paid' && canReceivePayment && (
+                            <Button size="sm" variant="outline" data-testid={`receivable-pay-${r.id}`} onClick={() => openPayment(r, 'receivable')}>
                               Record Payment
                             </Button>
                           )}
@@ -656,11 +671,13 @@ export default function AccountingPage() {
 
         {/* PAYABLES TAB */}
         <TabsContent value="payables" className="mt-4 space-y-4">
-          <div className="flex justify-end">
-            <Button onClick={() => { setPayableForm({ supplier: '', description: '', amount: 0, due_date: '' }); setPayableDialog(true); }} className="bg-[#1A4D2E] hover:bg-[#14532d] text-white" data-testid="create-payable-btn">
-              <Plus size={16} className="mr-2" /> Record Payable
-            </Button>
-          </div>
+          {canCreateExpense && (
+            <div className="flex justify-end">
+              <Button onClick={() => { setPayableForm({ supplier: '', description: '', amount: 0, due_date: '' }); setPayableDialog(true); }} className="bg-[#1A4D2E] hover:bg-[#14532d] text-white" data-testid="create-payable-btn">
+                <Plus size={16} className="mr-2" /> Record Payable
+              </Button>
+            </div>
+          )}
           <Card className="border-slate-200">
             <CardContent className="p-0">
               <Table>
@@ -689,8 +706,8 @@ export default function AccountingPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        {p.status !== 'paid' && (
-                          <Button size="sm" variant="outline" onClick={() => openPayment(p, 'payable')}>
+                        {p.status !== 'paid' && canCreateExpense && (
+                          <Button size="sm" variant="outline" data-testid={`payable-pay-${p.id}`} onClick={() => openPayment(p, 'payable')}>
                             Record Payment
                           </Button>
                         )}

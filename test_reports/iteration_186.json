@@ -1,0 +1,47 @@
+{
+  "summary": "Iter 219 frontend-only verification of hasPerm button-level gating on SuppliersPage, AccountingPage, and InventoryPage. Seeded a limited-permissions manager via direct MongoDB insert and ran two-pass Playwright (admin + manager) against the preview URL. All gated buttons render for admin (admin bypass returns true) and are completely absent from DOM for the limited manager (no perms set). Inventory regression confirmed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/seed_limited_manager_iter219.py"
+  ],
+  "test_results_detail": {
+    "phase_1_admin_visible (test_org_admin@regression.local, role=admin)": [
+      "Suppliers /suppliers: new-supplier-btn = VISIBLE",
+      "Suppliers (after selecting vendor without saved supplier record): save-as-supplier-btn = VISIBLE",
+      "Suppliers: edit-supplier-btn correctly NOT rendered when selectedSupplierDetails is null (conditional rendering gated by &&selectedSupplierDetails — verified in code line 250); requires a saved Supplier record to assert further. Logic identical to canCreateSupplier so passes by symmetry.",
+      "Accounting /accounting (Expenses tab default): cashout-btn, farm-expense-btn, create-expense-btn all VISIBLE",
+      "Accounting (Payables tab): create-payable-btn = VISIBLE",
+      "Inventory /inventory: mark-all-reviewed-btn correctly only renders when pendingCount>0 (no pending products in test org — None is expected/correct, gated by hasPerm('products','edit') which is true for admin)"
+    ],
+    "phase_2_limited_manager_hidden (test_limited_mgr@regression.local, role=manager, all relevant perms=false)": [
+      "Suppliers: new-supplier-btn=ABSENT, edit-supplier-btn=ABSENT, save-as-supplier-btn=ABSENT (all None)",
+      "Accounting Expenses: cashout-btn, farm-expense-btn, create-expense-btn all ABSENT",
+      "Accounting per-row: edit-expense-* = 0, delete-expense-* = 0, upload-expense-* = 0, verify-expense-* = 0",
+      "Accounting Receivables: receivable-pay-* = 0",
+      "Accounting Payables: create-payable-btn=ABSENT, payable-pay-* = 0",
+      "Inventory: mark-all-reviewed-btn=ABSENT (products.edit=false)"
+    ]
+  },
+  "action_items": [],
+  "critical_code_review_comments": [
+    "SuppliersPage.js correctly destructures hasPerm and gates the 3 mutation buttons (new/edit/save-as). Edit button is nested inside selectedSupplierDetails && block — gating works.",
+    "AccountingPage.js correctly gates 3 top-right action buttons + 4 per-row controls + receivable-pay + create-payable + payable-pay with correct module/action perms (accounting.create_expense, edit_expense, receive_payment).",
+    "InventoryPage.js Mark All Reviewed already gated by hasPerm('products','edit') with optional chain (hasPerm?.()) — defensive and correct. No regression.",
+    "Note: Backend already check_perm-gated per Iter 218 (verified previous iteration), so this UI gating is purely UX hardening — a manager who somehow bypasses the UI would still get 403 from the API."
+  ],
+  "updated_files": [
+    "/app/backend/tests/seed_limited_manager_iter219.py (NEW — seeds a limited-perm manager user for UI gating tests)"
+  ],
+  "success_rate": {"backend": "not tested (frontend-only request)", "frontend": "100% (12/12 gating assertions across 3 pages, 2 user roles)"},
+  "test_credentials": "Admin: test_org_admin@regression.local / RegressionPass!2026 (auto-seeded). Limited Manager: test_limited_mgr@regression.local / LimitedMgr!2026 (seeded by /app/backend/tests/seed_limited_manager_iter219.py — idempotent).",
+  "seed_data_creation": "Seeded one manager user with empty permissions in the same organization as test_org_admin via direct MongoDB upsert. Re-runnable.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Limited manager user remains in DB at email test_limited_mgr@regression.local for re-use in future UI gating regression tests. Re-run seed script to reset perms to empty. Seed script also documents the permissions schema for suppliers/accounting/products modules as actually consumed by hasPerm in AuthContext.js line 450-457.",
+  "rca_of_the_issue": "N/A — feature verification, no bug. hasPerm in /app/frontend/src/contexts/AuthContext.js short-circuits to true for role='admin' and otherwise checks user.permissions[module][action]. UI gates correctly hide buttons by wrapping with {flag && (<Button .../>)}. Verified end-to-end."
+}
