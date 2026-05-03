@@ -1692,7 +1692,11 @@ export default function UnifiedSalesPage() {
 
   const lineTotal = (line) => {
     const base = line.quantity * line.rate;
-    const disc = line.discount_type === 'percent' ? base * line.discount_value / 100 : line.discount_value;
+    // Per-unit amount discounts: ₱X off each unit × qty (not flat per-line).
+    // Percent discounts stay as a % of the full line — same math either way.
+    const disc = line.discount_type === 'percent'
+      ? base * line.discount_value / 100
+      : line.discount_value * line.quantity;
     return Math.max(0, base - disc);
   };
 
@@ -2077,7 +2081,7 @@ export default function UnifiedSalesPage() {
           product_id: l.product_id, product_name: l.product_name,
           description: l.description, quantity: l.quantity, rate: l.rate,
           discount_type: l.discount_type, discount_value: l.discount_value,
-          discount_amount: l.discount_type === 'percent' ? l.quantity * l.rate * l.discount_value / 100 : l.discount_value,
+          discount_amount: l.discount_type === 'percent' ? l.quantity * l.rate * l.discount_value / 100 : l.discount_value * l.quantity,
           total: lineTotal(l), is_repack: l.is_repack || false,
         }));
 
@@ -3181,7 +3185,7 @@ export default function UnifiedSalesPage() {
                         <th className="text-left px-3 py-2 text-xs uppercase text-slate-500 font-medium min-w-[120px]">Description</th>
                         <th className="text-right px-3 py-2 text-xs uppercase text-slate-500 font-medium w-20">Qty</th>
                         <th className="text-right px-3 py-2 text-xs uppercase text-slate-500 font-medium w-28">Unit Price</th>
-                        <th className="text-right px-3 py-2 text-xs uppercase text-slate-500 font-medium w-28">Discount</th>
+                        <th className="text-right px-3 py-2 text-xs uppercase text-slate-500 font-medium w-28" title="Amount discounts apply per unit (₱X × qty). Percent discounts apply to the line total.">Discount<span className="text-[9px] lowercase text-slate-400 normal-case font-normal ml-1">/unit</span></th>
                         <th className="text-right px-3 py-2 text-xs uppercase text-slate-500 font-medium w-28">Sub-Total</th>
                         <th className="w-10"></th>
                       </tr>

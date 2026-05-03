@@ -23,6 +23,9 @@ export default function ProductsPage() {
   const { currentBranch, user, hasPerm } = useAuth();
   const canViewCost = hasPerm('products', 'view_cost');
   const canEditCost = hasPerm('products', 'edit_cost');
+  const canCreateProduct = hasPerm('products', 'create');
+  const canEditProduct = hasPerm('products', 'edit');
+  const canAdjustInventory = hasPerm('inventory', 'adjust');
   const [products, setProducts] = useState([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState('');
@@ -585,18 +588,22 @@ export default function ProductsPage() {
           <Button variant="outline" size="sm" onClick={() => navigate('/barcode-print')} data-testid="print-barcodes-nav-btn">
             <ScanBarcode size={15} className="mr-1.5 text-emerald-600" /> Print Barcodes
           </Button>
-          <Button variant="outline" size="sm" onClick={openQrModal} data-testid="quick-repack-btn">
-            <Zap size={15} className="mr-1.5 text-amber-500" /> Quick Repack
-          </Button>
+          {canCreateProduct && (
+            <Button variant="outline" size="sm" onClick={openQrModal} data-testid="quick-repack-btn">
+              <Zap size={15} className="mr-1.5 text-amber-500" /> Quick Repack
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={() => navigate('/products/repack-pricing')} data-testid="repack-pricing-nav-btn">
             <Tag size={15} className="mr-1.5 text-amber-600" /> Repack Pricing
           </Button>
           <Button variant="outline" size="sm" onClick={() => { loadCatMgmt(); setCatMgmtOpen(true); }} data-testid="manage-categories-btn">
             <Tag size={15} className="mr-1.5 text-violet-500" /> Categories
           </Button>
-          <Button data-testid="create-product-btn" onClick={() => openCreate()} className="bg-[#1A4D2E] hover:bg-[#14532d] text-white">
-            <Plus size={16} className="mr-2" /> Add Product
-          </Button>
+          {canCreateProduct && (
+            <Button data-testid="create-product-btn" onClick={() => openCreate()} className="bg-[#1A4D2E] hover:bg-[#14532d] text-white">
+              <Plus size={16} className="mr-2" /> Add Product
+            </Button>
+          )}
         </div>
       </div>
 
@@ -737,7 +744,7 @@ export default function ProductsPage() {
                       <Button variant="ghost" size="sm" data-testid={`view-product-${p.id}`} onClick={() => navigate(`/products/${p.id}`)} title="View Details">
                         <Eye size={14} className="text-blue-500" />
                       </Button>
-                      {!p.is_repack && (
+                      {!p.is_repack && canCreateProduct && (
                         <Button variant="ghost" size="sm"
                           data-testid={`repack-btn-${p.id}`}
                           onClick={() => openRepack(p)}
@@ -747,8 +754,14 @@ export default function ProductsPage() {
                           <Link2 size={14} />
                         </Button>
                       )}
-                      <Button variant="ghost" size="sm" data-testid={`edit-product-${p.id}`} onClick={() => openEdit(p)}>
-                        <Pencil size={14} />
+                      <Button variant="ghost" size="sm"
+                        data-testid={`edit-product-${p.id}`}
+                        onClick={() => openEdit(p)}
+                        title={canEditProduct ? 'Edit product' : 'View product (read-only — no edit permission)'}
+                      >
+                        {canEditProduct
+                          ? <Pencil size={14} />
+                          : <Eye size={14} className="text-slate-400" />}
                       </Button>
                       {isAdminOrOwner && !p.is_repack && (
                         <Button variant="ghost" size="sm"
@@ -791,8 +804,16 @@ export default function ProductsPage() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle style={{ fontFamily: 'Manrope' }}>{editing ? 'Edit Product' : 'New Product'}</DialogTitle>
+            <DialogTitle style={{ fontFamily: 'Manrope' }}>
+              {editing ? (canEditProduct ? 'Edit Product' : 'View Product') : 'New Product'}
+            </DialogTitle>
           </DialogHeader>
+          {editing && !canEditProduct && (
+            <div data-testid="product-readonly-banner"
+              className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 flex items-center gap-2">
+              <Lock size={12} /> Read-only — you do not have permission to edit products.
+            </div>
+          )}
           {/* ── Edit-scope banner ─────────────────────────────────────────
               Surfaces WHERE the edit will land. Without this, branch users
               were silently editing the master catalog (a footgun that
@@ -826,6 +847,7 @@ export default function ProductsPage() {
             )
           )}
           <div className="space-y-4 mt-2">
+            <fieldset disabled={!!editing && !canEditProduct} className="space-y-4 disabled:opacity-80">
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label>SKU <span className="text-xs text-muted-foreground font-normal">(optional - auto-generated if blank)</span></Label>
@@ -918,9 +940,10 @@ export default function ProductsPage() {
                 <p className="text-[11px] text-slate-400 mt-0.5">Leave 0 if no stock yet</p>
               </div>
             )}
+            </fieldset>
 
-            {/* ── Inventory Correction (edit mode only) ── */}
-            {editing && !editing.is_repack && (
+            {/* ── Inventory Correction (edit mode only, requires inventory.adjust) ── */}
+            {editing && !editing.is_repack && canAdjustInventory && (
               <div className="border border-dashed border-slate-300 rounded-lg overflow-hidden">
                 <button
                   type="button"
@@ -1030,8 +1053,12 @@ export default function ProductsPage() {
             )}
 
             <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-              <Button data-testid="save-product-btn" onClick={handleSave} className="bg-[#1A4D2E] hover:bg-[#14532d] text-white">Save Product</Button>
+              <Button variant="outline" onClick={() => setDialogOpen(false)}>
+                {editing && !canEditProduct ? 'Close' : 'Cancel'}
+              </Button>
+              {((editing && canEditProduct) || (!editing && canCreateProduct)) && (
+                <Button data-testid="save-product-btn" onClick={handleSave} className="bg-[#1A4D2E] hover:bg-[#14532d] text-white">Save Product</Button>
+              )}
             </div>
           </div>
         </DialogContent>

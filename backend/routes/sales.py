@@ -451,7 +451,9 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
         
         disc_type = item.get("discount_type", "amount")
         disc_val = float(item.get("discount_value", 0))
-        disc_amt = disc_val if disc_type == "amount" else round(qty * rate * disc_val / 100, 2)
+        # Per-unit amount discounts: ₱X off each unit × qty (not flat per-line).
+        # Percent discounts stay as a % of the full line — same math either way.
+        disc_amt = round(qty * disc_val, 2) if disc_type == "amount" else round(qty * rate * disc_val / 100, 2)
         line_total = round(qty * rate - disc_amt, 2)
 
         # Check capital rule AFTER discount — net price per unit must not fall below capital

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 from config import db
 from utils import (
-    get_current_user, check_perm, now_iso, new_id, log_movement,
+    get_current_user, check_perm, has_perm, now_iso, new_id, log_movement,
     get_branch_filter, apply_branch_filter, ensure_branch_access, get_default_branch,
     mark_price_reviewed,
 )
@@ -407,13 +407,20 @@ async def admin_adjust_inventory(data: dict, user=Depends(get_current_user)):
     Admin inventory correction — sets stock to exact new_quantity to fix counting errors.
     Requires PIN verification per policy. Creates a full audit log.
     """
+    # Permission gate — admin role OR explicit `inventory.adjust` permission.
+    # A manager without inventory.adjust perm cannot silently call this endpoint.
+    if user.get("role") != "admin" and not has_perm(user, "inventory", "adjust"):
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have permission to adjust inventory."
+        )
+
     # PIN enforcement for inventory adjustment
     pin = data.get("pin", "")
     if pin:
         from routes.verify import verify_pin_for_action
         verifier = await verify_pin_for_action(pin, "inventory_adjust")
         if not verifier:
-            from fastapi import HTTPException
             raise HTTPException(status_code=403, detail="Invalid PIN")
 
     product_id = data["product_id"]
@@ -426,7 +433,6 @@ async def admin_adjust_inventory(data: dict, user=Depends(get_current_user)):
     # Repack guard
     product = await db.products.find_one({"id": product_id}, {"_id": 0})
     if product and product.get("is_repack"):
-        from fastapi import HTTPException
         raise HTTPException(
             status_code=400,
             detail="Cannot adjust repack inventory directly. Adjust the parent product."

@@ -1,0 +1,51 @@
+{
+  "summary": "Iter 218 backend regression — verified per-unit amount discount math at /api/unified-sale and permission gating at /api/inventory/admin-adjust + /api/products. All 6 supplied tests pass + 5 additional edge cases I authored also pass (11/11). No regressions introduced.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_perunit_discount_and_perm_gates_218.py",
+    "/app/backend/tests/test_perunit_discount_edges_218.py",
+    "/app/test_reports/pytest/iter_218_results.xml",
+    "/app/test_reports/pytest/iter_218_edges_results.xml"
+  ],
+  "test_results_detail": {
+    "supplied_tests_iter218 (6/6 PASS)": [
+      "test_amount_discount_is_per_unit_not_flat_per_line — qty 10 x P5 disc -> discount_amount=50, line_total=950",
+      "test_percent_discount_math_unchanged — 10% of 1000 -> discount_amount=100",
+      "test_admin_adjust_blocks_manager_without_inventory_adjust_perm — manager w/ inventory.adjust=False -> 403",
+      "test_admin_adjust_still_works_for_admin_role — admin -> 200",
+      "test_products_create_blocked_without_create_perm — 403",
+      "test_products_edit_blocked_without_edit_perm — 403"
+    ],
+    "additional_edge_tests (5/5 PASS)": [
+      "qty=1 amount disc collapses to flat (P7)",
+      "decimal qty 2.5 x P4 = P10 disc",
+      "zero discount value -> 0 disc",
+      "manager WITH inventory.adjust=True NOT blocked (positive case)",
+      "products.delete blocked without delete perm -> 403"
+    ]
+  },
+  "action_items": [],
+  "critical_code_review_comments": [
+    "sales.py line 456: per-unit math 'qty * disc_val' is correct and consistent (rounded to 2 dp). Capital-floor recheck after discount on line 459-466 uses net_per_unit which works correctly with the new math.",
+    "inventory.py line 412: gate uses 'user.role != admin AND not has_perm(..., inventory, adjust)' — short-circuits correctly; admins unaffected.",
+    "Note: 18 unrelated pre-existing test ERRORS in test_invoice_edit.py / test_sales_bug_fixes_134.py are due to those files reading REACT_APP_BACKEND_URL which is not set in the backend test env. NOT caused by Iter 218."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_perunit_discount_edges_218.py (NEW — 5 edge cases authored by testing agent)"
+  ],
+  "success_rate": {"backend": "100% (11/11 targeted tests)", "frontend": "not tested (backend-only request)"},
+  "test_credentials": "test_org_admin@regression.local / RegressionPass!2026 (auto-seeded). Manager users created per-test with random emails @regression.local.",
+  "seed_data_creation": "Each test creates its own product + branch + temporary manager user via direct MongoDB insert with bcrypt-hashed password.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iter 218 backend changes verified 100% on 11 tests. The pre-existing 18 ERRORs in test_invoice_edit.py / test_sales_bug_fixes_134.py are due to REACT_APP_BACKEND_URL env var missing in backend pytest env — unrelated, recurring across iterations.",
+  "rca_notes": "BUG #1 root cause: /api/unified-sale used 'qty * rate - disc_val' for amount discounts -> flat PX per line regardless of qty. Fix: 'disc_amt = qty * disc_val' for amount type. Verified persisted invoice line.discount_amount and line.total reflect per-unit math. BUG #2a root cause: /api/inventory/admin-adjust had no perm check; relied on UI hiding the button. Fix: explicit role+perm gate raised at top of handler. Verified 403 for manager without perm and 200 for both admin and manager-with-perm."
+}
