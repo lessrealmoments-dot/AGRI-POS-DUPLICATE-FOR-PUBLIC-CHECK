@@ -239,6 +239,8 @@ PIN_POLICY_ACTIONS = [
     # Customer Management — destructive bulk ops
     {"key": "customer_bulk_delete",   "label": "Bulk Delete Customers",           "module": "Customers",         "defaults": ["admin_pin", "manager_pin", "totp"]},
     {"key": "customer_merge",         "label": "Merge Duplicate Customers",       "module": "Customers",         "defaults": ["admin_pin", "manager_pin", "totp"]},
+    # Branch Transfer — approve pending (manager-submitted) transfer + retail-set
+    {"key": "transfer_approve",       "label": "Approve Pending Branch Transfer", "module": "Branch Transfers",  "defaults": ["admin_pin", "manager_pin", "totp"]},
 ]
 
 # Build quick lookup: action_key → default methods

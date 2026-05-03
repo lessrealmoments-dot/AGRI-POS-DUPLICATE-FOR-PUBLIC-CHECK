@@ -1,5 +1,59 @@
 # AgriBooks PRD
 
+## Iter 217 (May 2026) — Approve-with-PIN + Smart Retail Inherit + Target Insights ✅
+
+### Asks from user
+1. Can a specific manager be authorized to approve transfers? (Instead of admin-only)
+2. Require a PIN before the final Approve button fires
+3. Blank retail on approval = keep the target branch's current retail
+4. Show target branch's current retail AND current capital (moving + last-purchase) on the approval page
+5. Confirm the per-branch mute still works
+
+### Shipped
+
+**New permission `branch_transfers.approve`** (`models/permissions.py`)
+- Admin gets it by default. Manager starts WITHOUT and admin can grant via User Permissions UI.
+
+**New PIN policy action `transfer_approve`** (`routes/verify.py`)
+- Default methods: `admin_pin`, `manager_pin`, `totp`. Owners can tighten in Settings → PIN Policy.
+
+**Backend (`routes/branch_transfers.py`)**
+- `POST /{id}/approve`:
+  - Enforces `branch_transfers.approve` permission instead of hardcoded admin check.
+  - **Requires a PIN** (400 if absent, 403 if wrong / unauthorized).
+  - If the PIN belongs to a non-admin user, that user must ALSO have `branch_transfers.approve` — prevents any manager PIN from bypassing the grant.
+  - Retail fallback chain for blank/0 retails: **target branch price → source branch price → product list price → keep draft value**. Tagged as `retail_source: "inherited_target"` in the audit trail.
+  - Records `approved_by_role`, `approved_pin_method` alongside existing `approved_by_name` for full audit context.
+- `POST /{id}/reject`:
+  - Also gated by `branch_transfers.approve` permission (no PIN — reject is a return, not a dispatch, per user's iter 215 choice).
+- `GET /{id}/approval-insights`: per-item payload with `current_target_retail`, `current_source_retail`, `target_moving_capital`, `target_last_purchase_cost`, `target_stock`. One backend call — approval page stays snappy.
+
+**Frontend (`pages/ApproveTransferPage.js`) — full rewrite**
+- New columns: **From Cap, Xfer, Tgt Moving, Tgt Last Buy, Current Tgt Retail, New Retail, Margin**.
+- Product cell shows target-branch stock inline ("42 in tgt stock").
+- `New Retail` input placeholder = `<current_target_retail> (keep)` — blank on purpose lets admin inherit.
+- "X row(s) will inherit target retail" soft warning (confirm dialog) before approval if any blank.
+- **PIN dialog** on click "Approve & Dispatch" — password input, 3-min warm cache (useRef), "PIN warm 3 min" emerald badge when cached. `403` response invalidates the cache.
+- Permission gate: `user.role === 'admin'` OR `user.permissions.branch_transfers.approve` — otherwise shows a friendly "Not authorized" view.
+
+### Mute confirmation (per user's ask)
+Ran `tests/test_branch_close_reminder_opt_out_201.py` — **all 3 tests pass**. The `close_reminder_disabled` flag is honoured by the close-reminder scheduler `tick_once()`, the toggle endpoint flips correctly, and the diagnose endpoint surfaces the flag. Combined with iter 216 spam-storm fixes, muted branches are now triple-protected: enqueue refused → throttle → dispatch cap.
+
+### Tested
+- **15/15 pytest** pass (`test_transfer_approval_215.py` + `test_transfer_approval_pin_217.py`):
+  - approve without PIN → 400
+  - approve with wrong PIN → 403
+  - approve with blank retail → backend inherits target `branch_prices.retail` (verified via seeded `branch_prices` doc; `retail_source:"inherited_target"` flag asserted)
+  - `/approval-insights` returns all 5 insight fields correctly (current retail target + source, moving capital, last purchase, stock)
+  - permission constants and PIN action wired into presets
+- End-to-end Playwright smoke: pending transfer → admin opens `/approve-transfer/:id` → sees all new columns with target insights populated → clicks Approve → confirm "will inherit" dialog → PIN prompt → enters `913712` → success toast → redirect to Branch Transfers showing order now in In Transit.
+
+### For the owner
+- Go to Team → User Permissions → pick a trusted manager → flip **Branch Transfers → Approve Pending Transfer** on. From then on, that manager's PIN (`521325` in test data) will be accepted at the approval page just like admin's.
+- Warm PIN = enter once, approve multiple transfers in a row without re-typing (3-minute window).
+
+---
+
 ## Iter 216 (May 2026) — 🚨 SMS Spam-Storm Fix + Manager SMS Access ✅
 
 ### What the user saw

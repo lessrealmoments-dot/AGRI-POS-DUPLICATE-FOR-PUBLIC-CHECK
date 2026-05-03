@@ -15,6 +15,7 @@ import requests
 API_URL = os.environ.get("REACT_APP_BACKEND_URL", "http://localhost:8001") + "/api"
 ADMIN_EMAIL = "test_org_admin@regression.local"
 ADMIN_PASS = "RegressionPass!2026"
+ADMIN_PIN = "913712"
 
 
 def _login(email, password):
@@ -74,11 +75,11 @@ def test_admin_approve_dispatches_with_retail():
     tok = _login(ADMIN_EMAIL, ADMIN_PASS)
     b1, b2 = _two_branches(tok)
     t = _create(tok, b1, b2, requires_approval=True)
-    # Approve with retail
+    # Approve with retail + PIN
     r = requests.post(
         f"{API_URL}/branch-transfers/{t['id']}/approve",
         headers=_hdr(tok),
-        json={"items": [{"product_id": "test-prod", "branch_retail": 175}], "notes": "ok"},
+        json={"items": [{"product_id": "test-prod", "branch_retail": 175}], "notes": "ok", "pin": ADMIN_PIN},
     )
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "sent"
@@ -96,7 +97,7 @@ def test_admin_approve_on_non_pending_returns_400():
     t = _create(tok, b1, b2, requires_approval=False)  # draft
     r = requests.post(
         f"{API_URL}/branch-transfers/{t['id']}/approve",
-        headers=_hdr(tok), json={"items": []},
+        headers=_hdr(tok), json={"items": [], "pin": ADMIN_PIN},
     )
     assert r.status_code == 400
 

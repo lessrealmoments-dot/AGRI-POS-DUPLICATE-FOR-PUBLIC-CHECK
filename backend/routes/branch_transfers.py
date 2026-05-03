@@ -462,15 +462,57 @@ async def create_transfer(data: dict, user=Depends(get_current_user)):
 @router.post("/{transfer_id}/approve")
 async def approve_pending_transfer(transfer_id: str, data: dict, user=Depends(get_current_user)):
     """
-    Admin approves a pending-approval transfer. Body may include:
-      - items: [{product_id, branch_retail}]  (admin-set retail per row)
-      - notes: optional approval note
-    On approval: items are merged with admin's retail values, status flips to
-    'sent' immediately (auto-dispatch — owner approved + chose not to send back
-    to manager), stock deduction notifications fire to destination branch.
+    Approve a pending-approval transfer. Body:
+      - items: [{product_id, branch_retail}]  — admin's retail per row.
+                `branch_retail=0` or omitted → inherit CURRENT target-branch
+                retail (falls back to source-branch retail, then product list
+                price). This lets admins approve a transfer without setting a
+                fresh retail for every line.
+      - notes: optional approval note (audit trail)
+      - pin: manager/admin PIN, verified via `transfer_approve` policy
+             (defaults admin_pin + manager_pin + totp; owner can tighten in
+             Settings → PIN Policy). Manager PIN only passes if that manager
+             has `branch_transfers.approve=True` in their permissions.
+
+    Permission: `branch_transfers.approve` (admin has it by default; admin
+    can grant to a specific manager via User Permissions).
+
+    On approval: retail merged + recomputed, status → 'sent' (auto-dispatch),
+    destination branch notified, manager SMS'd.
     """
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can approve transfers")
+    from routes.verify import verify_pin_for_action
+
+    # 1. Permission gate (replaces hardcoded admin check)
+    from utils import check_perm as _check_perm
+    _check_perm(user, "branch_transfers", "approve")
+
+    # 2. PIN gate
+    pin = str(data.get("pin") or "").strip()
+    if not pin:
+        raise HTTPException(status_code=400, detail="PIN required to approve transfer")
+    verifier = await verify_pin_for_action(pin, "transfer_approve")
+    if not verifier:
+        raise HTTPException(status_code=403, detail="Invalid PIN or unauthorized for transfer approval")
+
+    # Resolve the verifier to a real user (so we can check their permissions).
+    # The `verifier_id="system_admin"` case means the system admin_pin (hashed
+    # in system_settings) matched — implicitly grants approval authority.
+    verifier_id = verifier.get("verifier_id")
+    verifier_user = None
+    if verifier_id and verifier_id != "system_admin":
+        verifier_user = await _raw_db.users.find_one({"id": verifier_id}, {"_id": 0})
+
+    # If the PIN belongs to a real user AND that user is not an admin, they
+    # must ALSO have the transfers.approve permission themselves — prevents a
+    # manager PIN from bypassing the grant.
+    if verifier_user and verifier_user.get("role") != "admin":
+        from utils import has_perm as _has_perm
+        if not _has_perm(verifier_user, "branch_transfers", "approve"):
+            raise HTTPException(
+                status_code=403,
+                detail="This manager is not an authorized approver. Ask the admin to enable 'Approve Pending Transfer' in User Permissions."
+            )
+
     order = await db.branch_transfer_orders.find_one({"id": transfer_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Transfer not found")
@@ -481,14 +523,60 @@ async def approve_pending_transfer(transfer_id: str, data: dict, user=Depends(ge
     if not get_org_context():
         await ensure_org_context(branch_id=order["from_branch_id"], org_id=order.get("organization_id"))
 
-    # Merge admin-set retail prices into items
+    # 3. Merge admin-set retail with smart fallback:
+    #    blank/0 → target branch's current retail → source branch's retail →
+    #    product list price → keep whatever the draft already had.
     admin_items = {it.get("product_id"): it for it in (data.get("items") or []) if it.get("product_id")}
+    to_branch = order["to_branch_id"]
+    from_branch = order["from_branch_id"]
+
+    async def _resolve_retail(product_id: str, draft_retail: float) -> float:
+        """Return a sensible retail for this product+target-branch when admin blanked it.
+        Fallback chain: target-branch price → source-branch price → product list price.
+        """
+        if not product_id:
+            return float(draft_retail or 0)
+        # 1. Target branch price
+        target_doc = await _raw_db.branch_prices.find_one(
+            {"product_id": product_id, "branch_id": to_branch},
+            {"_id": 0, "prices": 1},
+        )
+        target_retail = (target_doc or {}).get("prices", {}).get("retail")
+        if target_retail and float(target_retail) > 0:
+            return float(target_retail)
+        # 2. Source branch price
+        source_doc = await _raw_db.branch_prices.find_one(
+            {"product_id": product_id, "branch_id": from_branch},
+            {"_id": 0, "prices": 1},
+        )
+        source_retail = (source_doc or {}).get("prices", {}).get("retail")
+        if source_retail and float(source_retail) > 0:
+            return float(source_retail)
+        # 3. Product list price (global default)
+        prod = await _raw_db.products.find_one(
+            {"id": product_id}, {"_id": 0, "prices": 1, "price": 1}
+        )
+        list_price = ((prod or {}).get("prices", {}).get("retail")
+                      or (prod or {}).get("price")
+                      or 0)
+        return float(list_price or draft_retail or 0)
+
     new_items = []
     for it in order.get("items", []):
         merged = dict(it)
         admin_row = admin_items.get(it.get("product_id"))
-        if admin_row and admin_row.get("branch_retail") is not None:
-            merged["branch_retail"] = float(admin_row["branch_retail"])
+        admin_retail = None
+        if admin_row is not None and admin_row.get("branch_retail") not in (None, ""):
+            admin_retail = float(admin_row["branch_retail"])
+        if admin_retail is not None and admin_retail > 0:
+            merged["branch_retail"] = admin_retail
+        else:
+            # Admin left it blank → smart fallback
+            merged["branch_retail"] = await _resolve_retail(
+                it.get("product_id"),
+                float(it.get("branch_retail") or 0),
+            )
+            merged["retail_source"] = "inherited_target"
         new_items.append(merged)
 
     # Recompute retail total
@@ -496,8 +584,11 @@ async def approve_pending_transfer(transfer_id: str, data: dict, user=Depends(ge
         float(i.get("branch_retail", 0)) * float(i.get("qty", 0)) for i in new_items), 2)
 
     approval_meta = {
-        "approved_by": user["id"],
-        "approved_by_name": user.get("full_name", user["username"]),
+        "approved_by": (verifier_user or {}).get("id") or user["id"],
+        "approved_by_name": (verifier_user or {}).get("full_name") or (verifier_user or {}).get("username")
+                             or verifier.get("verifier_name") or user.get("full_name", user["username"]),
+        "approved_by_role": (verifier_user or {}).get("role", user.get("role", "")),
+        "approved_pin_method": verifier.get("method", ""),
         "approved_at": now_iso(),
         "approval_note": data.get("notes", ""),
     }
@@ -510,15 +601,15 @@ async def approve_pending_transfer(transfer_id: str, data: dict, user=Depends(ge
             "total_at_branch_retail": total_at_branch_retail,
             "status": "sent",
             "sent_at": now_iso(),
-            "sent_by": user["id"],
+            "sent_by": (verifier_user or {}).get("id") or user["id"],
         }}
     )
 
     # Re-use the same destination notification + invoice update + doc-code path as /send
-    from_branch = await db.branches.find_one({"id": order["from_branch_id"]}, {"_id": 0, "name": 1})
-    to_branch = await db.branches.find_one({"id": order["to_branch_id"]}, {"_id": 0, "name": 1})
-    from_name = from_branch.get("name", order["from_branch_id"]) if from_branch else order["from_branch_id"]
-    to_name = to_branch.get("name", order["to_branch_id"]) if to_branch else order["to_branch_id"]
+    from_branch_doc = await db.branches.find_one({"id": order["from_branch_id"]}, {"_id": 0, "name": 1})
+    to_branch_doc = await db.branches.find_one({"id": order["to_branch_id"]}, {"_id": 0, "name": 1})
+    from_name = from_branch_doc.get("name", order["from_branch_id"]) if from_branch_doc else order["from_branch_id"]
+    to_name = to_branch_doc.get("name", order["to_branch_id"]) if to_branch_doc else order["to_branch_id"]
 
     dest_users = await db.users.find(
         {"branch_id": order["to_branch_id"], "active": True}, {"_id": 0, "id": 1}
@@ -601,9 +692,14 @@ async def approve_pending_transfer(transfer_id: str, data: dict, user=Depends(ge
 
 @router.post("/{transfer_id}/reject")
 async def reject_pending_transfer(transfer_id: str, data: dict, user=Depends(get_current_user)):
-    """Admin rejects a pending-approval transfer with a reason. Manager can edit and resubmit."""
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can reject transfers")
+    """Reject a pending-approval transfer with a reason. Requires same
+    permission as approve (`branch_transfers.approve`) — rejection is an
+    authoritative action. PIN is NOT required for reject: it's a return, not
+    a dispatch. Manager can edit + resubmit after the bounce-back.
+    """
+    from utils import check_perm as _check_perm
+    _check_perm(user, "branch_transfers", "approve")
+
     reason = (data.get("reason") or "").strip()
     if len(reason) < 4:
         raise HTTPException(status_code=400, detail="Rejection reason is required (≥ 4 chars)")
@@ -698,6 +794,69 @@ async def resubmit_returned_transfer(transfer_id: str, user=Depends(get_current_
     except Exception:
         pass
     return {"message": "Transfer resubmitted for approval", "status": "pending_approval"}
+
+
+@router.get("/{transfer_id}/approval-insights")
+async def get_approval_insights(transfer_id: str, user=Depends(get_current_user)):
+    """
+    Returns per-item insights the approver needs on the approval page:
+      - current_target_retail: the retail price currently set in the target
+        branch (what the blank-retail fallback will inherit)
+      - current_source_retail: the source branch's current retail (reference)
+      - target_moving_capital: moving-avg capital in the target branch
+      - target_last_purchase_cost: most recent purchase/transfer-in cost at
+        the target branch
+
+    Keeps UI reads fast: one call per approval page, instead of N product
+    fetches from the frontend.
+    """
+    from utils import check_perm as _check_perm
+    _check_perm(user, "branch_transfers", "approve")
+
+    order = await db.branch_transfer_orders.find_one({"id": transfer_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Transfer not found")
+
+    to_branch = order["to_branch_id"]
+    from_branch = order["from_branch_id"]
+    insights = {}
+    for it in (order.get("items") or []):
+        pid = it.get("product_id")
+        if not pid:
+            continue
+        # Retail prices — target and source
+        target_price = await _raw_db.branch_prices.find_one(
+            {"product_id": pid, "branch_id": to_branch}, {"_id": 0, "prices": 1}
+        )
+        source_price = await _raw_db.branch_prices.find_one(
+            {"product_id": pid, "branch_id": from_branch}, {"_id": 0, "prices": 1}
+        )
+        prod = await _raw_db.products.find_one(
+            {"id": pid}, {"_id": 0, "prices": 1, "price": 1}
+        )
+        current_target_retail = (
+            (target_price or {}).get("prices", {}).get("retail")
+            or (prod or {}).get("prices", {}).get("retail")
+            or (prod or {}).get("price") or 0
+        )
+        current_source_retail = (
+            (source_price or {}).get("prices", {}).get("retail")
+            or (prod or {}).get("prices", {}).get("retail")
+            or (prod or {}).get("price") or 0
+        )
+        # Capital — moving avg + last purchase at target branch
+        inv = await _raw_db.inventory.find_one(
+            {"product_id": pid, "branch_id": to_branch},
+            {"_id": 0, "moving_avg_cost": 1, "last_purchase_cost": 1, "quantity": 1},
+        )
+        insights[pid] = {
+            "current_target_retail": float(current_target_retail or 0),
+            "current_source_retail": float(current_source_retail or 0),
+            "target_moving_capital": float((inv or {}).get("moving_avg_cost") or 0),
+            "target_last_purchase_cost": float((inv or {}).get("last_purchase_cost") or 0),
+            "target_stock": float((inv or {}).get("quantity") or 0),
+        }
+    return {"insights": insights}
 
 
 @router.get("/{transfer_id}")

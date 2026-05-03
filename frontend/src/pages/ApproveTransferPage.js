@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth, api } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
@@ -9,34 +9,53 @@ import { Badge } from '../components/ui/badge';
 import { Textarea } from '../components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import {
-  ArrowLeft, Shield, Check, X, AlertTriangle, Building2, Package, ArrowRight, Clock, Loader2,
+  ArrowLeft, Shield, Check, X, AlertTriangle, Building2, ArrowRight, Clock, Loader2, KeyRound,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPHP } from '../lib/utils';
+
+// 3-min warm PIN cache per ApproveTransferPage session.
+const PIN_TTL_MS = 3 * 60 * 1000;
 
 export default function ApproveTransferPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
 
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [retails, setRetails] = useState({}); // product_id -> retail
+  const [insights, setInsights] = useState({}); // product_id -> { current_target_retail, target_moving_capital, target_last_purchase_cost, target_stock, current_source_retail }
+  const [retails, setRetails] = useState({}); // product_id -> string retail
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
+  const [pinOpen, setPinOpen] = useState(false);
+  const [pinValue, setPinValue] = useState('');
+  const [pinPurpose, setPinPurpose] = useState('approve'); // 'approve' only for now — reject needs no PIN
+
+  // Warm PIN cache
+  const pinCacheRef = useRef({ pin: '', expires_at: 0 });
+  const isPinWarm = () => pinCacheRef.current.pin && Date.now() < pinCacheRef.current.expires_at;
+  const cachePin = (pin) => {
+    pinCacheRef.current = { pin, expires_at: Date.now() + PIN_TTL_MS };
+  };
 
   useEffect(() => {
     if (!id) return;
     setLoading(true);
-    api.get(`/branch-transfers/${id}`)
-      .then(r => {
-        setOrder(r.data);
+    Promise.all([
+      api.get(`/branch-transfers/${id}`),
+      api.get(`/branch-transfers/${id}/approval-insights`).catch(() => ({ data: { insights: {} } })),
+    ])
+      .then(([ord, ins]) => {
+        setOrder(ord.data);
+        setInsights(ins.data.insights || {});
         const initial = {};
-        (r.data.items || []).forEach(it => {
-          initial[it.product_id] = String(it.branch_retail || '');
+        (ord.data.items || []).forEach(it => {
+          // Pre-fill retail if the draft already had one, otherwise leave blank
+          // so the "inherit target retail" placeholder nudges the admin.
+          initial[it.product_id] = it.branch_retail > 0 ? String(it.branch_retail) : '';
         });
         setRetails(initial);
       })
@@ -45,40 +64,60 @@ export default function ApproveTransferPage() {
   }, [id]);
 
   const totals = useMemo(() => {
-    if (!order) return { capital: 0, transfer: 0, retail: 0, profit: 0 };
+    if (!order) return { capital: 0, transfer: 0, retail: 0, profit: 0, blank_count: 0 };
     const items = order.items || [];
     const capital = items.reduce((s, it) => s + (parseFloat(it.branch_capital) || 0) * (parseFloat(it.qty) || 0), 0);
     const transfer = items.reduce((s, it) => s + (parseFloat(it.transfer_capital) || 0) * (parseFloat(it.qty) || 0), 0);
+    let blank_count = 0;
     const retail = items.reduce((s, it) => {
-      const r = parseFloat(retails[it.product_id]) || 0;
-      return s + r * (parseFloat(it.qty) || 0);
+      const entered = parseFloat(retails[it.product_id]);
+      let effective = entered;
+      if (!entered || entered <= 0) {
+        blank_count += 1;
+        // Use insight's current target retail as the effective price
+        effective = parseFloat(insights[it.product_id]?.current_target_retail || 0);
+      }
+      return s + (effective || 0) * (parseFloat(it.qty) || 0);
     }, 0);
-    return { capital, transfer, retail, profit: retail - transfer };
-  }, [order, retails]);
+    return { capital, transfer, retail, profit: retail - transfer, blank_count };
+  }, [order, retails, insights]);
 
-  const allRetailsFilled = useMemo(() => {
-    if (!order) return false;
-    return (order.items || []).every(it => {
-      const r = parseFloat(retails[it.product_id]) || 0;
-      return r > 0;
-    });
-  }, [order, retails]);
-
-  const handleApprove = async () => {
-    if (!allRetailsFilled) {
-      if (!window.confirm('Some rows have no retail price set. Approve and dispatch anyway?')) return;
+  // Open PIN dialog (or reuse warm PIN) then call approve()
+  const requestApprove = () => {
+    if (totals.blank_count > 0) {
+      const ok = window.confirm(
+        `${totals.blank_count} row(s) have no retail set — they will inherit the target branch's ` +
+        `CURRENT retail price. Continue?`
+      );
+      if (!ok) return;
     }
+    if (isPinWarm()) {
+      doApprove(pinCacheRef.current.pin);
+      return;
+    }
+    setPinPurpose('approve');
+    setPinValue('');
+    setPinOpen(true);
+  };
+
+  const doApprove = async (pin) => {
     setSubmitting(true);
     try {
       const items = (order.items || []).map(it => ({
         product_id: it.product_id,
-        branch_retail: parseFloat(retails[it.product_id]) || 0,
+        branch_retail: parseFloat(retails[it.product_id]) || 0, // 0 = blank → backend inherits
       }));
-      await api.post(`/branch-transfers/${id}/approve`, { items, notes });
-      toast.success('Approved & dispatched. Manager has been notified.');
-      navigate('/branch-transfers?subtab=in_transit');
+      await api.post(`/branch-transfers/${id}/approve`, { items, notes, pin });
+      cachePin(pin); // warm for 3 minutes
+      toast.success('Approved & dispatched. Manager notified by SMS.');
+      setPinOpen(false);
+      navigate('/branch-transfers?tab=history');
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Failed to approve');
+      if (e.response?.status === 403) {
+        // Invalidate warm cache on auth failure
+        pinCacheRef.current = { pin: '', expires_at: 0 };
+      }
     } finally {
       setSubmitting(false);
     }
@@ -94,12 +133,19 @@ export default function ApproveTransferPage() {
       await api.post(`/branch-transfers/${id}/reject`, { reason: rejectReason.trim() });
       toast.success('Transfer rejected. Manager has been notified.');
       setRejectOpen(false);
-      navigate('/branch-transfers?subtab=returned');
+      navigate('/branch-transfers?tab=history');
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Failed to reject');
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handlePinSubmit = (e) => {
+    e?.preventDefault?.();
+    const pin = pinValue.trim();
+    if (!pin) { toast.error('Enter PIN'); return; }
+    if (pinPurpose === 'approve') doApprove(pin);
   };
 
   if (loading) {
@@ -121,12 +167,18 @@ export default function ApproveTransferPage() {
     );
   }
 
-  if (!isAdmin) {
+  // Permission gate — admin OR a manager with branch_transfers.approve
+  const canApprove = user?.role === 'admin'
+    || !!user?.permissions?.branch_transfers?.approve;
+
+  if (!canApprove) {
     return (
-      <div className="p-12 text-center" data-testid="approve-not-admin">
+      <div className="p-12 text-center" data-testid="approve-not-authorized">
         <Shield size={32} className="mx-auto mb-3 text-amber-500" />
-        <p className="text-slate-700 font-semibold">Admin access required</p>
-        <p className="text-slate-500 text-sm mt-1">Only admins can approve branch transfers.</p>
+        <p className="text-slate-700 font-semibold">Not authorized to approve transfers</p>
+        <p className="text-slate-500 text-sm mt-1">
+          Ask an admin to enable <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded">Branch Transfers → Approve Pending Transfer</span> in your User Permissions.
+        </p>
         <Button variant="outline" onClick={() => navigate('/branch-transfers')} className="mt-4">Back to Transfers</Button>
       </div>
     );
@@ -144,7 +196,7 @@ export default function ApproveTransferPage() {
   }
 
   return (
-    <div className="p-4 md:p-8 max-w-5xl mx-auto" data-testid="approve-transfer-page">
+    <div className="p-4 md:p-8 max-w-6xl mx-auto" data-testid="approve-transfer-page">
       <Button variant="ghost" size="sm" onClick={() => navigate('/branch-transfers')} className="mb-4 text-slate-500" data-testid="back-btn">
         <ArrowLeft size={14} className="mr-1.5" /> Back to Transfers
       </Button>
@@ -177,10 +229,12 @@ export default function ApproveTransferPage() {
               <span className="font-semibold text-emerald-800">{order.to_branch_name || order.to_branch_id}</span>
             </div>
           </div>
+          <p className="text-xs text-slate-500 mt-3">
+            💡 Leave Branch Retail <b>blank</b> to inherit the target branch's <b>current retail price</b>. Insights on the right show what each row will become.
+          </p>
         </CardContent>
       </Card>
 
-      {/* Items table */}
       <Card className="mb-4">
         <CardHeader className="pb-3">
           <CardTitle className="text-base" style={{ fontFamily: 'Manrope' }}>
@@ -190,47 +244,68 @@ export default function ApproveTransferPage() {
         <CardContent className="px-0 pb-0">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500">
+              <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500">
                 <tr>
                   <th className="text-left px-4 py-2.5">Product</th>
-                  <th className="text-right px-3 py-2.5">Qty</th>
-                  <th className="text-right px-3 py-2.5">Branch Capital</th>
-                  <th className="text-right px-3 py-2.5">Transfer Capital</th>
-                  <th className="text-right px-3 py-2.5 bg-amber-50 text-amber-800">Branch Retail *</th>
-                  <th className="text-right px-3 py-2.5">Margin / unit</th>
+                  <th className="text-right px-2 py-2.5">Qty</th>
+                  <th className="text-right px-2 py-2.5" title="Source branch: what we book it at">From Cap</th>
+                  <th className="text-right px-2 py-2.5 text-blue-700" title="Transfer price to destination">Xfer</th>
+                  <th className="text-right px-2 py-2.5" title="Target branch moving-avg cost">Tgt Moving</th>
+                  <th className="text-right px-2 py-2.5" title="Target branch last purchase cost">Tgt Last Buy</th>
+                  <th className="text-right px-2 py-2.5 text-slate-600" title="Target branch's current retail — will be used if admin leaves input blank">Current Tgt Retail</th>
+                  <th className="text-right px-2 py-2.5 bg-amber-50 text-amber-800 min-w-[110px]">New Retail</th>
+                  <th className="text-right px-2 py-2.5">Margin</th>
                 </tr>
               </thead>
               <tbody>
                 {(order.items || []).map((it, idx) => {
-                  const r = parseFloat(retails[it.product_id]) || 0;
+                  const pid = it.product_id;
+                  const ins = insights[pid] || {};
+                  const entered = parseFloat(retails[pid]);
+                  const effectiveRetail = (entered > 0) ? entered : parseFloat(ins.current_target_retail || 0);
                   const tc = parseFloat(it.transfer_capital) || 0;
-                  const margin = r - tc;
-                  const marginColor = r === 0 ? 'text-slate-400' : margin <= 0 ? 'text-red-600' : margin < (order.min_margin || 20) ? 'text-amber-600' : 'text-emerald-600';
+                  const margin = effectiveRetail - tc;
+                  const marginColor = effectiveRetail === 0 ? 'text-slate-400' : margin <= 0 ? 'text-red-600' : margin < (order.min_margin || 20) ? 'text-amber-600' : 'text-emerald-600';
+                  const willInherit = !(entered > 0);
                   return (
-                    <tr key={it.product_id || idx} className="border-t border-slate-100">
+                    <tr key={pid || idx} className="border-t border-slate-100">
                       <td className="px-4 py-2.5">
                         <div className="font-semibold text-slate-800">{it.product_name}</div>
                         <div className="text-[10px] text-slate-400 font-mono">{it.sku}</div>
+                        {ins.target_stock !== undefined && (
+                          <div className="text-[10px] text-emerald-600 mt-0.5">
+                            {ins.target_stock} in tgt stock
+                          </div>
+                        )}
                       </td>
-                      <td className="px-3 py-2.5 text-right font-mono">{it.qty}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-slate-600">{formatPHP(it.branch_capital)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-blue-700">{formatPHP(it.transfer_capital)}</td>
-                      <td className="px-3 py-2.5 bg-amber-50/40">
+                      <td className="px-2 py-2.5 text-right font-mono">{it.qty}</td>
+                      <td className="px-2 py-2.5 text-right font-mono text-slate-600">{formatPHP(it.branch_capital)}</td>
+                      <td className="px-2 py-2.5 text-right font-mono text-blue-700">{formatPHP(it.transfer_capital)}</td>
+                      <td className="px-2 py-2.5 text-right font-mono text-slate-500">
+                        {ins.target_moving_capital > 0 ? formatPHP(ins.target_moving_capital) : <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className="px-2 py-2.5 text-right font-mono text-slate-500">
+                        {ins.target_last_purchase_cost > 0 ? formatPHP(ins.target_last_purchase_cost) : <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className="px-2 py-2.5 text-right font-mono text-slate-700">
+                        {ins.current_target_retail > 0 ? formatPHP(ins.current_target_retail) : <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className="px-2 py-2.5 bg-amber-50/40">
                         <Input
                           type="number"
                           min="0"
                           step="0.01"
                           inputMode="decimal"
-                          value={retails[it.product_id] || ''}
-                          onChange={e => setRetails({ ...retails, [it.product_id]: e.target.value })}
+                          value={retails[pid] || ''}
+                          onChange={e => setRetails({ ...retails, [pid]: e.target.value })}
                           onWheel={e => e.currentTarget.blur()}
-                          className="h-9 text-right font-mono font-bold border-amber-300 focus:border-amber-500"
-                          placeholder="0.00"
-                          data-testid={`retail-input-${it.product_id}`}
+                          className={`h-9 text-right font-mono font-bold border-amber-300 focus:border-amber-500 ${willInherit ? 'placeholder:text-amber-700 placeholder:opacity-60' : ''}`}
+                          placeholder={ins.current_target_retail > 0 ? `${ins.current_target_retail.toFixed(2)} (keep)` : 'blank'}
+                          data-testid={`retail-input-${pid}`}
                         />
                       </td>
-                      <td className={`px-3 py-2.5 text-right font-mono font-semibold ${marginColor}`}>
-                        {r === 0 ? '—' : formatPHP(margin)}
+                      <td className={`px-2 py-2.5 text-right font-mono font-semibold ${marginColor}`}>
+                        {effectiveRetail === 0 ? '—' : formatPHP(margin)}
                       </td>
                     </tr>
                   );
@@ -241,7 +316,6 @@ export default function ApproveTransferPage() {
         </CardContent>
       </Card>
 
-      {/* Approval note */}
       <Card className="mb-4">
         <CardContent className="p-4">
           <Label className="text-xs text-slate-500">Approval Note (optional)</Label>
@@ -256,7 +330,6 @@ export default function ApproveTransferPage() {
         </CardContent>
       </Card>
 
-      {/* Totals + actions */}
       <div className="bg-white border-2 border-slate-200 rounded-xl p-5 flex items-center justify-between flex-wrap gap-4">
         <div className="flex items-center gap-6 text-sm">
           <div className="text-right">
@@ -270,8 +343,13 @@ export default function ApproveTransferPage() {
           </div>
           <ArrowRight size={14} className="text-slate-400" />
           <div className="text-right">
-            <p className="text-[10px] text-slate-400 uppercase tracking-wider">Branch Retail</p>
+            <p className="text-[10px] text-slate-400 uppercase tracking-wider">Effective Retail</p>
             <p className="font-mono font-bold text-emerald-700">{formatPHP(totals.retail)}</p>
+            {totals.blank_count > 0 && (
+              <p className="text-[10px] text-amber-700 font-semibold mt-0.5">
+                {totals.blank_count} row(s) will inherit target retail
+              </p>
+            )}
           </div>
           <div className="text-right border-l border-slate-200 pl-6">
             <p className="text-[10px] text-slate-400 uppercase tracking-wider">Profit at Target</p>
@@ -280,6 +358,11 @@ export default function ApproveTransferPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          {isPinWarm() && (
+            <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] flex items-center gap-1">
+              <KeyRound size={10} /> PIN warm 3 min
+            </Badge>
+          )}
           <Button
             variant="outline"
             onClick={() => setRejectOpen(true)}
@@ -290,7 +373,7 @@ export default function ApproveTransferPage() {
             <X size={14} className="mr-1.5" /> Return / Reject
           </Button>
           <Button
-            onClick={handleApprove}
+            onClick={requestApprove}
             disabled={submitting}
             className="bg-emerald-600 hover:bg-emerald-700 text-white"
             data-testid="approve-btn"
@@ -300,6 +383,40 @@ export default function ApproveTransferPage() {
           </Button>
         </div>
       </div>
+
+      {/* PIN prompt */}
+      <Dialog open={pinOpen} onOpenChange={setPinOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2" style={{ fontFamily: 'Manrope' }}>
+              <KeyRound size={18} className="text-amber-600" /> PIN Required
+            </DialogTitle>
+            <DialogDescription>
+              Enter your Admin PIN, or an authorized manager's PIN, to approve this transfer. PIN will stay valid for 3 minutes.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handlePinSubmit} className="space-y-3">
+            <Input
+              type="password"
+              inputMode="numeric"
+              autoFocus
+              value={pinValue}
+              onChange={e => setPinValue(e.target.value)}
+              placeholder="••••••"
+              className="text-center tracking-[0.5em] font-mono text-lg"
+              data-testid="pin-input"
+            />
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setPinOpen(false)} disabled={submitting}>Cancel</Button>
+              <Button type="submit" disabled={submitting || !pinValue.trim()}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white" data-testid="pin-confirm-btn">
+                {submitting ? <Loader2 size={14} className="animate-spin mr-1.5" /> : <Check size={14} className="mr-1.5" />}
+                Approve
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Reject dialog */}
       <Dialog open={rejectOpen} onOpenChange={setRejectOpen}>
