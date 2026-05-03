@@ -354,6 +354,14 @@ export default function UnifiedSalesPage() {
   const [allProducts, setAllProducts] = useState([]);
   const [filteredProducts, setFilteredProducts] = useState([]);
   const [search, setSearch] = useState('');
+  // Debounced search — heavy filter only runs 150ms after last keystroke
+  // so typing in a 1000+ product catalog doesn't lock up the UI thread on
+  // every letter (Iter 222 perf fix).
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 150);
+    return () => clearTimeout(t);
+  }, [search]);
   // Set when the strict search returns 0 results AND the fuzzy fallback
   // produced suggestions. The UI shows a banner so the user is never
   // confused about why an unexpected product appears in the grid.
@@ -796,51 +804,72 @@ export default function UnifiedSalesPage() {
   }, []);
 
   const loadData = async (forceOnline = false) => {
-    const online = forceOnline || navigator.onLine;
-    if (online) {
-      try {
-        // Use effectiveBranchId (always available from localStorage/user data)
-        // currentBranch depends on branches[] loading first and may be null
-        const branchId = currentBranch?.id || (effectiveBranchId && effectiveBranchId !== 'all' ? effectiveBranchId : null);
-        const branchParams = branchId ? { branch_id: branchId } : {};
-        const [posRes, custRes, termRes, prefixRes, userRes, schemeRes] = await Promise.all([
-          api.get('/sync/pos-data', { params: branchParams }),
-          api.get('/customers', { params: { limit: 500, ...branchParams } }),
-          api.get('/settings/terms-options').catch(() => ({ data: [] })),
-          api.get('/settings/invoice-prefixes').catch(() => ({ data: {} })),
-          api.get('/users').catch(() => ({ data: [] })),
-          api.get('/price-schemes').catch(() => ({ data: [] })),
-        ]);
-        setAllProducts(posRes.data.products);
-        setCustomers(custRes.data.customers || posRes.data.customers);
-        setSchemes(schemeRes.data || posRes.data.price_schemes);
-        setTerms(termRes.data || []);
-        setPrefixes(prefixRes.data || {});
-        setUsers(userRes.data || []);
-        await Promise.all([
-          cacheProducts(posRes.data.products),
-          cacheCustomers(custRes.data.customers || posRes.data.customers),
-          cachePriceSchemes(schemeRes.data || posRes.data.price_schemes),
-        ]);
-        // Cache admin_pin bcrypt hash + branch-scoped manager PIN grants
-        // for offline manager-PIN verification (Iter 192 — Offline Mode
-        // Robustness Overhaul). Managers run the POS, so we ship their
-        // PINs scoped to this branch. Admin PINs work all branches.
-        if (posRes.data.admin_pin_hash) {
-          await setOfflineAdminPinHash(posRes.data.admin_pin_hash);
-        }
-        if (Array.isArray(posRes.data.offline_pin_grants)) {
-          await setOfflinePinGrants(posRes.data.offline_pin_grants);
-        }
+    // ── Stale-while-revalidate (Iter 222 perf fix) ─────────────────────
+    // 1) Paint from IndexedDB cache IMMEDIATELY so the cart, search, and
+    //    product grid are usable in <100ms on every navigation back to
+    //    Sales — no more 5–10 sec blank state while the server responds.
+    // 2) When online, fire the network refresh in the background and swap
+    //    the cache (and React state) once it returns. This keeps prices
+    //    and stock counts fresh without blocking the UI.
+    try {
+      const [cachedProds, cachedCusts, cachedSchs] = await Promise.all([
+        getProducts(), getCustomers(), getPriceSchemes(),
+      ]);
+      if (Array.isArray(cachedProds) && cachedProds.length > 0) {
+        setAllProducts(cachedProds);
+        setCustomers(cachedCusts || []);
+        setSchemes(cachedSchs || []);
         setDataLoaded(true);
-        return;
-      } catch (e) { console.warn('API failed, using offline cache'); }
+      }
+    } catch { /* no cache yet — first ever load */ }
+
+    const online = forceOnline || navigator.onLine;
+    if (!online) {
+      // Truly offline and no cache → fall back to the disk read result
+      // (already applied above if it succeeded). Mark loaded either way.
+      setDataLoaded(true);
+      return;
     }
-    const [prods, custs, schs] = await Promise.all([getProducts(), getCustomers(), getPriceSchemes()]);
-    setAllProducts(prods);
-    setCustomers(custs);
-    setSchemes(schs);
-    setDataLoaded(true);
+
+    try {
+      // Use effectiveBranchId (always available from localStorage/user data)
+      // currentBranch depends on branches[] loading first and may be null
+      const branchId = currentBranch?.id || (effectiveBranchId && effectiveBranchId !== 'all' ? effectiveBranchId : null);
+      const branchParams = branchId ? { branch_id: branchId } : {};
+      const [posRes, custRes, termRes, prefixRes, userRes, schemeRes] = await Promise.all([
+        api.get('/sync/pos-data', { params: branchParams }),
+        api.get('/customers', { params: { limit: 500, ...branchParams } }),
+        api.get('/settings/terms-options').catch(() => ({ data: [] })),
+        api.get('/settings/invoice-prefixes').catch(() => ({ data: {} })),
+        api.get('/users').catch(() => ({ data: [] })),
+        api.get('/price-schemes').catch(() => ({ data: [] })),
+      ]);
+      setAllProducts(posRes.data.products);
+      setCustomers(custRes.data.customers || posRes.data.customers);
+      setSchemes(schemeRes.data || posRes.data.price_schemes);
+      setTerms(termRes.data || []);
+      setPrefixes(prefixRes.data || {});
+      setUsers(userRes.data || []);
+      await Promise.all([
+        cacheProducts(posRes.data.products),
+        cacheCustomers(custRes.data.customers || posRes.data.customers),
+        cachePriceSchemes(schemeRes.data || posRes.data.price_schemes),
+      ]);
+      // Cache admin_pin bcrypt hash + branch-scoped manager PIN grants
+      // for offline manager-PIN verification (Iter 192 — Offline Mode
+      // Robustness Overhaul). Managers run the POS, so we ship their
+      // PINs scoped to this branch. Admin PINs work all branches.
+      if (posRes.data.admin_pin_hash) {
+        await setOfflineAdminPinHash(posRes.data.admin_pin_hash);
+      }
+      if (Array.isArray(posRes.data.offline_pin_grants)) {
+        await setOfflinePinGrants(posRes.data.offline_pin_grants);
+      }
+      setDataLoaded(true);
+    } catch (e) {
+      console.warn('API failed, keeping cached data');
+      setDataLoaded(true);
+    }
   };
 
   // Load data on mount and reload whenever branch changes
@@ -1076,7 +1105,28 @@ export default function UnifiedSalesPage() {
   //   • Capped to the first 200 products by name to keep typing snappy
   // The banner state below tells the UI to surface a "Showing fuzzy matches
   // for 'X'" hint with a Clear button so the user is never surprised.
+  // Pre-computed search index — built once per `allProducts` change, NOT
+  // per keystroke. Each entry stores the lowercase name / sku / barcode,
+  // the joined haystack, and the pre-split word arrays used by the strict
+  // and fuzzy passes. Cuts per-keystroke work from O(n × split-regex) to
+  // O(n × cheap-string-compare). With 1000+ products this is the
+  // difference between snappy typing and a 100ms+ lag every letter.
+  const productIndex = useMemo(() => allProducts.map(p => {
+    const name = (p.name || '').toLowerCase();
+    const sku = (p.sku || '').toLowerCase();
+    const barcode = (p.barcode || '').toLowerCase();
+    const haystack = `${name} ${sku} ${barcode}`;
+    return {
+      p,
+      name,
+      haystack,
+      nameWords: name.split(/[\s\-/,]+/).filter(Boolean),
+      words: haystack.split(/[\s\-/,]+/).filter(Boolean),
+    };
+  }), [allProducts]);
+
   useEffect(() => {
+    const search = debouncedSearch;
     if (!search) {
       setFilteredProducts(allProducts);
       setFuzzyHint(null);
@@ -1100,12 +1150,8 @@ export default function UnifiedSalesPage() {
 
     // ── Strict pass ──
     const strict = [];
-    for (const p of allProducts) {
-      const name = (p.name || '').toLowerCase();
-      const sku = (p.sku || '').toLowerCase();
-      const barcode = (p.barcode || '').toLowerCase();
-      const haystack = `${name} ${sku} ${barcode}`;
-      const nameWords = name.split(/[\s\-/,]+/).filter(Boolean);
+    for (const idx of productIndex) {
+      const { p, name, haystack, nameWords } = idx;
       if (!tokens.every(t => tokenMatches(t, haystack, nameWords))) continue;
       // Rank: 0 = name starts with the full query (prefix), 1 = full query is
       // a contiguous substring of name, 2 = token-only match. Tiebreak by
@@ -1138,21 +1184,16 @@ export default function UnifiedSalesPage() {
     }
 
     const allowedDist = (t) => (t.length >= 8 ? 2 : 1);
-    const candidates = allProducts.slice(0, 200);
+    const candidates = productIndex.slice(0, 200);
 
     const fuzzy = [];
-    for (const p of candidates) {
-      const name = (p.name || '').toLowerCase();
-      const sku = (p.sku || '').toLowerCase();
-      const barcode = (p.barcode || '').toLowerCase();
-      const haystack = `${name} ${sku} ${barcode}`;
-      const nameWords = name.split(/[\s\-/,]+/).filter(Boolean);
+    for (const idx of candidates) {
+      const { p, name, haystack, nameWords, words } = idx;
 
       // Every exact-required token still needs a literal hit (with the same
       // short-numeric prefix rule used in the strict pass).
       if (!exactRequired.every(t => tokenMatches(t, haystack, nameWords))) continue;
 
-      const words = haystack.split(/[\s\-/,]+/).filter(Boolean);
       let totalEdits = 0;
       let matchedAll = true;
       for (const t of fuzzable) {
@@ -1180,7 +1221,7 @@ export default function UnifiedSalesPage() {
       setFilteredProducts([]);
       setFuzzyHint(null);
     }
-  }, [search, allProducts]);
+  }, [debouncedSearch, allProducts, productIndex]);
 
   const filteredCusts = custSearch 
     ? customers.filter(c => c.name.toLowerCase().includes(custSearch.toLowerCase())).slice(0, 8) 
