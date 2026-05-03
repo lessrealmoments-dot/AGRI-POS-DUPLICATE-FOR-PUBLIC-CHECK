@@ -1056,7 +1056,7 @@ export default function UnifiedSalesPage() {
       const filledLines = lines.filter(l => l.product_id);
       const hasDiscount = filledLines.some(l => l.discount_value > 0);
       if (hasDiscount) {
-        toast.error('Cannot switch to Quick mode — per-line discounts exist. Remove them or stay in Order mode.');
+        toast.error('Cannot switch to Quick Sale — per-line discounts exist. Remove them or stay in Detailed Sale.');
         return;
       }
       if (filledLines.length > 0) {
@@ -2440,43 +2440,57 @@ export default function UnifiedSalesPage() {
           <h1 className="text-xl font-bold tracking-tight" style={{ fontFamily: 'Manrope' }}>Sales</h1>
 
           {/* Main Tab: New Sale / History */}
-          <div className="flex items-center bg-slate-100 rounded-lg p-1">
+          <div className="inline-flex items-center bg-slate-100/80 rounded-xl p-1 shadow-inner ring-1 ring-slate-200/40" data-testid="main-tab-toggle">
             <button
               onClick={() => salesGuard.requestSafe(() => setMainTab('sale'))}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${mainTab === 'sale' ? 'bg-white shadow-sm text-[#1A4D2E]' : 'text-slate-500 hover:text-slate-700'}`}
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${mainTab === 'sale' ? 'bg-white shadow-sm ring-1 ring-slate-200/60 text-[#1A4D2E]' : 'text-slate-500 hover:text-slate-700'}`}
               data-testid="tab-new-sale"
             >
               <ShoppingCart size={14} /> New Sale
             </button>
             <button
               onClick={() => salesGuard.requestSafe(() => setMainTab('history'))}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${mainTab === 'history' ? 'bg-white shadow-sm text-[#1A4D2E]' : 'text-slate-500 hover:text-slate-700'}`}
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${mainTab === 'history' ? 'bg-white shadow-sm ring-1 ring-slate-200/60 text-[#1A4D2E]' : 'text-slate-500 hover:text-slate-700'}`}
               data-testid="tab-history"
             >
               <FileText size={14} /> Sales History
             </button>
           </div>
 
-          {/* Mode Toggle — only in new sale tab */}
+          {/* Mode Toggle — segmented control with subtitle, only in new sale tab */}
           {mainTab === 'sale' && (
-            <div className="flex items-center gap-2 bg-slate-100 rounded-lg p-1">
+            <div className="inline-flex items-stretch bg-slate-100/80 rounded-xl p-1 shadow-inner ring-1 ring-slate-200/40" data-testid="mode-toggle">
               <button
                 onClick={() => switchMode('quick')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
-                  mode === 'quick' ? 'bg-white shadow-sm text-[#1A4D2E]' : 'text-slate-500 hover:text-slate-700'
+                className={`flex flex-col items-start justify-center gap-0 px-3.5 py-1.5 rounded-lg transition-all duration-200 ${
+                  mode === 'quick'
+                    ? 'bg-white shadow-sm ring-1 ring-slate-200/60 text-[#1A4D2E]'
+                    : 'text-slate-500 hover:text-slate-700'
                 }`}
                 data-testid="mode-quick"
               >
-                <Zap size={14} /> Quick
+                <span className="flex items-center gap-1.5 text-sm font-semibold leading-tight">
+                  <Zap size={14} /> Quick Sale
+                </span>
+                <span className={`text-[10px] leading-tight mt-0.5 ${mode === 'quick' ? 'text-slate-500' : 'text-slate-400'}`}>
+                  Fast checkout
+                </span>
               </button>
               <button
                 onClick={() => switchMode('order')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
-                  mode === 'order' ? 'bg-white shadow-sm text-[#1A4D2E]' : 'text-slate-500 hover:text-slate-700'
+                className={`flex flex-col items-start justify-center gap-0 px-3.5 py-1.5 rounded-lg transition-all duration-200 ${
+                  mode === 'order'
+                    ? 'bg-white shadow-sm ring-1 ring-slate-200/60 text-[#1A4D2E]'
+                    : 'text-slate-500 hover:text-slate-700'
                 }`}
                 data-testid="mode-order"
               >
-                <ClipboardList size={14} /> Order
+                <span className="flex items-center gap-1.5 text-sm font-semibold leading-tight">
+                  <ClipboardList size={14} /> Detailed Sale
+                </span>
+                <span className={`text-[10px] leading-tight mt-0.5 ${mode === 'order' ? 'text-slate-500' : 'text-slate-400'}`}>
+                  Per-line pricing
+                </span>
               </button>
             </div>
           )}
@@ -2487,7 +2501,7 @@ export default function UnifiedSalesPage() {
               <button
                 onClick={hideCapital}
                 data-testid="hide-capital-btn"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200 hover:bg-amber-200 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-amber-100/80 text-amber-800 ring-1 ring-amber-200 hover:bg-amber-200 transition-colors"
                 title="Hide capital info on product cards"
               >
                 <EyeOff size={13} /> Hide Capital
@@ -2496,7 +2510,7 @@ export default function UnifiedSalesPage() {
               <button
                 onClick={requestShowCapital}
                 data-testid="show-capital-btn"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-slate-100/80 text-slate-600 ring-1 ring-slate-200/60 hover:bg-slate-200 transition-colors"
                 title="Reveal capital info — admin / manager PIN required"
               >
                 <Eye size={13} /> Show Capital
@@ -4852,7 +4866,7 @@ export default function UnifiedSalesPage() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-medium text-sm truncate">{park.label || 'Untitled park'}</span>
                       <Badge variant="outline" className="text-[9px] py-0 px-1.5">
-                        {park.mode === 'quick' ? <><Zap size={9} className="mr-0.5" /> Quick</> : <><ClipboardList size={9} className="mr-0.5" /> Order</>}
+                        {park.mode === 'quick' ? <><Zap size={9} className="mr-0.5" /> Quick Sale</> : <><ClipboardList size={9} className="mr-0.5" /> Detailed Sale</>}
                       </Badge>
                       {!isOwn && (
                         <Badge className="text-[9px] py-0 px-1.5 bg-slate-100 text-slate-600 hover:bg-slate-100">
