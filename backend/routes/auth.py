@@ -198,9 +198,15 @@ async def verify_manager_pin(data: dict, user=Depends(get_current_user)):
     action_key = data.get("action_key", "credit_sale_approval")
     logger.info(f"verify-manager-pin called: action={action_key}, user={user.get('full_name', user.get('username', '?'))}, org={user.get('organization_id', 'none')}")
 
-    # Extract branch_id from context for branch-aware PIN checks
-    context = data.get("context") or {}
-    branch_id = context.get("branch_id") or data.get("branch_id") or user.get("branch_id")
+    # Extract branch_id from context for branch-aware PIN checks.
+    # NOTE: callers may send `context` as either a dict ({branch_id, type, ...})
+    # or a plain descriptive string (e.g. "Daily close 2026-05-01 — Main Warehouse").
+    # Previously we called `.get("branch_id")` unconditionally which crashed
+    # with AttributeError when the frontend sent a string — observed in the
+    # Close Wizard PIN step (reported by user). Guard defensively here.
+    raw_context = data.get("context")
+    ctx_dict = raw_context if isinstance(raw_context, dict) else {}
+    branch_id = ctx_dict.get("branch_id") or data.get("branch_id") or user.get("branch_id")
 
     verifier = await verify_pin_for_action(pin, action_key, branch_id=branch_id)
     if verifier:
