@@ -679,6 +679,9 @@ export default function ProductsPage() {
                 <TableHead className="text-xs uppercase tracking-wider text-slate-500 font-medium">Product Name</TableHead>
                 <TableHead className="text-xs uppercase tracking-wider text-slate-500 font-medium">Category</TableHead>
                 <TableHead className="text-xs uppercase tracking-wider text-slate-500 font-medium">Unit</TableHead>
+                <TableHead className="text-xs uppercase tracking-wider text-slate-500 font-medium text-right" title={currentBranch?.id && currentBranch.id !== 'all' ? `On-hand at ${currentBranch.name}` : 'Total on-hand across all branches'}>
+                  Stock
+                </TableHead>
                 {canViewCost && <TableHead className="text-xs uppercase tracking-wider text-slate-500 font-medium text-right">Cost</TableHead>}
                 {schemes.map(s => (
                   <TableHead key={s.key} className="text-xs uppercase tracking-wider text-slate-500 font-medium text-right capitalize">{s.name}</TableHead>
@@ -719,6 +722,13 @@ export default function ProductsPage() {
                   </TableCell>
                   <TableCell className="text-slate-500">{p.category}</TableCell>
                   <TableCell>{p.unit}</TableCell>
+                  <TableCell className="text-right font-mono text-sm" data-testid={`stock-${p.id}`}>
+                    {(() => {
+                      const s = Number(p.stock_on_hand ?? 0);
+                      if (s <= 0) return <span className="text-red-500">0</span>;
+                      return <span className="text-slate-700">{Number.isInteger(s) ? s : s.toFixed(2)}</span>;
+                    })()}
+                  </TableCell>
                   {canViewCost && <TableCell className="text-right font-mono">{formatPHP(p.cost_price)}</TableCell>}
                   {schemes.map(s => (
                     <TableCell key={s.key} className="text-right font-mono text-sm">

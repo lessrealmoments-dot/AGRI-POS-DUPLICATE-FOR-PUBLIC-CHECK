@@ -78,6 +78,7 @@ async def list_products(
         products = await _enrich_repacks_with_live_capital(products, branch_id)
         products = await _enrich_with_branch_overrides(products, branch_id)
         products = await _enrich_with_disabled_at_branch(products, branch_id)
+        products = await _enrich_with_stock(products, branch_id)
         return {"products": products, "total": total, "skip": skip, "limit": limit}
 
     elif sort_by == "type":
@@ -100,7 +101,52 @@ async def list_products(
     products = await _enrich_repacks_with_live_capital(products, branch_id)
     products = await _enrich_with_branch_overrides(products, branch_id)
     products = await _enrich_with_disabled_at_branch(products, branch_id)
+    products = await _enrich_with_stock(products, branch_id)
     return {"products": products, "total": total, "skip": skip, "limit": limit}
+
+
+async def _enrich_with_stock(products: list, branch_id: Optional[str]) -> list:
+    """Inject `stock_on_hand` on each product so the list view can show
+    current inventory at-a-glance without navigating into each product.
+
+    - If branch_id is provided and != "all": stock at THAT branch only.
+    - Else: sum across ALL branches.
+    - Repacks: derived from parent stock × units_per_parent (matching the
+      search-detail endpoint's logic so the list view and POS agree).
+
+    One aggregation per call (not per-product) — cheap even at limit=50.
+    """
+    if not products:
+        return products
+
+    parent_ids = [p["id"] for p in products if not p.get("is_repack") and p.get("id")]
+    repack_parent_ids = [p["parent_id"] for p in products if p.get("is_repack") and p.get("parent_id")]
+    all_pids = list({*parent_ids, *repack_parent_ids})
+    if not all_pids:
+        for p in products:
+            p["stock_on_hand"] = 0
+        return products
+
+    specific_branch = bool(branch_id and branch_id != "all")
+    match = {"product_id": {"$in": all_pids}}
+    if specific_branch:
+        match["branch_id"] = branch_id
+
+    pipeline = [
+        {"$match": match},
+        {"$group": {"_id": "$product_id", "total": {"$sum": "$quantity"}}},
+    ]
+    rows = await db.inventory.aggregate(pipeline).to_list(len(all_pids))
+    stock_by_pid = {r["_id"]: float(r.get("total") or 0) for r in rows}
+
+    for p in products:
+        if p.get("is_repack") and p.get("parent_id"):
+            parent_stock = stock_by_pid.get(p["parent_id"], 0)
+            upp = p.get("units_per_parent") or 1
+            p["stock_on_hand"] = parent_stock * upp
+        else:
+            p["stock_on_hand"] = stock_by_pid.get(p.get("id"), 0)
+    return products
 
 
 async def _enrich_with_branch_overrides(products: list, branch_id: Optional[str]) -> list:
