@@ -1,5 +1,19 @@
 # AgriBooks Changelog
 
+## Feb 2026 — Price Match Double-Click Fix + Signature Bypass Visibility (Iter 220)
+
+**Price Match Modal — single-click confirm fix:**
+- `UnifiedSalesPage.js` PriceMatchModal `onConfirm` previously called `setTimeout(() => openCheckout(), 30)` after `setPriceMatchApproved(...)`. The setTimeout closure captured the *stale* `openCheckout` function from the prior render where `priceMatchApproved` was still `null`, so the modal would close, then re-trigger checkout, see no approval, and re-open. Result: user had to click "Update Branch Price" twice.
+- Fix: replaced the `setTimeout(...)` with inlined post-approval transitions (`setPaymentType('cash')`, `setAmountTendered(grandTotal)`, `setPartialPayment(0)`, `setReleaseMode('full')`, then `setCustSaveDialog` or `setCheckoutDialog` directly). The price-match approval now flows in a single click, no closure race.
+
+**Signature bypass button — high-visibility restyle:**
+- `RequestSignatureDialog.js`: the "Customer can't sign? Manager bypass" button used `text-xs text-slate-500` — barely visible to elderly customers / low-vision staff. Now styled as a full-width amber outline button (`border-2 border-amber-400 bg-amber-50 text-amber-800 font-semibold py-2.5`) labeled **"Customer can't sign? Skip with Manager PIN"** with a `ShieldAlert` icon. Same restyle applied to the inline-terminal mode bypass button (now `Skip (PIN)` outline button, `h-10`).
+
+**Files changed:**
+- `/app/frontend/src/pages/UnifiedSalesPage.js` (lines 4649-4690 — onConfirm rewrite)
+- `/app/frontend/src/components/RequestSignatureDialog.js` (lines 294-310 QR-mode + lines 350-360 inline-mode bypass buttons)
+
+
 ## May 2026 — Global & Customer Payment History + Close Wizard (Iter 204)
 
 **Global Payment History Tab on /payments:**
