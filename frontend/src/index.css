@@ -56,6 +56,23 @@
   }
 }
 
+/* Remove native number input spinners globally (Chrome/Safari/Edge + Firefox).
+   Users reported that accidentally scrolling or pressing arrow keys over a
+   number field could silently change critical amounts (payments, discounts,
+   quantities). We hide the spinners completely; a complementary global
+   listener in App.js blocks wheel + ArrowUp/ArrowDown from mutating the
+   value while the input is focused. */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

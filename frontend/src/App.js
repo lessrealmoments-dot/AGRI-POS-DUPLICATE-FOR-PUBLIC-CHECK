@@ -132,6 +132,33 @@ function AppRoutes() {
     return () => window.removeEventListener('keydown', handler);
   }, [user]);
 
+  // Global guard: prevent <input type="number"> values from being mutated
+  // by mouse-wheel scroll or Arrow Up/Down key presses. Spinners themselves
+  // are hidden via CSS (index.css). Users reported accidental edits to
+  // payment/discount/quantity fields — this makes those fields behave like
+  // plain text inputs for numeric entry while keeping the numeric keyboard
+  // on mobile.
+  useEffect(() => {
+    const isNumberInput = (el) => el && el.tagName === 'INPUT' && el.type === 'number';
+    const onWheel = (e) => {
+      if (isNumberInput(e.target) && document.activeElement === e.target) {
+        // Blur so the wheel event scrolls the page instead of the input value.
+        e.target.blur();
+      }
+    };
+    const onKeyDown = (e) => {
+      if (isNumberInput(e.target) && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        e.preventDefault();
+      }
+    };
+    document.addEventListener('wheel', onWheel, { passive: true, capture: true });
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      document.removeEventListener('wheel', onWheel, { capture: true });
+      document.removeEventListener('keydown', onKeyDown, true);
+    };
+  }, []);
+
   useEffect(() => {
     const checkSetup = async () => {
       try {
