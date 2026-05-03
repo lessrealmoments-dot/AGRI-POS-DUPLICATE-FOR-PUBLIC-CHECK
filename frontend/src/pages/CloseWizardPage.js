@@ -736,7 +736,7 @@ export default function CloseWizardPage() {
               </div>
               <div className="flex gap-2">
                 {batchMode ? (
-                  <Button size="sm" variant="outline" onClick={() => { setBatchMode(false); setBatchDates([]); setBatchPreview(null); selectDay(0); }}
+                  <Button size="sm" variant="outline" onClick={() => { setBatchMode(false); setBatchDates([]); setBatchPreview(null); setBatchReason(''); selectDay(0); }}
                     className="text-xs border-amber-300 text-amber-700 hover:bg-amber-100" data-testid="close-one-by-one-btn">
                     Close One by One
                   </Button>
