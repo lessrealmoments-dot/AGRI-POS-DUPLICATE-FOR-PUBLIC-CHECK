@@ -1,5 +1,39 @@
 # AgriBooks PRD
 
+## Iter 218 (Feb 2026) — Per-Unit Discount + Products Permission Gating ✅
+
+### Fix 1 — Order Mode amount discount now per-unit × qty
+Reported: "our discounts from sales - Order are per line not per product. This should be per product".
+
+**Root cause**: `lineTotal` in `UnifiedSalesPage.js` and backend `sales.py` treated amount discount as flat per-line. `₱5` discount with qty `10` only removed `₱5` from the line.
+
+**Fix**: For `amount` discount type, `disc_amt = qty × discount_value`. Percent discount unchanged.
+- Backend `routes/sales.py` line 454 updated.
+- Frontend `UnifiedSalesPage.js` `lineTotal()` + payload `discount_amount` updated.
+- Column header relabelled "Discount /unit" with tooltip.
+
+### Fix 2 — Manager Products page: permission gating audit
+Reported: "I can click the pen and edit the inventory and price. But how are we allowing this when I am using a manager account that has no access to inventory... I wonder why the manager can create products... Also Created repacks".
+
+**Findings**: ProductsPage.js had ZERO frontend gates on pencil/create/repack/inventory-correction buttons. Backend also missed perm check on `/api/inventory/admin-adjust`.
+
+**Fix**:
+- Backend `routes/inventory.py`: `admin_adjust_inventory` now returns 403 unless user is admin OR has `inventory.adjust` perm.
+- Frontend `ProductsPage.js`:
+  - `canCreateProduct`, `canEditProduct`, `canAdjustInventory` flags added.
+  - "Add Product" + "Quick Repack" + per-row Link2 repack btn hidden if !canCreateProduct.
+  - Pencil shows Eye icon (read-only) if !canEditProduct → dialog opens read-only (fieldset disabled, Save hidden, amber "Read-only" banner shown, Close button instead of Cancel).
+  - Inventory Correction accordion hidden unless canAdjustInventory.
+
+### Tested
+- **11/11 pytest** across `tests/test_perunit_discount_and_perm_gates_218.py` (6) + `tests/test_perunit_discount_edges_218.py` (5 edge cases from testing agent).
+- Zero regressions in existing discount, price-match, consistency, and stock-injection suites.
+
+### Known Remaining Gaps (backlog)
+- `SuppliersPage.js`, `AccountingPage.js`, `InventoryPage.js` UIs do not use `hasPerm` for button-level gating. Backend mutations ARE gated (all endpoints use `check_perm`), so this is a UX/trust-but-verify gap rather than a security hole. Tracked as P1 refactor.
+
+---
+
 ## Iter 217b (May 2026) — Sales Price-Change Prompt (retail=0 fix) + Admin Stock Injection ✅
 
 ### Fix 1 — Price-change prompt didn't trigger when current retail is 0

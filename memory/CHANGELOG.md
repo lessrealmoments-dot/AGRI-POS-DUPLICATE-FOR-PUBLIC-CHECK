@@ -884,3 +884,24 @@ so short numeric tokens no longer leak unrelated products via SKU collisions.
 - PIN verification audit (all endpoints connected)
 - Quick customer picker in checkout dialog
 - Digital payment separation in closing formula
+
+## Iter 218 — Feb 2026 (Per-Unit Discount + Permission Gating Audit)
+
+### Fixes
+- **Sales (Order Mode) amount discount now per-unit × qty** — previously ₱5 discount with qty 10 = only ₱5 off the line; now correctly applies ₱5 × 10 = ₱50 off. Percent discounts unchanged.
+  - Backend: `routes/sales.py` line 454 — `disc_amt = round(qty * disc_val, 2)` for amount type.
+  - Frontend: `UnifiedSalesPage.js` `lineTotal()` and payload `discount_amount` now multiply by qty.
+  - UI: Discount column header updated to "Discount /unit" for clarity.
+- **`/api/inventory/admin-adjust` now permission-gated** — previously had no auth check beyond optional PIN. Now requires admin role OR `inventory.adjust` permission (HTTP 403 otherwise).
+- **Products page UI permission gating tightened**:
+  - "Add Product" button hidden if `!canCreateProduct`
+  - "Quick Repack" + per-row Link2 repack button hidden if `!canCreateProduct`
+  - Pencil edit button now shows Eye icon and opens **read-only** dialog (fieldset disabled, Save hidden, read-only banner shown) if `!canEditProduct`
+  - Inventory Correction accordion inside edit dialog now hidden if `!canAdjustInventory`
+
+### Tests
+- NEW: `tests/test_perunit_discount_and_perm_gates_218.py` — 6 tests (all pass)
+- NEW: `tests/test_perunit_discount_edges_218.py` — 5 edge-case tests authored by testing agent (all pass)
+
+### Remaining Pages to Audit (backlog)
+- `SuppliersPage.js`, `AccountingPage.js`, `InventoryPage.js` — do not destructure `hasPerm`; all backend mutations are gated, but UI buttons shown regardless of permissions.
