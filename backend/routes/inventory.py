@@ -488,6 +488,169 @@ async def admin_adjust_inventory(data: dict, user=Depends(get_current_user)):
     }
 
 
+@router.post("/admin-inject")
+async def admin_inject_inventory(data: dict, user=Depends(get_current_user)):
+    """
+    Admin-only stock injection (Iter 217b).
+
+    Supports three modes:
+      • "add"    — bump current quantity by +N
+      • "deduct" — reduce current quantity by N  (safe-guarded: can't go negative)
+      • "set"    — overwrite quantity to exactly N (like the old /admin-adjust)
+
+    Does NOT touch moving_avg_cost, last_purchase_cost, branch_prices,
+    or any pricing fields. Intended for opening balance seeds, physical-count
+    variances, vendor returns, promo stock — scenarios where the cost basis
+    should be preserved.
+
+    Strict admin role gate — no `inventory.inject` permission. A trusted
+    manager can NOT do this even via permission grant. (Per user's Iter 217b
+    spec: "only admin can, admin can login to any branch anyway".)
+
+    Full audit trail: `stock_injections` collection + `stock_movements` entry
+    with type="injection" so it surfaces in Stock Movements view and Audit
+    Pulse's red-flag card.
+    """
+    # 1. Strict admin role gate
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin role required for stock injection")
+
+    product_id = (data.get("product_id") or "").strip()
+    branch_id = (data.get("branch_id") or "").strip()
+    mode = (data.get("mode") or "").strip().lower()
+    qty = data.get("quantity")
+    reason_type = (data.get("reason_type") or "").strip()
+    reason_note = (data.get("reason_note") or "").strip()
+
+    # 2. Input validation
+    if not product_id or not branch_id:
+        raise HTTPException(status_code=400, detail="product_id and branch_id required")
+    if mode not in ("add", "deduct", "set"):
+        raise HTTPException(status_code=400, detail="mode must be 'add', 'deduct', or 'set'")
+    try:
+        qty = float(qty)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="quantity must be a number")
+    if qty < 0:
+        raise HTTPException(status_code=400, detail="quantity must be ≥ 0 — use mode='deduct' to subtract")
+    allowed_reasons = {
+        "opening_balance", "count_variance", "damaged_recovery",
+        "promo_stock", "vendor_return", "other",
+    }
+    if reason_type not in allowed_reasons:
+        raise HTTPException(
+            status_code=400,
+            detail=f"reason_type must be one of: {', '.join(sorted(allowed_reasons))}"
+        )
+    if len(reason_note) < 10:
+        raise HTTPException(
+            status_code=400,
+            detail="reason_note is required and must be ≥ 10 characters for the audit trail"
+        )
+
+    # 3. Repack guard
+    product = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    if product.get("is_repack"):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot inject into a repack product — inject the parent product instead."
+        )
+
+    # 4. Compute new quantity
+    existing = await db.inventory.find_one(
+        {"product_id": product_id, "branch_id": branch_id}, {"_id": 0}
+    )
+    old_quantity = float((existing or {}).get("quantity") or 0)
+    if mode == "add":
+        new_quantity = old_quantity + qty
+    elif mode == "deduct":
+        if qty > old_quantity:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot deduct {qty} — branch only has {old_quantity} in stock"
+            )
+        new_quantity = old_quantity - qty
+    else:  # set
+        new_quantity = qty
+    diff = new_quantity - old_quantity
+
+    # 5. Persist inventory (NO moving_avg_cost / last_purchase_cost touch)
+    if existing:
+        await db.inventory.update_one(
+            {"product_id": product_id, "branch_id": branch_id},
+            {"$set": {"quantity": new_quantity, "updated_at": now_iso()}},
+        )
+    else:
+        await db.inventory.insert_one({
+            "id": new_id(),
+            "product_id": product_id,
+            "branch_id": branch_id,
+            "quantity": new_quantity,
+            "updated_at": now_iso(),
+        })
+
+    # 6. Audit record
+    injection_id = new_id()
+    injection = {
+        "id": injection_id,
+        "product_id": product_id,
+        "product_name": product.get("name", ""),
+        "sku": product.get("sku", ""),
+        "branch_id": branch_id,
+        "mode": mode,
+        "quantity": qty,
+        "old_quantity": old_quantity,
+        "new_quantity": new_quantity,
+        "difference": diff,
+        "reason_type": reason_type,
+        "reason_note": reason_note,
+        "performed_by_id": user["id"],
+        "performed_by_name": user.get("full_name", user["username"]),
+        "created_at": now_iso(),
+    }
+    await db.stock_injections.insert_one(injection)
+    del injection["_id"]
+
+    # 7. Stock-movement ledger entry — tagged 'injection' so Stock Movements
+    #    view + Audit Pulse red-flag card can filter on it.
+    await log_movement(
+        product_id, branch_id, "injection", diff,
+        injection_id, f"INJ-{mode.upper()}", 0, user["id"],
+        user.get("full_name", user["username"]),
+        f"[{reason_type}] {reason_note}",
+    )
+
+    return {
+        "message": "Stock injection recorded",
+        "mode": mode,
+        "old_quantity": old_quantity,
+        "new_quantity": new_quantity,
+        "difference": diff,
+        "injection": injection,
+    }
+
+
+@router.get("/injections")
+async def list_stock_injections(
+    product_id: str = "",
+    branch_id: str = "",
+    limit: int = 50,
+    user=Depends(get_current_user),
+):
+    """List recent stock injections for audit view. Filters: product_id, branch_id."""
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin role required")
+    q: dict = {}
+    if product_id:
+        q["product_id"] = product_id
+    if branch_id:
+        q["branch_id"] = branch_id
+    rows = await db.stock_injections.find(q, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
+    return {"injections": rows, "total": len(rows)}
+
+
 @router.get("/corrections/{product_id}")
 async def get_inventory_corrections(product_id: str, user=Depends(get_current_user)):
     """Get correction history for a specific product."""

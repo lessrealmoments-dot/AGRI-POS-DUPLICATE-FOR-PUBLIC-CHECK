@@ -1563,32 +1563,47 @@ export default function UnifiedSalesPage() {
   // Returns: [{ product_id, product_name, old_price, new_price, scheme }]
   const computePriceChanges = useCallback(() => {
     const changes = [];
+    // A "price change" is triggered when:
+    //   • the user entered a valid new price (np > 0), AND
+    //   • EITHER the original price was 0/unset (first-time pricing of a
+    //     product whose retail was blank) OR the new price differs from the
+    //     original by more than 1 centavo.
+    // Previous logic required `op > 0` too, which skipped the prompt when
+    // the retail was 0 → user set a price → never asked to save. (Iter 217b)
     if (mode === 'quick') {
       cart.forEach(c => {
-        const op = parseFloat(c.original_price);
-        const np = parseFloat(c.price);
-        if (op > 0 && np > 0 && Math.abs(np - op) > 0.001 && !c.is_repack) {
+        const op = parseFloat(c.original_price) || 0;
+        const np = parseFloat(c.price) || 0;
+        if (np <= 0 || c.is_repack) return;
+        const isNewPricing = op === 0;
+        const isChanged = op > 0 && Math.abs(np - op) > 0.001;
+        if (isNewPricing || isChanged) {
           changes.push({
             product_id: c.product_id,
             product_name: c.product_name,
             old_price: op,
             new_price: np,
             scheme: activeScheme,
+            reason_hint: isNewPricing ? 'first_time_pricing' : 'manual_change',
           });
         }
       });
     } else {
       lines.forEach(l => {
         if (!l.product_id) return;
-        const op = parseFloat(l.original_rate);
-        const np = parseFloat(l.rate);
-        if (op > 0 && np > 0 && Math.abs(np - op) > 0.001 && !l.is_repack) {
+        const op = parseFloat(l.original_rate) || 0;
+        const np = parseFloat(l.rate) || 0;
+        if (np <= 0 || l.is_repack) return;
+        const isNewPricing = op === 0;
+        const isChanged = op > 0 && Math.abs(np - op) > 0.001;
+        if (isNewPricing || isChanged) {
           changes.push({
             product_id: l.product_id,
             product_name: l.product_name,
             old_price: op,
             new_price: np,
             scheme: activeScheme,
+            reason_hint: isNewPricing ? 'first_time_pricing' : 'manual_change',
           });
         }
       });

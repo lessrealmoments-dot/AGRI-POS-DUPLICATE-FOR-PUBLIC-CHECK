@@ -101,12 +101,21 @@ export default function PriceMatchModal({
                   {pc.product_name}
                 </span>
                 <span className="font-mono text-slate-500 shrink-0">
-                  <span className="line-through">{formatPHP(pc.old_price)}</span>
-                  {' → '}
-                  <span className="font-bold text-amber-700">{formatPHP(pc.new_price)}</span>
-                  <span className={`ml-2 ${pc.new_price < pc.old_price ? 'text-red-600' : 'text-emerald-600'}`}>
-                    ({pc.new_price < pc.old_price ? '-' : '+'}{formatPHP(Math.abs(pc.new_price - pc.old_price))})
-                  </span>
+                  {pc.old_price > 0 ? (
+                    <>
+                      <span className="line-through">{formatPHP(pc.old_price)}</span>
+                      {' → '}
+                      <span className="font-bold text-amber-700">{formatPHP(pc.new_price)}</span>
+                      <span className={`ml-2 ${pc.new_price < pc.old_price ? 'text-red-600' : 'text-emerald-600'}`}>
+                        ({pc.new_price < pc.old_price ? '-' : '+'}{formatPHP(Math.abs(pc.new_price - pc.old_price))})
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-[10px] uppercase tracking-wider text-amber-600 mr-1.5">first-time pricing</span>
+                      <span className="font-bold text-amber-700">{formatPHP(pc.new_price)}</span>
+                    </>
+                  )}
                 </span>
               </div>
             ))}

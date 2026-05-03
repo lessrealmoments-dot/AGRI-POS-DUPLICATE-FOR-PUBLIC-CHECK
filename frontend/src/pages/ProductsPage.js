@@ -9,13 +9,14 @@ import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Package, Plus, Pencil, Trash2, Search, Link2, ChevronRight, Eye, EyeOff, Upload, Download, Zap, X, CheckCircle, XCircle, AlertTriangle, History, RefreshCw, Lock, ScanBarcode, Tag } from 'lucide-react';
+import { Package, Plus, Pencil, Trash2, Search, Link2, ChevronRight, Eye, EyeOff, Upload, Download, Zap, X, CheckCircle, XCircle, AlertTriangle, History, RefreshCw, Lock, ScanBarcode, Tag, ShieldAlert } from 'lucide-react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { formatPHP } from '../lib/utils';
 import UploadQRDialog from '../components/UploadQRDialog';
 import { TotpVerifyDialog } from '../components/TotpVerifyDialog';
 import CategorySelect from '../components/CategorySelect';
+import StockInjectionDialog from '../components/StockInjectionDialog';
 
 export default function ProductsPage() {
   const navigate = useNavigate();
@@ -55,6 +56,10 @@ export default function ProductsPage() {
   const [corrUploadQROpen, setCorrUploadQROpen] = useState(false);
   const [corrUploadId, setCorrUploadId] = useState(null);
   const [barcodeGenerating, setBarcodeGenerating] = useState(false);
+
+  // ── Stock Injection (admin-only, Iter 217b) ─────────────────────────────
+  const [injectionOpen, setInjectionOpen] = useState(false);
+  const [injectionProduct, setInjectionProduct] = useState(null);
 
   // ── Manage Categories ──────────────────────────────────────────────────────
   const [catMgmtOpen, setCatMgmtOpen] = useState(false);
@@ -745,6 +750,15 @@ export default function ProductsPage() {
                       <Button variant="ghost" size="sm" data-testid={`edit-product-${p.id}`} onClick={() => openEdit(p)}>
                         <Pencil size={14} />
                       </Button>
+                      {isAdminOrOwner && !p.is_repack && (
+                        <Button variant="ghost" size="sm"
+                          data-testid={`inject-stock-${p.id}`}
+                          onClick={() => { setInjectionProduct(p); setInjectionOpen(true); }}
+                          className="text-red-500 hover:text-red-700"
+                          title="Admin Stock Injection (bypasses PO / Transfer; audit logged)">
+                          <ShieldAlert size={14} />
+                        </Button>
+                      )}
                       {isAdminOrOwner && (
                         <Button variant="ghost" size="sm" data-testid={`delete-product-${p.id}`} onClick={() => handleDelete(p.id)} className="text-red-500" title="Delete (Admin only)">
                           <Trash2 size={14} />
@@ -1486,6 +1500,13 @@ export default function ProductsPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <StockInjectionDialog
+        open={injectionOpen}
+        onOpenChange={setInjectionOpen}
+        product={injectionProduct}
+        onDone={() => { fetchProducts(); }}
+      />
     </div>
   );
 }

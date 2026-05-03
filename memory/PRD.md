@@ -1,5 +1,44 @@
 # AgriBooks PRD
 
+## Iter 217b (May 2026) — Sales Price-Change Prompt (retail=0 fix) + Admin Stock Injection ✅
+
+### Fix 1 — Price-change prompt didn't trigger when current retail is 0
+Reported: "You know how we get notified when we change the price? For some reason it doesn't ask to save when retail is 0 and we change it to an actual price."
+
+**Root cause**: `computePriceChanges` in `UnifiedSalesPage.js` required BOTH `old_price > 0 AND new_price > 0`. When a product's retail is blank (0), typing a new price failed `op > 0` → prompt skipped.
+
+**Fix**: allow the prompt when `op === 0` (first-time pricing). Tag these changes as `reason_hint: "first_time_pricing"`. `PriceMatchModal` displays an amber "FIRST-TIME PRICING" label instead of strike-through old price.
+
+### Fix 2 — Admin Stock Injection (bypass PO / Transfer flow, preserve cost basis)
+Reported: "Inject stocks directly without affecting moving average or current price, admin only, audit + stock movements visible."
+
+**Backend (`routes/inventory.py`)**
+- New endpoint `POST /inventory/admin-inject`:
+  - **Strict admin role gate** — not permission-based, not manager-grantable (per user: "only admin can").
+  - 3 modes: `add` (+N), `deduct` (−N, with over-deduct guard), `set` (overwrite total).
+  - Validation: `reason_type` must be one of `opening_balance`, `count_variance`, `damaged_recovery`, `promo_stock`, `vendor_return`, `other`; `reason_note` ≥ 10 chars; repack products rejected.
+  - **Preserves cost basis**: never touches `moving_avg_cost`, `last_purchase_cost`, `branch_prices`.
+  - Writes to `stock_injections` audit doc (with `performed_by_name`, old_qty, new_qty, diff, reason).
+  - Writes to `movements` ledger with `type="injection"` + `reference_number="INJ-ADD|DEDUCT|SET"` — surfaces in Stock Movements view and available for Audit Pulse red-flag filtering.
+- New endpoint `GET /inventory/injections` — admin-only audit listing, filterable by `product_id` + `branch_id`.
+
+**Frontend**
+- New component `components/StockInjectionDialog.js`:
+  - **Branch picker FIRST** (per user spec), then a **big red banner** "⚠️ You are editing inventory for <Branch>" once picked.
+  - Shows current stock at the chosen branch inline.
+  - 3-button action row (Add / Deduct / Set Total) with live projected-qty math (`5 → 10 (+5)`).
+  - Reason dropdown + required 10-char note with counter.
+  - "Moving avg & retail NOT changed" safety badge in footer.
+  - Submit disabled until all 4 steps valid.
+- `ProductsPage.js`: new `ShieldAlert` (red) button in the actions column, admin-only visible, next to Edit. Hidden for repack products.
+
+### Tested
+- **10/10 pytest** in `tests/test_stock_injection_217b.py`: non-admin 403, validation (short note, bad reason_type), repack block, add preserves cost basis (moving_avg 99.99 stays, last 111.11 stays), deduct blocks over-deduction, set overwrites exact, audit doc + movements ledger entry both created with correct fields.
+- **34/34 pytest** across iters 201/215/216/217/217b — zero regressions.
+- **End-to-end Playwright smoke**: login → Products → click shield → branch picker → red banner appears → qty=5, reason note → Inject → success toast "Stock +5 for Consistency-5f7c2a at Main Warehouse / New total: 15".
+
+---
+
 ## Iter 217 (May 2026) — Approve-with-PIN + Smart Retail Inherit + Target Insights ✅
 
 ### Asks from user
