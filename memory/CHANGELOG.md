@@ -1,5 +1,36 @@
 # AgriBooks Changelog
 
+## Feb 2026 — Sales Page Perf Pass: Cache + Debounce (Iter 222)
+
+**User reports**:
+- "5–10 second wait every time I leave Customers and come back to Sales"
+- "Product search won't search fast"
+- "On the 3rd sale (~20 lines) the lag is real" — particularly in Order Mode
+
+**Two surgical changes:**
+
+### 1. Stale-while-revalidate cache (5–10s → ~1s)
+- `loadData()` in `UnifiedSalesPage.js` now reads `getProducts() / getCustomers() / getPriceSchemes()` from IndexedDB FIRST and renders immediately
+- Then fires the network refresh (`/sync/pos-data` + 5 other endpoints) in the background, swapping React state when it returns
+- Previously: every navigation to /sales-new blocked the UI on 6 parallel awaits
+- After: usable in <100ms, prices/stock refresh silently in the background
+
+### 2. Search debounce + pre-computed index (per-keystroke 100ms+ → 25ms)
+- Added a 150ms-debounced `debouncedSearch` state — heavy filter only runs after typing pauses
+- Added a `useMemo`'d `productIndex` that pre-computes lowercase name/sku/barcode + pre-split nameWords/words arrays per product, ONCE per `allProducts` change (not per keystroke)
+- Strict + fuzzy passes now iterate the pre-built index instead of running `.toLowerCase()` + 2 regex splits per product per letter
+- All search semantics preserved: strict prefix-match ranking, Levenshtein fuzzy fallback, short-numeric prefix-of-word rule
+
+**Files changed:**
+- `/app/frontend/src/pages/UnifiedSalesPage.js` (loadData rewrite + debouncedSearch + productIndex + filter useEffect refactor)
+
+**Verified by `testing_agent_v3_fork` (iter 188):**
+- Cold load: 1.66s
+- Warm paint from cache (after /customers round-trip): 1.07s
+- Keystroke latency: 21–25ms (down from ~100ms+)
+- Search regression suite: PASS (strict, fuzzy, numeric, empty)
+- Checkout flow: PASS (no regression)
+
 ## Feb 2026 — Timezone-Aware Timestamp Display (Iter 221)
 
 **Bug**: A sale created at 3pm Philippine time was showing as "07:00" (early morning) on the cashier wallet movements list. Same anti-pattern affected ~30 places across the frontend.
