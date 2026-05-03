@@ -1,5 +1,20 @@
 # AgriBooks PRD
 
+## Iter 219 (Feb 2026) — UI Permission Gating Audit: Suppliers/Accounting/Inventory ✅
+
+Follow-up to Iter 218. Extended the same button-level `hasPerm` gating pattern to 3 more pages.
+
+### Changes
+- **SuppliersPage.js**: Gated New Supplier, Edit Supplier, Save-as-Supplier buttons.
+- **AccountingPage.js**: Gated Cash Out / Farm Expense / Record Expense (top-right), per-expense row controls (Edit / Upload / Verify / Delete), Receivable Record Payment, Payable Record Payable + Record Payment.
+- **InventoryPage.js**: No changes — already properly gated.
+
+### Tested
+- 2-pass Playwright (admin + limited-perm manager) — 0 UI/backend issues.
+- Admin sees all buttons (admin bypass in `hasPerm`); limited manager sees none of the gated ones.
+
+---
+
 ## Iter 218 (Feb 2026) — Per-Unit Discount + Products Permission Gating ✅
 
 ### Fix 1 — Order Mode amount discount now per-unit × qty

@@ -905,3 +905,25 @@ so short numeric tokens no longer leak unrelated products via SKU collisions.
 
 ### Remaining Pages to Audit (backlog)
 - `SuppliersPage.js`, `AccountingPage.js`, `InventoryPage.js` — do not destructure `hasPerm`; all backend mutations are gated, but UI buttons shown regardless of permissions.
+
+## Iter 219 — Feb 2026 (Broader UI Permission Gating Audit)
+
+### Scope — Extended the Iter 218 gating pattern to 3 more pages
+
+**SuppliersPage.js**
+- Destructured `hasPerm` from `useAuth`; added `canCreateSupplier`, `canEditSupplier` flags.
+- Gated "New Supplier" btn, "Edit" (in supplier details panel), "Save as Supplier" btn.
+
+**AccountingPage.js**
+- Destructured `hasPerm`; added `canCreateExpense`, `canEditExpense`, `canReceivePayment` flags.
+- Gated top-right actions: Customer Cash Out, Farm Expense, Record Expense.
+- Gated per-expense row controls: Edit pencil, Upload receipt, Verify, Delete.
+- Gated Receivable "Record Payment", Payable "Record Payable", Payable "Record Payment".
+
+**InventoryPage.js**
+- No changes needed — was already gating "Mark All Reviewed" via `hasPerm('products', 'edit')`.
+
+### Tests
+- Testing agent performed 2-pass Playwright (admin + seeded limited-perm manager) verification.
+- 0 UI/integration/backend issues. Admin sees everything; limited manager sees no gated buttons.
+- NEW: `tests/seed_limited_manager_iter219.py` (testing-agent authored) seeds a perm-restricted manager.
