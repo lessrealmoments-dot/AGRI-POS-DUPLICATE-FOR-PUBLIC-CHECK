@@ -15,9 +15,10 @@ import {
   Truck, Clock, CreditCard, Banknote, CheckCircle2, Calendar,
   BarChart3, RefreshCw, ArrowUpRight, ArrowDownRight, Lock, ShieldCheck,
   CalendarClock, ChevronDown, ChevronRight, FileCheck, GripVertical,
-  RotateCcw, Smartphone
+  RotateCcw, Smartphone, WifiOff, CloudOff
 } from 'lucide-react';
 import { formatPHP } from '../lib/utils';
+import { useOnlineStatus } from '../lib/useOnlineStatus';
 import ReviewDetailDialog from '../components/ReviewDetailDialog';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
 import CustomerStatementModal from '../components/CustomerStatementModal';
@@ -218,6 +219,7 @@ const BRANCH_DEFAULT_LAYOUT = {
 export default function DashboardPage() {
   const { isConsolidatedView, switchBranch, selectedBranchId, currentBranch, user } = useAuth();
   const navigate = useNavigate();
+  const isOnline = useOnlineStatus();
   const [stats, setStats] = useState(null);
   const [branchSummary, setBranchSummary] = useState(null);
   const [poSummary, setPoSummary] = useState(null);
@@ -276,6 +278,9 @@ export default function DashboardPage() {
   };
 
   const loadData = async (silent = false) => {
+    // Skip network calls entirely when offline — Quick Launch still works,
+    // and the offline placeholder UI is rendered instead of stale data.
+    if (!isOnline) { setLoading(false); setRefreshing(false); return; }
     if (!silent) setLoading(true); else setRefreshing(true);
     try {
       if (isConsolidatedView) {
@@ -311,10 +316,11 @@ export default function DashboardPage() {
     setRefreshing(false);
   };
 
-  useEffect(() => { loadData(); }, [isConsolidatedView, selectedBranchId]); // eslint-disable-line
+  useEffect(() => { loadData(); }, [isConsolidatedView, selectedBranchId, isOnline]); // eslint-disable-line
 
   // Check if company_info is missing (post-reset self-heal)
   useEffect(() => {
+    if (!isOnline) return; // skip when offline
     let cancelled = false;
     (async () => {
       try {
@@ -347,6 +353,53 @@ export default function DashboardPage() {
     }
     setRestoringCompanyInfo(false);
   };
+
+  // ── Offline mode ────────────────────────────────────────────────────────
+  // When offline, render a slim dashboard so managers can still use Quick
+  // Launch. Stats / charts are replaced with a friendly placeholder card.
+  if (!isOnline) {
+    const today = new Date().toISOString().slice(0, 10);
+    return (
+      <div className="space-y-4 animate-fadeIn" data-testid="dashboard-offline">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Building2 size={20} className="text-[#1A4D2E]" />
+              <h1 className="text-2xl font-bold tracking-tight" style={{ fontFamily: 'Manrope' }}>Dashboard</h1>
+              <Badge className="bg-amber-100 text-amber-800 border-amber-200 gap-1 ml-1">
+                <WifiOff size={11} /> Offline
+              </Badge>
+            </div>
+            <p className="text-sm text-slate-500 mt-0.5">{today} · Limited data — sales & cached actions still work</p>
+          </div>
+        </div>
+
+        {/* Quick Launch always works — no API calls */}
+        <QuickLaunch />
+
+        {/* Friendly offline placeholder where stats/widgets would be */}
+        <Card className="border-dashed border-2 border-amber-200 bg-amber-50/50" data-testid="offline-placeholder-card">
+          <CardContent className="py-10">
+            <div className="flex flex-col items-center text-center max-w-md mx-auto">
+              <div className="w-14 h-14 rounded-full bg-amber-100 flex items-center justify-center mb-3">
+                <CloudOff size={26} className="text-amber-600" />
+              </div>
+              <h3 className="text-lg font-bold text-slate-800 mb-1.5" style={{ fontFamily: 'Manrope' }}>
+                Live data needs an internet connection
+              </h3>
+              <p className="text-sm text-slate-600 leading-relaxed mb-4">
+                Sales, AR, cash position, audit health, and charts will reappear automatically once you're back online. In the meantime, use <span className="font-semibold text-[#1A4D2E]">Quick Launch</span> above to head to Sales, Inventory or any cached area.
+              </p>
+              <div className="flex items-center gap-2 text-xs text-slate-500">
+                <RefreshCw size={12} />
+                <span>Auto-refreshes when connection is restored</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   if (loading) return (
     <div className="flex items-center justify-center h-64 text-slate-400">
