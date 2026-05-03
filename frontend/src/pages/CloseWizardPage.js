@@ -15,7 +15,7 @@ import {
   CheckCircle2, Circle, ChevronRight, ChevronLeft, Receipt, CreditCard,
   Banknote, ReceiptText, Calculator, Wallet, Lock, Sun, Plus, RefreshCw,
   AlertTriangle, Package, Truck, ExternalLink, Check, XCircle, Search, Upload, Download,
-  Percent, Zap, Info, ChevronDown, ChevronUp
+  Percent, Zap, Info, ChevronDown, ChevronUp, Calendar
 } from 'lucide-react';
 import { toast } from 'sonner';
 import UploadQRDialog from '../components/UploadQRDialog';
@@ -291,34 +291,58 @@ export default function CloseWizardPage() {
     await loadWizardData(unclosedDays[index].date);
   };
 
-  // Enter batch mode — aggregate all unclosed days
-  const enterBatchMode = async () => {
+  // Enter batch mode — user picks a subset of unclosed days to combine.
+  // Starts with NO days selected so the user explicitly chooses which days
+  // to group (e.g., group Day 1-5 for inventory week, then regular-close
+  // Day 6-7 individually).
+  const enterBatchMode = () => {
     if (unclosedDays.length < 2) return;
-    const allDates = unclosedDays.map(d => d.date);
-    setBatchDates(allDates);
+    setBatchDates([]);
+    setBatchPreview(null);
+    setPreview(null);
     setBatchMode(true);
+    setStep(1);
+    setCompleted(new Set());
+    setActualCash('');
+    setCashToSafe('');
+    setCashToDrawer('');
+    setManagerPin('');
+    setPinVerified(false);
+    setManagerName('');
+    setBatchReason('');
+  };
+
+  // Toggle a single date in/out of the batch selection.
+  const toggleBatchDate = (d) => {
+    setBatchDates(prev => {
+      const has = prev.includes(d);
+      const next = has ? prev.filter(x => x !== d) : [...prev, d];
+      return next.sort();
+    });
+    // Invalidate preview whenever selection changes; user must re-confirm.
+    setBatchPreview(null);
+    setPreview(null);
+  };
+
+  // Confirm the current batch selection → load preview + enter wizard steps.
+  const confirmBatchSelection = async () => {
+    if (batchDates.length < 2) { toast.error('Select at least 2 days to group'); return; }
     setLoading(true);
     try {
-      const dateStr = allDates.join(',');
+      const dateStr = batchDates.join(',');
       const [bpRes, logRes] = await Promise.all([
         api.get('/daily-close-preview/batch', { params: { branch_id: currentBranch.id, dates: dateStr } }),
-        api.get('/daily-log', { params: { date: allDates[allDates.length - 1], branch_id: currentBranch.id } }),
+        api.get('/daily-log', { params: { date: batchDates[batchDates.length - 1], branch_id: currentBranch.id } }),
       ]);
       setBatchPreview(bpRes.data);
-      setPreview(bpRes.data); // Use batch preview as preview data for the wizard steps
-      setDailyLog(logRes.data); // Show last day's log (user can switch)
-      setDate(`${allDates[0]} to ${allDates[allDates.length - 1]}`);
+      setPreview(bpRes.data);
+      setDailyLog(logRes.data);
+      setDate(`${batchDates[0]} to ${batchDates[batchDates.length - 1]}`);
       setIsClosed(false);
       setClosingRecord(null);
       setStep(1);
       setCompleted(new Set());
-      setActualCash('');
-      setCashToSafe('');
-      setCashToDrawer('');
-      setManagerPin('');
-      setPinVerified(false);
-      setManagerName('');
-    } catch (e) { toast.error('Failed to load batch preview'); setBatchMode(false); }
+    } catch (e) { toast.error('Failed to load batch preview'); }
     setLoading(false);
   };
 
@@ -712,14 +736,14 @@ export default function CloseWizardPage() {
               </div>
               <div className="flex gap-2">
                 {batchMode ? (
-                  <Button size="sm" variant="outline" onClick={() => { setBatchMode(false); selectDay(0); }}
+                  <Button size="sm" variant="outline" onClick={() => { setBatchMode(false); setBatchDates([]); setBatchPreview(null); selectDay(0); }}
                     className="text-xs border-amber-300 text-amber-700 hover:bg-amber-100" data-testid="close-one-by-one-btn">
                     Close One by One
                   </Button>
                 ) : (
                   <Button size="sm" onClick={enterBatchMode}
                     className="text-xs bg-amber-600 text-white hover:bg-amber-700" data-testid="close-as-group-btn">
-                    Close All as Group
+                    Close as Group
                   </Button>
                 )}
               </div>
@@ -727,31 +751,67 @@ export default function CloseWizardPage() {
 
             {batchMode ? (
               <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-amber-700 font-semibold" data-testid="batch-selection-counter">
+                    Selected: {batchDates.length} of {unclosedDays.length} day{unclosedDays.length === 1 ? '' : 's'}
+                  </span>
+                  {batchDates.length >= 2 && !batchPreview && (
+                    <Button size="sm" onClick={confirmBatchSelection} disabled={loading}
+                      data-testid="confirm-batch-selection-btn"
+                      className="h-7 text-xs bg-[#1A4D2E] text-white hover:bg-[#163d25]">
+                      Confirm Selection & Preview
+                    </Button>
+                  )}
+                  {batchDates.length >= 2 && batchPreview && (
+                    <span className="text-[10px] text-emerald-700 font-medium">
+                      Preview loaded — scroll down to continue
+                    </span>
+                  )}
+                </div>
                 <div className="flex gap-1.5 flex-wrap">
                   {unclosedDays.map((day) => {
                     const dayLabel = new Date(day.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                    const isSelected = batchDates.includes(day.date);
                     return (
-                      <div key={day.date} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#1A4D2E] text-white text-xs font-medium">
-                        <Check size={10} />
+                      <button
+                        key={day.date}
+                        type="button"
+                        onClick={() => toggleBatchDate(day.date)}
+                        data-testid={`batch-chip-${day.date}`}
+                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+                          isSelected
+                            ? 'bg-[#1A4D2E] text-white border-[#1A4D2E] hover:bg-[#163d25]'
+                            : 'bg-white text-slate-700 border-slate-300 hover:border-[#1A4D2E]/60 hover:bg-slate-50'
+                        }`}
+                      >
+                        {isSelected ? <Check size={10} /> : <span className="w-2.5" />}
                         <span>{dayLabel}</span>
-                        {day.has_activity && <span className="text-emerald-200 text-[10px]">{day.sales_count}s</span>}
-                      </div>
+                        {day.has_activity && <span className={`text-[10px] ${isSelected ? 'text-emerald-200' : 'text-slate-400'}`}>{day.sales_count}s</span>}
+                      </button>
                     );
                   })}
                 </div>
-                <div>
-                  <Label className="text-xs text-amber-700 font-semibold">Reason for batch close *</Label>
-                  <Input
-                    data-testid="batch-reason-input"
-                    value={batchReason}
-                    onChange={e => setBatchReason(e.target.value)}
-                    placeholder="e.g., Store audit week, holiday break, power outage..."
-                    className="mt-1 h-8 text-sm bg-white border-amber-200"
-                  />
-                </div>
-                <p className="text-[10px] text-amber-600">
-                  All sales, credits, expenses from {unclosedDays[0]?.date} to {unclosedDays[unclosedDays.length-1]?.date} will be combined into a single closing.
-                </p>
+                {batchDates.length < 2 ? (
+                  <p className="text-[10px] text-amber-700">
+                    Tip: click any day to include it in the group. Select at least 2 days. Days you leave unchecked can still be closed individually afterward.
+                  </p>
+                ) : (
+                  <>
+                    <div>
+                      <Label className="text-xs text-amber-700 font-semibold">Reason for batch close *</Label>
+                      <Input
+                        data-testid="batch-reason-input"
+                        value={batchReason}
+                        onChange={e => setBatchReason(e.target.value)}
+                        placeholder="e.g., Annual inventory week, store audit, power outage..."
+                        className="mt-1 h-8 text-sm bg-white border-amber-200"
+                      />
+                    </div>
+                    <p className="text-[10px] text-amber-600">
+                      Sales, credits, and expenses from the {batchDates.length} selected days ({batchDates[0]} → {batchDates[batchDates.length-1]}) will be combined into a single closing.
+                    </p>
+                  </>
+                )}
               </div>
             ) : (
               <>
@@ -792,6 +852,25 @@ export default function CloseWizardPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* In batch mode, hide the wizard steps until the user confirms their
+          date selection. Prevents stepping through an empty/stale preview. */}
+      {batchMode && !batchPreview ? (
+        <Card className="border-dashed border-slate-300 bg-slate-50/50">
+          <CardContent className="p-8 text-center">
+            <Calendar size={28} className="text-slate-400 mx-auto mb-2" />
+            <p className="text-sm text-slate-600 font-medium">
+              {batchDates.length < 2
+                ? 'Pick the days you want to group above'
+                : 'Click "Confirm Selection & Preview" above to continue'}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-1">
+              Selected {batchDates.length} day{batchDates.length === 1 ? '' : 's'} &middot; minimum 2 required
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
 
       {/* Stepper */}
       <div className="flex items-center gap-0 overflow-x-auto pb-1">
@@ -2201,6 +2280,8 @@ export default function CloseWizardPage() {
           {step === 7 ? (isClosed ? 'Next' : 'Close First') : 'Next'} <ChevronRight size={15} className="ml-1" />
         </Button>
       </div>
+        </>
+      )}
 
       {/* ── Quick Add Sale Dialog ── */}
       <Dialog open={saleDialog} onOpenChange={setSaleDialog}>
