@@ -14,7 +14,7 @@ import time
 import random
 import string
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://multi-branch-pos-14.preview.emergentagent.com')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://park-draft-sale.preview.emergentagent.com')
 
 # Test credentials
 ADMIN_EMAIL = "janmarkeahig@gmail.com"
