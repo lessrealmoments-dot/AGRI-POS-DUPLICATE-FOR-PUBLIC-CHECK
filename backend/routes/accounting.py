@@ -1877,6 +1877,7 @@ async def get_customer_payment_history(customer_id: str, user=Depends(get_curren
             history.append({
                 "payment_id": p.get("id", ""),
                 "invoice_id": inv.get("id", ""),
+                "customer_id": customer_id,
                 "date": p.get("date", ""), "invoice_number": inv.get("invoice_number", ""),
                 "sale_type": inv.get("sale_type", "regular"), "method": p.get("method", ""),
                 "reference": p.get("reference", ""), "amount": p.get("amount", 0),

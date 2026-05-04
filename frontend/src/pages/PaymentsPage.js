@@ -643,12 +643,20 @@ export default function PaymentsPage() {
 
   const handleModifyPayment = async () => {
     if (!editPayment) return;
+    // Fall back to the customer_id embedded on the payment row itself —
+    // this keeps the flow working even if `selectedCustomer` was cleared
+    // by a background refresh while the dialog was open (iter 224 bug).
+    const customerId = selectedCustomer?.id || editPayment?.customer_id;
+    if (!customerId) {
+      toast.error('No customer context — please reselect the customer and try again');
+      return;
+    }
     const newAmt = parseFloat(editAmount);
     if (isNaN(newAmt) || newAmt < 0) { toast.error('Enter a valid amount'); return; }
     if (!editPin || editPin.length < 4) { toast.error('Manager PIN required'); return; }
     setEditSubmitting(true);
     try {
-      const res = await api.post(`/customers/${selectedCustomer.id}/modify-payment`, {
+      const res = await api.post(`/customers/${customerId}/modify-payment`, {
         invoice_id: editPayment.invoice_id,
         payment_id: editPayment.payment_id,
         new_amount: newAmt,
@@ -660,17 +668,26 @@ export default function PaymentsPage() {
       setEditAmount('');
       setEditPin('');
       setEditReason('');
-      // Reload everything
-      const histRes = await api.get(`/customers/${selectedCustomer.id}/payment-history`);
-      setPayHistory(histRes.data);
-      await loadInvoices(selectedCustomer.id);
-      await loadChargesPreview(selectedCustomer.id);
+      // Reload everything — guard each call against a mid-flight
+      // selectedCustomer reset so the success path never crashes.
+      try {
+        const histRes = await api.get(`/customers/${customerId}/payment-history`);
+        setPayHistory(histRes.data);
+      } catch {}
+      try { await loadInvoices(customerId); } catch {}
+      try { await loadChargesPreview(customerId); } catch {}
       invalidateBalanceCache();
-      await loadCustList();
-      const refreshed = (await api.get('/customers/receivables-summary', {
-        params: { include_zero: showAll, ...(currentBranch?.id ? { branch_id: currentBranch.id } : {}) }
-      }).then(r => r.data || []).catch(() => [])).find(c => c.id === selectedCustomer.id);
-      if (refreshed) setSelectedCustomer(refreshed);
+      try { await loadCustList(); } catch {}
+      try {
+        const refreshed = (await api.get('/customers/receivables-summary', {
+          params: { include_zero: showAll, ...(currentBranch?.id ? { branch_id: currentBranch.id } : {}) }
+        }).then(r => r.data || []).catch(() => [])).find(c => c.id === customerId);
+        if (refreshed) setSelectedCustomer(refreshed);
+      } catch {}
+      // If we're on global history, refresh it too.
+      if (pageTab === 'global_history') {
+        try { await loadGlobalHistory(histGlobalDateFrom, histGlobalDateTo, histGlobalMethod, histGlobalSearch); } catch {}
+      }
     } catch (e) {
       toast.error(extractApiError(e, 'Modification failed'));
     }
@@ -680,6 +697,11 @@ export default function PaymentsPage() {
   // ── Void Payment (full cancel — wallet, invoice, AR all reversed) ──
   const handleVoidPayment = async () => {
     if (!voidPayment) return;
+    const customerId = selectedCustomer?.id || voidPayment?.customer_id;
+    if (!customerId) {
+      toast.error('No customer context — please reselect the customer and try again');
+      return;
+    }
     if (!voidPin || voidPin.length < 4) { toast.error('Manager PIN required'); return; }
     if (!voidReason.trim() || voidReason.trim().length < 4) {
       toast.error('Reason required (≥ 4 chars) — e.g. "Applied to wrong customer"');
@@ -687,7 +709,7 @@ export default function PaymentsPage() {
     }
     setVoidSubmitting(true);
     try {
-      const res = await api.post(`/customers/${selectedCustomer.id}/void-payment`, {
+      const res = await api.post(`/customers/${customerId}/void-payment`, {
         invoice_id: voidPayment.invoice_id,
         payment_id: voidPayment.payment_id,
         manager_pin: voidPin,
@@ -697,17 +719,24 @@ export default function PaymentsPage() {
       setVoidPayment(null);
       setVoidPin('');
       setVoidReason('');
-      // Reload everything (history, invoice list, AR balance, customer summary)
-      const histRes = await api.get(`/customers/${selectedCustomer.id}/payment-history`);
-      setPayHistory(histRes.data);
-      await loadInvoices(selectedCustomer.id);
-      await loadChargesPreview(selectedCustomer.id);
+      // Reload everything — guarded against mid-flight state resets.
+      try {
+        const histRes = await api.get(`/customers/${customerId}/payment-history`);
+        setPayHistory(histRes.data);
+      } catch {}
+      try { await loadInvoices(customerId); } catch {}
+      try { await loadChargesPreview(customerId); } catch {}
       invalidateBalanceCache();
-      await loadCustList();
-      const refreshed = (await api.get('/customers/receivables-summary', {
-        params: { include_zero: showAll, ...(currentBranch?.id ? { branch_id: currentBranch.id } : {}) }
-      }).then(r => r.data || []).catch(() => [])).find(c => c.id === selectedCustomer.id);
-      if (refreshed) setSelectedCustomer(refreshed);
+      try { await loadCustList(); } catch {}
+      try {
+        const refreshed = (await api.get('/customers/receivables-summary', {
+          params: { include_zero: showAll, ...(currentBranch?.id ? { branch_id: currentBranch.id } : {}) }
+        }).then(r => r.data || []).catch(() => [])).find(c => c.id === customerId);
+        if (refreshed) setSelectedCustomer(refreshed);
+      } catch {}
+      if (pageTab === 'global_history') {
+        try { await loadGlobalHistory(histGlobalDateFrom, histGlobalDateTo, histGlobalMethod, histGlobalSearch); } catch {}
+      }
     } catch (e) {
       toast.error(extractApiError(e, 'Void failed'));
     }
@@ -717,12 +746,17 @@ export default function PaymentsPage() {
   // ── Change Payment Date (date-only edit, PIN-gated, audit-logged) ──
   const handleEditPaymentDate = async () => {
     if (!dateEditPayment) return;
+    const customerId = selectedCustomer?.id || dateEditPayment?.customer_id;
+    if (!customerId) {
+      toast.error('No customer context — please reselect the customer and try again');
+      return;
+    }
     if (!dateEditNewDate) { toast.error('Pick a new date'); return; }
     if (dateEditNewDate === dateEditPayment.date) { toast.error('Pick a different date'); return; }
     if (!dateEditPin || dateEditPin.length < 4) { toast.error('Manager PIN required'); return; }
     setDateEditSubmitting(true);
     try {
-      const res = await api.post(`/customers/${selectedCustomer.id}/edit-payment-date`, {
+      const res = await api.post(`/customers/${customerId}/edit-payment-date`, {
         invoice_id: dateEditPayment.invoice_id,
         payment_id: dateEditPayment.payment_id,
         new_date: dateEditNewDate,
@@ -735,12 +769,12 @@ export default function PaymentsPage() {
       setDateEditPin('');
       setDateEditReason('');
       // Reload history for whichever view is active
-      if (selectedCustomer?.id) {
-        const histRes = await api.get(`/customers/${selectedCustomer.id}/payment-history`);
+      try {
+        const histRes = await api.get(`/customers/${customerId}/payment-history`);
         setPayHistory(histRes.data);
-      }
+      } catch {}
       if (pageTab === 'global_history') {
-        loadGlobalHistory(histGlobalDateFrom, histGlobalDateTo, histGlobalMethod, histGlobalSearch);
+        try { loadGlobalHistory(histGlobalDateFrom, histGlobalDateTo, histGlobalMethod, histGlobalSearch); } catch {}
       }
     } catch (e) {
       toast.error(extractApiError(e, 'Date change failed'));
