@@ -1,5 +1,27 @@
 # AgriBooks Changelog
 
+## Feb 2026 — SMS Mute Purge + Gateway-Replay Storm Protection (Iter 226)
+
+**User report**: Owner got spammed with **60+ duplicate close-day SMS** during a gateway DNS outage. Muting the affected branches via the Team SMS card did nothing — the spam kept coming. User had to log out of the gateway entirely.
+
+**Root cause**:
+1. **Mute bug**: The branch mute toggle only set `close_reminder_disabled=true` on the branch record — it did NOT purge queue rows that were already created before the mute. Those rows kept getting handed out to the gateway on every poll.
+2. **Gateway replay**: The Kotlin gateway app's local send-worker kept retrying the same ~7 queueIds via GSM because its `mark-sent` HTTP POST kept failing due to DNS (`Unable to resolve host agri-books.com`). Every retry = another real SMS delivered. (Gateway-side fix is out of scope — this repo only controls the server.)
+
+**Fixes** (`/app/backend/routes/sms.py`, `/app/frontend/src/components/sms/TeamSmsRemindersCard.js`):
+- **A. Purge-on-mute** — `PUT /api/sms/close-reminder/branch-toggle/:branch_id` with `disabled=true` now cancels every `pending`/`deferred`/`failed` close-reminder row for that branch in the same transaction. Response includes `purged` count; toast shows "🔕 MUTED — N pending close-day SMS cancelled".
+- **B. Filter-on-dispatch safety net** — `GET /sms/queue/pending` checks each candidate's branch against the muted list; any close-reminder row belonging to a muted branch is flipped to `cancelled` (`reason=branch_muted_at_dispatch`) and excluded from the returned batch. Catches race conditions and legacy rows.
+- **C. Emergency kill-switch** — New endpoint `POST /sms/queue/cancel-pending-close-reminders` + red "Emergency: Stop All Pending Close-Day SMS" button in the Team SMS card. Cancels every pending close-reminder across ALL branches for the caller's org (customer / expense / manual SMS untouched). Owner-only panic button.
+- **D. Tighter dispatch cap for close-reminder templates** — `MAX_DISPATCHES_CLOSE_REMINDER=2` (was implicit 3 via `MAX_DISPATCHES_PER_DAY`). A close-reminder row can now only be handed out twice per day before being deferred till tomorrow. Halves the blast radius of any future gateway-ack failure.
+
+**Tests** — `tests/test_mute_purge_queue_226.py` (3 passing):
+- Muting a branch purges its pending/deferred/failed close-reminder rows ONLY (other templates + other branches untouched)
+- Unmuting does NOT resurrect cancelled rows
+- Emergency endpoint cancels all close-reminder rows across branches without touching other templates
+
+**Gateway-side follow-up for the user**: once deployed, the owner needs to force-stop + clear the Kotlin SMS gateway app's local data (~7 stuck queueIds cached on the phone). Server-side alone can't flush a phone-local SQLite queue.
+
+
 ## Feb 2026 — Accounting Page: Customer Typeahead Search in Farm Expense & Cash Out Dialogs
 
 **User request**: On `/accounting`, the Farm Expense and Customer Cash Out dialogs used a `<Select>` dropdown for picking the customer to bill — unusable with 500+ customers. User asked for a typeahead input, and to move **Bill to Customer** to the **top**, above **Service Description**.

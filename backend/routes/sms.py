@@ -39,6 +39,26 @@ MAX_DISPATCHES_PER_DAY = 3            # 3 handouts/day per row; then defer
 ENQUEUE_THROTTLE_SECONDS = 600        # 10 min per-recipient per-template
 MAX_GATEWAY_RETRIES = 3               # existing cap for mark-failed path
 
+# Close-reminder stage keys. When an admin mutes a branch (via Team SMS card),
+# we purge any pending/deferred/failed rows with these template_keys for that
+# branch — otherwise items queued BEFORE the mute keep flowing to the gateway
+# and spam recipients even though the UI says "muted". Kept in sync with
+# STAGES list in `routes/close_reminder.py`.
+CLOSE_REMINDER_TEMPLATE_KEYS = [
+    "close_catchup_3pm",
+    "close_precheck",
+    "close_late_notice",
+    "close_status_snapshot",
+    "close_escalation",
+    "close_overdue_next_day",
+    "close_overdue_multi_day",
+]
+# Tighter dispatch cap for close-reminder templates (Iter 226). Regular
+# templates still use MAX_DISPATCHES_PER_DAY=3. Close-reminder messages are
+# the single biggest source of gateway-replay spam when the phone's DNS
+# flakes, so we hard-cap them at 2 hand-outs/day/row.
+MAX_DISPATCHES_CLOSE_REMINDER = 2
+
 
 async def _tomorrow_midnight_iso(org_id: str) -> str:
     """Return tomorrow 00:00:00 in the org's timezone, as an ISO-8601 string.
@@ -1013,14 +1033,58 @@ async def get_pending_sms(limit: int = 50, user=Depends(get_current_user)):
         {"_id": 0},
     ).sort("created_at", 1).limit(limit).to_list(limit)
 
+    # 2a. BELT-AND-SUSPENDERS (Iter 226) — any close-reminder candidate whose
+    # branch was muted AFTER the row was queued must NOT be handed out. We
+    # auto-cancel those rows on-the-fly and remove them from the dispatch
+    # batch. The primary purge happens on mute-toggle (see branch-toggle
+    # endpoint) — this is a safety net for races / legacy rows.
+    muted_branch_ids: set[str] = set()
+    candidate_branch_ids = [c.get("branch_id") for c in candidates if c.get("branch_id")]
+    if candidate_branch_ids:
+        muted_cursor = db.branches.find(
+            {"id": {"$in": candidate_branch_ids}, "close_reminder_disabled": True},
+            {"_id": 0, "id": 1},
+        )
+        async for br in muted_cursor:
+            muted_branch_ids.add(br["id"])
+    if muted_branch_ids:
+        filtered: list[dict] = []
+        to_cancel: list[str] = []
+        for c in candidates:
+            if (c.get("branch_id") in muted_branch_ids
+                    and c.get("template_key") in CLOSE_REMINDER_TEMPLATE_KEYS):
+                to_cancel.append(c["id"])
+                continue
+            filtered.append(c)
+        if to_cancel:
+            await db.sms_queue.update_many(
+                {"id": {"$in": to_cancel}},
+                {"$set": {
+                    "status": "cancelled",
+                    "cancelled_at": now,
+                    "cancelled_reason": "branch_muted_at_dispatch",
+                    "leased_until": None,
+                }},
+            )
+        candidates = filtered
+
     # 3. Atomically claim each (prevents two pollers racing on the same row).
     lease_until = (datetime.now(timezone.utc) + timedelta(seconds=DISPATCH_LEASE_SECONDS)).isoformat()
     items = []
     for c in candidates:
         new_dispatch_count = (c.get("dispatch_count") or 0) + 1
 
+        # Tighter per-day cap for close-reminder templates — two strikes then
+        # defer (vs three for everything else). Owners were getting spammed
+        # hardest by these during gateway DNS outages.
+        per_day_cap = (
+            MAX_DISPATCHES_CLOSE_REMINDER
+            if c.get("template_key") in CLOSE_REMINDER_TEMPLATE_KEYS
+            else MAX_DISPATCHES_PER_DAY
+        )
+
         # Over the per-day cap → defer instead of dispatching.
-        if new_dispatch_count > MAX_DISPATCHES_PER_DAY:
+        if new_dispatch_count > per_day_cap:
             deferred_until = await _tomorrow_midnight_iso(c.get("organization_id", ""))
             await db.sms_queue.update_one(
                 {"id": c["id"], "status": "pending"},
@@ -1140,6 +1204,35 @@ async def retry_sms(sms_id: str, user=Depends(get_current_user)):
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="SMS not found or not in failed state")
     return {"status": "pending"}
+
+
+@router.post("/queue/cancel-pending-close-reminders")
+async def cancel_pending_close_reminders(user=Depends(get_current_user)):
+    """Admin: emergency "Stop All Pending Close-Day SMS" button.
+
+    Cancels EVERY pending / deferred / failed close-reminder row across ALL
+    branches for this org — without touching customer-facing SMS, expense
+    reminders, or any other template. Used when the owner is being spammed
+    by a gateway-replay storm and wants to pull the plug immediately.
+
+    Scoped to the caller's organization only (multi-tenant safe).
+    """
+    check_perm(user, "settings", "edit")
+    org_id = user.get("organization_id") or ""
+    result = await _raw_db.sms_queue.update_many(
+        {
+            "organization_id": org_id,
+            "template_key": {"$in": CLOSE_REMINDER_TEMPLATE_KEYS},
+            "status": {"$in": ["pending", "deferred", "failed"]},
+        },
+        {"$set": {
+            "status": "cancelled",
+            "cancelled_at": now_iso(),
+            "cancelled_reason": "admin_emergency_stop",
+            "leased_until": None,
+        }},
+    )
+    return {"cancelled": result.modified_count or 0}
 
 
 @router.post("/queue/clear-stuck")
@@ -1811,7 +1904,33 @@ async def update_branch_close_reminder_toggle(branch_id: str, data: dict, user=D
         {"id": branch_id},
         {"$set": {"close_reminder_disabled": disabled, "updated_at": now_iso()}},
     )
-    return {"branch_id": branch_id, "close_reminder_disabled": disabled}
+    # Purge any close-reminder rows already in-flight for this branch so the
+    # mute takes effect immediately. Without this, items queued BEFORE the
+    # mute keep being handed out to the gateway and the owner still gets
+    # spam — which is exactly the user-visible bug the mute is supposed to
+    # solve. Scoped to this org + branch + close-reminder template_keys.
+    purged_count = 0
+    if disabled:
+        purge_result = await _raw_db.sms_queue.update_many(
+            {
+                "organization_id": org_id,
+                "branch_id": branch_id,
+                "template_key": {"$in": CLOSE_REMINDER_TEMPLATE_KEYS},
+                "status": {"$in": ["pending", "deferred", "failed"]},
+            },
+            {"$set": {
+                "status": "cancelled",
+                "cancelled_at": now_iso(),
+                "cancelled_reason": "branch_muted",
+                "leased_until": None,
+            }},
+        )
+        purged_count = purge_result.modified_count or 0
+    return {
+        "branch_id": branch_id,
+        "close_reminder_disabled": disabled,
+        "purged": purged_count,
+    }
 
 
 @router.post("/close-reminder/test-stage/{stage_key}")

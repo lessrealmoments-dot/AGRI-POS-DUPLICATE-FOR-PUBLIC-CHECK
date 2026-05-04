@@ -171,10 +171,17 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
     try {
       const r = await api.put(`/sms/close-reminder/branch-toggle/${branchId}`, { disabled: nextDisabled });
       const serverValue = !!r.data?.close_reminder_disabled;
+      const purged = Number(r.data?.purged || 0);
       setBranchDisabled(s => ({ ...s, [branchId]: serverValue }));
-      toast.success(serverValue
-        ? '🔕 Close-day SMS MUTED for this branch'
-        : '🔔 Close-day SMS RE-ENABLED for this branch');
+      if (serverValue) {
+        toast.success(
+          purged > 0
+            ? `🔕 MUTED — ${purged} pending close-day SMS cancelled for this branch`
+            : '🔕 Close-day SMS MUTED for this branch'
+        );
+      } else {
+        toast.success('🔔 Close-day SMS RE-ENABLED for this branch');
+      }
       // Refresh the fresh-from-server copy so optimistic state sticks
       refreshBranches();
     } catch (e) {
@@ -183,6 +190,36 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
       toast.error(e.response?.data?.detail || 'Save failed');
     }
     setTogglingDisabled(s => ({ ...s, [branchId]: false }));
+  };
+
+  // Emergency "Stop All Pending Close-Day SMS" — cancels every pending,
+  // deferred, or failed close-reminder row across ALL branches in this org.
+  // Used during gateway-replay storms (DNS outage on the phone → same
+  // SMS keeps being re-sent via GSM). Confirms first because it's
+  // destructive; customer/expense SMS are untouched.
+  const [cancellingAll, setCancellingAll] = useState(false);
+  const cancelAllPending = async () => {
+    // eslint-disable-next-line no-alert
+    const ok = window.confirm(
+      'Cancel ALL pending close-day SMS across every branch?\n\n'
+      + 'This only affects close-reminder messages (did-not-close, approaching-close, overdue, day-after recap).\n'
+      + 'Customer, expense, and other SMS are untouched.\n\n'
+      + 'Use this to stop a gateway-replay storm immediately.'
+    );
+    if (!ok) return;
+    setCancellingAll(true);
+    try {
+      const r = await api.post('/sms/queue/cancel-pending-close-reminders');
+      const n = Number(r.data?.cancelled || 0);
+      if (n > 0) {
+        toast.success(`🛑 ${n} pending close-day SMS cancelled. Gateway will stop receiving these.`);
+      } else {
+        toast.success('Nothing to cancel — the close-day queue is already clean.');
+      }
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Cancel failed');
+    }
+    setCancellingAll(false);
   };
 
 
@@ -377,6 +414,27 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
                 Muted branches are skipped by the close-day scheduler — no "approaching close", "overdue", or "day-after recap" SMS will fire for them. Z-Report summaries (sent when you actively close the day) still go out.
               </p>
             )}
+            {/* Emergency kill-switch — pulls every pending close-reminder row
+                out of the queue across ALL branches. Only close-reminder
+                templates; customer/expense SMS untouched. Appears as a subtle
+                red link so admins don't hit it by accident, but is obviously
+                clickable. */}
+            <div className="mt-3 pt-3 border-t border-slate-200 flex items-center justify-between gap-2">
+              <p className="text-[10px] text-slate-400 italic">
+                Gateway storming you with duplicate alerts? Stop them instantly:
+              </p>
+              <button
+                type="button"
+                data-testid="emergency-cancel-close-sms-btn"
+                disabled={cancellingAll}
+                onClick={cancelAllPending}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold rounded-md border-2 border-red-300 text-red-700 bg-red-50 hover:bg-red-100 hover:border-red-400 transition-colors disabled:opacity-50"
+                title="Cancel every pending close-day SMS across all branches (customer / expense SMS are NOT affected)">
+                {cancellingAll
+                  ? <><Loader2 size={12} className="animate-spin" /> Cancelling…</>
+                  : <><BellOff size={12} /> Emergency: Stop All Pending Close-Day SMS</>}
+              </button>
+            </div>
           </div>
         )}
 
