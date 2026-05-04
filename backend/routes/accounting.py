@@ -1859,12 +1859,13 @@ async def get_customer_payment_history(customer_id: str, user=Depends(get_curren
             if not p.get("voided"):
                 date_branch_pairs.add((p.get("date", ""), inv.get("branch_id", "")))
 
-    # Check which dates are closed (Z-Report generated)
+    # Check which dates are closed (Z-Report generated) — only status="closed"
+    # counts. "open" or "reopened" rows must NOT mark payments as uneditable.
     closed_dates = set()
     for pay_date, branch_id in date_branch_pairs:
         if pay_date and branch_id:
             close_rec = await db.daily_closings.find_one(
-                {"date": pay_date, "branch_id": branch_id}, {"_id": 0, "date": 1}
+                {"date": pay_date, "branch_id": branch_id, "status": "closed"}, {"_id": 0, "date": 1}
             )
             if close_rec:
                 closed_dates.add((pay_date, branch_id))
@@ -2017,12 +2018,14 @@ async def modify_customer_payment(customer_id: str, data: dict, user=Depends(get
     if payment.get("voided"):
         raise HTTPException(status_code=400, detail="Payment already voided")
 
-    # Guard: check if the payment date is in a closed Z-Report day
+    # Guard: check if the payment date is in a closed Z-Report day.
+    # Only blocking if status="closed" — "open" or "reopened" rows must not
+    # block modifications.
     branch_id = inv.get("branch_id", "")
     pay_date = payment.get("date", "")
     if pay_date and branch_id:
         close_rec = await db.daily_closings.find_one(
-            {"date": pay_date, "branch_id": branch_id}, {"_id": 0}
+            {"date": pay_date, "branch_id": branch_id, "status": "closed"}, {"_id": 0}
         )
         if close_rec:
             raise HTTPException(status_code=400, detail=f"Cannot modify — {pay_date} is already included in a Z-Report")
@@ -2261,7 +2264,7 @@ async def void_customer_payment(customer_id: str, data: dict, user=Depends(get_c
     pay_date = payment.get("date", "")
     if pay_date and branch_id:
         close_rec = await db.daily_closings.find_one(
-            {"date": pay_date, "branch_id": branch_id}, {"_id": 0}
+            {"date": pay_date, "branch_id": branch_id, "status": "closed"}, {"_id": 0}
         )
         if close_rec:
             raise HTTPException(

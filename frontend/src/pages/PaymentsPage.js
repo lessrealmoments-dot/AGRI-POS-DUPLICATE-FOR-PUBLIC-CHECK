@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import { useAuth, api } from '../contexts/AuthContext';
-import { formatPHP } from '../lib/utils';
+import { formatPHP, extractApiError } from '../lib/utils';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
@@ -672,7 +672,7 @@ export default function PaymentsPage() {
       }).then(r => r.data || []).catch(() => [])).find(c => c.id === selectedCustomer.id);
       if (refreshed) setSelectedCustomer(refreshed);
     } catch (e) {
-      toast.error(e.response?.data?.detail || 'Modification failed');
+      toast.error(extractApiError(e, 'Modification failed'));
     }
     setEditSubmitting(false);
   };
@@ -709,7 +709,7 @@ export default function PaymentsPage() {
       }).then(r => r.data || []).catch(() => [])).find(c => c.id === selectedCustomer.id);
       if (refreshed) setSelectedCustomer(refreshed);
     } catch (e) {
-      toast.error(e.response?.data?.detail || 'Void failed');
+      toast.error(extractApiError(e, 'Void failed'));
     }
     setVoidSubmitting(false);
   };
@@ -743,7 +743,7 @@ export default function PaymentsPage() {
         loadGlobalHistory(histGlobalDateFrom, histGlobalDateTo, histGlobalMethod, histGlobalSearch);
       }
     } catch (e) {
-      toast.error(e.response?.data?.detail || 'Date change failed');
+      toast.error(extractApiError(e, 'Date change failed'));
     }
     setDateEditSubmitting(false);
   };

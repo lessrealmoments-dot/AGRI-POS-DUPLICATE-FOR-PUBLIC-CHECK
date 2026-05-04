@@ -14,6 +14,26 @@ export const formatQty = (qty, unit) => {
   return `${q % 1 === 0 ? q : q.toFixed(2)} ${unit || ''}`.trim();
 };
 
+// ─── Error message extractor ────────────────────────────────────────────────
+// FastAPI `HTTPException(detail=...)` accepts strings OR dicts. When the
+// backend sends a structured error (e.g. {type:"insufficient_funds",
+// message:"..."}), a naive `e.response?.data?.detail` turns into
+// `[object Object]` in toasts. This helper unpacks common shapes.
+export function extractApiError(err, fallback = 'Something went wrong') {
+  const d = err?.response?.data?.detail;
+  if (!d) return err?.message || fallback;
+  if (typeof d === 'string') return d;
+  if (typeof d === 'object') {
+    if (d.message) return d.message;
+    if (d.detail) return d.detail;
+    if (d.error) return d.error;
+    try { return JSON.stringify(d); } catch { return fallback; }
+  }
+  return fallback;
+}
+
+
+
 // ─── Timezone-aware date / datetime formatters (Iter 221) ──────────────────
 // Backend stores all *_at timestamps as UTC ISO strings (e.g. 2026-02-03T07:00:00+00:00).
 // Naively slicing produces UTC wall-clock — for PH staff a 3pm sale would
