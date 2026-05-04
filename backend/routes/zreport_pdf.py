@@ -88,9 +88,19 @@ async def generate_z_report_pdf(
     date: Optional[str] = None,
     branch_id: Optional[str] = None,
     closing_id: Optional[str] = None,
+    detailed: bool = False,
     user=Depends(get_current_user),
 ):
-    """Generate a detailed Z-Report PDF matching the Closing Wizard UI."""
+    """Generate a Z-Report PDF.
+
+    `detailed=False` (default) → compact Z-Report — only the Cash Drawer
+    Reconciliation block + footer. Mirrors the on-screen "Normal" view.
+
+    `detailed=True` → full breakdown (AR-by-method, Fund Transfers, Cashier
+    & Safe Expenses, Credit Extended, Digital/E-Wallet, Cash Sales by
+    Category, Discounts, Price Changes, Interest/Penalty Invoices). Mirrors
+    the on-screen "Detailed" view & Close Wizard Step 7.
+    """
     check_perm(user, "reports", "view")
 
     # If closing_id provided, pull data from the closing record
@@ -187,99 +197,156 @@ async def generate_z_report_pdf(
         pdf.row("Float Tomorrow", php(cash_to_drawer))
     pdf.ln(3)
 
-    # ── 2. AR Cash Payments Detail ────────────────────────────────────────
-    ar_payments = preview.get("ar_payments", [])
-    if ar_payments:
-        pdf.section_header("AR PAYMENTS RECEIVED", php(preview.get("total_ar_received", 0)))
-        pdf.detail_row("Customer", "Invoice #", "Amount", "Method", header=True)
-        for p in ar_payments:
-            method = p.get("method", "Cash" if p.get("fund_source") == "cashier" else "Digital")
-            pdf.detail_row(
-                str(p.get("customer_name", ""))[:30],
-                str(p.get("invoice_number", "")),
-                php(p.get("amount_paid", 0)),
-                method
+    # ── 2. AR Cash Payments Detail (DETAILED MODE ONLY) ──────────────────
+    if detailed:
+        ar_payments = preview.get("ar_payments", [])
+        if ar_payments:
+            pdf.section_header("AR PAYMENTS RECEIVED", php(preview.get("total_ar_received", 0)))
+            pdf.detail_row("Customer", "Invoice #", "Amount", "Method", header=True)
+            for p in ar_payments:
+                method = p.get("method", "Cash" if p.get("fund_source") == "cashier" else "Digital")
+                pdf.detail_row(
+                    str(p.get("customer_name", ""))[:30],
+                    str(p.get("invoice_number", "")),
+                    php(p.get("amount_paid", 0)),
+                    method
+                )
+            pdf.ln(3)
+
+        # ── 3. Fund Transfers Detail ──────────────────────────────────────────
+        fund_transfers = preview.get("fund_transfers_today", [])
+        if fund_transfers:
+            pdf.section_header("FUND TRANSFERS", php(net_ft))
+            pdf.detail_row("Type", "Authorized By", "Amount", "Note", header=True)
+            for ft in fund_transfers:
+                ft_type = ft.get("type", "")
+                label = "Capital Injection" if ft_type == "capital_add" else "Safe -> Cashier" if ft_type == "safe_to_cashier" else "Cashier -> Safe"
+                pdf.detail_row(
+                    label,
+                    str(ft.get("authorized_by", ""))[:25],
+                    php(ft.get("amount", 0)),
+                    str(ft.get("note", ""))[:20]
+                )
+            pdf.ln(3)
+
+        # ── 4. Expenses Detail ────────────────────────────────────────────────
+        expenses = preview.get("expenses", [])
+        cashier_exps = [e for e in expenses if e.get("fund_source") != "safe"]
+        safe_exps = [e for e in expenses if e.get("fund_source") == "safe"]
+
+        if cashier_exps:
+            pdf.section_header("CASHIER EXPENSES (from drawer)", php(preview.get("total_cashier_expenses", 0)))
+            pdf.detail_row("Description", "Category", "Amount", "", header=True)
+            for e in cashier_exps:
+                desc = str(e.get("description", e.get("category", "")))[:35]
+                if e.get("employee_name"):
+                    desc += f" ({e['employee_name']})"
+                pdf.detail_row(desc[:40], str(e.get("category", ""))[:20], php(e.get("amount", 0)))
+            pdf.ln(3)
+
+        if safe_exps:
+            pdf.section_header("SAFE EXPENSES (not from drawer)", php(preview.get("total_safe_expenses", 0)))
+            pdf.detail_row("Description", "Category", "Amount", "", header=True)
+            for e in safe_exps:
+                pdf.detail_row(str(e.get("description", ""))[:40], str(e.get("category", ""))[:20], php(e.get("amount", 0)))
+            pdf.ln(3)
+
+        # ── 5. Credit Extended Today ──────────────────────────────────────────
+        credit_sales = preview.get("credit_sales_today", [])
+        if credit_sales:
+            pdf.section_header("CREDIT EXTENDED TODAY", php(preview.get("total_credit_today", 0)))
+            pdf.detail_row("Customer", "Invoice #", "Balance", "Type", header=True)
+            for inv in credit_sales:
+                pdf.detail_row(
+                    str(inv.get("customer_name", ""))[:30],
+                    str(inv.get("invoice_number", "")),
+                    php(inv.get("balance", inv.get("grand_total", 0))),
+                    str(inv.get("payment_type", "credit")).title()
+                )
+            pdf.ln(3)
+
+        # ── 6. Digital/E-Wallet Payments ──────────────────────────────────────
+        digital_sales = preview.get("digital_sales_today", [])
+        if digital_sales:
+            pdf.section_header("E-WALLET / DIGITAL PAYMENTS", php(preview.get("total_digital_today", 0)))
+            pdf.detail_row("Customer", "Invoice #", "Amount", "Platform", header=True)
+            for d in digital_sales:
+                pdf.detail_row(
+                    str(d.get("customer_name", "Walk-in"))[:30],
+                    str(d.get("invoice_number", "")),
+                    php(d.get("amount", 0)),
+                    str(d.get("platform", "Digital"))[:15]
+                )
+            # Platform subtotals
+            pdf.separator()
+            for platform, amt in (preview.get("digital_by_platform") or {}).items():
+                pdf.row(f"  {platform} Total", php(amt), indent=6)
+            pdf.ln(3)
+
+        # ── 7. Cash Sales by Category ─────────────────────────────────────────
+        categories = preview.get("cash_sales_by_category", [])
+        if categories:
+            pdf.section_header("CASH SALES BY CATEGORY", php(preview.get("total_cash_sales", 0)))
+            pdf.detail_row("Category", "Items Sold", "Total", "", header=True)
+            for cat in categories:
+                pdf.detail_row(str(cat.get("category", "General"))[:30], str(cat.get("qty", 0)), php(cat.get("total", 0)))
+            pdf.ln(3)
+
+        # ── 8. Discount Breakdown by Product ──────────────────────────────────
+        disc = preview.get("discount_breakdown") or {}
+        disc_products = disc.get("products") or []
+        if disc_products or float(disc.get("total_discount", 0)) > 0:
+            pdf.section_header("DISCOUNTS GIVEN TODAY", php(disc.get("total_discount", 0)))
+            if disc_products:
+                pdf.detail_row("Product", "Units", "Total Disc.", "Avg/Unit", header=True)
+                for p in disc_products:
+                    pdf.detail_row(
+                        str(p.get("product_name", ""))[:35],
+                        str(p.get("units_sold", 0)),
+                        php(p.get("total_discount", 0)),
+                        php(p.get("avg_discount_per_unit", 0)),
+                    )
+            if float(disc.get("total_overall_discount", 0)) > 0:
+                pdf.row("Overall (invoice-level) discounts",
+                        php(disc.get("total_overall_discount", 0)), indent=6)
+            pdf.ln(3)
+
+        # ── 9. Permanent Price Changes Today ──────────────────────────────────
+        price_changes = (preview.get("price_changes_today") or {}).get("rows") or []
+        if price_changes:
+            pdf.section_header(
+                "PERMANENT PRICE CHANGES",
+                f"{(preview.get('price_changes_today') or {}).get('count', len(price_changes))} change(s)",
             )
-        pdf.ln(3)
+            pdf.detail_row("Product / Invoice", "From", "To", "OK by", header=True)
+            for r in price_changes:
+                pdf.detail_row(
+                    f"{str(r.get('product_name', ''))[:25]} / {str(r.get('invoice_number', ''))[:15]}",
+                    php(r.get("old_price", 0)),
+                    php(r.get("new_price", 0)),
+                    str(r.get("approver_name", ""))[:15],
+                )
+            pdf.ln(3)
 
-    # ── 3. Fund Transfers Detail ──────────────────────────────────────────
-    fund_transfers = preview.get("fund_transfers_today", [])
-    if fund_transfers:
-        pdf.section_header("FUND TRANSFERS", php(net_ft))
-        pdf.detail_row("Type", "Authorized By", "Amount", "Note", header=True)
-        for ft in fund_transfers:
-            ft_type = ft.get("type", "")
-            label = "Capital Injection" if ft_type == "capital_add" else "Safe -> Cashier" if ft_type == "safe_to_cashier" else "Cashier -> Safe"
-            pdf.detail_row(
-                label,
-                str(ft.get("authorized_by", ""))[:25],
-                php(ft.get("amount", 0)),
-                str(ft.get("note", ""))[:20]
-            )
-        pdf.ln(3)
-
-    # ── 4. Expenses Detail ────────────────────────────────────────────────
-    expenses = preview.get("expenses", [])
-    cashier_exps = [e for e in expenses if e.get("fund_source") != "safe"]
-    safe_exps = [e for e in expenses if e.get("fund_source") == "safe"]
-
-    if cashier_exps:
-        pdf.section_header("CASHIER EXPENSES (from drawer)", php(preview.get("total_cashier_expenses", 0)))
-        pdf.detail_row("Description", "Category", "Amount", "", header=True)
-        for e in cashier_exps:
-            desc = str(e.get("description", e.get("category", "")))[:35]
-            if e.get("employee_name"):
-                desc += f" ({e['employee_name']})"
-            pdf.detail_row(desc[:40], str(e.get("category", ""))[:20], php(e.get("amount", 0)))
-        pdf.ln(3)
-
-    if safe_exps:
-        pdf.section_header("SAFE EXPENSES (not from drawer)", php(preview.get("total_safe_expenses", 0)))
-        pdf.detail_row("Description", "Category", "Amount", "", header=True)
-        for e in safe_exps:
-            pdf.detail_row(str(e.get("description", ""))[:40], str(e.get("category", ""))[:20], php(e.get("amount", 0)))
-        pdf.ln(3)
-
-    # ── 5. Credit Extended Today ──────────────────────────────────────────
-    credit_sales = preview.get("credit_sales_today", [])
-    if credit_sales:
-        pdf.section_header("CREDIT EXTENDED TODAY", php(preview.get("total_credit_today", 0)))
-        pdf.detail_row("Customer", "Invoice #", "Balance", "Type", header=True)
-        for inv in credit_sales:
-            pdf.detail_row(
-                str(inv.get("customer_name", ""))[:30],
-                str(inv.get("invoice_number", "")),
-                php(inv.get("balance", inv.get("grand_total", 0))),
-                str(inv.get("payment_type", "credit")).title()
-            )
-        pdf.ln(3)
-
-    # ── 6. Digital/E-Wallet Payments ──────────────────────────────────────
-    digital_sales = preview.get("digital_sales_today", [])
-    if digital_sales:
-        pdf.section_header("E-WALLET / DIGITAL PAYMENTS", php(preview.get("total_digital_today", 0)))
-        pdf.detail_row("Customer", "Invoice #", "Amount", "Platform", header=True)
-        for d in digital_sales:
-            pdf.detail_row(
-                str(d.get("customer_name", "Walk-in"))[:30],
-                str(d.get("invoice_number", "")),
-                php(d.get("amount", 0)),
-                str(d.get("platform", "Digital"))[:15]
-            )
-        # Platform subtotals
-        pdf.separator()
-        for platform, amt in (preview.get("digital_by_platform") or {}).items():
-            pdf.row(f"  {platform} Total", php(amt), indent=6)
-        pdf.ln(3)
-
-    # ── 7. Cash Sales by Category ─────────────────────────────────────────
-    categories = preview.get("cash_sales_by_category", [])
-    if categories:
-        pdf.section_header("CASH SALES BY CATEGORY", php(preview.get("total_cash_sales", 0)))
-        pdf.detail_row("Category", "Items Sold", "Total", "", header=True)
-        for cat in categories:
-            pdf.detail_row(str(cat.get("category", "General"))[:30], str(cat.get("qty", 0)), php(cat.get("total", 0)))
-        pdf.ln(3)
+        # ── 10. Interest & Penalty Invoices Issued Today ──────────────────────
+        int_invs = preview.get("interest_invoices_today") or []
+        if int_invs:
+            int_total = sum(float(i.get("grand_total", 0)) for i in int_invs)
+            pdf.section_header("INTEREST & PENALTY INVOICES ISSUED TODAY", php(int_total))
+            pdf.detail_row("Customer", "Invoice #", "Amount", "Type", header=True)
+            for inv in int_invs:
+                inv_type = (
+                    "Penalty" if inv.get("sale_type") == "penalty_charge"
+                    else "Manual INT" if inv.get("manual_interest")
+                    else "Interest"
+                )
+                pdf.detail_row(
+                    str(inv.get("customer_name", ""))[:30],
+                    str(inv.get("invoice_number", "")),
+                    php(inv.get("grand_total", 0)),
+                    inv_type,
+                )
+            pdf.ln(3)
 
     # ── Footer summary ────────────────────────────────────────────────────
     pdf.separator()
@@ -299,7 +366,10 @@ async def generate_z_report_pdf(
     pdf.output(buf)
     buf.seek(0)
 
-    filename = f"ZReport_{branch_name.replace(' ', '_')}_{date}.pdf"
+    filename = (
+        f"ZReport{'_DETAILED' if detailed else ''}_"
+        f"{branch_name.replace(' ', '_')}_{date}.pdf"
+    )
     return StreamingResponse(
         buf,
         media_type="application/pdf",

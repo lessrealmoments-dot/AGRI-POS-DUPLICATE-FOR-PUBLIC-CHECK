@@ -2257,10 +2257,10 @@ export default function CloseWizardPage() {
                       const date = inGroupMode ? batchDates[0] : preview?.date;
                       const branchId = preview?.branch_id;
                       if (!date || !branchId) { toast.error('Missing date or branch'); return; }
-                      const tid = toast.loading('Preparing PDF for print…');
+                      const tid = toast.loading('Preparing detailed PDF for print…');
                       try {
                         const res = await api.get('/reports/z-report-pdf',
-                          { params: { date, branch_id: branchId }, responseType: 'blob' });
+                          { params: { date, branch_id: branchId, detailed: true }, responseType: 'blob' });
                         const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
                         const w = window.open(url, '_blank');
                         if (!w) { toast.error('Pop-up blocked — allow pop-ups to print.', { id: tid }); URL.revokeObjectURL(url); return; }
@@ -2273,19 +2273,19 @@ export default function CloseWizardPage() {
                       const date = inGroupMode ? batchDates[0] : preview?.date;
                       const branchId = preview?.branch_id;
                       if (!date || !branchId) { toast.error('Missing date or branch'); return; }
-                      const tid = toast.loading('Building PDF…');
+                      const tid = toast.loading('Building detailed PDF…');
                       try {
                         const res = await api.get('/reports/z-report-pdf',
-                          { params: { date, branch_id: branchId }, responseType: 'blob' });
+                          { params: { date, branch_id: branchId, detailed: true }, responseType: 'blob' });
                         const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
                         const a = document.createElement('a');
                         a.href = url;
-                        a.download = `ZReport_${(preview?.branch_name || 'branch').replace(/\s+/g, '_')}_${date}.pdf`;
+                        a.download = `ZReport_DETAILED_${(preview?.branch_name || 'branch').replace(/\s+/g, '_')}_${date}.pdf`;
                         document.body.appendChild(a);
                         a.click();
                         document.body.removeChild(a);
                         setTimeout(() => URL.revokeObjectURL(url), 2_000);
-                        toast.success('PDF downloaded', { id: tid });
+                        toast.success('Detailed PDF downloaded', { id: tid });
                       } catch (e) { toast.error(e.response?.data?.detail || 'Download failed', { id: tid }); }
                     }}>
                       <Download size={14} className="mr-1.5" /> Download PDF

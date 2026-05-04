@@ -606,20 +606,22 @@ export default function DailyLogPage() {
   // carries the JWT). `window.open(url)` and `<a download>` CAN'T attach
   // Authorization headers, which is why the previous "Download PDF" button
   // in the Close Wizard silently 401'd. These helpers cover both Print and
-  // Download flows from any Z-Report view (Normal or Detailed) — the PDF
-  // endpoint already renders the full Close-Wizard-Step-7 detail.
-  const fetchZReportBlob = useCallback(async (date, branchId) => {
+  // Download flows from any Z-Report view (Normal or Detailed) — the
+  // `detailed` flag tells the backend which layout to render so Normal
+  // prints/downloads the compact PDF and Detailed prints/downloads the
+  // full Step-7-style breakdown.
+  const fetchZReportBlob = useCallback(async (date, branchId, detailed = false) => {
     const res = await api.get('/reports/z-report-pdf', {
-      params: { date, branch_id: branchId },
+      params: { date, branch_id: branchId, detailed },
       responseType: 'blob',
     });
     return URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
   }, []);
 
-  const printZReportPdf = useCallback(async (date, branchId) => {
-    const toastId = toast.loading('Preparing PDF for print…');
+  const printZReportPdf = useCallback(async (date, branchId, detailed = false) => {
+    const toastId = toast.loading(`Preparing ${detailed ? 'detailed ' : ''}PDF for print…`);
     try {
-      const objUrl = await fetchZReportBlob(date, branchId);
+      const objUrl = await fetchZReportBlob(date, branchId, detailed);
       const w = window.open(objUrl, '_blank');
       if (!w) {
         toast.error('Pop-up blocked — please allow pop-ups for this site to print.', { id: toastId });
@@ -637,19 +639,19 @@ export default function DailyLogPage() {
     }
   }, [fetchZReportBlob]);
 
-  const downloadZReportPdf = useCallback(async (date, branchId, branchName) => {
-    const toastId = toast.loading('Building PDF…');
+  const downloadZReportPdf = useCallback(async (date, branchId, branchName, detailed = false) => {
+    const toastId = toast.loading(`Building ${detailed ? 'detailed ' : ''}PDF…`);
     try {
-      const objUrl = await fetchZReportBlob(date, branchId);
+      const objUrl = await fetchZReportBlob(date, branchId, detailed);
       const a = document.createElement('a');
       a.href = objUrl;
       const safeBranch = (branchName || 'branch').replace(/\s+/g, '_');
-      a.download = `ZReport_${safeBranch}_${date}.pdf`;
+      a.download = `ZReport${detailed ? '_DETAILED' : ''}_${safeBranch}_${date}.pdf`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(objUrl), 2_000);
-      toast.success('PDF downloaded', { id: toastId });
+      toast.success(`${detailed ? 'Detailed ' : ''}PDF downloaded`, { id: toastId });
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Could not download Z-Report PDF', { id: toastId });
     }
@@ -1298,8 +1300,8 @@ export default function DailyLogPage() {
             <ZReport
               data={closing}
               branchName={currentBranch?.name}
-              onPrint={() => printZReportPdf(closing.date, closing.branch_id || currentBranch?.id)}
-              onDownloadPdf={() => downloadZReportPdf(closing.date, closing.branch_id || currentBranch?.id, currentBranch?.name)}
+              onPrint={() => printZReportPdf(closing.date, closing.branch_id || currentBranch?.id, false)}
+              onDownloadPdf={() => downloadZReportPdf(closing.date, closing.branch_id || currentBranch?.id, currentBranch?.name, false)}
             />
           ) : (
             /* ── OPEN: Cash Reconciliation Form ── */
@@ -1886,8 +1888,8 @@ export default function DailyLogPage() {
                       preview={zreportDetail}
                       closing={zreportData}
                       branchName={zreportData.branch_name || currentBranch?.name}
-                      onPrint={() => printZReportPdf(zreportData.date, zreportData.branch_id)}
-                      onDownloadPdf={() => downloadZReportPdf(zreportData.date, zreportData.branch_id, zreportData.branch_name || currentBranch?.name)}
+                      onPrint={() => printZReportPdf(zreportData.date, zreportData.branch_id, true)}
+                      onDownloadPdf={() => downloadZReportPdf(zreportData.date, zreportData.branch_id, zreportData.branch_name || currentBranch?.name, true)}
                     />
                   ) : (
                     <p className="text-center py-8 text-slate-400">Could not load detailed breakdown.</p>
@@ -1896,8 +1898,8 @@ export default function DailyLogPage() {
                   <ZReport
                     data={zreportData}
                     branchName={zreportData.branch_name || currentBranch?.name}
-                    onPrint={() => printZReportPdf(zreportData.date, zreportData.branch_id)}
-                    onDownloadPdf={() => downloadZReportPdf(zreportData.date, zreportData.branch_id, zreportData.branch_name || currentBranch?.name)}
+                    onPrint={() => printZReportPdf(zreportData.date, zreportData.branch_id, false)}
+                    onDownloadPdf={() => downloadZReportPdf(zreportData.date, zreportData.branch_id, zreportData.branch_name || currentBranch?.name, false)}
                   />
                 )
               ) : (

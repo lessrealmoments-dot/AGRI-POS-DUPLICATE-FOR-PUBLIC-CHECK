@@ -1,5 +1,21 @@
 # AgriBooks Changelog
 
+## Feb 2026 — Z-Report PDF respects Normal vs Detailed mode (Iter 233)
+
+**User report**: Whether the user clicked Print/Download from the **Normal** or the **Detailed** Z-Report view, the PDF that came out was always the same (compact). Detailed view's Print/Download was effectively cosmetic — the backend ignored which view triggered it.
+
+**Fix**:
+- **Backend** (`/app/backend/routes/zreport_pdf.py`): `GET /api/reports/z-report-pdf` now accepts `detailed: bool = False` query param.
+  - `detailed=False` → renders ONLY the Cash Drawer Reconciliation block + footer summary (compact, mirrors on-screen Normal view).
+  - `detailed=True` → renders the full Step-7 breakdown: AR Payments, Fund Transfers, Cashier/Safe Expenses, Credit Extended, Digital/E-Wallet, Cash Sales by Category, **+ NEW**: Discounts by Product, Permanent Price Changes, Interest & Penalty Invoices Issued. Mirrors on-screen Detailed view.
+  - Filename now includes `_DETAILED` suffix when applicable: `ZReport_DETAILED_<branch>_<date>.pdf` vs `ZReport_<branch>_<date>.pdf`.
+
+- **Frontend** (`DailyLogPage.js` + `CloseWizardPage.js`): The Print and Download PDF buttons now pass `detailed: true|false` based on the active view mode. Toast text updates to `"Preparing detailed PDF..."` when in Detailed mode for clarity.
+  - Close Wizard Step 8 always sends `detailed: true` since it's used immediately after the wizard's Step 7 detailed preview.
+
+The PDF print bug from Iter 230 (Radix Dialog blocking browser print) was already worked around by going through the PDF endpoint — this iter fixes the orthogonal bug that the PDF endpoint always rendered the same content regardless of the calling view.
+
+
 ## Feb 2026 — Interest/Penalty Backdate Guard + Retag Audit (Iter 232)
 
 **User report**: Generated interest on 5/4 but dated it as 5/3 (via PaymentsPage date picker), and also collected the payment dated 5/3. The Close Wizard for 5/4 still showed it in "Interest & Penalty Invoices Created Today" because the header/UI trusted the creation timestamp while the ledger used `order_date` — mismatched dates leak across the auditor's view.
