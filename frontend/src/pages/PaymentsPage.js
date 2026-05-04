@@ -14,7 +14,7 @@ import {
   Search, AlertTriangle, Percent, Receipt, Clock,
   Info, Zap, Edit3, Banknote, CreditCard, FileText, RefreshCw,
   Building2, Smartphone, X, Tag, Users, ArrowDownAZ, ArrowDown01, GhostIcon,
-  Shield, PenLine, Ban, History, ChevronDown, Printer, DollarSign
+  Shield, PenLine, Ban, History, ChevronDown, Printer, DollarSign, CalendarDays
 } from 'lucide-react';
 import { toast } from 'sonner';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
@@ -174,6 +174,13 @@ export default function PaymentsPage() {
   const [voidPin, setVoidPin] = useState('');
   const [voidReason, setVoidReason] = useState('');
   const [voidSubmitting, setVoidSubmitting] = useState(false);
+
+  // Payment date change
+  const [dateEditPayment, setDateEditPayment] = useState(null); // same shape as editPayment
+  const [dateEditNewDate, setDateEditNewDate] = useState('');
+  const [dateEditPin, setDateEditPin] = useState('');
+  const [dateEditReason, setDateEditReason] = useState('');
+  const [dateEditSubmitting, setDateEditSubmitting] = useState(false);
 
   // No-rate prompt
   const [ratePromptOpen, setRatePromptOpen] = useState(false);
@@ -707,6 +714,40 @@ export default function PaymentsPage() {
     setVoidSubmitting(false);
   };
 
+  // ── Change Payment Date (date-only edit, PIN-gated, audit-logged) ──
+  const handleEditPaymentDate = async () => {
+    if (!dateEditPayment) return;
+    if (!dateEditNewDate) { toast.error('Pick a new date'); return; }
+    if (dateEditNewDate === dateEditPayment.date) { toast.error('Pick a different date'); return; }
+    if (!dateEditPin || dateEditPin.length < 4) { toast.error('Manager PIN required'); return; }
+    setDateEditSubmitting(true);
+    try {
+      const res = await api.post(`/customers/${selectedCustomer.id}/edit-payment-date`, {
+        invoice_id: dateEditPayment.invoice_id,
+        payment_id: dateEditPayment.payment_id,
+        new_date: dateEditNewDate,
+        manager_pin: dateEditPin,
+        reason: dateEditReason || 'Date corrected',
+      });
+      toast.success(`${res.data.message} — authorized by ${res.data.authorized_by}`);
+      setDateEditPayment(null);
+      setDateEditNewDate('');
+      setDateEditPin('');
+      setDateEditReason('');
+      // Reload history for whichever view is active
+      if (selectedCustomer?.id) {
+        const histRes = await api.get(`/customers/${selectedCustomer.id}/payment-history`);
+        setPayHistory(histRes.data);
+      }
+      if (pageTab === 'global_history') {
+        loadGlobalHistory(histGlobalDateFrom, histGlobalDateTo, histGlobalMethod, histGlobalSearch);
+      }
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Date change failed');
+    }
+    setDateEditSubmitting(false);
+  };
+
 
   const getDaysOverdue = (dueDate) => {
     if (!dueDate) return 0;
@@ -888,6 +929,7 @@ export default function PaymentsPage() {
                     <th className="text-right px-3 py-2 text-[10px] font-semibold text-slate-500 uppercase">Amount</th>
                     <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-500 uppercase">Reference</th>
                     <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-500 uppercase">Recorded By</th>
+                    <th className="text-right px-3 py-2 text-[10px] font-semibold text-slate-500 uppercase w-20"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -926,6 +968,25 @@ export default function PaymentsPage() {
                         </td>
                         <td className="px-3 py-2 text-xs text-slate-400">{p.reference || '—'}</td>
                         <td className="px-3 py-2 text-xs text-slate-500">{p.recorded_by}</td>
+                        <td className="px-3 py-2 text-right">
+                          {!p.voided && !isDiscount && p.customer_id && (
+                            <Button variant="ghost" size="sm"
+                              className="h-6 px-1.5 text-[10px] text-indigo-600 hover:text-indigo-700 gap-0.5"
+                              onClick={() => {
+                                // Ensure we target the right customer context for the
+                                // backend endpoint, then open the date-edit dialog.
+                                setSelectedCustomer({ id: p.customer_id, name: p.customer_name });
+                                setDateEditPayment(p);
+                                setDateEditNewDate(p.date || '');
+                                setDateEditPin('');
+                                setDateEditReason('');
+                              }}
+                              title="Change the payment date (PIN-gated, audit-logged)"
+                              data-testid={`hist-edit-date-${i}`}>
+                              <CalendarDays size={10} /> Date
+                            </Button>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
@@ -1554,6 +1615,17 @@ export default function PaymentsPage() {
                               data-testid={`edit-payment-${p.payment_id}`}>
                               <PenLine size={10} /> Edit
                             </Button>
+                            <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px] text-indigo-600 hover:text-indigo-700 gap-0.5"
+                              onClick={() => {
+                                setDateEditPayment(p);
+                                setDateEditNewDate(p.date || '');
+                                setDateEditPin('');
+                                setDateEditReason('');
+                              }}
+                              title="Change the payment date (PIN-gated, audit-logged)"
+                              data-testid={`edit-payment-date-${p.payment_id}`}>
+                              <CalendarDays size={10} /> Date
+                            </Button>
                             <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px] text-red-600 hover:text-red-700 hover:bg-red-50 gap-0.5"
                               onClick={() => {
                                 setVoidPayment(p);
@@ -1675,6 +1747,62 @@ export default function PaymentsPage() {
                 disabled={voidSubmitting || !voidPin || voidPin.length < 4 || !voidReason.trim() || voidReason.trim().length < 4}
                 data-testid="void-payment-confirm">
                 {voidSubmitting ? 'Voiding...' : 'Confirm Cancel'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+
+      {/* ── Edit Payment Date Dialog ── */}
+      <Dialog open={!!dateEditPayment} onOpenChange={(o) => { if (!o) setDateEditPayment(null); }}>
+        <DialogContent className="sm:max-w-sm" data-testid="edit-payment-date-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <CalendarDays size={16} className="text-indigo-600" /> Change Payment Date
+            </DialogTitle>
+            <DialogDescription>
+              {dateEditPayment?.invoice_number} — {formatPHP(dateEditPayment?.amount || 0)} · {dateEditPayment?.method}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs space-y-1">
+              <div className="flex justify-between"><span className="text-slate-500">Current Date</span><span className="font-mono font-bold">{dateEditPayment?.date || '—'}</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">Recorded By</span><span>{dateEditPayment?.recorded_by || '—'}</span></div>
+              <div className="text-[10px] text-slate-500 mt-1.5 leading-snug">
+                <Info size={9} className="inline mr-0.5" />
+                Only the payment DATE changes — amount, method and linked invoice stay the same.
+                Both the old and new dates must be OPEN (not closed in a Z-Report).
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs">New Date <span className="text-red-600">*</span></Label>
+              <Input type="date" value={dateEditNewDate}
+                onChange={e => setDateEditNewDate(e.target.value)}
+                max={new Date().toISOString().slice(0, 10)}
+                className="h-9 mt-1"
+                data-testid="edit-payment-date-newdate" />
+            </div>
+            <div>
+              <Label className="text-xs">Reason (optional)</Label>
+              <Input value={dateEditReason} onChange={e => setDateEditReason(e.target.value)}
+                placeholder="e.g. Paid on this date, encoded late"
+                className="h-8 mt-1 text-xs"
+                data-testid="edit-payment-date-reason" />
+            </div>
+            <div>
+              <Label className="text-xs flex items-center gap-1"><Shield size={11} /> Manager PIN <span className="text-red-600">*</span></Label>
+              <Input type="password" value={dateEditPin} onChange={e => setDateEditPin(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleEditPaymentDate()}
+                placeholder="Enter PIN" className="h-9 mt-1 font-mono text-center text-xl tracking-widest"
+                data-testid="edit-payment-date-pin" />
+            </div>
+            <div className="flex gap-2 pt-1">
+              <Button variant="outline" className="flex-1" onClick={() => setDateEditPayment(null)}>Cancel</Button>
+              <Button className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white" onClick={() => handleEditPaymentDate()}
+                disabled={dateEditSubmitting || !dateEditNewDate || dateEditNewDate === dateEditPayment?.date || !dateEditPin || dateEditPin.length < 4}
+                data-testid="edit-payment-date-confirm">
+                {dateEditSubmitting ? 'Saving...' : 'Confirm Change'}
               </Button>
             </div>
           </div>

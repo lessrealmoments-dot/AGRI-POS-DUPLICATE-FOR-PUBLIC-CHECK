@@ -10,7 +10,7 @@
  *   branchId       – current branch UUID
  *   onSuccess      – fn() called after successful transfer
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../contexts/AuthContext';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -28,17 +28,45 @@ const WALLET_LABELS = {
 };
 
 export default function FundTransferDialog({ open, onClose, transferType, walletByType, branchId, onSuccess }) {
+  const todayLocal = () => {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
   const [managerPin, setManagerPin] = useState('');
   const [totpCode, setTotpCode] = useState('');
   const [ownerPin, setOwnerPin] = useState('');
   const [capitalTarget, setCapitalTarget] = useState('cashier');
+  const [transferDate, setTransferDate] = useState(todayLocal());
+  const [dateClosed, setDateClosed] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Validate the selected date against daily-closings — fund movements
+  // can only be recorded on an open day.
+  useEffect(() => {
+    if (!open || !transferDate || !branchId) { setDateClosed(false); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api.get(`${BACKEND_URL}/api/invoices/check-date-closed`, {
+          params: { date: transferDate, branch_id: branchId },
+        });
+        if (!cancelled) setDateClosed(!!r.data.closed);
+      } catch {
+        if (!cancelled) setDateClosed(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [open, transferDate, branchId]);
 
   const reset = () => {
     setAmount(''); setNote(''); setManagerPin('');
     setTotpCode(''); setOwnerPin(''); setCapitalTarget('cashier');
+    setTransferDate(todayLocal()); setDateClosed(false);
   };
 
   const handleClose = () => { reset(); onClose?.(); };
@@ -47,6 +75,8 @@ export default function FundTransferDialog({ open, onClose, transferType, wallet
     if (!amount || parseFloat(amount) <= 0) { toast.error('Enter a valid amount'); return; }
     if (!transferType) return;
     if (transferType.key !== 'capital_add' && !note.trim()) { toast.error('Please add a note'); return; }
+    if (!transferDate) { toast.error('Select a date'); return; }
+    if (dateClosed) { toast.error('Day is already closed — pick an open day'); return; }
 
     setSaving(true);
     try {
@@ -55,6 +85,7 @@ export default function FundTransferDialog({ open, onClose, transferType, wallet
         transfer_type: transferType.key,
         amount: parseFloat(amount),
         note,
+        date: transferDate,
         target_wallet: transferType.key === 'capital_add' ? capitalTarget : undefined,
         manager_pin: managerPin || undefined,
         totp_code: totpCode || undefined,
@@ -104,6 +135,19 @@ export default function FundTransferDialog({ open, onClose, transferType, wallet
             <Input type="number" value={amount} onChange={e => setAmount(e.target.value)}
               placeholder="0.00" className="mt-1 h-10 text-lg font-mono" autoFocus
               data-testid="fund-transfer-amount" />
+          </div>
+          <div>
+            <Label className="text-xs text-slate-600">Date *</Label>
+            <Input type="date" value={transferDate}
+              onChange={e => setTransferDate(e.target.value)}
+              max={todayLocal()}
+              className="mt-1 h-9"
+              data-testid="fund-transfer-date" />
+            <p className={`text-[10px] mt-1 ${dateClosed ? 'text-red-600 font-medium' : 'text-slate-400'}`}>
+              {dateClosed
+                ? 'This day is already closed — only open days can receive fund transfers.'
+                : 'Default: today. Only open (unclosed) days are accepted.'}
+            </p>
           </div>
           {transferType.key !== 'capital_add' && (
             <div>
@@ -182,7 +226,7 @@ export default function FundTransferDialog({ open, onClose, transferType, wallet
           <button onClick={handleClose}
             className="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-600 hover:bg-slate-50"
             data-testid="fund-transfer-cancel">Cancel</button>
-          <button onClick={executeTransfer} disabled={saving || !amount}
+          <button onClick={executeTransfer} disabled={saving || !amount || dateClosed}
             className="flex-1 py-2.5 rounded-xl bg-[#1A4D2E] hover:bg-[#14532d] text-white text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
             data-testid="fund-transfer-confirm">
             {saving ? <RefreshCw size={14} className="animate-spin" /> : <ArrowRightLeft size={14} />}

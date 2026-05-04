@@ -270,6 +270,20 @@ async def create_fund_transfer(data: dict, user=Depends(get_current_user)):
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be positive")
 
+    # Resolve effective date — frontend may override (backdate to an open day).
+    # Default: today in UTC (kept for backward compatibility).
+    effective_date = (data.get("date") or "").strip() or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # Reject backdating onto a closed day — fund movements must live on an open day.
+    closed_day = await db.daily_closings.find_one(
+        {"branch_id": branch_id, "date": effective_date, "status": "closed"},
+        {"_id": 0, "date": 1}
+    )
+    if closed_day:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Day {effective_date} is already closed — fund transfers can only be recorded on open days."
+        )
+
     authorized_by = None
 
     # ── Authorization based on transfer type ─────────────────────────────────
@@ -433,7 +447,7 @@ async def create_fund_transfer(data: dict, user=Depends(get_current_user)):
         "performed_by_id": user["id"],
         "performed_by_name": user.get("full_name", user["username"]),
         "created_at": now_iso(),
-        "date": data.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d")),
+        "date": effective_date,
     }
     # Store target for capital_add so closing wizard knows if it went to cashier or safe
     if transfer_type == "capital_add":
@@ -2006,6 +2020,108 @@ async def modify_customer_payment(customer_id: str, data: dict, user=Depends(get
         "new_balance": final_balance,
         "new_status": final_status,
         "authorized_by": authorized_name,
+    }
+
+
+@router.post("/customers/{customer_id}/edit-payment-date")
+async def edit_customer_payment_date(customer_id: str, data: dict, user=Depends(get_current_user)):
+    """Change the date of an already-posted payment.
+
+    Guards:
+      - Manager PIN required (action_key=modify_payment).
+      - Blocked if the ORIGINAL payment date is in a closed Z-Report day
+        (can't pull it out of a finalised report).
+      - Blocked if the NEW date falls on a closed Z-Report day
+        (can't retroactively push it into a finalised report).
+      - Cannot edit a voided payment.
+
+    Stores a `date_edit_history` trail on the payment row so the change
+    is fully auditable.
+    """
+    check_perm(user, "accounting", "receive_payment")
+
+    invoice_id = data.get("invoice_id")
+    payment_id = data.get("payment_id")
+    new_date = (data.get("new_date") or "").strip()
+    manager_pin = data.get("manager_pin", "")
+    reason = (data.get("reason") or "Payment date corrected").strip()
+
+    if not invoice_id or not payment_id:
+        raise HTTPException(status_code=400, detail="invoice_id and payment_id required")
+    if not new_date:
+        raise HTTPException(status_code=400, detail="new_date required (YYYY-MM-DD)")
+    try:
+        datetime.strptime(new_date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="new_date must be YYYY-MM-DD")
+    if not manager_pin:
+        raise HTTPException(status_code=400, detail="Manager PIN required")
+
+    from routes.verify import verify_pin_for_action
+    verifier = await verify_pin_for_action(manager_pin, "modify_payment")
+    if not verifier:
+        raise HTTPException(status_code=403, detail="Invalid PIN — date change not authorized")
+
+    inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    payment = next((p for p in inv.get("payments", []) if p.get("id") == payment_id), None)
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment record not found")
+    if payment.get("voided"):
+        raise HTTPException(status_code=400, detail="Cannot edit a voided payment")
+
+    branch_id = inv.get("branch_id", "")
+    old_date = payment.get("date", "")
+    if old_date == new_date:
+        return {"message": "Date unchanged", "old_date": old_date, "new_date": new_date}
+
+    # Block if original date is closed
+    if old_date and branch_id:
+        close_rec = await db.daily_closings.find_one(
+            {"date": old_date, "branch_id": branch_id, "status": "closed"}, {"_id": 0}
+        )
+        if close_rec:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot edit — original date {old_date} is already included in a Z-Report."
+            )
+    # Block if new date is closed
+    if branch_id:
+        close_new = await db.daily_closings.find_one(
+            {"date": new_date, "branch_id": branch_id, "status": "closed"}, {"_id": 0}
+        )
+        if close_new:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot edit — target date {new_date} is already closed in a Z-Report."
+            )
+
+    authorized_name = verifier.get("verifier_name", "Manager")
+    history_entry = {
+        "from": old_date,
+        "to": new_date,
+        "reason": reason,
+        "edited_by": user.get("full_name", user["username"]),
+        "authorized_by": authorized_name,
+        "edited_at": now_iso(),
+    }
+
+    await db.invoices.update_one(
+        {"id": invoice_id, "payments.id": payment_id},
+        {
+            "$set": {"payments.$.date": new_date},
+            "$push": {"payments.$.date_edit_history": history_entry},
+        }
+    )
+
+    return {
+        "message": f"Payment date changed: {old_date} → {new_date}",
+        "old_date": old_date,
+        "new_date": new_date,
+        "authorized_by": authorized_name,
+        "reason": reason,
     }
 
 

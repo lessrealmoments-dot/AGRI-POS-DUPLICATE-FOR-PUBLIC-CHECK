@@ -550,6 +550,7 @@ async def get_daily_close_preview(
             {"type": ft["transfer_type"], "amount": float(ft.get("amount", 0)),
              "note": ft.get("note", ""), "authorized_by": ft.get("authorized_by", ""),
              "target_wallet": ft.get("target_wallet", ""),
+             "date": ft.get("date", ""),
              "time": ft.get("created_at", "")[-19:-10] if ft.get("created_at") else ""}
             for ft in fund_transfers_today
             if ft.get("transfer_type") in ("capital_add", "safe_to_cashier", "cashier_to_safe")
@@ -1151,6 +1152,15 @@ async def batch_close_preview(
         "safe_to_cashier": safe_to_cashier,
         "cashier_to_safe": cashier_to_safe,
         "net_fund_transfers": net_fund_transfers,
+        "fund_transfers_today": [
+            {"type": ft["transfer_type"], "amount": float(ft.get("amount", 0)),
+             "note": ft.get("note", ""), "authorized_by": ft.get("authorized_by", ""),
+             "target_wallet": ft.get("target_wallet", ""),
+             "date": ft.get("date", ""),
+             "time": ft.get("created_at", "")[-19:-10] if ft.get("created_at") else ""}
+            for ft in fund_transfers_batch
+            if ft.get("transfer_type") in ("capital_add", "safe_to_cashier", "cashier_to_safe")
+        ],
         "total_digital_today": total_digital,
         "digital_by_platform": digital_by_platform,
         "digital_sales_today": digital_sales_list,

@@ -223,6 +223,28 @@ export async function getMeta(key) {
   });
 }
 
+/**
+ * Generate an offline receipt number that mirrors the online format but
+ * carries an `OFF` marker so it cannot collide with the server-side
+ * sequence. Format: `{PREFIX}-{BRANCH_CODE}-OFF-{6-digit local seq}`.
+ * Sequence is per (branch_code, prefix) and persisted in the META store
+ * so each offline device keeps incrementing until cleared.
+ *
+ * Example: SI-MN-OFF-000001
+ *
+ * Backend `/sales/sync` preserves whatever `invoice_number` we send, so
+ * these numbers remain permanent on the server too — no renumbering.
+ */
+export async function getNextOfflineReceiptNumber(prefix, branchCode) {
+  const safePrefix = (prefix || 'SI').toUpperCase();
+  const safeCode = (branchCode || 'XX').toUpperCase();
+  const key = `offline_seq:${safeCode}:${safePrefix}`;
+  const currentValue = await getMeta(key);
+  const next = (parseInt(currentValue, 10) || 0) + 1;
+  await setMeta(key, next);
+  return `${safePrefix}-${safeCode}-OFF-${String(next).padStart(6, '0')}`;
+}
+
 // Branch price overrides cache (keyed by product_id — one branch at a time)
 export async function cacheBranchPrices(items) {
   await clearAndPut(STORES.BRANCH_PRICES, items);

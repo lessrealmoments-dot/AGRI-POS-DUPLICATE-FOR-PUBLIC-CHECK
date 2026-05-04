@@ -25,6 +25,7 @@ import {
   cacheProducts, getProducts, cacheCustomers, getCustomers,
   cachePriceSchemes, getPriceSchemes, addPendingSale, getPendingSaleCount,
   setOfflineAdminPinHash, setOfflinePinGrants,
+  getNextOfflineReceiptNumber,
 } from '../lib/offlineDB';
 import { syncPendingSales, startAutoSync, stopAutoSync, newEnvelopeId } from '../lib/syncManager';
 import {
@@ -2032,11 +2033,22 @@ export default function UnifiedSalesPage() {
                 product_name: l.product_name, quantity: l.quantity,
                 rate: l.rate, total: lineTotal(l), unit: l.unit || ''
               }));
+          // If we happen to be offline here (mid-checkout connectivity drop),
+          // use an offline invoice number so the signed slip shows a real ID.
+          let sigInvoiceNumber = '(pending)';
+          if (!isOnline) {
+            try {
+              sigInvoiceNumber = await getNextOfflineReceiptNumber(
+                header.prefix || 'SI',
+                currentBranch?.branch_code || ''
+              );
+            } catch {}
+          }
           setPreInvoiceSig({
             approvedBy: res.data.manager_name,
             invoice: {
               id: '',  // no invoice yet
-              invoice_number: '(pending)',
+              invoice_number: sigInvoiceNumber,
               customer_name: selectedCustomer.name,
               customer_id: selectedCustomer.id,
               branch_id: currentBranch?.id || '',
@@ -2081,6 +2093,21 @@ export default function UnifiedSalesPage() {
     const saleId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const envelopeId = newEnvelopeId(); // separate idempotency key for resilient sync
     const today = localToday();
+
+    // Offline receipt number — mirrors the online format (PREFIX-BRANCH-SEQ)
+    // with an "OFF" marker so it can never collide with the server-side
+    // sequence. Backend /sales/sync preserves this number on replay.
+    let offlineInvoiceNumber = null;
+    if (!isOnline) {
+      try {
+        offlineInvoiceNumber = await getNextOfflineReceiptNumber(
+          header.prefix || 'SI',
+          currentBranch?.branch_code || ''
+        );
+      } catch (err) {
+        console.error('Offline receipt number generation failed:', err);
+      }
+    }
     
     // Calculate amounts
     const splitCashAmt = parseFloat(splitCash || 0);
@@ -2193,6 +2220,10 @@ export default function UnifiedSalesPage() {
       // Offline credit-sale bypass metadata (Iter 192) — replayed by /sales/sync
       // which retroactively creates a signature_session(status=bypassed)
       offline_bypass: offlineBypass || undefined,
+      // Offline invoice number (present only when sale was built offline).
+      // Backend /sales/sync preserves this via sale.get("invoice_number") so
+      // the receipt handed to the customer never renumbers on sync.
+      invoice_number: offlineInvoiceNumber || undefined,
     };
 
     if (isOnline) {
@@ -2346,10 +2377,22 @@ export default function UnifiedSalesPage() {
           return;
         }
         // Save offline if API fails for other reasons
+        // If we didn't have an offline receipt number (we started online),
+        // mint one now so the saved record carries a proper identifier.
+        if (!saleData.invoice_number) {
+          try {
+            saleData.invoice_number = await getNextOfflineReceiptNumber(
+              header.prefix || 'SI',
+              currentBranch?.branch_code || ''
+            );
+          } catch {}
+        }
         await addPendingSale(saleData);
         const count = await getPendingSaleCount();
         setPendingCount(count);
-        toast.success('Sale saved offline (will sync later)');
+        toast.success(saleData.invoice_number
+          ? `${saleData.invoice_number} saved offline (will sync later)`
+          : 'Sale saved offline (will sync later)');
         clearCart();
         setCheckoutDialog(false);
         setPendingCreditSale(null);
@@ -2358,7 +2401,9 @@ export default function UnifiedSalesPage() {
       await addPendingSale(saleData);
       const count = await getPendingSaleCount();
       setPendingCount(count);
-      toast.success(`Sale saved offline!`);
+      toast.success(saleData.invoice_number
+        ? `${saleData.invoice_number} saved offline!`
+        : 'Sale saved offline!');
       clearCart();
       setCheckoutDialog(false);
       setPendingCreditSale(null);

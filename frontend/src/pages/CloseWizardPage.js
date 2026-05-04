@@ -2001,6 +2001,7 @@ export default function CloseWizardPage() {
                         <div key={i} className="px-4 py-2 flex items-center justify-between text-sm">
                           <div>
                             <span className="font-medium text-slate-800">{label}</span>
+                            {ft.date && <span className="ml-2 text-[10px] text-slate-500 font-mono">{ft.date}</span>}
                             {ft.note && <span className="text-xs text-slate-400 ml-2">{ft.note}</span>}
                             {ft.authorized_by && <span className="text-[10px] text-slate-400 ml-1">by {ft.authorized_by}</span>}
                           </div>

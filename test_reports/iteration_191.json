@@ -1,0 +1,58 @@
+{
+  "summary": "Iter 191 review of three minor improvements: (1) Fund Transfer date field + closed-day guard, (2) Offline invoice number preservation in /sales/sync, (3) Manager-PIN Edit Payment Date endpoint + UI dialog. Backend pytest: 11/11 PASS. Frontend smoke: Global Payment History 'Date' buttons + Edit-Payment-Date dialog confirmed live; FundTransferDialog data-testid present in code (UI opener gated behind single-branch selection on /fund-management).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "playwright_results": {
+    "login": "PASS — test_org_admin@regression.local / RegressionPass!2026 → /dashboard",
+    "global_payment_history_date_buttons": "PASS — /payments → 'Payment History' tab renders 2x data-testid=hist-edit-date-{i} buttons. Clicking opens data-testid=edit-payment-date-dialog with date+password inputs (types observed: ['date', null, 'password']).",
+    "customer_history_date_buttons": "NOT VERIFIED LIVE — clicked 'Juan Dela Cruz 633c26' in customer list; 0 data-testid=edit-payment-date-{payment_id} buttons rendered. Code at /app/frontend/src/pages/PaymentsPage.js:1626 only shows the button for non-voided, non-discount, open-day payments. The selected customer has receivables but no qualifying past-payment row visible in this view. Spec coverage validated indirectly: same dialog is used by global history flow and the backend endpoint is fully covered by 6 pytest cases.",
+    "fund_transfer_dialog_date": "CODE-VERIFIED — data-testid=fund-transfer-date present at /app/frontend/src/components/FundTransferDialog.js:145 with input type=date + max=today. Unable to reliably open the dialog via UI in this run because /fund-management requires a single branch (not 'All Branches') and the sidebar branch picker render path was inconsistent. End-to-end `date` payload behavior is fully covered by backend test_capital_add_with_date_field + test_capital_add_on_closed_day_rejected (both PASS)."
+  },
+  "pytest_results": {
+    "file": "/app/backend/tests/test_iter191_fund_offline_paydate.py",
+    "junit_xml": "/app/test_reports/pytest/iter191.xml",
+    "passed": 11,
+    "failed": 0,
+    "tests": [
+      "TestFundTransferDate::test_capital_add_with_date_field PASSED",
+      "TestFundTransferDate::test_capital_add_on_closed_day_rejected PASSED",
+      "TestDailyClosePreviewFundTransfers::test_preview_includes_fund_transfer_with_date PASSED",
+      "TestDailyClosePreviewFundTransfers::test_batch_preview_includes_fund_transfers_today PASSED",
+      "TestOfflineSalesSyncPreservesInvoiceNumber::test_offline_invoice_number_preserved PASSED",
+      "TestEditPaymentDate::test_happy_path PASSED (verified date_edit_history.from/to/reason/authorized_by/edited_at persisted)",
+      "TestEditPaymentDate::test_missing_fields PASSED (400 on missing manager_pin and missing invoice_id)",
+      "TestEditPaymentDate::test_invalid_pin PASSED (403 'not authorized')",
+      "TestEditPaymentDate::test_reject_voided_payment PASSED (400 'Cannot edit a voided payment')",
+      "TestEditPaymentDate::test_reject_when_original_date_closed PASSED (400 mentions 'z-report')",
+      "TestEditPaymentDate::test_reject_when_new_date_closed PASSED (400 mentions 'target date'/'already closed')"
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter191_fund_offline_paydate.py",
+    "/app/test_reports/pytest/iter191.xml"
+  ],
+  "action_items": [
+    "(Optional, low priority) Live UI verification of customer-row 'Date' button (data-testid=edit-payment-date-{payment_id}) requires a customer with at least one non-voided, non-discount payment whose payment.date is NOT in a closed daily_closings record for the customer's branch. Recommend seeding such a row to harden frontend regression coverage.",
+    "(Optional) FundTransferDialog opener live-test requires the /fund-management page with a single branch selected — current branch-picker portal renders outside <aside> and is brittle to script. Adding data-testid='branch-option-{branch_id}' on each option would make this much more testable."
+  ],
+  "critical_code_review_comments": [
+    "/app/backend/routes/accounting.py:275-285 — fund_transfers backdating guard correctly checks daily_closings(status='closed') by branch_id+date and returns 403. Default fallback to UTC today preserves backward compat for clients that don't send `date`.",
+    "/app/backend/routes/accounting.py:2026-2125 — edit-payment-date endpoint is well structured: PIN-action='modify_payment', validates YYYY-MM-DD, blocks voided payments, blocks both old & new date being in a closed Z-Report day, appends auditable date_edit_history entry with from/to/reason/authorized_by/edited_at. No-op short-circuit when old_date == new_date is graceful.",
+    "/app/backend/routes/sync.py:383 — `inv_number = sale.get('invoice_number', f'SYNC-{sale_id[:8]}')` correctly preserves the device-minted SI-{BRANCH}-OFF-{seq}, NO renumbering on sync. Idempotency by id OR envelope_id (line 372) is correct.",
+    "/app/backend/routes/daily_operations.py:549-557 + 1392-1401 — both single-day and batch close preview now project a `date` field per fund-transfer row; batch preview returning fund_transfers_today closes the previously-missing data leak in Z-Report capital-injection coverage.",
+    "/app/frontend/src/components/FundTransferDialog.js:145 — fund-transfer-date input has max=today (correctly blocks future-dating); /invoices/check-date-closed pre-flight + Confirm button disable on closed-day is the right UX.",
+    "/app/frontend/src/pages/PaymentsPage.js:1759 — edit-payment-date-dialog testid present and reused by both global-history (hist-edit-date-{i}) and per-row customer flows; consolidated handler is DRY."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter191_fund_offline_paydate.py"],
+  "success_rate": {"backend": "100% (11/11 pytest)", "frontend": "Confirmed: global Payment History 'Date' button + edit-payment-date-dialog open & inputs present. Customer-row button code-verified only (no qualifying row in test data). FundTransferDialog testid code-verified."},
+  "test_credentials": "test_org_admin@regression.local / RegressionPass!2026 ; manager_pin=521325 ; owner_pin=913712",
+  "seed_data_creation": "test_iter191 ephemeral fund_transfers, daily_closings rows, and a TEST-INV invoice with payment — all torn down by teardown_module + per-test finally blocks.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Routes are mounted under /api directly (no /accounting prefix in URL despite the file name): use /api/fund-transfers, /api/customers/{id}/edit-payment-date, /api/daily-close-preview, /api/daily-close-preview/batch?branch_id=...&dates=YYYY-MM-DD,YYYY-MM-DD,... (NOT from_date/to_date). The single-day preview returns fund_transfers_today rows projected to {type, amount, note, authorized_by, target_wallet, date, time} — no `id` field — match by note for assertions. The fund_transfers list endpoint accepts ?branch_id=...&limit=N. seeded_invoice_with_payment fixture in test_iter191_fund_offline_paydate.py reuses any existing org invoice with non-voided payment, falling back to a minimal seed if none qualifies.",
+  "rca_of_the_issue": "N/A — feature validation pass."
+}
