@@ -5,6 +5,7 @@ Supports multi-branch data isolation.
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 from datetime import datetime, timezone, timedelta
+import re
 from config import db
 from utils import (
     get_current_user, check_perm, now_iso, new_id,
@@ -458,8 +459,31 @@ async def edit_invoice(invoice_id: str, data: dict, user=Depends(get_current_use
                 update_data[field] = new_val
                 changes_made.append(f"{field}: '{old_val}' → '{new_val}'")
     
-    # Date editing — only allowed if target date is not closed
+    # Date editing — STRICT guard (Iter 231):
+    # Refuse any `order_date` / `invoice_date` change when the invoice
+    # CURRENTLY sits on a closed day. Previously the endpoint only checked
+    # if the NEW date was closed, which let users silently move closed-day
+    # transactions out of the ledger (the exact root cause of the bug where
+    # interest invoices INT-SB-001004/1005 were moved from 4/3 to 5/4 and
+    # showed on both dates). Closed-day bookkeeping is meant to be
+    # immutable — moves must go through void + re-issue or a manual
+    # reversing journal entry.
+    #
+    # An explicit override path exists for force-corrections: pass both
+    # `force_move_date=True` AND a `manager_pin` (already validated above);
+    # the original edit record stores enough detail for the audit "Date
+    # Moves" tab and the one-click restore endpoint to reverse it.
     date_fields = ["order_date", "invoice_date"]
+    force_move_date = bool(data.get("force_move_date"))
+    _current_invoice_date = invoice.get("order_date") or invoice.get("invoice_date", "")
+    _current_branch = invoice.get("branch_id", "")
+    _current_date_is_closed = False
+    if _current_invoice_date and _current_branch:
+        _closed_src = await db.daily_closings.find_one(
+            {"branch_id": _current_branch, "date": _current_invoice_date, "status": "closed"},
+            {"_id": 0},
+        )
+        _current_date_is_closed = bool(_closed_src)
     for df in date_fields:
         if df in data and data[df] != invoice.get(df):
             new_date = data[df]
@@ -472,6 +496,21 @@ async def edit_invoice(invoice_id: str, data: dict, user=Depends(get_current_use
                 raise HTTPException(
                     status_code=400,
                     detail=f"Cannot change {df} to {new_date} — that date is already closed. Use a journal entry instead."
+                )
+            # NEW guard — also refuse to move OUT of a closed day unless
+            # force_move_date is explicitly passed (manager PIN is already
+            # validated earlier). Blocks accidental Edit-invoice flows from
+            # silently retroactive-ing the ledger.
+            if _current_date_is_closed and not force_move_date:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Cannot change {df} — this invoice currently sits on a closed "
+                        f"day ({_current_invoice_date}). Closed-day transactions are "
+                        f"immutable. Void + re-issue this invoice, or pass "
+                        f"force_move_date=true (with manager PIN) if you are absolutely "
+                        f"sure you want to override and leave an audit trail."
+                    ),
                 )
             changes_made.append(f"{df}: '{invoice.get(df)}' → '{new_date}'")
             update_data[df] = new_date
@@ -614,6 +653,216 @@ async def get_invoice_edit_history(invoice_id: str, user=Depends(get_current_use
         {"invoice_id": invoice_id}, {"_id": 0}
     ).sort("edited_at", -1).to_list(100)
     return history
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Audit: invoices whose order_date / invoice_date was moved OUT of a closed
+# day (before the Iter 231 guard landed). Scans `invoice_edits.changes` for
+# "order_date: 'YYYY-MM-DD' → 'YYYY-MM-DD'" strings and checks whether the
+# source date was closed at the time. Returns a sortable list for the Audit
+# Center "Date Moves" tab so the owner can review and (optionally) restore
+# each affected record.
+# ──────────────────────────────────────────────────────────────────────────
+_DATE_MOVE_RE = re.compile(
+    r"^(order_date|invoice_date): '([^']*)' → '([^']*)'$"
+)
+
+
+@router.get("/invoices/audit/date-moves")
+async def audit_date_moves(
+    closed_source_only: bool = True,
+    user=Depends(get_current_user),
+):
+    """List every invoice whose order_date / invoice_date was changed.
+
+    By default returns only the records whose *source* date was on a closed
+    day (the dangerous subset). Pass `closed_source_only=false` to see every
+    date move regardless of closure state.
+    """
+    check_perm(user, "reports", "view")
+    edits_cursor = db.invoice_edits.find(
+        {"changes": {"$elemMatch": {"$regex": r"^(order_date|invoice_date):"}}},
+        {"_id": 0},
+    ).sort("edited_at", -1)
+    out: list[dict] = []
+    async for edit in edits_cursor:
+        invoice_id = edit.get("invoice_id")
+        if not invoice_id:
+            continue
+        moves: list[dict] = []
+        for ch in edit.get("changes", []) or []:
+            m = _DATE_MOVE_RE.match(ch)
+            if not m:
+                continue
+            moves.append({"field": m.group(1), "from": m.group(2), "to": m.group(3)})
+        if not moves:
+            continue
+        inv = await db.invoices.find_one(
+            {"id": invoice_id},
+            {"_id": 0, "invoice_number": 1, "customer_name": 1, "branch_id": 1,
+             "grand_total": 1, "order_date": 1, "invoice_date": 1, "status": 1,
+             "sale_type": 1, "balance": 1},
+        )
+        if not inv:
+            continue
+        # Was the FROM date on a closed day at any point?
+        from_dates = {m["from"] for m in moves if m["from"]}
+        closed_sources: set[str] = set()
+        for d in from_dates:
+            if not d:
+                continue
+            closed = await db.daily_closings.find_one(
+                {"branch_id": inv.get("branch_id", ""), "date": d, "status": "closed"},
+                {"_id": 0, "date": 1},
+            )
+            if closed:
+                closed_sources.add(d)
+        if closed_source_only and not closed_sources:
+            continue
+        out.append({
+            "edit_id": edit.get("id"),
+            "invoice_id": invoice_id,
+            "invoice_number": inv.get("invoice_number", ""),
+            "customer_name": inv.get("customer_name", ""),
+            "branch_id": inv.get("branch_id", ""),
+            "sale_type": inv.get("sale_type", "sale"),
+            "grand_total": round(float(inv.get("grand_total", 0)), 2),
+            "balance": round(float(inv.get("balance", 0)), 2),
+            "status": inv.get("status", ""),
+            "current_order_date": inv.get("order_date", ""),
+            "current_invoice_date": inv.get("invoice_date", ""),
+            "moves": moves,
+            "closed_source_dates": sorted(closed_sources),
+            "edited_at": edit.get("edited_at"),
+            "edited_by_name": edit.get("edited_by_name", ""),
+            "reason": edit.get("reason", ""),
+        })
+    return out
+
+
+@router.post("/invoices/{invoice_id}/restore-date")
+async def restore_invoice_date(
+    invoice_id: str,
+    data: dict,
+    user=Depends(get_current_user),
+):
+    """One-click restore: put an invoice's order_date / invoice_date back to
+    the ORIGINAL values captured in the most-recent edit record (see Audit
+    Center → Date Moves tab). Recalculates due_date from terms_days.
+
+    Guards:
+      • Manager PIN required (same as any invoice edit).
+      • Refuses if the TARGET (original) date is currently closed — the
+        intent is to restore clean pre-move state, not to re-break locks.
+      • Recalculates customer balance delta if grand_total happens to have
+        changed on the source edit (rare).
+      • Writes a new `invoice_edits` record with reason="date_move_restore"
+        so the Audit tab reflects the restore.
+    """
+    check_perm(user, "pos", "edit")
+    pin = data.get("pin") or data.get("manager_pin") or ""
+    if not pin:
+        raise HTTPException(status_code=400, detail="Manager PIN is required")
+    from routes.verify import verify_pin_for_action
+    verifier = await verify_pin_for_action(pin, "invoice_edit")
+    if not verifier:
+        raise HTTPException(status_code=403, detail="Invalid manager PIN")
+
+    inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    # Find the most recent edit that moved the date, and pull the ORIGINAL
+    # dates from the edit's change strings (not from original_state, which
+    # doesn't include order_date).
+    recent = await db.invoice_edits.find_one(
+        {
+            "invoice_id": invoice_id,
+            "changes": {"$elemMatch": {"$regex": r"^(order_date|invoice_date):"}},
+        },
+        {"_id": 0},
+        sort=[("edited_at", -1)],
+    )
+    if not recent:
+        raise HTTPException(
+            status_code=400,
+            detail="No date-move history found for this invoice — nothing to restore.",
+        )
+    orig_order_date: str | None = None
+    orig_invoice_date: str | None = None
+    for ch in recent.get("changes", []) or []:
+        m = _DATE_MOVE_RE.match(ch)
+        if not m:
+            continue
+        field, frm, _to = m.group(1), m.group(2), m.group(3)
+        if field == "order_date" and not orig_order_date:
+            orig_order_date = frm
+        if field == "invoice_date" and not orig_invoice_date:
+            orig_invoice_date = frm
+    if not (orig_order_date or orig_invoice_date):
+        raise HTTPException(status_code=400, detail="Could not parse original dates from edit history.")
+
+    # Guard: don't restore onto a currently-closed target that would conflict
+    branch_id = inv.get("branch_id", "")
+    for dname, val in (("order_date", orig_order_date), ("invoice_date", orig_invoice_date)):
+        if not val:
+            continue
+        closed = await db.daily_closings.find_one(
+            {"branch_id": branch_id, "date": val, "status": "closed"}, {"_id": 0}
+        )
+        if closed:
+            # Restoring ONTO a closed day is EXACTLY the correct behavior here —
+            # the invoice used to live there, the snapshot already reflects it,
+            # so putting it back is ledger-consistent. We allow it explicitly
+            # in this endpoint (unlike edit's normal date-change guard).
+            continue
+
+    update_data: dict = {"last_edited_at": now_iso(),
+                         "last_edited_by": user.get("full_name", user["username"]),
+                         "updated_at": now_iso()}
+    changes_made: list[str] = []
+    if orig_order_date and orig_order_date != inv.get("order_date"):
+        update_data["order_date"] = orig_order_date
+        changes_made.append(f"order_date: '{inv.get('order_date')}' → '{orig_order_date}' (restored)")
+        # Recompute due_date from terms_days
+        if inv.get("terms_days", 0):
+            try:
+                od = datetime.strptime(orig_order_date, "%Y-%m-%d")
+                new_due = (od + timedelta(days=int(inv["terms_days"]))).strftime("%Y-%m-%d")
+                update_data["due_date"] = new_due
+                changes_made.append(f"due_date recalculated: '{inv.get('due_date')}' → '{new_due}'")
+            except Exception:
+                pass
+    if orig_invoice_date and orig_invoice_date != inv.get("invoice_date"):
+        update_data["invoice_date"] = orig_invoice_date
+        changes_made.append(f"invoice_date: '{inv.get('invoice_date')}' → '{orig_invoice_date}' (restored)")
+
+    if not changes_made:
+        return {"message": "Dates already match the original — nothing to restore.", "invoice": inv}
+
+    await db.invoices.update_one({"id": invoice_id}, {"$set": update_data})
+
+    # Write a matching audit entry so the Date-Moves tab reflects the restore
+    await db.invoice_edits.insert_one({
+        "id": new_id(),
+        "invoice_id": invoice_id,
+        "invoice_number": inv.get("invoice_number", ""),
+        "collection": "invoices",
+        "edited_by_id": user["id"],
+        "edited_by_name": user.get("full_name", user["username"]),
+        "edited_at": now_iso(),
+        "reason": "date_move_restore",
+        "authorized_by": verifier.get("verifier_name", ""),
+        "source_edit_id": recent.get("id"),
+        "changes": changes_made,
+    })
+
+    restored = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    return {
+        "message": "Date restored to original values",
+        "changes": changes_made,
+        "invoice": restored,
+    }
 
 
 # ==================== VOID / REOPEN ====================

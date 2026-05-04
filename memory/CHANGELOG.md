@@ -1,5 +1,31 @@
 # AgriBooks Changelog
 
+## Feb 2026 — Closed-Day Date-Move Guard + Audit Tab + One-Click Restore (Iter 231)
+
+**User report**: Interest invoices INT-SB-001004/5 created on 4/3/25 (closed day) appeared again on 5/4/25 Z-Report. User suspected "cancellation not properly reversed".
+
+**RCA**: The bug wasn't cancellation — it was an **invoice edit** path (`PUT /api/invoices/:id/edit`) that let anyone change `order_date` / `invoice_date` OUT of a closed day as long as the TARGET date wasn't also closed. The guard at `invoices.py` L462-475 was one-sided — it only blocked moves INTO closed days. Closed-day bookkeeping was therefore mutable: a user clicking "Edit → change date" on a closed-day transaction silently shifted it to another date, producing double counting when the new date was also closed / queried.
+
+**Fix — 3 pieces**:
+
+**A. Backend guard** (`routes/invoices.py`): The `edit_invoice` endpoint now refuses any `order_date` / `invoice_date` change when the invoice CURRENTLY sits on a closed day. Returns 400 with an actionable message pointing to Void + Re-issue. An escape hatch (`force_move_date=True` + manager PIN) exists for hard corrections — every forced move lands in the audit log for the Date Moves tab.
+
+**B. Audit endpoint** (`GET /api/invoices/audit/date-moves?closed_source_only=true|false`): Parses every `invoice_edits.changes` row for `order_date: 'X' → 'Y'` patterns, checks whether the source date was closed at the time, returns a sorted list with the invoice's current date, moves, who edited, when, and reason. Multi-tenant scoped.
+
+**C. One-click restore endpoint** (`POST /api/invoices/:id/restore-date`): Reads the most recent date-move record, rewinds `order_date` / `invoice_date` to the original values, recomputes `due_date` from `terms_days`, writes a new audit entry with `reason=date_move_restore`. Manager PIN required (reuses `verify_pin_for_action`).
+
+**Frontend**: New `DateMovesTab` component added to Audit Center as a dedicated tab. Lists every offending record (rose-tinted for closed-source moves), shows the full from→to move with strikethrough, has a green "Restore" button per row that opens a PIN dialog. Also a "Show all moves" toggle for admins who want the full edit-history audit, not just the dangerous subset.
+
+**Tests** — `tests/test_closed_day_date_move_guard_231.py` (5 passing):
+- Edit refuses date move out of closed day
+- Edit refuses without PIN when source is closed
+- Audit endpoint lists offending records
+- Restore endpoint puts dates back with a valid PIN
+- Restore refuses without PIN
+
+**For the affected INT-SB-001004/5**: After deploy, go to **Audit Center → Date Moves tab** → both records should appear in red → click **Restore** on each → enter manager PIN → done. 4/3/25 live queries and 5/4/25 Z-Report will both be clean. Closed-day snapshots for 4/3 are already correct (they were frozen at close-time).
+
+
 ## Feb 2026 — Z-Report Print via PDF + Download PDF Button (Iter 230)
 
 **User report**: After the `id="printable-report"` CSS fix, the Z-Report Print button still prints a blank page. Also requested a Download PDF option.

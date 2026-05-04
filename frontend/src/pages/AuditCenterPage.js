@@ -25,6 +25,7 @@ import CustomerStatementModal from '../components/CustomerStatementModal';
 import ReceiptGallery from '../components/ReceiptGallery';
 import SignatureVerifyToolbar from '../components/SignatureVerifyToolbar';
 import ReserveTab from '../components/audit/ReserveTab';
+import DateMovesTab from '../components/audit/DateMovesTab';
 
 import { Wallet } from 'lucide-react';
 import CalcInput from '../components/CalcInput';
@@ -1093,6 +1094,10 @@ export default function AuditCenterPage() {
           <TabsTrigger value="reserve" data-testid="audit-reserve-tab"
             className="data-[state=active]:bg-emerald-50 data-[state=active]:text-emerald-700">
             <Wallet size={14} className="mr-1.5" />Reserve
+          </TabsTrigger>
+          <TabsTrigger value="date-moves" data-testid="audit-date-moves-tab"
+            className="data-[state=active]:bg-amber-50 data-[state=active]:text-amber-700">
+            <History size={14} className="mr-1.5" />Date Moves
           </TabsTrigger>
           <TabsTrigger value="security" data-testid="security-flags-tab" className="data-[state=active]:bg-red-50 data-[state=active]:text-red-700">
             <KeyRound size={14} className="mr-1.5" />
@@ -2285,6 +2290,11 @@ export default function AuditCenterPage() {
         {/* ── RESERVE TAB ──────────────────────────────────────────────── */}
         <TabsContent value="reserve" className="mt-4">
           <ReserveTab branchId={auditBranchId} />
+        </TabsContent>
+
+        {/* ── DATE MOVES TAB (Iter 231) ───────────────────────────────── */}
+        <TabsContent value="date-moves" className="mt-4">
+          <DateMovesTab />
         </TabsContent>
 
         {/* Security Flags Tab */}
