@@ -363,9 +363,9 @@ function ZReportDetailed({ preview, closing, branchName, onPrint, onDownloadPdf 
           </div>
           <div className="px-3 pt-2 pb-1 grid grid-cols-12 text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
             <div className="col-span-4">Product</div>
-            <div className="col-span-3 text-right">From → To</div>
             <div className="col-span-2 text-right">Cap MA</div>
             <div className="col-span-2 text-right">Last Pur.</div>
+            <div className="col-span-3 text-right">From → To</div>
             <div className="col-span-1 text-right">OK by</div>
           </div>
           {(() => {
@@ -383,46 +383,62 @@ function ZReportDetailed({ preview, closing, branchName, onPrint, onDownloadPdf 
               }
               currentBucket.items.push(r);
             }
-            return groups.map((g, gi) => (
-              <div key={gi} className="border-t border-amber-100">
-                <div className="px-3 py-1 bg-amber-50/50 text-[10px] uppercase tracking-wider text-amber-800 font-bold flex items-center justify-between">
-                  <span>{g.cat}</span>
-                  <span className="font-mono text-amber-600">{g.items.length}</span>
-                </div>
-                <div className="px-3 py-1 text-xs">
-                  {g.items.map((r, i) => {
-                    const up = r.new_price > r.old_price;
-                    const down = r.new_price < r.old_price;
-                    const ma = parseFloat(r.moving_average_cost || 0);
-                    const lp = parseFloat(r.last_purchase_cost || 0);
-                    return (
-                      <div key={i} className="grid grid-cols-12 items-center border-b border-amber-50 last:border-0 py-1">
-                        <div className="col-span-4 min-w-0">
-                          <span className="font-medium text-slate-700 truncate block">{r.product_name}</span>
-                          <span className="text-[10px] text-slate-400 font-mono">{r.invoice_number}</span>
-                        </div>
-                        <div className="col-span-3 font-mono text-right">
-                          <span className="line-through text-slate-400">{formatPHP(r.old_price)}</span>
-                          {' → '}
-                          <span className={`font-semibold ${down ? 'text-red-600' : up ? 'text-emerald-600' : 'text-slate-700'}`}>
-                            {formatPHP(r.new_price)}
-                          </span>
-                        </div>
-                        <div className="col-span-2 text-right text-[11px] font-mono text-slate-500">
-                          {ma > 0 ? formatPHP(ma) : '—'}
-                        </div>
-                        <div className="col-span-2 text-right text-[11px] font-mono text-slate-500">
-                          {lp > 0 ? formatPHP(lp) : '—'}
-                        </div>
-                        <div className="col-span-1 text-right text-[10px] text-slate-500 truncate">
-                          {r.approver_name || '—'}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ));
+            const hasGlobalFallback = rows.some(r => r.last_purchase_source === 'global');
+            return (
+              <>
+                {groups.map((g, gi) => (
+                  <div key={gi} className="border-t border-amber-100">
+                    <div className="px-3 py-1 bg-amber-50/50 text-[10px] uppercase tracking-wider text-amber-800 font-bold flex items-center justify-between">
+                      <span>{g.cat}</span>
+                      <span className="font-mono text-amber-600">{g.items.length}</span>
+                    </div>
+                    <div className="px-3 py-1 text-xs">
+                      {g.items.map((r, i) => {
+                        const up = r.new_price > r.old_price;
+                        const down = r.new_price < r.old_price;
+                        const ma = parseFloat(r.moving_average_cost || 0);
+                        const lp = parseFloat(r.last_purchase_cost || 0);
+                        const lpGlobal = r.last_purchase_source === 'global';
+                        return (
+                          <div key={i} className="grid grid-cols-12 items-center border-b border-amber-50 last:border-0 py-1">
+                            <div className="col-span-4 min-w-0">
+                              <span className="font-medium text-slate-700 truncate block">{r.product_name}</span>
+                              <span className="text-[10px] text-slate-400 font-mono">{r.invoice_number}</span>
+                            </div>
+                            <div className="col-span-2 text-right text-[11px] font-mono text-slate-500">
+                              {ma > 0 ? formatPHP(ma) : '—'}
+                            </div>
+                            <div className={`col-span-2 text-right text-[11px] font-mono ${lpGlobal ? 'italic text-slate-400' : 'text-slate-500'}`}>
+                              {lp > 0 ? (
+                                <>
+                                  {formatPHP(lp)}
+                                  {lpGlobal && <span title="No branch purchase history — using global cost" className="ml-0.5 text-amber-500">*</span>}
+                                </>
+                              ) : '—'}
+                            </div>
+                            <div className="col-span-3 font-mono text-right">
+                              <span className="line-through text-slate-400">{formatPHP(r.old_price)}</span>
+                              {' → '}
+                              <span className={`font-semibold ${down ? 'text-red-600' : up ? 'text-emerald-600' : 'text-slate-700'}`}>
+                                {formatPHP(r.new_price)}
+                              </span>
+                            </div>
+                            <div className="col-span-1 text-right text-[10px] text-slate-500 truncate">
+                              {r.approver_name || '—'}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+                {hasGlobalFallback && (
+                  <div className="px-3 py-1.5 bg-amber-50/30 border-t border-amber-100 text-[10px] italic text-slate-500">
+                    <span className="text-amber-500">*</span> Last Purchase shown is the product's global cost — no branch purchase history yet.
+                  </div>
+                )}
+              </>
+            );
           })()}
         </div>
       )}

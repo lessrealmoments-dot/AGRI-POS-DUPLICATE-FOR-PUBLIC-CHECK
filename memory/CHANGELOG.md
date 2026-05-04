@@ -1,5 +1,17 @@
 # AgriBooks Changelog
 
+## May 2026 — Z-Report Detailed: Capital columns next to Product + Last-Purchase fallback (Iter 236)
+
+Follow-up polish to iter 235:
+
+- **Column order**: `Cap MA` + `Last Purchase` now sit directly after the Product name (before From → To). Reading flow becomes Product → what it costs us → what we sold it for → approver.
+- **Moving Average is strictly branch-specific** — no fallback. If this branch has zero purchase/transfer-in history for the SKU, MA renders as `—` (previously was silently falling back to `product.cost_price` which understated the per-branch cost basis).
+- **Last Purchase fallback**: branch-specific first; if this branch has no acquisition history, fall back to the product's global `cost_price`. The fallback value is shown in italic with an `*` marker and a footnote ("Last Purchase shown is the product's global cost — no branch purchase history yet"), so the owner knows it isn't a real branch receipt.
+- Backend now returns `last_purchase_source` per row (`"branch" | "global" | "none"`); both the PDF and on-screen view key off it to render the fallback indicator consistently.
+
+Files touched: `backend/routes/daily_operations.py` · `backend/routes/zreport_pdf.py` · `frontend/src/pages/DailyLogPage.js`. Regression suite (14 tests) still green.
+
+
 ## May 2026 — Z-Report Detailed: Price-Change refinements + Interest reorder (Iter 235)
 
 User feedback on the Detailed Z-Report:

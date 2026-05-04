@@ -512,18 +512,20 @@ def render_detailed(pdf: ZReportPDF, preview: dict, closing: Optional[dict]):
             f"{(preview.get('price_changes_today') or {}).get('count', len(price_changes))} change(s)",
         )
 
-        # Column layout: Product (52) | From (22) | -> | To (22) | Cap MA (24) | Last Pur (24) | OK by (38) = 188mm
+        # Column layout: Product (52) | Cap MA (22) | Last Pur (22) | From (22) | -> (6) | To (22) | OK by (42) = 188mm
+        # Capital reference columns sit right next to the product so the eye
+        # reads "what it costs us" before "what we sold it for".
         def _pc_header():
             pdf.set_font("Helvetica", "B", 8)
             pdf.set_fill_color(248, 248, 248)
             pdf.set_x(14)
             pdf.cell(52, 5, _s("Product"), fill=True)
+            pdf.cell(22, 5, _s("Cap MA"), align="R", fill=True)
+            pdf.cell(22, 5, _s("Last Pur"), align="R", fill=True)
             pdf.cell(22, 5, _s("From"), align="R", fill=True)
             pdf.cell(6, 5, _s(""), fill=True)
             pdf.cell(22, 5, _s("To"), align="R", fill=True)
-            pdf.cell(24, 5, _s("Cap MA"), align="R", fill=True)
-            pdf.cell(24, 5, _s("Last Pur"), align="R", fill=True)
-            pdf.cell(38, 5, _s("OK by"), fill=True)
+            pdf.cell(42, 5, _s("OK by"), fill=True)
             pdf.ln(5)
 
         # Group rows by category (already sorted by backend (category, name))
@@ -553,12 +555,25 @@ def render_detailed(pdf: ZReportPDF, preview: dict, closing: Optional[dict]):
                 )
                 ma = float(r.get("moving_average_cost") or 0)
                 lp = float(r.get("last_purchase_cost") or 0)
+                lp_source = r.get("last_purchase_source", "branch")
 
                 pdf.set_font("Helvetica", "", 8)
                 pdf.set_x(14)
                 # Product
                 pdf.set_text_color(30, 30, 30)
                 pdf.cell(52, 5, _s(str(r.get("product_name", ""))[:32]))
+                # Cap MA (branch-specific; dash if no branch history)
+                pdf.set_text_color(80, 80, 80)
+                pdf.cell(22, 5, _s(php(ma) if ma > 0 else "-"), align="R")
+                # Last Pur (branch first, global fallback). Italic when the
+                # displayed value is the global cost_price fallback so the
+                # owner can tell it isn't a real branch receipt.
+                if lp > 0 and lp_source == "global":
+                    pdf.set_font("Helvetica", "I", 8)
+                    pdf.cell(22, 5, _s(f"{php(lp)}*"), align="R")
+                    pdf.set_font("Helvetica", "", 8)
+                else:
+                    pdf.cell(22, 5, _s(php(lp) if lp > 0 else "-"), align="R")
                 # From (struck-through visually impossible in fpdf — italic instead)
                 pdf.set_text_color(120, 120, 120)
                 pdf.set_font("Helvetica", "I", 8)
@@ -571,18 +586,21 @@ def render_detailed(pdf: ZReportPDF, preview: dict, closing: Optional[dict]):
                 pdf.set_text_color(*price_color)
                 pdf.set_font("Helvetica", "B", 8)
                 pdf.cell(22, 5, _s(php(new_p)), align="R")
-                # Cap MA
-                pdf.set_font("Helvetica", "", 8)
-                pdf.set_text_color(80, 80, 80)
-                pdf.cell(24, 5, _s(php(ma) if ma else "-"), align="R")
-                # Last Pur
-                pdf.cell(24, 5, _s(php(lp) if lp else "-"), align="R")
                 # OK by
+                pdf.set_font("Helvetica", "", 8)
                 pdf.set_text_color(30, 30, 30)
-                pdf.cell(38, 5, _s(str(r.get("approver_name", ""))[:22]))
+                pdf.cell(42, 5, _s(str(r.get("approver_name", ""))[:24]))
                 pdf.ln(5)
                 pdf.set_text_color(30, 30, 30)
             pdf.ln(1)
+        # Footnote for the global-cost fallback marker used above.
+        if any((r.get("last_purchase_source") == "global") for r in price_changes):
+            pdf.set_font("Helvetica", "I", 7)
+            pdf.set_text_color(150, 150, 150)
+            pdf.set_x(14)
+            pdf.cell(0, 4, _s("  * Last Purchase shown is the product's global cost (no branch purchase history yet)."))
+            pdf.ln(5)
+            pdf.set_text_color(30, 30, 30)
         pdf.ln(2)
 
 

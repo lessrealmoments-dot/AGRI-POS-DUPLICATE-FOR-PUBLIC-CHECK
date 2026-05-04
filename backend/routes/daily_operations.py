@@ -291,7 +291,10 @@ async def _get_price_changes_today(branch_id: str, date: str) -> dict:
         ).to_list(10000)
         total_qty = sum(float(m.get("quantity_change", 0)) for m in all_acqs)
         total_cost = sum(float(m.get("quantity_change", 0)) * float(m.get("price_at_time", 0)) for m in all_acqs)
-        ma = round(total_cost / total_qty, 4) if total_qty > 0 else float(product.get("cost_price", 0))
+        # Moving average is STRICTLY branch-specific. No fallback — if this
+        # branch has no purchase/transfer-in history the MA is 0 and the UI
+        # renders a dash.
+        ma = round(total_cost / total_qty, 4) if total_qty > 0 else 0.0
 
         # For repacks, scale parent-level cost down to the repack unit so the
         # capital reference is comparable to the line price the cashier sees.
@@ -300,9 +303,23 @@ async def _get_price_changes_today(branch_id: str, date: str) -> dict:
             last_purchase = round(last_purchase / upp, 4) if last_purchase else last_purchase
             ma = round(ma / upp, 4) if ma else ma
 
+        # Last Purchase fallback — only when this branch has zero acquisition
+        # history for the SKU (brand new product, or legacy data imported
+        # without movement rows), fall back to the product's global cost_price
+        # so the Z-Report still shows a meaningful capital reference.
+        last_purchase_source = "branch"
+        if last_purchase <= 0:
+            global_cost = float(product.get("cost_price", 0) or 0)
+            if global_cost > 0:
+                last_purchase = global_cost
+                last_purchase_source = "global"
+            else:
+                last_purchase_source = "none"
+
         enriched = {
             "category": category,
             "last_purchase_cost": last_purchase,
+            "last_purchase_source": last_purchase_source,
             "moving_average_cost": ma,
         }
         enrich_cache[key] = enriched
@@ -315,6 +332,7 @@ async def _get_price_changes_today(branch_id: str, date: str) -> dict:
         info = await _enrich(pid, br_id) if pid else {
             "category": "Uncategorized",
             "last_purchase_cost": 0.0,
+            "last_purchase_source": "none",
             "moving_average_cost": 0.0,
         }
         old_p = float(r.get("old_price") or 0)
@@ -323,6 +341,7 @@ async def _get_price_changes_today(branch_id: str, date: str) -> dict:
             **r,
             "category": info["category"],
             "last_purchase_cost": info["last_purchase_cost"],
+            "last_purchase_source": info.get("last_purchase_source", "branch"),
             "moving_average_cost": info["moving_average_cost"],
             "delta": round(new_p - old_p, 2),
             "delta_pct": round((new_p - old_p) / old_p * 100, 2) if old_p > 0 else 0,
