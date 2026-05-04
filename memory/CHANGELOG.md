@@ -1,5 +1,28 @@
 # AgriBooks Changelog
 
+## Feb 2026 — Branch Transfer: Pre-Flight Stock Guard + Audit Trail Fix (Iter 224)
+
+**User report**: Live ticket `BTO-20260503-0003` on agri-books.com — "Created a branch transfer, injected the product from source to main. It says FAILED but stocks got deducted."
+
+### Root causes found in `_apply_receipt`:
+
+1. **Partial-failure inventory drift** — items were processed in a for-loop; each iteration decremented source + incremented destination BEFORE the next item's source-stock check. If item N failed insufficient-stock validation, items 1..N-1 had already had inventory moved while the transfer status was never flipped to `received`. The UI showed "Failed" but inventory was half-moved.
+
+2. **Silent audit corruption** — the `capital_changes` row was being inserted AFTER the `branch_prices` upsert. The code re-read `bp_before` right before the audit write, so `old_capital` always equalled `new_capital`. Any investigator scanning the capital-change ledger would see no actual transitions.
+
+3. **Smart Rule method mislogged** — `choice = capital_choices.get(product_id, "transfer_capital")` was overwriting the earlier Smart-Rule computation right before the audit insert. When Smart Rule auto-switched to `moving_average` (because transfer_capital < current_dest_capital), the log still recorded `transfer_capital`.
+
+### Fix (`/app/backend/routes/branch_transfers.py::_apply_receipt`):
+- **Pre-flight loop**: validates source stock for EVERY item and snapshots destination capital BEFORE any mutation. If any item fails stock check, raises `400` with "No inventory changed." — zero partial mutation.
+- **Audit write uses the pre-flight snapshot** for `old_capital` — true old→new transition.
+- **Preserved Smart-Rule `choice` variable** through to the audit insert — method field is now trustworthy.
+
+### Tests: `tests/test_branch_transfer_preflight_224.py` — 3/3 PASS
+- `test_preflight_rollback_on_insufficient_stock` — seeds 2 products, one with enough stock one short; asserts 400 AND NO inventory moved for either.
+- `test_capital_change_audit_records_true_old_capital` — seeds dest@8, transfers @15, asserts `old=8, new=15`.
+- `test_smart_rule_records_moving_average_when_selected` — transfer_capital=5 < dest_capital=20 → asserts audit method=`moving_average`.
+
+
 ## Feb 2026 — Fund Injection Date + Offline Receipt Numbering + Payment Date Edit (Iter 191)
 
 **User reports**:

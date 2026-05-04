@@ -1335,17 +1335,47 @@ async def _apply_receipt(order, items, shortages, excesses, from_branch_id, to_b
 
     if capital_choices is None:
         capital_choices = {}
+
+    # ── PRE-FLIGHT: validate source stock for EVERY item BEFORE any inventory
+    # mutation. Without this, a mid-loop HTTPException leaves items 1..N-1
+    # already decremented from source + incremented at destination while the
+    # transfer status never flips to "received" — user sees "Failed" but
+    # stocks got deducted. Ref: live report BTO-20260503-0003.
+    # Also snapshot each product's CURRENT destination capital here so the
+    # audit log records the real old→new transition (not the post-upsert
+    # value it was inadvertently reading).
+    dest_capital_before_by_product: dict = {}
+    for item in items:
+        product_id = item["product_id"]
+        qty_needed = float(item.get("qty_received", item["qty"]))
+        if qty_needed <= 0:
+            continue
+        src_inv = await db.inventory.find_one(
+            {"product_id": product_id, "branch_id": from_branch_id}, {"_id": 0, "quantity": 1}
+        )
+        src_stock = float(src_inv["quantity"]) if src_inv else 0
+        if src_stock < qty_needed:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Insufficient stock for '{item['product_name']}' in source branch: "
+                       f"have {src_stock:.0f}, need {qty_needed:.0f}. No inventory changed."
+            )
+        bp_before = await db.branch_prices.find_one(
+            {"product_id": product_id, "branch_id": to_branch_id}, {"_id": 0, "cost_price": 1}
+        )
+        dest_capital_before_by_product[product_id] = (
+            float(bp_before["cost_price"]) if bp_before and bp_before.get("cost_price") is not None else 0
+        )
+
     for item in items:
         product_id = item["product_id"]
         qty_received = float(item.get("qty_received", item["qty"]))
         transfer_capital = float(item.get("transfer_capital") or item.get("branch_capital") or 0)
         branch_retail = float(item.get("branch_retail") or 0)
 
-        # Get current capital at destination for smart rule comparison
-        bp_current = await db.branch_prices.find_one(
-            {"product_id": product_id, "branch_id": to_branch_id}, {"_id": 0}
-        )
-        current_dest_capital = float(bp_current["cost_price"]) if bp_current and bp_current.get("cost_price") is not None else 0
+        # Current capital at destination (snapshot BEFORE we mutate) — used
+        # both to drive the Smart Rule and to populate the audit log.
+        current_dest_capital = dest_capital_before_by_product.get(product_id, 0)
 
         # Determine final capital at destination based on choice
         # Smart rule: same logic as PO receive
@@ -1365,18 +1395,6 @@ async def _apply_receipt(order, items, shortages, excesses, from_branch_id, to_b
 
         if qty_received <= 0:
             continue
-
-        # Check source has enough
-        source_inv = await db.inventory.find_one(
-            {"product_id": product_id, "branch_id": from_branch_id}, {"_id": 0}
-        )
-        source_stock = float(source_inv["quantity"]) if source_inv else 0
-        if source_stock < qty_received:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Insufficient stock for '{item['product_name']}' in source branch: "
-                       f"have {source_stock:.0f}, need {qty_received:.0f}"
-            )
 
         await db.inventory.update_one(
             {"product_id": product_id, "branch_id": from_branch_id},
@@ -1412,17 +1430,14 @@ async def _apply_receipt(order, items, shortages, excesses, from_branch_id, to_b
             upsert=True
         )
 
-        # Log capital change at destination
-        bp_before = await db.branch_prices.find_one(
-            {"product_id": product_id, "branch_id": to_branch_id}, {"_id": 0}
-        )
-        old_dest_capital = float(bp_before["cost_price"]) if bp_before and bp_before.get("cost_price") is not None else 0
-        choice = capital_choices.get(product_id, "transfer_capital")
+        # Log capital change at destination — use the pre-flight snapshot
+        # and the ACTUAL method selected (Smart Rule respected) so the audit
+        # trail stays accurate.
         await db.capital_changes.insert_one({
             "id": new_id(),
             "product_id": product_id,
             "branch_id": to_branch_id,
-            "old_capital": old_dest_capital,
+            "old_capital": current_dest_capital,
             "new_capital": dest_capital,
             "method": choice,
             "source_type": "branch_transfer",
