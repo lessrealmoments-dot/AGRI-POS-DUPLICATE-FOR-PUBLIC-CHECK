@@ -208,6 +208,302 @@ function ZReport({ data, branchName, onPrint }) {
   );
 }
 
+// ── Detailed Z-Report ────────────────────────────────────────────────────
+// Mirrors the rich breakdown shown on Close Wizard → Step 7 (Preview) so the
+// owner can audit discounts, price changes, AR collections by method, interest
+// invoices issued, fund transfers, and per-category cashier/safe expenses —
+// none of which fit into the compact `<ZReport>`.
+//
+// Data source: `/daily-close-preview` which recomputes from sales_log +
+// invoices + fund_transfers for any date (also works for already-closed days).
+// Read-only — no input fields, no close actions.
+function ZReportDetailed({ preview, closing, branchName, onPrint }) {
+  if (!preview) return null;
+  const total_ar_payments = (preview.ar_payments || [])
+    .filter(p => p.fund_source !== 'discount')
+    .reduce((s, p) => s + (p.amount_paid || 0), 0);
+  const cashierExps = (preview.expenses || []).filter(e => e.fund_source !== 'safe');
+  const safeExps = (preview.expenses || []).filter(e => e.fund_source === 'safe');
+  return (
+    <div id="printable-report" className="space-y-4 print:space-y-3">
+      <div className="flex items-center justify-between print:hidden">
+        <Card className="border-emerald-200 bg-emerald-50 flex-1 mr-3"><CardContent className="p-3">
+          <p className="font-bold text-emerald-800">
+            <CheckCircle size={14} className="inline mr-1" />
+            DETAILED Z-Report · {closing?.date} · {branchName}
+            {closing?.closed_by_name && <> · closed by {closing.closed_by_name}</>}
+          </p>
+        </CardContent></Card>
+        <Button variant="outline" size="sm" onClick={onPrint}><Printer size={14} className="mr-1" /> Print</Button>
+      </div>
+
+      {/* Print header */}
+      <div className="hidden print:block border-b-2 border-black pb-3 mb-3">
+        <h1 className="text-xl font-bold">DETAILED DAILY CLOSE REPORT — {branchName}</h1>
+        <p>Date: {closing?.date} · Closed by: {closing?.closed_by_name || '—'}</p>
+      </div>
+
+      {/* ── Cash Drawer Reconciliation ───────────────────────────────── */}
+      <div className="rounded-xl border border-slate-200 overflow-hidden">
+        <div className="px-4 py-2 bg-slate-100 text-xs font-bold uppercase tracking-wider text-slate-600">Cash Drawer Reconciliation</div>
+        <div className="p-4 space-y-1.5 text-sm">
+          <div className="flex justify-between"><span className="text-slate-500">Opening Float</span><span className="font-mono">{formatPHP(preview.starting_float || 0)}</span></div>
+          <div className="flex justify-between"><span className="text-emerald-600">+ Cash Sales</span><span className="font-mono font-semibold text-emerald-700">{formatPHP(preview.total_cash_sales || 0)}</span></div>
+          {(preview.total_split_cash || 0) > 0 && (
+            <div className="flex justify-between"><span className="text-teal-600">+ Split Cash Portion</span><span className="font-mono text-teal-700">{formatPHP(preview.total_split_cash || 0)}</span></div>
+          )}
+          {(preview.total_partial_cash || 0) > 0 && (
+            <div className="flex justify-between"><span className="text-blue-600">+ Partial Cash Received</span><span className="font-mono text-blue-700">{formatPHP(preview.total_partial_cash || 0)}</span></div>
+          )}
+          <div className="flex justify-between"><span className="text-indigo-600">+ AR Cash Payments</span><span className="font-mono text-indigo-700">{formatPHP(preview.total_cash_ar ?? preview.total_ar_received ?? 0)}</span></div>
+          {(preview.total_digital_ar || 0) > 0 && (
+            <div className="flex justify-between text-xs"><span className="text-indigo-400 pl-3">AR Digital (e-wallet, not in drawer)</span><span className="font-mono text-indigo-400">{formatPHP(preview.total_digital_ar || 0)}</span></div>
+          )}
+          {(preview.ar_interest_collected || 0) > 0 && (
+            <div className="flex justify-between text-xs"><span className="text-amber-500 pl-3">↳ of which interest collected</span><span className="font-mono text-amber-600">{formatPHP(preview.ar_interest_collected)}</span></div>
+          )}
+          {(preview.ar_discount_today || 0) > 0 && (
+            <div className="flex justify-between text-xs"><span className="text-blue-500 pl-3">↳ discounts given on interest/penalty</span><span className="font-mono text-blue-600">-{formatPHP(preview.ar_discount_today)}</span></div>
+          )}
+          {(preview.capital_to_cashier || 0) > 0 && (
+            <div className="flex justify-between"><span className="text-cyan-600">+ Capital Injection</span><span className="font-mono text-cyan-700">{formatPHP(preview.capital_to_cashier)}</span></div>
+          )}
+          {(preview.safe_to_cashier || 0) > 0 && (
+            <div className="flex justify-between"><span className="text-cyan-600">+ Safe → Cashier</span><span className="font-mono text-cyan-700">{formatPHP(preview.safe_to_cashier)}</span></div>
+          )}
+          {(preview.cashier_to_safe || 0) > 0 && (
+            <div className="flex justify-between"><span className="text-orange-600">- Cashier → Safe</span><span className="font-mono text-orange-600">{formatPHP(preview.cashier_to_safe)}</span></div>
+          )}
+          <Separator />
+          <div className="flex justify-between font-semibold"><span className="text-green-700">= Total Cash In</span><span className="font-mono text-green-700">{formatPHP(preview.total_cash_in || 0)}</span></div>
+          <div className="flex justify-between"><span className="text-red-600">- Cashier Expenses</span><span className="font-mono text-red-600">{formatPHP(preview.total_cashier_expenses ?? preview.total_expenses ?? 0)}</span></div>
+          {(preview.total_safe_expenses || 0) > 0 && (
+            <div className="flex justify-between text-xs"><span className="text-red-400 pl-3">Safe expenses (not from drawer)</span><span className="font-mono text-red-400">{formatPHP(preview.total_safe_expenses || 0)}</span></div>
+          )}
+          <Separator />
+          <div className="flex justify-between font-bold text-base"><span>Expected in Drawer</span><span className="font-mono">{formatPHP(preview.expected_counter || closing?.expected_cash || 0)}</span></div>
+          <div className="flex justify-between font-bold text-base"><span>Actual Count</span><span className="font-mono">{formatPHP(closing?.actual_cash || 0)}</span></div>
+          {closing && (
+            <div className={`flex justify-between font-bold ${(closing.over_short || 0) >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+              <span>Over / Short</span>
+              <span className="font-mono">{(closing.over_short || 0) > 0 ? '+' : ''}{formatPHP(closing.over_short || 0)}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Discount Breakdown by Product ─────────────────────────────── */}
+      {(preview.discount_breakdown?.products?.length > 0 || (preview.discount_breakdown?.total_overall_discount || 0) > 0) && (
+        <div className="rounded-xl border border-rose-200 overflow-hidden">
+          <div className="px-4 py-2 bg-rose-50 text-xs font-bold uppercase tracking-wider text-rose-700 flex items-center justify-between">
+            <span>Discounts Given Today</span>
+            <span className="font-mono">{formatPHP(preview.discount_breakdown?.total_discount || 0)}</span>
+          </div>
+          <div className="p-3 space-y-2">
+            {(preview.discount_breakdown?.products || []).length > 0 && (
+              <table className="w-full text-xs">
+                <thead className="bg-rose-50/60">
+                  <tr>
+                    <th className="text-left px-2 py-1.5 text-rose-700 font-medium">Product</th>
+                    <th className="text-right px-2 py-1.5 text-rose-700 font-medium w-20">Units</th>
+                    <th className="text-right px-2 py-1.5 text-rose-700 font-medium w-28">Total Disc.</th>
+                    <th className="text-right px-2 py-1.5 text-rose-700 font-medium w-28">Avg / Unit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.discount_breakdown.products.map((p, i) => (
+                    <tr key={i} className="border-t border-rose-50">
+                      <td className="px-2 py-1 text-slate-700">{p.product_name}</td>
+                      <td className="px-2 py-1 text-right font-mono">{p.units_sold}</td>
+                      <td className="px-2 py-1 text-right font-mono text-rose-600">{formatPHP(p.total_discount)}</td>
+                      <td className="px-2 py-1 text-right font-mono text-rose-500">{formatPHP(p.avg_discount_per_unit)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {(preview.discount_breakdown?.total_overall_discount || 0) > 0 && (
+              <div className="text-xs text-rose-700 flex items-center justify-between bg-rose-50 px-2 py-1 rounded">
+                <span>Overall (invoice-level) discounts</span>
+                <span className="font-mono">{formatPHP(preview.discount_breakdown.total_overall_discount)}</span>
+              </div>
+            )}
+            <p className="text-[10px] text-slate-500 italic">
+              {preview.discount_breakdown?.transaction_count || 0} transaction(s) had discounts.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Price Changes Today ───────────────────────────────────────── */}
+      {(preview.price_changes_today?.count || 0) > 0 && (
+        <div className="rounded-xl border border-amber-200 overflow-hidden">
+          <div className="px-4 py-2 bg-amber-50 text-xs font-bold uppercase tracking-wider text-amber-700 flex items-center justify-between">
+            <span>Permanent Price Changes Today</span>
+            <span className="font-mono">{preview.price_changes_today.count} change(s)</span>
+          </div>
+          <div className="p-3 space-y-1 text-xs">
+            {(preview.price_changes_today.rows || []).map((r, i) => (
+              <div key={i} className="flex items-center justify-between border-b border-amber-50 last:border-0 py-1">
+                <div className="min-w-0 flex-1">
+                  <span className="font-medium text-slate-700">{r.product_name}</span>
+                  <span className="ml-2 text-[10px] text-slate-400 font-mono">{r.invoice_number}</span>
+                </div>
+                <div className="font-mono w-44 text-right">
+                  <span className="line-through text-slate-400">{formatPHP(r.old_price)}</span>
+                  {' → '}
+                  <span className={`font-semibold ${r.new_price < r.old_price ? 'text-red-600' : 'text-emerald-600'}`}>
+                    {formatPHP(r.new_price)}
+                  </span>
+                </div>
+                <div className="w-32 text-right text-[10px] text-slate-500">
+                  {r.approver_name && `OK ${r.approver_name}`}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── AR Collections Detailed ──────────────────────────────────── */}
+      {(preview.ar_payments || []).filter(p => p.fund_source !== 'discount').length > 0 && (
+        <div className="rounded-xl border border-indigo-200 overflow-hidden">
+          <div className="px-4 py-2 bg-indigo-50 flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-3">
+              <p className="text-xs font-bold uppercase tracking-wider text-indigo-600">AR Collections Today</p>
+              {preview.ar_payment_by_method && Object.entries(preview.ar_payment_by_method).map(([m, v]) => (
+                <span key={m} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">
+                  {m}: {formatPHP(v.total)}
+                </span>
+              ))}
+            </div>
+            <span className="font-bold font-mono text-indigo-700 text-sm">{formatPHP(total_ar_payments)}</span>
+          </div>
+          <div className="divide-y divide-indigo-100">
+            {preview.ar_payments.filter(p => p.fund_source !== 'discount').map((p, i) => (
+              <div key={i} className="px-4 py-2 flex items-center justify-between text-sm">
+                <div>
+                  <span className="font-medium text-slate-800">{p.customer_name}</span>
+                  <span className="text-xs text-blue-600 font-mono ml-2">{p.invoice_number}</span>
+                  <span className={`ml-2 text-[10px] px-1.5 py-0.5 rounded font-medium ${p.fund_source === 'cashier' ? 'bg-emerald-100 text-emerald-700' : 'bg-violet-100 text-violet-700'}`}>
+                    {p.method || (p.fund_source === 'cashier' ? 'Cash' : 'Digital')}
+                  </span>
+                  {p.interest_paid > 0 && (
+                    <span className="ml-1 text-[10px] text-amber-600">INT: {formatPHP(p.interest_paid)}</span>
+                  )}
+                </div>
+                <span className="font-mono font-semibold text-indigo-700">{formatPHP(p.amount_paid)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Interest & Penalty Invoices Issued Today ──────────────────── */}
+      {(preview.interest_invoices_today || []).length > 0 && (
+        <div className="rounded-xl border border-amber-200 overflow-hidden">
+          <div className="px-4 py-2 bg-amber-50 flex items-center justify-between">
+            <p className="text-xs font-bold uppercase tracking-wider text-amber-700">Interest & Penalty Invoices Issued Today</p>
+            <span className="font-mono font-bold text-amber-700 text-sm">{formatPHP(preview.interest_invoices_today.reduce((s, i) => s + (i.grand_total || 0), 0))}</span>
+          </div>
+          <div className="divide-y divide-amber-100">
+            {preview.interest_invoices_today.map((inv, i) => (
+              <div key={i} className="px-4 py-2 flex items-center justify-between text-sm">
+                <div>
+                  <span className="font-medium text-slate-700">{inv.customer_name}</span>
+                  <span className="font-mono text-xs text-slate-400 ml-2">{inv.invoice_number}</span>
+                  <span className={`ml-2 text-[9px] px-1.5 py-0.5 rounded font-medium ${inv.sale_type === 'penalty_charge' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                    {inv.sale_type === 'penalty_charge' ? 'Penalty' : inv.manual_interest ? 'Manual INT' : 'Interest'}
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className="font-mono font-semibold text-amber-700">{formatPHP(inv.grand_total)}</span>
+                  {inv.amount_paid > 0 && (
+                    <span className="text-[10px] text-emerald-600 ml-2">({formatPHP(inv.amount_paid)} collected)</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Fund Transfers ────────────────────────────────────────────── */}
+      {(preview.fund_transfers_today || []).length > 0 && (
+        <div className="rounded-xl border border-cyan-200 overflow-hidden">
+          <div className="px-4 py-2 bg-cyan-50 flex items-center justify-between">
+            <p className="text-xs font-bold uppercase tracking-wider text-cyan-700">Fund Transfers</p>
+            <span className="font-bold font-mono text-cyan-700 text-sm">{(preview.net_fund_transfers || 0) > 0 ? '+' : ''}{formatPHP(preview.net_fund_transfers || 0)}</span>
+          </div>
+          <div className="divide-y divide-cyan-100">
+            {preview.fund_transfers_today.map((ft, i) => {
+              const isCashierToSafe = ft.type === 'cashier_to_safe';
+              const label = ft.type === 'capital_add'
+                ? `Capital → ${ft.target_wallet === 'safe' ? 'Safe' : 'Cashier'}`
+                : ft.type === 'safe_to_cashier' ? 'Safe → Cashier' : 'Cashier → Safe';
+              return (
+                <div key={i} className="px-4 py-2 flex items-center justify-between text-sm">
+                  <div>
+                    <span className="font-medium text-slate-800">{label}</span>
+                    {ft.note && <span className="text-xs text-slate-400 ml-2">{ft.note}</span>}
+                    {ft.authorized_by && <span className="text-[10px] text-slate-400 ml-1">by {ft.authorized_by}</span>}
+                  </div>
+                  <span className={`font-mono font-semibold ${isCashierToSafe ? 'text-orange-600' : 'text-cyan-700'}`}>
+                    {isCashierToSafe ? '-' : '+'}{formatPHP(ft.amount)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Cashier Expenses Detailed ─────────────────────────────────── */}
+      {cashierExps.length > 0 && (
+        <div className="rounded-xl border border-red-200 overflow-hidden">
+          <div className="px-4 py-2 bg-red-50 flex items-center justify-between">
+            <p className="text-xs font-bold uppercase tracking-wider text-red-600">Cashier Expenses (from drawer)</p>
+            <span className="font-bold font-mono text-red-700 text-sm">{formatPHP(preview.total_cashier_expenses || 0)}</span>
+          </div>
+          <div className="divide-y divide-red-100">
+            {cashierExps.map((e, i) => (
+              <div key={i} className="px-4 py-2 text-sm flex items-center justify-between">
+                <div>
+                  <span className="font-medium text-slate-800">{e.description || e.category}</span>
+                  <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-600 font-medium">{e.category}</span>
+                  {e.employee_name && <span className="text-[11px] text-slate-500 ml-2">({e.employee_name})</span>}
+                </div>
+                <span className="font-mono font-semibold text-red-600">{formatPHP(e.amount)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Safe Expenses Detailed ────────────────────────────────────── */}
+      {safeExps.length > 0 && (
+        <div className="rounded-xl border border-amber-200 overflow-hidden">
+          <div className="px-4 py-2 bg-amber-50 flex items-center justify-between">
+            <p className="text-xs font-bold uppercase tracking-wider text-amber-700">Safe Expenses (from vault, not drawer)</p>
+            <span className="font-bold font-mono text-amber-700 text-sm">{formatPHP(preview.total_safe_expenses || 0)}</span>
+          </div>
+          <div className="divide-y divide-amber-100">
+            {safeExps.map((e, i) => (
+              <div key={i} className="px-4 py-2 text-sm flex items-center justify-between">
+                <div>
+                  <span className="font-medium text-slate-800">{e.description || e.category}</span>
+                  <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">{e.category}</span>
+                </div>
+                <span className="font-mono font-semibold text-amber-700">{formatPHP(e.amount)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function DailyLogPage() {
   const { currentBranch, branches, hasPerm } = useAuth();
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
@@ -257,6 +553,13 @@ export default function DailyLogPage() {
   const [zreportDialog, setZreportDialog] = useState(false);
   const [zreportData, setZreportData] = useState(null);
   const [zreportLoading, setZreportLoading] = useState(false);
+  // Which Z-Report view is shown — normal (compact) or detailed (rich, with
+  // discounts, price changes, AR collection methods, fund transfers, etc.).
+  // Detail data is loaded lazily from /daily-close-preview the first time
+  // the user flips to "Detailed" — keeps the initial dialog open fast.
+  const [zreportMode, setZreportMode] = useState('normal');
+  const [zreportDetail, setZreportDetail] = useState(null);
+  const [zreportDetailLoading, setZreportDetailLoading] = useState(false);
 
   const fetchArchive = useCallback(async (branchId = 'all') => {
     setArchiveLoading(true);
@@ -271,6 +574,8 @@ export default function DailyLogPage() {
 
   const openZreport = async (record) => {
     setZreportData(null);
+    setZreportDetail(null);
+    setZreportMode('normal');
     setZreportDialog(true);
     setZreportLoading(true);
     try {
@@ -281,6 +586,21 @@ export default function DailyLogPage() {
     } catch { toast.error('Failed to load Z-report'); }
     setZreportLoading(false);
   };
+
+  // Lazy-loads the rich preview payload used by the "Detailed" Z-Report view.
+  // Same endpoint Close Wizard Step 7 uses — recomputes from sales_log +
+  // invoices + fund_transfers so it works on any historical closed day.
+  const loadZreportDetail = useCallback(async () => {
+    if (!zreportData || zreportDetail || zreportDetailLoading) return;
+    setZreportDetailLoading(true);
+    try {
+      const res = await api.get('/daily-close-preview', {
+        params: { date: zreportData.date, branch_id: zreportData.branch_id }
+      });
+      setZreportDetail(res.data || null);
+    } catch { toast.error('Failed to load detailed breakdown'); }
+    setZreportDetailLoading(false);
+  }, [zreportData, zreportDetail, zreportDetailLoading]);
 
   function r2(n) { return Math.round((parseFloat(n) || 0) * 100) / 100; }
 
@@ -1445,6 +1765,36 @@ export default function DailyLogPage() {
               {zreportData ? `Z-Report — ${zreportData.date} · ${zreportData.branch_name || ''}` : 'Loading Z-Report...'}
             </DialogTitle>
           </DialogHeader>
+          {/* View toggle — Normal (compact) vs Detailed (rich breakdown with
+              discounts, price changes, AR method split, fund transfers, per-
+              category expense lines). Detail payload loads lazily the first
+              time the owner flips to Detailed so opening the dialog stays
+              instant. */}
+          {zreportData && (
+            <div className="flex items-center gap-2 px-1 pb-2 shrink-0 print:hidden" data-testid="z-report-mode-toggle">
+              <Button
+                size="sm"
+                variant={zreportMode === 'normal' ? 'default' : 'outline'}
+                onClick={() => setZreportMode('normal')}
+                data-testid="z-report-mode-normal"
+                className={zreportMode === 'normal' ? 'bg-[#1A4D2E] text-white hover:bg-[#163f25]' : ''}>
+                Normal
+              </Button>
+              <Button
+                size="sm"
+                variant={zreportMode === 'detailed' ? 'default' : 'outline'}
+                onClick={() => { setZreportMode('detailed'); loadZreportDetail(); }}
+                data-testid="z-report-mode-detailed"
+                className={zreportMode === 'detailed' ? 'bg-[#1A4D2E] text-white hover:bg-[#163f25]' : ''}>
+                Detailed
+              </Button>
+              <span className="text-[11px] text-slate-400 ml-2">
+                {zreportMode === 'detailed'
+                  ? 'Discounts, price changes, AR by method, fund transfers, full expense list'
+                  : 'Compact Z-Report (default)'}
+              </span>
+            </div>
+          )}
           <ScrollArea className="flex-1 overflow-auto">
             <div className="pr-2 py-1">
               {zreportLoading ? (
@@ -1452,11 +1802,29 @@ export default function DailyLogPage() {
                   <RefreshCw size={22} className="animate-spin text-slate-400" />
                 </div>
               ) : zreportData ? (
-                <ZReport
-                  data={zreportData}
-                  branchName={zreportData.branch_name || currentBranch?.name}
-                  onPrint={() => window.print()}
-                />
+                zreportMode === 'detailed' ? (
+                  zreportDetailLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                      <RefreshCw size={22} className="animate-spin text-slate-400" />
+                      <span className="ml-2 text-sm text-slate-400">Loading detailed breakdown…</span>
+                    </div>
+                  ) : zreportDetail ? (
+                    <ZReportDetailed
+                      preview={zreportDetail}
+                      closing={zreportData}
+                      branchName={zreportData.branch_name || currentBranch?.name}
+                      onPrint={() => window.print()}
+                    />
+                  ) : (
+                    <p className="text-center py-8 text-slate-400">Could not load detailed breakdown.</p>
+                  )
+                ) : (
+                  <ZReport
+                    data={zreportData}
+                    branchName={zreportData.branch_name || currentBranch?.name}
+                    onPrint={() => window.print()}
+                  />
+                )
               ) : (
                 <p className="text-center py-8 text-slate-400">Could not load Z-report data.</p>
               )}

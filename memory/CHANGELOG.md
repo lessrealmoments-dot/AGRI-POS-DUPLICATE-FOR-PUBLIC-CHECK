@@ -1,5 +1,17 @@
 # AgriBooks Changelog
 
+## Feb 2026 — Detailed Z-Report Toggle (Iter 229)
+
+**User ask**: "Step 7 preview in the Close Wizard has SO MANY details (price changes, discounts, AR by method, fund transfers, per-category expenses). The regular Z-Report I can print later doesn't show any of that. Give me a Detailed Z-Report next to the Normal one so I can choose which to view & print."
+
+**Fix** (`/app/frontend/src/pages/DailyLogPage.js`):
+- New `<ZReportDetailed>` component — renders the same rich breakdown as Close Wizard Step 7 (Cash Drawer Reconciliation, Discount-per-product, Permanent Price Changes, AR Collections with per-method chips, Interest & Penalty Invoices Issued, Fund Transfers, Cashier/Safe Expenses). Uses `id="printable-report"` for print support.
+- Z-Report viewer dialog now has a `[Normal]` / `[Detailed]` toggle at the top (`data-testid="z-report-mode-toggle"`). Default = Normal (fast, compact). Clicking Detailed lazy-loads `/daily-close-preview` for that date/branch — same payload Step 7 uses, recomputes from `sales_log` + `invoices` + `fund_transfers` so it works on historical closed days.
+- Each view has its own Print button — printing either the Normal or the Detailed view now works end-to-end.
+
+No backend changes (endpoint `/api/daily-close-preview` already handles any date). Lint clean.
+
+
 ## Feb 2026 — Z-Report Print = Blank Page (Iter 228)
 
 **User report**: On `/daily-ops` the Z-Report dialog renders fine on screen, but clicking **Print** produces an entirely blank page preview.
