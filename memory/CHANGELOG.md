@@ -1,5 +1,22 @@
 # AgriBooks Changelog
 
+## Feb 2026 — SMS ONE-SHOT Dispatch Policy (Iter 227) — Carrier-Flag Recovery
+
+**User report**: After the 60-SMS spam flood, the user's **carrier FLAGGED the SIM for spam**. User correctly pointed out: "If the server says pending, the gateway will send it the moment it comes back online. One send is enough. Retries are pointless and cause duplicates." They use the **web gateway** (not Android app), so there's no local app cache to clear.
+
+**Fix — three hard guards** (`/app/backend/routes/sms.py`):
+
+1. **`MAX_DISPATCHES_PER_DAY = 1`** (was 3). Every queue row is dispatched **exactly once** by the server. After that single hand-out the row becomes `sent` (ACK received), `failed` (gateway reported failure), or `deferred` (no ACK within lease).
+
+2. **Auto-revive of deferred rows REMOVED**. Previously the server flipped `deferred` → `pending` with a fresh 3-strike budget every night. That re-sent any SMS whose GSM send succeeded but whose ACK failed — the exact cause of the spam. Now deferred rows sit visibly in the queue forever; admin must manually POST `/sms/queue/{id}/retry` after confirming non-delivery.
+
+3. **Absolute per-phone daily fuse `MAX_SMS_PER_PHONE_PER_DAY = 10`** in `queue_sms`. No matter what templates, triggers, schedulers or retries are firing, a single phone number can never accumulate more than 10 auto-triggered SMS rows in a rolling 24h window. This is the last-line defense that would have prevented the carrier-flag. Manual composes (admin typing a message) bypass this cap.
+
+**Tests updated** (`tests/test_sms_spam_protection_216.py`): old 3-strikes + auto-revive tests replaced with one-shot + no-auto-revive assertions. `test_spam_protection_constants` now asserts the new `MAX_DISPATCHES_PER_DAY=1` and `MAX_SMS_PER_PHONE_PER_DAY=10`. **All 12 SMS regression tests pass** (`test_mute_purge_queue_226.py` + `test_branch_close_reminder_opt_out_201.py` + `test_sms_spam_protection_216.py`).
+
+**Trade-off accepted by user**: if the gateway crashes BEFORE actually sending a row via GSM, that row becomes `deferred` and needs manual `/retry`. Under-delivery is explicitly preferred over carrier-blacklisting.
+
+
 ## Feb 2026 — SMS Mute Purge + Gateway-Replay Storm Protection (Iter 226)
 
 **User report**: Owner got spammed with **60+ duplicate close-day SMS** during a gateway DNS outage. Muting the affected branches via the Team SMS card did nothing — the spam kept coming. User had to log out of the gateway entirely.

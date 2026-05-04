@@ -12,32 +12,37 @@ from utils import get_current_user, check_perm, now_iso, new_id
 router = APIRouter(prefix="/sms", tags=["SMS"])
 
 
-# ── Gateway-dispatch tuning (spam-storm prevention) ─────────────────────────
+# ── Gateway-dispatch tuning (ONE-SHOT policy, Iter 227) ────────────────────
 #
-# Problem (Iter 216, user-reported):
-#   During a power outage the gateway phone lost DNS. The phone SENT the SMS
-#   via GSM but its HTTP `mark-sent` ack to the server failed. On the next
-#   poll the server handed out the SAME row again → the recipient was spammed
-#   with the same "URGENT" message over and over.
+# Policy change (user-driven, after carrier flagged the SIM for spam):
+#   The server dispatches each queue row EXACTLY ONCE. Period.
 #
-# Strategy:
-#   1. LEASE — when we hand a row to the gateway, lock it for `DISPATCH_LEASE_SECONDS`.
-#      Other polls skip leased rows. Lease is released on ack (`mark-sent` /
-#      `mark-failed`) OR when it expires (legitimate retry path).
-#   2. 3 STRIKES / DAY — every dispatch bumps `dispatch_count`. Once it hits
-#      `MAX_DISPATCHES_PER_DAY` without a `mark-sent`, the row flips to
-#      `deferred` with `deferred_until = tomorrow 00:00 org-tz`. Stops the
-#      spiral dead within a day, even if the gateway never acks again.
-#   3. DAILY SELF-HEAL — on each `GET /queue/pending` call, any `deferred`
-#      row whose `deferred_until` has passed is flipped back to `pending` with
-#      `dispatch_count=0`, giving it a fresh 3 strikes tomorrow.
-#   4. PER-RECIPIENT THROTTLE — `queue_sms` refuses to enqueue the same
-#      (template_key, phone) combo within `ENQUEUE_THROTTLE_SECONDS`. Prevents
-#      the scheduler from piling on while the gateway is offline.
-DISPATCH_LEASE_SECONDS = 300          # 5 min
-MAX_DISPATCHES_PER_DAY = 3            # 3 handouts/day per row; then defer
+#   Rationale: once the gateway polls /queue/pending, it physically sends the
+#   SMS via GSM. If its mark-sent ACK fails (DNS outage, power blip, server
+#   maintenance), re-dispatching the SAME row just sends the SAME SMS AGAIN
+#   via GSM — that's what caused the 60+ duplicate "URGENT close" flood and
+#   got the user's SIM flagged by the carrier.
+#
+#   Trade-off: if the gateway crashed BEFORE actually sending the SMS we
+#   lose one legitimate message. The user has explicitly opted into this
+#   because under-delivery is far cheaper than carrier blacklisting.
+#
+#   After dispatch, the row waits for either mark-sent (→ sent) or
+#   mark-failed (→ failed, admin can /retry manually). If neither ACK
+#   arrives within the lease, the row becomes `deferred` with a visible
+#   reason so the admin can inspect it in the Queue UI and decide.
+#
+# What stays in place from Iter 216/226:
+#   - LEASE — still locks the row so two concurrent polls don't double-ship.
+#   - PER-RECIPIENT THROTTLE — `queue_sms` refuses to enqueue the same
+#     (template_key, phone) combo within ENQUEUE_THROTTLE_SECONDS. Stops
+#     the scheduler from piling on while the gateway is offline.
+#   - MUTE PURGE + FILTER — muting a branch cancels queued rows AND the
+#     dispatch handler skips rows for muted branches.
+DISPATCH_LEASE_SECONDS = 300          # 5 min lease before self-defer
+MAX_DISPATCHES_PER_DAY = 1            # ONE-SHOT: server dispatches each row once
 ENQUEUE_THROTTLE_SECONDS = 600        # 10 min per-recipient per-template
-MAX_GATEWAY_RETRIES = 3               # existing cap for mark-failed path
+MAX_GATEWAY_RETRIES = 3               # existing cap for mark-failed ACK path
 
 # Close-reminder stage keys. When an admin mutes a branch (via Team SMS card),
 # we purge any pending/deferred/failed rows with these template_keys for that
@@ -53,11 +58,20 @@ CLOSE_REMINDER_TEMPLATE_KEYS = [
     "close_overdue_next_day",
     "close_overdue_multi_day",
 ]
-# Tighter dispatch cap for close-reminder templates (Iter 226). Regular
-# templates still use MAX_DISPATCHES_PER_DAY=3. Close-reminder messages are
-# the single biggest source of gateway-replay spam when the phone's DNS
-# flakes, so we hard-cap them at 2 hand-outs/day/row.
-MAX_DISPATCHES_CLOSE_REMINDER = 2
+# Close-reminder cap equals the global one-shot cap. Explicit alias kept
+# so future per-template overrides (e.g. payment reminders allowed 2) can
+# land without re-plumbing. ONE means: one dispatch, one chance to send.
+MAX_DISPATCHES_CLOSE_REMINDER = 1
+
+# ── Absolute per-phone safety fuse (Iter 227) ───────────────────────────────
+# No matter what templates, triggers, schedulers, or retries are in play, a
+# single recipient phone can NEVER receive more than this many SMS from our
+# queue in a rolling 24h window. The carrier flagged the user's SIM after
+# ~60 duplicates hit one owner in an hour; this is the last line of defense
+# if every other guard fails. Count includes any row in status
+# {pending, sent, deferred, failed} — i.e. the intent counts, not just the
+# physical-send.
+MAX_SMS_PER_PHONE_PER_DAY = 10
 
 
 async def _tomorrow_midnight_iso(org_id: str) -> str:
@@ -743,6 +757,31 @@ async def queue_sms(
             )
             return None
 
+    # Absolute per-phone-per-day fuse (Iter 227) — NO recipient may receive
+    # more than MAX_SMS_PER_PHONE_PER_DAY distinct queue rows in the rolling
+    # 24h window, regardless of template, trigger, or scheduler. This is the
+    # final safeguard that would have prevented the carrier from flagging
+    # the user's SIM. Auto-triggers are enforced hard; manual composes bypass
+    # this (admin has consciously composed each message) because otherwise
+    # the user can't urgently reach a customer late in the day.
+    if trigger == "auto":
+        day_cutoff = (
+            datetime.now(timezone.utc) - timedelta(hours=24)
+        ).isoformat()
+        recent_count = await _raw_db.sms_queue.count_documents({
+            "phone": phone.strip(),
+            "status": {"$in": ["pending", "sent", "deferred", "failed"]},
+            "created_at": {"$gte": day_cutoff},
+            **org_filter,
+        })
+        if recent_count >= MAX_SMS_PER_PHONE_PER_DAY:
+            sms_log.warning(
+                f"queue_sms BLOCKED — per-phone daily cap hit ({recent_count} "
+                f">= {MAX_SMS_PER_PHONE_PER_DAY}) | template={template_key} "
+                f"phone={phone} org={organization_id}"
+            )
+            return None
+
     message = render_template(template["body"], variables)
     doc = {
         "id": new_id(),
@@ -993,31 +1032,28 @@ async def diagnose_sms_trigger(
 async def get_pending_sms(limit: int = 50, user=Depends(get_current_user)):
     """Get pending SMS for the gateway app to send.
 
-    Spam-storm protection (Iter 216):
+    ONE-SHOT policy (Iter 227):
       • LEASE — every row handed out is locked for DISPATCH_LEASE_SECONDS so
-        the same row is never served to two concurrent polls AND a failed-ack
-        poll doesn't immediately re-fire the same SMS via GSM.
-      • 3-STRIKES-PER-DAY — each hand-out bumps `dispatch_count`. At
-        MAX_DISPATCHES_PER_DAY the row flips to `deferred` with
-        `deferred_until = tomorrow 00:00 org-tz`. This stops the recipient
-        from being spammed during DNS / data outages.
-      • SELF-HEAL — expired `deferred` rows and stale leases are re-armed on
-        every poll so the queue recovers automatically without a cron.
+        two concurrent polls never ship the same row.
+      • SINGLE DISPATCH — each row is handed out EXACTLY ONCE. After that it
+        either becomes `sent` (ACK received), `failed` (gateway reported
+        failure), or `deferred` (no ACK within lease → waits for admin /retry).
+      • NO AUTO-REVIVE — deferred rows do NOT auto-resurrect the next day.
+        They sit visibly in the queue so the admin can decide whether the
+        SMS actually went out before flipping it back to pending. This is
+        the explicit guard against re-sending a message whose ACK failed
+        but whose GSM send succeeded — which was the root cause of the
+        carrier-flagging spam incident.
+      • MUTED-BRANCH FILTER — close-reminder rows for branches flipped to
+        muted between queuing and dispatch are auto-cancelled.
     """
     now = now_iso()
 
-    # 1. Self-heal expired deferrals (tomorrow's first poll picks them back up
-    #    with a fresh 3-strike budget).
-    await db.sms_queue.update_many(
-        {"status": "deferred", "deferred_until": {"$lte": now}},
-        {"$set": {
-            "status": "pending",
-            "dispatch_count": 0,
-            "leased_until": None,
-            "deferred_until": None,
-            "re_armed_at": now,
-        }},
-    )
+    # NOTE: Auto-revive of expired deferrals was intentionally REMOVED in
+    # Iter 227. Rows become deferred for a reason (no ACK after one dispatch),
+    # and resurrecting them risks re-sending a message that actually got
+    # delivered via GSM. Admin must explicitly POST /sms/queue/{id}/retry
+    # after confirming non-delivery.
 
     # 2. Pull candidates whose lease (if any) has expired.
     candidates = await db.sms_queue.find(
@@ -1074,16 +1110,17 @@ async def get_pending_sms(limit: int = 50, user=Depends(get_current_user)):
     for c in candidates:
         new_dispatch_count = (c.get("dispatch_count") or 0) + 1
 
-        # Tighter per-day cap for close-reminder templates — two strikes then
-        # defer (vs three for everything else). Owners were getting spammed
-        # hardest by these during gateway DNS outages.
+        # ONE-SHOT cap — close-reminder and everything else both top out at
+        # MAX_DISPATCHES_PER_DAY=1. The per-template variable stays in place
+        # so a future trigger type (e.g. payment reminders) can have a
+        # different cap without re-plumbing this whole block.
         per_day_cap = (
             MAX_DISPATCHES_CLOSE_REMINDER
             if c.get("template_key") in CLOSE_REMINDER_TEMPLATE_KEYS
             else MAX_DISPATCHES_PER_DAY
         )
 
-        # Over the per-day cap → defer instead of dispatching.
+        # Over the one-shot cap → defer (stays deferred until admin /retry).
         if new_dispatch_count > per_day_cap:
             deferred_until = await _tomorrow_midnight_iso(c.get("organization_id", ""))
             await db.sms_queue.update_one(

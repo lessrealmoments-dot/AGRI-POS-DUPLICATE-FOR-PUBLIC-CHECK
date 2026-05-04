@@ -110,23 +110,29 @@ def test_lease_prevents_immediate_reissue(admin_token):
         _cleanup()
 
 
-def test_three_strikes_defers_to_tomorrow(admin_token):
+def test_one_shot_dispatch_defers_after_single_hand_out(admin_token):
+    """ONE-SHOT policy (Iter 227): after ONE dispatch the row is deferred
+    until admin manually /retry — never auto-re-dispatched.
+    Previously this was 3 strikes/day; the old behavior spammed recipients
+    when the gateway's mark-sent ACK failed (DNS outage) and got the user's
+    SIM flagged by the carrier."""
     _cleanup()
     sid = _insert_pending(phone="+639000000202")
     try:
-        for strike in range(3):
-            r = requests.get(f"{API}/sms/queue/pending", headers=_hdr(admin_token))
-            assert r.status_code == 200
-            assert sid in [x["id"] for x in r.json()], f"strike {strike+1} should yield the row"
-            # Simulate phone failing to ack — manually expire the lease
-            _db.sms_queue.update_one(
-                {"id": sid}, {"$set": {"leased_until": _iso(-10)}}
-            )
+        # First poll → row dispatched
+        r = requests.get(f"{API}/sms/queue/pending", headers=_hdr(admin_token))
+        assert r.status_code == 200
+        assert sid in [x["id"] for x in r.json()], "first poll should yield the row"
 
-        # 4th poll — row deferred, not returned
-        r4 = requests.get(f"{API}/sms/queue/pending", headers=_hdr(admin_token))
-        assert r4.status_code == 200
-        assert sid not in [x["id"] for x in r4.json()]
+        # Simulate phone failing to ACK — expire the lease manually
+        _db.sms_queue.update_one({"id": sid}, {"$set": {"leased_until": _iso(-10)}})
+
+        # Second poll → row must be deferred, not re-dispatched
+        r2 = requests.get(f"{API}/sms/queue/pending", headers=_hdr(admin_token))
+        assert r2.status_code == 200
+        assert sid not in [x["id"] for x in r2.json()], (
+            "one-shot policy: a second dispatch must never happen"
+        )
 
         row = _db.sms_queue.find_one({"id": sid}, {"_id": 0})
         assert row["status"] == "deferred"
@@ -136,22 +142,31 @@ def test_three_strikes_defers_to_tomorrow(admin_token):
         _cleanup()
 
 
-def test_expired_deferred_self_heals(admin_token):
+def test_deferred_rows_do_not_auto_revive(admin_token):
+    """Iter 227: auto-revive of expired-deferred rows was INTENTIONALLY
+    removed. A deferred row stays deferred until admin explicitly /retry —
+    this is the safeguard against re-sending an SMS whose GSM send
+    succeeded but whose ACK failed (the exact spam pattern)."""
     _cleanup()
     sid = _insert_pending(phone="+639000000203")
     try:
+        # Mark as deferred with an expired deferred_until
         _db.sms_queue.update_one(
             {"id": sid},
-            {"$set": {"status": "deferred", "deferred_until": _iso(-60), "dispatch_count": 3}},
+            {"$set": {"status": "deferred", "deferred_until": _iso(-60),
+                      "dispatch_count": 1}},
         )
         r = requests.get(f"{API}/sms/queue/pending", headers=_hdr(admin_token))
         assert r.status_code == 200
-        assert sid in [x["id"] for x in r.json()], "expired-deferred row should re-arm"
+        assert sid not in [x["id"] for x in r.json()], (
+            "deferred rows must NEVER auto-revive — admin manual /retry only"
+        )
 
         row = _db.sms_queue.find_one({"id": sid}, {"_id": 0})
-        assert row["status"] == "pending"
-        assert row["dispatch_count"] == 1  # fresh 3-strike budget, this poll = 1
-        assert row.get("re_armed_at")
+        # Should still be deferred — server never flipped it back
+        assert row["status"] == "deferred", (
+            "deferred should stay deferred (no self-heal)"
+        )
     finally:
         _cleanup()
 
@@ -197,7 +212,9 @@ def test_clear_stuck_default_leaves_pending(admin_token):
 def test_spam_protection_constants():
     from routes.sms import (
         DISPATCH_LEASE_SECONDS, MAX_DISPATCHES_PER_DAY, ENQUEUE_THROTTLE_SECONDS,
+        MAX_SMS_PER_PHONE_PER_DAY,
     )
     assert DISPATCH_LEASE_SECONDS == 300        # 5 min
-    assert MAX_DISPATCHES_PER_DAY == 3          # 3 strikes/day
+    assert MAX_DISPATCHES_PER_DAY == 1          # Iter 227: ONE-SHOT dispatch
     assert ENQUEUE_THROTTLE_SECONDS == 600      # 10 min per-recipient throttle
+    assert MAX_SMS_PER_PHONE_PER_DAY == 10      # Iter 227: absolute 24h fuse
