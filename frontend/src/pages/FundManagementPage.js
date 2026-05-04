@@ -22,7 +22,7 @@ import FundTransferDialog from '../components/FundTransferDialog';
 import OverageReserveCard from '../components/OverageReserveCard';
 import {
   Banknote, Lock, Smartphone, Building2, RefreshCw, ArrowRight,
-  ArrowRightLeft, Shield, EyeOff, History, AlertTriangle
+  ArrowRightLeft, Shield, EyeOff, History, AlertTriangle, CalendarDays
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPHP, fmtDateTime } from '../lib/utils';
@@ -116,6 +116,13 @@ export default function FundManagementPage() {
   const [movements, setMovements] = useState([]);
   const [movLoading, setMovLoading] = useState(false);
 
+  // Fund-transfer date edit
+  const [dateEditTransfer, setDateEditTransfer] = useState(null);
+  const [dateEditNewDate, setDateEditNewDate] = useState('');
+  const [dateEditPin, setDateEditPin] = useState('');
+  const [dateEditReason, setDateEditReason] = useState('');
+  const [dateEditSubmitting, setDateEditSubmitting] = useState(false);
+
   const branchId = currentBranch?.id;
 
   const loadData = useCallback(async () => {
@@ -148,6 +155,31 @@ export default function FundManagementPage() {
       setMovements(res.data || []);
     } catch {}
     setMovLoading(false);
+  };
+
+  // ── Change fund-transfer date (PIN-gated, audit-logged) ──
+  const handleEditTransferDate = async () => {
+    if (!dateEditTransfer) return;
+    if (!dateEditNewDate) { toast.error('Pick a new date'); return; }
+    if (dateEditNewDate === dateEditTransfer.date) { toast.error('Pick a different date'); return; }
+    if (!dateEditPin || dateEditPin.length < 4) { toast.error('Manager PIN required'); return; }
+    setDateEditSubmitting(true);
+    try {
+      const res = await api.post(`${BACKEND_URL}/api/fund-transfers/${dateEditTransfer.id}/edit-date`, {
+        new_date: dateEditNewDate,
+        manager_pin: dateEditPin,
+        reason: dateEditReason || 'Date corrected',
+      });
+      toast.success(`${res.data.message} — authorized by ${res.data.authorized_by}`);
+      setDateEditTransfer(null);
+      setDateEditNewDate('');
+      setDateEditPin('');
+      setDateEditReason('');
+      loadData();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Date change failed');
+    }
+    setDateEditSubmitting(false);
   };
 
   if (loading) return (
@@ -301,15 +333,37 @@ export default function FundManagementPage() {
           <CardContent>
             <div className="space-y-2">
               {transfers.slice(0, 8).map(t => (
-                <div key={t.id} className="flex items-center justify-between text-xs py-1.5 border-b border-slate-50 last:border-0">
-                  <div>
+                <div key={t.id} className="flex items-center justify-between text-xs py-1.5 border-b border-slate-50 last:border-0" data-testid={`fund-transfer-row-${t.id}`}>
+                  <div className="min-w-0 flex-1">
                     <span className="font-medium text-slate-700">{t.description}</span>
                     {t.note && <span className="text-slate-400 ml-2">— {t.note}</span>}
                     <p className="text-[10px] text-slate-400 mt-0.5">
-                      By {t.performed_by_name} · Auth: {t.authorized_by} · {fmtDateTime(t.created_at)}
+                      By {t.performed_by_name} · Auth: {t.authorized_by} · Dated: <span className="font-mono text-slate-600">{t.date || '—'}</span> · Entered: {fmtDateTime(t.created_at)}
                     </p>
+                    {(t.date_edit_history || []).length > 0 && (
+                      <p className="text-[10px] text-indigo-500 mt-0.5">
+                        Date edited {t.date_edit_history.length}×
+                        {t.date_edit_history[t.date_edit_history.length - 1]?.from && (
+                          <> · last change: {t.date_edit_history[t.date_edit_history.length - 1].from} → {t.date_edit_history[t.date_edit_history.length - 1].to}</>
+                        )}
+                      </p>
+                    )}
                   </div>
-                  <span className="font-bold font-mono text-[#1A4D2E] shrink-0 ml-3">{formatPHP(t.amount)}</span>
+                  <div className="flex items-center gap-2 shrink-0 ml-3">
+                    <Button variant="ghost" size="sm"
+                      className="h-6 px-1.5 text-[10px] text-indigo-600 hover:text-indigo-700 gap-0.5"
+                      onClick={() => {
+                        setDateEditTransfer(t);
+                        setDateEditNewDate(t.date || new Date().toISOString().slice(0, 10));
+                        setDateEditPin('');
+                        setDateEditReason('');
+                      }}
+                      title="Change the effective date of this transfer (PIN-gated)"
+                      data-testid={`edit-transfer-date-${t.id}`}>
+                      <CalendarDays size={10} /> Date
+                    </Button>
+                    <span className="font-bold font-mono text-[#1A4D2E]">{formatPHP(t.amount)}</span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -326,6 +380,69 @@ export default function FundManagementPage() {
         branchId={branchId}
         onSuccess={loadData}
       />
+
+      {/* Edit Transfer Date Dialog */}
+      {dateEditTransfer && (
+        <div className="fixed inset-0 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 9999 }}
+          onClick={e => { if (e.target === e.currentTarget) setDateEditTransfer(null); }}
+          data-testid="edit-transfer-date-dialog">
+          <div className="bg-white rounded-2xl shadow-2xl w-full p-5" style={{ maxWidth: '400px' }}>
+            <div className="flex items-center gap-3 mb-4">
+              <CalendarDays size={18} className="text-indigo-600" />
+              <div>
+                <p className="font-bold text-slate-800">Change Fund Transfer Date</p>
+                <p className="text-xs text-slate-400">{dateEditTransfer.description} · {formatPHP(dateEditTransfer.amount)}</p>
+              </div>
+            </div>
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs space-y-1 mb-3">
+              <div className="flex justify-between"><span className="text-slate-500">Current Date</span><span className="font-mono font-bold">{dateEditTransfer.date || '—'}</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">Authorized By</span><span>{dateEditTransfer.authorized_by || '—'}</span></div>
+              <p className="text-[10px] text-slate-500 mt-1.5 leading-snug">
+                Both the old and the new date must be OPEN (not included in a Z-Report).
+                Audit trail is preserved.
+              </p>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-slate-600 font-medium">New Date *</label>
+                <input type="date" value={dateEditNewDate}
+                  onChange={e => setDateEditNewDate(e.target.value)}
+                  max={new Date().toISOString().slice(0, 10)}
+                  className="mt-1 w-full h-9 px-3 rounded-md border border-slate-200 text-sm"
+                  data-testid="edit-transfer-date-newdate" />
+              </div>
+              <div>
+                <label className="text-xs text-slate-600 font-medium">Reason (optional)</label>
+                <input type="text" value={dateEditReason}
+                  onChange={e => setDateEditReason(e.target.value)}
+                  placeholder="e.g. Recorded under wrong day"
+                  className="mt-1 w-full h-9 px-3 rounded-md border border-slate-200 text-sm"
+                  data-testid="edit-transfer-date-reason" />
+              </div>
+              <div>
+                <label className="text-xs text-slate-600 font-medium flex items-center gap-1"><Shield size={11} /> Manager PIN *</label>
+                <input type="password" value={dateEditPin} autoComplete="new-password"
+                  onChange={e => setDateEditPin(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleEditTransferDate()}
+                  placeholder="Enter PIN"
+                  className="mt-1 w-full h-10 px-3 rounded-md border border-slate-200 font-mono text-center text-xl tracking-widest"
+                  data-testid="edit-transfer-date-pin" />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-5">
+              <button onClick={() => setDateEditTransfer(null)}
+                className="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-600 hover:bg-slate-50"
+                data-testid="edit-transfer-date-cancel">Cancel</button>
+              <button onClick={handleEditTransferDate}
+                disabled={dateEditSubmitting || !dateEditNewDate || dateEditNewDate === dateEditTransfer.date || !dateEditPin || dateEditPin.length < 4}
+                className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold disabled:opacity-50"
+                data-testid="edit-transfer-date-confirm">
+                {dateEditSubmitting ? 'Saving...' : 'Confirm Change'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

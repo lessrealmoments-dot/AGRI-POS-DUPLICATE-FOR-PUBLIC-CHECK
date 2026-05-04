@@ -16,6 +16,7 @@
 - Backend `POST /fund-transfers` accepts `date` and rejects with `403` if the date is in a closed Z-Report day
 - `GET /daily-close-preview/batch` now returns the missing `fund_transfers_today` list, so batch Z-Reports finally show capital injections
 - Per-row `date` field added to both single-day and batch `fund_transfers_today` payloads; Close Wizard renders it next to each transfer
+- **Post-creation edit**: new `POST /fund-transfers/{id}/edit-date` endpoint (PIN-gated, `modify_payment` action) lets managers fix a wrongly-dated injection; same closed-day guards on old + new date; `date_edit_history` audit trail on the transfer doc. UI: CalendarDays "Date" button on every row of Recent Transfers in Fund Management, opens a dedicated dialog.
 
 ### 2. Offline Sales Receipt Numbering Standard
 - New helper `getNextOfflineReceiptNumber(prefix, branchCode)` in `/app/frontend/src/lib/offlineDB.js`

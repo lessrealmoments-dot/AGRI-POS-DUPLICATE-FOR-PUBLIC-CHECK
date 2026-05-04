@@ -479,6 +479,92 @@ async def list_fund_transfers(
     return transfers
 
 
+@router.post("/fund-transfers/{transfer_id}/edit-date")
+async def edit_fund_transfer_date(transfer_id: str, data: dict, user=Depends(get_current_user)):
+    """Change the effective `date` of a fund transfer (e.g. a capital injection
+    that was recorded under the wrong day).
+
+    Guards:
+      - Manager PIN required (action_key=`modify_payment`).
+      - Blocked if the ORIGINAL date is already in a closed Z-Report for the
+        branch — that day's balance has been finalised.
+      - Blocked if the NEW date is already in a closed Z-Report for the branch.
+      - Stores full audit trail in `date_edit_history` on the transfer doc.
+    """
+    check_perm(user, "accounting", "manage_funds")
+
+    new_date = (data.get("new_date") or "").strip()
+    manager_pin = data.get("manager_pin", "")
+    reason = (data.get("reason") or "Fund transfer date corrected").strip()
+
+    if not new_date:
+        raise HTTPException(status_code=400, detail="new_date required (YYYY-MM-DD)")
+    try:
+        datetime.strptime(new_date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="new_date must be YYYY-MM-DD")
+    if not manager_pin:
+        raise HTTPException(status_code=400, detail="Manager PIN required")
+
+    ft = await db.fund_transfers.find_one({"id": transfer_id}, {"_id": 0})
+    if not ft:
+        raise HTTPException(status_code=404, detail="Fund transfer not found")
+
+    branch_id = ft.get("branch_id", "")
+    old_date = ft.get("date", "")
+    if old_date == new_date:
+        return {"message": "Date unchanged", "old_date": old_date, "new_date": new_date}
+
+    from routes.verify import verify_pin_for_action
+    verifier = await verify_pin_for_action(manager_pin, "modify_payment")
+    if not verifier:
+        raise HTTPException(status_code=403, detail="Invalid PIN — date change not authorized")
+
+    # Guard — original date closed
+    if old_date and branch_id:
+        close_old = await db.daily_closings.find_one(
+            {"date": old_date, "branch_id": branch_id, "status": "closed"}, {"_id": 0}
+        )
+        if close_old:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot edit — original date {old_date} is already included in a Z-Report."
+            )
+    # Guard — new date closed
+    if branch_id:
+        close_new = await db.daily_closings.find_one(
+            {"date": new_date, "branch_id": branch_id, "status": "closed"}, {"_id": 0}
+        )
+        if close_new:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot edit — target date {new_date} is already closed in a Z-Report."
+            )
+
+    authorized_name = verifier.get("verifier_name", "Manager")
+    history_entry = {
+        "from": old_date,
+        "to": new_date,
+        "reason": reason,
+        "edited_by": user.get("full_name", user["username"]),
+        "authorized_by": authorized_name,
+        "edited_at": now_iso(),
+    }
+
+    await db.fund_transfers.update_one(
+        {"id": transfer_id},
+        {"$set": {"date": new_date}, "$push": {"date_edit_history": history_entry}}
+    )
+
+    return {
+        "message": f"Fund transfer date changed: {old_date} → {new_date}",
+        "old_date": old_date,
+        "new_date": new_date,
+        "authorized_by": authorized_name,
+        "reason": reason,
+    }
+
+
 
 @router.get("/expenses")
 async def list_expenses(
