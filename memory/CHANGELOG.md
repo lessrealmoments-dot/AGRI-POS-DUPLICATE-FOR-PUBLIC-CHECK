@@ -1151,3 +1151,52 @@ User-confirmed scope:
 - `CountSheetsPage.js` — physical count entries.
 - `CloseWizardPage.js` — cash-count denominations.
 - Misc dialogs in `BranchCapitalWizard`, `ReturnRefundWizard`, etc.
+
+## Iter 226 (Phase 2) — Feb 2026 (Calc Sweep Complete)
+
+Following Phase 1 (15 inputs in the daily-money pages), a Python codemod
+swept the entire frontend and converted ~140 more numeric inputs to
+`<CalcInput>`.
+
+### Codemod (`/app/scripts/calc_codemod.py`)
+- Regex-driven, conservative: only matches `<Input type="number" …/>` and
+  `<input type="text" inputMode="decimal" …/>`.
+- Drops attrs CalcInput owns: type, inputMode, min, max, step, onWheel.
+- Rewrites `onChange={e => setX(e.target.value)}` → `onChange={(__cv) => setX(__cv)}`
+  using parameter name `__cv` to avoid colliding with inner `const v`/`let v`.
+- Auto-inserts `import CalcInput from '<rel>'` at the right place (handles
+  multi-line `import { … } from …` blocks correctly).
+- 100 % idempotent — re-running it on already-migrated files is a no-op.
+
+### Phase 2 files swept (≈40)
+Sales / POS / Inventory: PurchaseOrderPage, BranchTransferPage, CountSheetsPage,
+RepackPricingPage, PriceManagerPage, ProductsPage, ProductDetailPage,
+ApproveTransferPage, PendingReleasesPage, terminal/TerminalPOCheck,
+terminal/TerminalTransfers, TerminalReturnRefundModal,
+TerminalUpdateReceiptModal.
+Money / accounting: AccountingPage, PaySupplierPage, JournalEntriesPage,
+CloseWizardPage, BranchCapitalWizard, BudgetChecker.
+Customers / suppliers / employees: CustomersPage, EmployeesPage,
+CropCreditsPage.
+Misc: SetupWizardPage, DailyLogPage, MessagesPage, IncidentTicketsPage,
+PriceSchemesPage, BarcodePrintPage, SuperAdminPage, ReturnRefundWizard,
+AuditCenterPage, DocViewerPage, AuthDialog, ExpenseDetailModal,
+ReviewDetailDialog, audit/ReserveTab, PriceScanManager, InvoiceDetailModal.
+
+### Manual fixes after codemod
+- `PaySupplierPage.js:548` — renamed inner `const v = …` to use `raw` for
+  the arrow param so it doesn't shadow.
+- `ProductsPage.js:1358 & 1369` — same shadowing fix.
+- `PendingReleasesPage.jsx:14` — relocated mis-injected import from inside a
+  multi-line `import { … }` block.
+
+### Verification (test report iteration_193)
+- 0 compile errors, 0 console errors across 15 touched pages.
+- Operator-key trigger + Enter-commit confirmed on PurchaseOrder,
+  BranchTransfer, PriceManager, PaySupplier.
+- Escape-revert and double-op collapse confirmed.
+- `data-calc-active` toggles 0 → 1 → 0 correctly.
+
+### Status
+The QuickBooks-style inline calculator is now LIVE on every numeric input
+across the application. Total: ~155 inputs migrated.
