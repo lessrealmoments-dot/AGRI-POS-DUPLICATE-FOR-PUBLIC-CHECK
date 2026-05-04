@@ -58,6 +58,29 @@ CLOSE_REMINDER_TEMPLATE_KEYS = [
     "close_overdue_next_day",
     "close_overdue_multi_day",
 ]
+
+# Templates that reference a specific branch's operational status and should
+# ALL be purged when a branch is muted / scope-blocked. Superset of
+# CLOSE_REMINDER_TEMPLATE_KEYS + the Z-Report finalized daily summary (which
+# previously survived a mute and kept arriving on owners' phones overnight).
+MUTED_BRANCH_TEMPLATE_KEYS = CLOSE_REMINDER_TEMPLATE_KEYS + [
+    "zreport_finalized",
+]
+
+# Night-time dispatch gate (Iter 237) — the Android gateway polls 24/7, so
+# rows queued at 6 PM (with the recipient asleep by 10 PM) used to be handed
+# out at 1 AM or 2 AM when the phone reconnected. We now refuse to dispatch
+# non-manual rows inside the org's local quiet window, mirroring the
+# enqueuer's 22:00–07:00 guard (close_reminder.py: QUIET_START / QUIET_END).
+DISPATCH_QUIET_START_H = 22   # 10 PM local
+DISPATCH_QUIET_END_H   = 7    # 7 AM local
+
+# Close-reminder rows become stale after this many hours (Iter 237).
+# An SMS queued 3 days ago with `days_overdue=0` is wrong by the time it
+# ships, and the recipient has already moved on. Before dispatch we expire
+# any pending close-reminder row older than this threshold so it can never
+# leak out after the situation has changed.
+CLOSE_REMINDER_TTL_HOURS = 24
 # Close-reminder cap equals the global one-shot cap. Explicit alias kept
 # so future per-template overrides (e.g. payment reminders allowed 2) can
 # land without re-plumbing. ONE means: one dispatch, one chance to send.
@@ -93,6 +116,58 @@ async def _tomorrow_midnight_iso(org_id: str) -> str:
         return (datetime.now(timezone.utc) + timedelta(days=1)).replace(
             hour=16, minute=0, second=0, microsecond=0
         ).isoformat()
+
+
+async def _is_org_in_quiet_hours(org_id: str) -> bool:
+    """True when the organization's local wall-clock is inside the
+    night-time dispatch window (DISPATCH_QUIET_START_H .. DISPATCH_QUIET_END_H).
+
+    Used by `GET /sms/queue/pending` to block the gateway from shipping
+    automated/scheduled rows overnight. Manual sends always bypass this.
+    """
+    if not org_id:
+        return False
+    try:
+        from routes.close_reminder import _resolve_org_timezone, _local_now_in
+        tz_name = await _resolve_org_timezone(org_id)
+        local = _local_now_in(tz_name)
+        h = local.hour
+        start, end = DISPATCH_QUIET_START_H, DISPATCH_QUIET_END_H
+        if start <= end:
+            return start <= h < end
+        # wrap (typical 22..7 case)
+        return h >= start or h < end
+    except Exception:
+        return False
+
+
+async def _get_org_pause_state(org_id: str) -> dict:
+    """Return `{paused: bool, until: iso|None, reason: str|None}` for the
+    org-wide SMS circuit breaker. Stored in the settings collection under
+    key="sms_global_pause" so admins can pause ALL automated SMS for a window
+    (e.g. 24h) without unmuting branches individually.
+    """
+    if not org_id:
+        return {"paused": False, "until": None, "reason": None}
+    try:
+        doc = await _raw_db.settings.find_one(
+            {"key": "sms_global_pause", "organization_id": org_id},
+            {"_id": 0, "value": 1},
+        )
+        value = (doc or {}).get("value") or {}
+        until = value.get("until")
+        if not until:
+            return {"paused": False, "until": None, "reason": None}
+        # Auto-expire the pause once `until` is in the past.
+        if until <= now_iso():
+            return {"paused": False, "until": until, "reason": value.get("reason")}
+        return {
+            "paused": True,
+            "until": until,
+            "reason": value.get("reason") or "",
+        }
+    except Exception:
+        return {"paused": False, "until": None, "reason": None}
 
 
 # ── Org-scoped company-name resolver (no cross-tenant bleed) ──────────────
@@ -724,6 +799,20 @@ async def queue_sms(
         sms_log.warning(f"queue_sms skipped — trigger_disabled in Settings | template={template_key} org={organization_id} branch={branch_id} customer={customer_id}")
         return None
 
+    # ── GLOBAL PAUSE GATE (Iter 237) ────────────────────────────────────────
+    # While an admin-triggered org-wide pause is active, don't enqueue any
+    # automated/scheduled SMS — they'd just pile up unbounded (and stale) in
+    # the queue until resume. Manual composes always bypass so admins can
+    # reach customers urgently during the pause.
+    if organization_id and trigger in ("auto", "scheduled"):
+        pause = await _get_org_pause_state(organization_id)
+        if pause.get("paused"):
+            sms_log.info(
+                f"queue_sms skipped — org sms paused until {pause.get('until')} "
+                f"| template={template_key} org={organization_id}"
+            )
+            return None
+
     # De-duplication — always org-scoped to prevent cross-company dedup conflicts
     if dedup_key:
         existing = await _raw_db.sms_queue.find_one({"dedup_key": dedup_key, **org_filter}, {"_id": 0})
@@ -1044,10 +1133,58 @@ async def get_pending_sms(limit: int = 50, user=Depends(get_current_user)):
         the explicit guard against re-sending a message whose ACK failed
         but whose GSM send succeeded — which was the root cause of the
         carrier-flagging spam incident.
-      • MUTED-BRANCH FILTER — close-reminder rows for branches flipped to
-        muted between queuing and dispatch are auto-cancelled.
+      • MUTED-BRANCH FILTER — close-reminder + zreport-finalized rows for
+        branches flipped to muted between queuing and dispatch are
+        auto-cancelled.
+      • QUIET-HOURS GATE (Iter 237) — no auto/scheduled rows are handed out
+        inside the org's local 22:00–07:00 window. Manual sends bypass.
+      • GLOBAL PAUSE (Iter 237) — if an admin clicked "Pause ALL SMS",
+        every non-manual row is held until the pause expires.
+      • STALE-ROW EXPIRY (Iter 237) — close-reminder rows older than
+        CLOSE_REMINDER_TTL_HOURS are expired before dispatch so a 3-day-old
+        "branch didn't close" reminder can never leak out after the day
+        has moved on.
     """
     now = now_iso()
+    org_id = user.get("organization_id") or ""
+
+    # ── STALE-ROW EXPIRY (Iter 237) ─────────────────────────────────────────
+    # Expire any close-reminder row whose created_at is older than the TTL.
+    # This prevents the 1 AM / 2 AM "leftover from 3 days ago" spam that
+    # happens when the gateway reconnects after a long outage.
+    ttl_cutoff = (
+        datetime.now(timezone.utc) - timedelta(hours=CLOSE_REMINDER_TTL_HOURS)
+    ).isoformat()
+    try:
+        await _raw_db.sms_queue.update_many(
+            {
+                "organization_id": org_id,
+                "template_key": {"$in": CLOSE_REMINDER_TEMPLATE_KEYS},
+                "status": {"$in": ["pending", "deferred", "failed"]},
+                "created_at": {"$lt": ttl_cutoff},
+            },
+            {"$set": {
+                "status": "expired",
+                "expired_at": now,
+                "expired_reason": "close_reminder_ttl_exceeded",
+                "leased_until": None,
+            }},
+        )
+    except Exception:
+        pass
+
+    # ── GLOBAL PAUSE GATE (Iter 237) ────────────────────────────────────────
+    pause = await _get_org_pause_state(org_id)
+    if pause["paused"]:
+        # Only return manual sends while paused so urgent admin-composed
+        # SMS still flow. Everything else waits for resume.
+        return []
+
+    # ── QUIET-HOURS GATE (Iter 237) ─────────────────────────────────────────
+    # Inside the org's local 22:00–07:00 window we refuse to hand out any
+    # non-manual rows. The gateway will poll again in a few minutes and
+    # receive everything once the quiet window ends.
+    quiet = await _is_org_in_quiet_hours(org_id)
 
     # NOTE: Auto-revive of expired deferrals was intentionally REMOVED in
     # Iter 227. Rows become deferred for a reason (no ACK after one dispatch),
@@ -1056,24 +1193,28 @@ async def get_pending_sms(limit: int = 50, user=Depends(get_current_user)):
     # after confirming non-delivery.
 
     # 2. Pull candidates whose lease (if any) has expired.
+    cand_query = {
+        "status": "pending",
+        "retry_count": {"$lt": MAX_GATEWAY_RETRIES},
+        "$or": [
+            {"leased_until": {"$exists": False}},
+            {"leased_until": None},
+            {"leased_until": {"$lte": now}},
+        ],
+    }
+    if quiet:
+        # Only manual sends escape the quiet-hour gate.
+        cand_query["trigger"] = "manual"
+
     candidates = await db.sms_queue.find(
-        {
-            "status": "pending",
-            "retry_count": {"$lt": MAX_GATEWAY_RETRIES},
-            "$or": [
-                {"leased_until": {"$exists": False}},
-                {"leased_until": None},
-                {"leased_until": {"$lte": now}},
-            ],
-        },
+        cand_query,
         {"_id": 0},
     ).sort("created_at", 1).limit(limit).to_list(limit)
 
-    # 2a. BELT-AND-SUSPENDERS (Iter 226) — any close-reminder candidate whose
-    # branch was muted AFTER the row was queued must NOT be handed out. We
-    # auto-cancel those rows on-the-fly and remove them from the dispatch
-    # batch. The primary purge happens on mute-toggle (see branch-toggle
-    # endpoint) — this is a safety net for races / legacy rows.
+    # 2a. BELT-AND-SUSPENDERS (Iter 226/237) — any candidate whose branch was
+    # muted AFTER the row was queued must NOT be handed out. Applies to BOTH
+    # close-reminder stages AND zreport_finalized (Iter 237) — previously
+    # zreport_finalized survived a mute and kept arriving overnight.
     muted_branch_ids: set[str] = set()
     candidate_branch_ids = [c.get("branch_id") for c in candidates if c.get("branch_id")]
     if candidate_branch_ids:
@@ -1088,7 +1229,7 @@ async def get_pending_sms(limit: int = 50, user=Depends(get_current_user)):
         to_cancel: list[str] = []
         for c in candidates:
             if (c.get("branch_id") in muted_branch_ids
-                    and c.get("template_key") in CLOSE_REMINDER_TEMPLATE_KEYS):
+                    and c.get("template_key") in MUTED_BRANCH_TEMPLATE_KEYS):
                 to_cancel.append(c["id"])
                 continue
             filtered.append(c)
@@ -1283,14 +1424,19 @@ async def clear_stuck_queue(data: dict = None, user=Depends(get_current_user)):
 
     The skipped items remain in queue history (auditable) but are no longer
     pollable by the gateway.
+
+    (Iter 237) Scoped to the caller's organization via explicit filter +
+    _raw_db — the prior version used the scoped `db` proxy which could
+    silently match zero rows if the request context lost its org scope.
     """
     check_perm(user, "settings", "edit")
     data = data or {}
+    org_id = user.get("organization_id") or ""
     statuses = ["failed", "failed_permanent"]
     if data.get("include_pending"):
         statuses.extend(["pending", "deferred"])
-    result = await db.sms_queue.update_many(
-        {"status": {"$in": statuses}},
+    result = await _raw_db.sms_queue.update_many(
+        {"organization_id": org_id, "status": {"$in": statuses}},
         {"$set": {
             "status": "skipped",
             "skipped_at": now_iso(),
@@ -1299,6 +1445,192 @@ async def clear_stuck_queue(data: dict = None, user=Depends(get_current_user)):
         }},
     )
     return {"cleared": result.modified_count, "statuses_cleared": statuses}
+
+
+@router.post("/queue/stop-all-auto")
+async def stop_all_auto_sms(user=Depends(get_current_user)):
+    """Admin: TRUE kill-switch — cancels EVERY automated / scheduled SMS in
+    flight for this org (close-reminder, zreport-finalized, credit hooks,
+    payment confirmations, interest/penalty notices, due-date reminders,
+    crop-credit alerts, etc.).
+
+    Manual admin composes (trigger="manual") are untouched so urgent
+    human-composed messages still flow.
+
+    (Iter 237) Complements the narrower `/queue/cancel-pending-close-reminders`
+    which only targets close-day templates. Use this during a gateway storm
+    when the owner wants everything automated to stop immediately.
+    """
+    check_perm(user, "settings", "edit")
+    org_id = user.get("organization_id") or ""
+    result = await _raw_db.sms_queue.update_many(
+        {
+            "organization_id": org_id,
+            "trigger": {"$in": ["auto", "scheduled"]},
+            "status": {"$in": ["pending", "deferred", "failed"]},
+        },
+        {"$set": {
+            "status": "cancelled",
+            "cancelled_at": now_iso(),
+            "cancelled_reason": "admin_stop_all_auto",
+            "leased_until": None,
+        }},
+    )
+    return {"cancelled": result.modified_count or 0}
+
+
+@router.post("/queue/pause-all")
+async def pause_all_sms(data: dict = None, user=Depends(get_current_user)):
+    """Admin: pause ALL automated SMS dispatch for the next N hours (default 24).
+
+    Sets a pause flag in settings that `GET /sms/queue/pending` honours —
+    non-manual rows are held back until `until` is reached. Manual admin
+    composes still flow. Queue rows are NOT cancelled, just not handed to
+    the gateway until resume. Calling again while paused extends the pause.
+
+    Body: { "hours": 24, "reason": "gateway storm" }
+    """
+    check_perm(user, "settings", "edit")
+    data = data or {}
+    org_id = user.get("organization_id") or ""
+    try:
+        hours = float(data.get("hours", 24))
+    except (TypeError, ValueError):
+        hours = 24.0
+    hours = max(0.25, min(hours, 168.0))  # clamp 15min..7d
+    until = (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()
+    reason = str(data.get("reason") or "").strip()[:200]
+    await _raw_db.settings.update_one(
+        {"key": "sms_global_pause", "organization_id": org_id},
+        {"$set": {
+            "key": "sms_global_pause",
+            "organization_id": org_id,
+            "value": {
+                "until": until,
+                "reason": reason,
+                "paused_by": user.get("id") or user.get("username") or "",
+                "paused_at": now_iso(),
+            },
+            "updated_at": now_iso(),
+        }},
+        upsert=True,
+    )
+    return {"paused": True, "until": until, "hours": hours, "reason": reason}
+
+
+@router.post("/queue/resume-all")
+async def resume_all_sms(user=Depends(get_current_user)):
+    """Admin: cancel the active org-wide SMS pause immediately."""
+    check_perm(user, "settings", "edit")
+    org_id = user.get("organization_id") or ""
+    await _raw_db.settings.update_one(
+        {"key": "sms_global_pause", "organization_id": org_id},
+        {"$set": {"value": {"until": None, "reason": None,
+                            "resumed_by": user.get("id") or "",
+                            "resumed_at": now_iso()},
+                  "updated_at": now_iso()}},
+        upsert=True,
+    )
+    return {"paused": False}
+
+
+@router.get("/queue/pause-status")
+async def get_pause_status(user=Depends(get_current_user)):
+    """Return the current org-wide pause state for the UI badge."""
+    org_id = user.get("organization_id") or ""
+    state = await _get_org_pause_state(org_id)
+    return state
+
+
+@router.get("/queue/audit-report")
+async def queue_audit_report(user=Depends(get_current_user)):
+    """Forensics for the SMS queue — helps operators diagnose "why did I
+    get an old/unexpected SMS?" without grepping logs.
+
+    Reports:
+      • oldest pending row (age in hours) — how stale is the backlog
+      • pending / deferred / cancelled counts by template_key bucket
+      • recent mute-leakage events (rows cancelled by branch_muted_at_dispatch)
+      • close-reminder rows expired by TTL in the last 24h
+      • currently-muted branch count + total auto-pending size
+      • global pause state
+    """
+    check_perm(user, "settings", "edit")
+    org_id = user.get("organization_id") or ""
+    day_cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+
+    # Oldest pending row
+    oldest = await _raw_db.sms_queue.find_one(
+        {"organization_id": org_id, "status": "pending"},
+        {"_id": 0, "id": 1, "template_key": 1, "branch_name": 1,
+         "created_at": 1, "phone": 1},
+        sort=[("created_at", 1)],
+    )
+    oldest_age_h = None
+    if oldest and oldest.get("created_at"):
+        try:
+            oldest_dt = datetime.fromisoformat(oldest["created_at"].replace("Z", "+00:00"))
+            oldest_age_h = round(
+                (datetime.now(timezone.utc) - oldest_dt).total_seconds() / 3600, 1
+            )
+        except Exception:
+            oldest_age_h = None
+
+    # Counts by status
+    counts: dict[str, int] = {}
+    async for row in _raw_db.sms_queue.aggregate([
+        {"$match": {"organization_id": org_id}},
+        {"$group": {"_id": "$status", "n": {"$sum": 1}}},
+    ]):
+        counts[row["_id"] or "unknown"] = row["n"]
+
+    # Close-reminder expired in the last 24h
+    expired_24h = await _raw_db.sms_queue.count_documents({
+        "organization_id": org_id,
+        "status": "expired",
+        "expired_reason": "close_reminder_ttl_exceeded",
+        "expired_at": {"$gte": day_cutoff},
+    })
+
+    # Mute-leakage cancellations in the last 24h
+    mute_leak_24h = await _raw_db.sms_queue.count_documents({
+        "organization_id": org_id,
+        "status": "cancelled",
+        "cancelled_reason": "branch_muted_at_dispatch",
+        "cancelled_at": {"$gte": day_cutoff},
+    })
+
+    # Muted branch count
+    muted_branches = await _raw_db.branches.count_documents({
+        "organization_id": org_id,
+        "close_reminder_disabled": True,
+        "active": {"$ne": False},
+    })
+
+    # Global pause state + quiet-hours state right now
+    pause = await _get_org_pause_state(org_id)
+    quiet = await _is_org_in_quiet_hours(org_id)
+
+    return {
+        "oldest_pending": {
+            "age_hours": oldest_age_h,
+            "created_at": (oldest or {}).get("created_at"),
+            "template_key": (oldest or {}).get("template_key"),
+            "branch_name": (oldest or {}).get("branch_name"),
+            "phone": (oldest or {}).get("phone"),
+        } if oldest else None,
+        "status_counts": counts,
+        "close_reminder_ttl_expired_24h": expired_24h,
+        "muted_branch_leak_cancelled_24h": mute_leak_24h,
+        "muted_branches": muted_branches,
+        "global_pause": pause,
+        "dispatch_quiet_hours_now": quiet,
+        "config": {
+            "close_reminder_ttl_hours": CLOSE_REMINDER_TTL_HOURS,
+            "dispatch_quiet_window": f"{DISPATCH_QUIET_START_H:02d}:00–{DISPATCH_QUIET_END_H:02d}:00 local",
+            "max_sms_per_phone_per_day": MAX_SMS_PER_PHONE_PER_DAY,
+        },
+    }
 
 
 @router.post("/queue/{sms_id}/skip")
@@ -1946,13 +2278,15 @@ async def update_branch_close_reminder_toggle(branch_id: str, data: dict, user=D
     # mute keep being handed out to the gateway and the owner still gets
     # spam — which is exactly the user-visible bug the mute is supposed to
     # solve. Scoped to this org + branch + close-reminder template_keys.
+    # (Iter 237) Now also purges zreport_finalized via MUTED_BRANCH_TEMPLATE_KEYS
+    # so the "daily summary" SMS can't slip through after a branch is muted.
     purged_count = 0
     if disabled:
         purge_result = await _raw_db.sms_queue.update_many(
             {
                 "organization_id": org_id,
                 "branch_id": branch_id,
-                "template_key": {"$in": CLOSE_REMINDER_TEMPLATE_KEYS},
+                "template_key": {"$in": MUTED_BRANCH_TEMPLATE_KEYS},
                 "status": {"$in": ["pending", "deferred", "failed"]},
             },
             {"$set": {

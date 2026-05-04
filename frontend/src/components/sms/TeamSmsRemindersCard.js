@@ -202,7 +202,7 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
     // eslint-disable-next-line no-alert
     const ok = window.confirm(
       'Cancel ALL pending close-day SMS across every branch?\n\n'
-      + 'This only affects close-reminder messages (did-not-close, approaching-close, overdue, day-after recap).\n'
+      + 'This only affects close-reminder messages (did-not-close, approaching-close, overdue, day-after recap, branch snapshot).\n'
       + 'Customer, expense, and other SMS are untouched.\n\n'
       + 'Use this to stop a gateway-replay storm immediately.'
     );
@@ -220,6 +220,99 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
       toast.error(e.response?.data?.detail || 'Cancel failed');
     }
     setCancellingAll(false);
+  };
+
+  // TRUE kill-switch — cancel EVERY automated/scheduled SMS (close-reminder,
+  // zreport-finalized, credit hooks, payment confirmations, reminders, etc.)
+  // Manual admin composes still flow.
+  const [stoppingAuto, setStoppingAuto] = useState(false);
+  const stopAllAuto = async () => {
+    // eslint-disable-next-line no-alert
+    const ok = window.confirm(
+      '⚠ STOP EVERY AUTOMATED SMS FOR THIS COMPANY?\n\n'
+      + 'This cancels ALL pending / deferred / failed rows with trigger=auto or scheduled:\n'
+      + '   • Close-day reminders & branch snapshots\n'
+      + '   • Z-Report daily summaries\n'
+      + '   • New credit / payment-received / interest-penalty notifications\n'
+      + '   • 15-day / 7-day / overdue reminders\n'
+      + '   • Crop-credit / harvest reminders\n\n'
+      + 'Manual admin SMS composes are untouched.\n\n'
+      + 'Proceed?'
+    );
+    if (!ok) return;
+    setStoppingAuto(true);
+    try {
+      const r = await api.post('/sms/queue/stop-all-auto');
+      const n = Number(r.data?.cancelled || 0);
+      toast.success(n > 0
+        ? `🛑 ${n} automated SMS cancelled across every template.`
+        : 'Nothing to cancel — automated queue is already clean.');
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Stop failed');
+    }
+    setStoppingAuto(false);
+  };
+
+  // Pause / resume org-wide SMS dispatch. Paused state is stored in Settings
+  // so the gateway honours it across polls. Calling again while paused
+  // extends the pause.
+  const [pauseState, setPauseState] = useState({ paused: false, until: null });
+  const refreshPauseState = useCallback(async () => {
+    try {
+      const r = await api.get('/sms/queue/pause-status');
+      setPauseState(r.data || { paused: false, until: null });
+    } catch { /* non-fatal */ }
+  }, []);
+  useEffect(() => { refreshPauseState(); }, [refreshPauseState]);
+
+  const [pausing, setPausing] = useState(false);
+  const pauseAll = async (hours = 24) => {
+    // eslint-disable-next-line no-alert
+    const ok = window.confirm(
+      `Pause ALL automated SMS for the next ${hours} hour(s)?\n\n`
+      + 'The gateway will stop receiving new automated rows until the pause expires.\n'
+      + 'Queue rows are NOT deleted — they resume when the pause ends.\n'
+      + 'Manual admin composes keep flowing during pause.\n\n'
+      + 'Use this when you need a hard break from ALL notifications.'
+    );
+    if (!ok) return;
+    setPausing(true);
+    try {
+      const r = await api.post('/sms/queue/pause-all', { hours });
+      toast.success(`⏸ SMS paused until ${new Date(r.data?.until).toLocaleString()}`);
+      refreshPauseState();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Pause failed');
+    }
+    setPausing(false);
+  };
+  const resumeAll = async () => {
+    setPausing(true);
+    try {
+      await api.post('/sms/queue/resume-all');
+      toast.success('▶ SMS resumed — gateway will pick up the queue on next poll.');
+      refreshPauseState();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Resume failed');
+    }
+    setPausing(false);
+  };
+
+  // Queue health / forensics modal — shows oldest pending age, mute-leak
+  // counts, TTL expiries, and current quiet/pause state.
+  const [auditOpen, setAuditOpen] = useState(false);
+  const [auditData, setAuditData] = useState(null);
+  const [loadingAudit, setLoadingAudit] = useState(false);
+  const openAudit = async () => {
+    setAuditOpen(true);
+    setLoadingAudit(true);
+    try {
+      const r = await api.get('/sms/queue/audit-report');
+      setAuditData(r.data || null);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Audit load failed');
+    }
+    setLoadingAudit(false);
   };
 
 
@@ -414,26 +507,171 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
                 Muted branches are skipped by the close-day scheduler — no "approaching close", "overdue", or "day-after recap" SMS will fire for them. Z-Report summaries (sent when you actively close the day) still go out.
               </p>
             )}
-            {/* Emergency kill-switch — pulls every pending close-reminder row
-                out of the queue across ALL branches. Only close-reminder
-                templates; customer/expense SMS untouched. Appears as a subtle
-                red link so admins don't hit it by accident, but is obviously
-                clickable. */}
-            <div className="mt-3 pt-3 border-t border-slate-200 flex items-center justify-between gap-2">
+            {/* Emergency kill-switch area — close-only cancel + full stop +
+                pause/resume + queue audit. Stacked so admins can pick the
+                right blast radius during a storm. */}
+            <div className="mt-3 pt-3 border-t border-slate-200 space-y-2">
+              {/* Pause state banner */}
+              {pauseState.paused && (
+                <div
+                  data-testid="sms-pause-banner"
+                  className="flex items-center justify-between gap-3 px-3 py-2 rounded-md bg-amber-50 border border-amber-300">
+                  <p className="text-[11px] text-amber-900">
+                    <span className="font-semibold">⏸ All automated SMS paused</span>
+                    {' '}until {new Date(pauseState.until).toLocaleString()}.
+                    Manual admin composes still send.
+                  </p>
+                  <button
+                    type="button"
+                    data-testid="sms-resume-btn"
+                    disabled={pausing}
+                    onClick={resumeAll}
+                    className="shrink-0 px-2.5 py-1 text-[10px] font-semibold rounded-md border border-amber-500 text-amber-900 bg-white hover:bg-amber-100 disabled:opacity-50">
+                    ▶ Resume now
+                  </button>
+                </div>
+              )}
+
+              {/* Button row */}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-[10px] text-slate-400 italic">
+                  Gateway storming you with duplicate alerts? Options by severity:
+                </p>
+                <button
+                  type="button"
+                  data-testid="sms-audit-report-btn"
+                  onClick={openAudit}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold rounded-md border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 transition-colors"
+                  title="Show oldest pending row, mute-leakage, TTL expiries, pause + quiet-hours state">
+                  🔍 Queue Health Report
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                {/* Narrow — close-day only */}
+                <button
+                  type="button"
+                  data-testid="emergency-cancel-close-sms-btn"
+                  disabled={cancellingAll}
+                  onClick={cancelAllPending}
+                  className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-[11px] font-semibold rounded-md border-2 border-red-300 text-red-700 bg-red-50 hover:bg-red-100 hover:border-red-400 transition-colors disabled:opacity-50"
+                  title="Cancel only close-day related SMS (close reminders + branch snapshots)">
+                  {cancellingAll
+                    ? <><Loader2 size={12} className="animate-spin" /> Cancelling…</>
+                    : <><BellOff size={12} /> Stop Close-Day SMS</>}
+                </button>
+
+                {/* Wide — everything automated */}
+                <button
+                  type="button"
+                  data-testid="emergency-stop-all-auto-sms-btn"
+                  disabled={stoppingAuto}
+                  onClick={stopAllAuto}
+                  className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-[11px] font-semibold rounded-md border-2 border-red-500 text-white bg-red-600 hover:bg-red-700 transition-colors disabled:opacity-50"
+                  title="Cancel EVERY pending automated SMS (reminders, Z-Report summaries, credit hooks, etc.)">
+                  {stoppingAuto
+                    ? <><Loader2 size={12} className="animate-spin" /> Stopping…</>
+                    : <><BellOff size={12} /> Stop EVERY Auto SMS</>}
+                </button>
+
+                {/* Pause — holds rows, doesn't cancel */}
+                <button
+                  type="button"
+                  data-testid="emergency-pause-24h-btn"
+                  disabled={pausing || pauseState.paused}
+                  onClick={() => pauseAll(24)}
+                  className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-[11px] font-semibold rounded-md border-2 border-amber-400 text-amber-800 bg-amber-50 hover:bg-amber-100 transition-colors disabled:opacity-50"
+                  title="Hold ALL automated SMS for 24 hours — queue rows are kept, not cancelled">
+                  {pausing
+                    ? <><Loader2 size={12} className="animate-spin" /> Working…</>
+                    : pauseState.paused ? <>⏸ Already paused</> : <>⏸ Pause ALL 24h</>}
+                </button>
+              </div>
               <p className="text-[10px] text-slate-400 italic">
-                Gateway storming you with duplicate alerts? Stop them instantly:
+                Auto quiet-hours 22:00–07:00 (local) and 24h close-reminder TTL now gate the gateway — no overnight or 3-day-old reminders can leak out.
               </p>
-              <button
-                type="button"
-                data-testid="emergency-cancel-close-sms-btn"
-                disabled={cancellingAll}
-                onClick={cancelAllPending}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold rounded-md border-2 border-red-300 text-red-700 bg-red-50 hover:bg-red-100 hover:border-red-400 transition-colors disabled:opacity-50"
-                title="Cancel every pending close-day SMS across all branches (customer / expense SMS are NOT affected)">
-                {cancellingAll
-                  ? <><Loader2 size={12} className="animate-spin" /> Cancelling…</>
-                  : <><BellOff size={12} /> Emergency: Stop All Pending Close-Day SMS</>}
-              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Queue-health audit modal */}
+        {auditOpen && (
+          <div
+            data-testid="sms-audit-modal"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+            onClick={() => setAuditOpen(false)}>
+            <div
+              className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[85vh] overflow-y-auto"
+              onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between p-4 border-b">
+                <h3 className="text-sm font-semibold">SMS Queue Health</h3>
+                <button
+                  type="button"
+                  onClick={() => setAuditOpen(false)}
+                  className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+              </div>
+              <div className="p-4 space-y-3 text-[12px]">
+                {loadingAudit && <p className="text-slate-500">Loading…</p>}
+                {!loadingAudit && auditData && (
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="p-2 rounded bg-slate-50 border">
+                        <div className="text-[10px] text-slate-500 uppercase">Global Pause</div>
+                        <div className="font-semibold">
+                          {auditData.global_pause?.paused
+                            ? `Yes — until ${new Date(auditData.global_pause.until).toLocaleString()}`
+                            : 'No'}
+                        </div>
+                      </div>
+                      <div className="p-2 rounded bg-slate-50 border">
+                        <div className="text-[10px] text-slate-500 uppercase">Quiet Hours Now</div>
+                        <div className="font-semibold">
+                          {auditData.dispatch_quiet_hours_now ? 'Yes (blocked)' : 'No (dispatching)'}
+                        </div>
+                      </div>
+                      <div className="p-2 rounded bg-slate-50 border col-span-2">
+                        <div className="text-[10px] text-slate-500 uppercase">Oldest Pending Row</div>
+                        {auditData.oldest_pending ? (
+                          <div className="text-[11px]">
+                            <div className="font-semibold">{auditData.oldest_pending.age_hours ?? '—'}h old</div>
+                            <div className="text-slate-600">{auditData.oldest_pending.template_key} → {auditData.oldest_pending.phone}</div>
+                            <div className="text-slate-500">{auditData.oldest_pending.branch_name}</div>
+                          </div>
+                        ) : <div className="text-slate-500 italic">Queue is empty.</div>}
+                      </div>
+                      <div className="p-2 rounded bg-slate-50 border">
+                        <div className="text-[10px] text-slate-500 uppercase">TTL-Expired 24h</div>
+                        <div className="font-semibold">{auditData.close_reminder_ttl_expired_24h || 0}</div>
+                      </div>
+                      <div className="p-2 rounded bg-slate-50 border">
+                        <div className="text-[10px] text-slate-500 uppercase">Mute-Leak Cancel 24h</div>
+                        <div className="font-semibold">{auditData.muted_branch_leak_cancelled_24h || 0}</div>
+                      </div>
+                      <div className="p-2 rounded bg-slate-50 border">
+                        <div className="text-[10px] text-slate-500 uppercase">Muted Branches</div>
+                        <div className="font-semibold">{auditData.muted_branches || 0}</div>
+                      </div>
+                      <div className="p-2 rounded bg-slate-50 border">
+                        <div className="text-[10px] text-slate-500 uppercase">Cap / phone / 24h</div>
+                        <div className="font-semibold">{auditData.config?.max_sms_per_phone_per_day}</div>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-slate-500 uppercase mb-1">Status Counts</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {Object.entries(auditData.status_counts || {}).map(([k, v]) => (
+                          <span key={k} className="px-2 py-0.5 rounded-full bg-slate-100 text-[11px] border">
+                            {k}: <span className="font-semibold">{v}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="text-[10px] text-slate-500 italic pt-2 border-t">
+                      Quiet window {auditData.config?.dispatch_quiet_window}. Close-reminder TTL {auditData.config?.close_reminder_ttl_hours}h.
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           </div>
         )}

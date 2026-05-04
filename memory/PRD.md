@@ -1,5 +1,31 @@
 # AgriBooks PRD
 
+## Iter 237 (May 2026) — SMS Emergency Controls + Quiet-Hours Dispatch Gate ✅
+
+**Problem**: User reported receiving SMS 3 days old (from 5/2/26) at 1 AM, 2 AM, 5 AM local time on 5/5/26, including messages from a branch that was already muted. "Emergency Stop" button felt ineffective. Full code audit identified 6 root-cause bugs.
+
+### Root-cause fixes
+1. **Dispatch-time quiet-hours gate** — `GET /sms/queue/pending` now blocks non-manual rows inside the org's local 22:00–07:00 window. Previously only the *enqueuer* honoured quiet hours; the gateway happily picked up rows at 1 AM.
+2. **Close-reminder TTL (24h)** — pending close-reminder rows older than 24h are auto-expired before dispatch so a 3-day-old "didn't close" alert can never leak out after the situation has changed.
+3. **Muted-branch template superset** — new `MUTED_BRANCH_TEMPLATE_KEYS` adds `zreport_finalized` to the close-reminder list. Mute-toggle purge and dispatch-time mute filter both use the superset so the Daily Summary SMS can no longer slip past a mute.
+4. **True kill-switch** — new `POST /sms/queue/stop-all-auto` cancels EVERY `trigger=auto|scheduled` row (close reminders, Z-Report summary, credit/payment/interest/reminder/crop hooks) while leaving manual admin composes intact.
+5. **Global pause / resume** — `POST /sms/queue/pause-all {hours}` sets a settings-level flag (`sms_global_pause`) that blocks both enqueue and dispatch for the window (clamp 15min..7d). `POST /sms/queue/resume-all` clears it. `GET /sms/queue/pause-status` surfaces the state for the UI banner.
+6. **Scoping fix** — `POST /sms/queue/clear-stuck` now uses `_raw_db` with explicit `organization_id` filter (was leaking through the request-scoped `db` proxy).
+7. **Audit-report endpoint** — new `GET /sms/queue/audit-report` surfaces oldest-pending age, status counts, TTL expiries 24h, mute-leak cancellations 24h, muted-branch count, current pause + quiet-hours state. Wired to a Queue Health modal in the Team SMS card.
+
+### UI changes
+- **TeamSmsRemindersCard**: 3-button emergency row (Stop Close-Day / Stop EVERY Auto SMS / Pause ALL 24h) + pause banner with inline Resume + Queue Health Report modal. Data-testids: `emergency-cancel-close-sms-btn`, `emergency-stop-all-auto-sms-btn`, `emergency-pause-24h-btn`, `sms-resume-btn`, `sms-audit-report-btn`, `sms-audit-modal`, `sms-pause-banner`.
+
+### Testing
+- `tests/test_sms_emergency_controls_237.py` — 11/11 PASS (quiet-hours wrap logic, TTL expiry, mute superset, stop-all-auto, pause/resume flow, clamp, audit-report shape, auth gating on every new endpoint).
+
+### Files touched
+- `/app/backend/routes/sms.py` — new constants (`MUTED_BRANCH_TEMPLATE_KEYS`, `DISPATCH_QUIET_START_H/END_H`, `CLOSE_REMINDER_TTL_HOURS`), new helpers (`_is_org_in_quiet_hours`, `_get_org_pause_state`), updated `get_pending_sms` (quiet-hours + TTL + global-pause gates, widened mute filter), updated mute-toggle purge (superset), updated `clear-stuck` scoping, new endpoints: `/queue/stop-all-auto`, `/queue/pause-all`, `/queue/resume-all`, `/queue/pause-status`, `/queue/audit-report`, updated `queue_sms` (pause-aware enqueue).
+- `/app/frontend/src/components/sms/TeamSmsRemindersCard.js` — 3-button emergency row + pause banner/resume + audit-report modal + refreshed handlers.
+- `/app/backend/tests/test_sms_emergency_controls_237.py` — new 11-test suite.
+
+
+
 ## Iter 223 (Feb 2026) — Fund Injection Date + Offline Receipt Numbering + Payment Date Edit ✅
 
 **Three minor improvements requested by user:**
