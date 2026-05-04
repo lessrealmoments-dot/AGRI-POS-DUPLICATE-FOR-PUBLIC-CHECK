@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUnsavedChangesGuard } from '../lib/useUnsavedChangesGuard';
+import CalcInput from '../components/CalcInput';
 
 const EMPTY_LINE = {
   product_id: '', product_name: '', unit: '', description: '',
@@ -871,14 +872,12 @@ export default function PurchaseOrderPage() {
                             value={line.description} onChange={e => updateLine(i, 'description', e.target.value)} placeholder="Optional" />
                         </td>
                         <td className="px-2 py-1">
-                          <input ref={el => qtyRefs.current[i] = el} type="number" min="0"
-                            className="w-full h-8 px-2 text-sm text-right font-mono border border-transparent hover:border-slate-200 focus:border-[#1A4D2E] focus:outline-none rounded"
-                            value={line.quantity} onChange={e => updateLine(i, 'quantity', parseFloat(e.target.value) || 0)} />
+                          <CalcInput ref={el => qtyRefs.current[i] = el} className="w-full h-8 px-2 text-sm text-right font-mono border border-transparent hover:border-slate-200 focus:border-[#1A4D2E] focus:outline-none rounded"
+ value={line.quantity} onChange={(v) => updateLine(i, 'quantity', parseFloat(v) || 0)} />
                         </td>
                         <td className="px-2 py-1">
-                          <input type="number" min="0"
-                            className="w-full h-8 px-2 text-sm text-right font-mono border border-transparent hover:border-slate-200 focus:border-[#1A4D2E] focus:outline-none rounded"
-                            value={line.unit_price} onChange={e => updateLine(i, 'unit_price', parseFloat(e.target.value) || 0)} />
+                          <CalcInput className="w-full h-8 px-2 text-sm text-right font-mono border border-transparent hover:border-slate-200 focus:border-[#1A4D2E] focus:outline-none rounded"
+ value={line.unit_price} onChange={(v) => updateLine(i, 'unit_price', parseFloat(v) || 0)} />
                         </td>
                         <td className="px-2 py-1">
                           <div className="flex gap-1">
@@ -887,10 +886,9 @@ export default function PurchaseOrderPage() {
                               <option value="amount">₱</option>
                               <option value="percent">%</option>
                             </select>
-                            <input type="number" min="0"
-                              className="flex-1 h-8 px-2 text-xs text-right font-mono border border-slate-200 hover:border-slate-300 focus:border-[#1A4D2E] focus:outline-none rounded"
-                              value={line.discount_value || ''} placeholder="0"
-                              onChange={e => updateLine(i, 'discount_value', e.target.value)} />
+                            <CalcInput className="flex-1 h-8 px-2 text-xs text-right font-mono border border-slate-200 hover:border-slate-300 focus:border-[#1A4D2E] focus:outline-none rounded"
+ value={line.discount_value || ''} placeholder="0"
+ onChange={(v) => updateLine(i, 'discount_value', v)} />
                           </div>
                           {computed.lineDiscounts[i] > 0 && (
                             <p className="text-[9px] text-emerald-600 text-right mt-0.5">-{formatPHP(computed.lineDiscounts[i])}</p>
@@ -926,8 +924,8 @@ export default function PurchaseOrderPage() {
               {header.show_freight && (
                 <div className="flex items-center gap-2">
                   <Label className="text-xs text-slate-500 w-32 shrink-0">Freight (₱)</Label>
-                  <Input type="number" min="0" className="h-8 w-28 font-mono text-sm text-right"
-                    value={header.freight} onChange={e => setHeader(h => ({ ...h, freight: e.target.value }))} />
+                  <CalcInput className="h-8 w-28 font-mono text-sm text-right"
+ value={header.freight} onChange={(v) => setHeader(h => ({ ...h, freight: v }))} />
                   <button onClick={() => setHeader(h => ({ ...h, show_freight: false, freight: 0 }))}
                     className="text-slate-400 hover:text-red-500"><X size={13} /></button>
                 </div>
@@ -941,8 +939,8 @@ export default function PurchaseOrderPage() {
               {header.show_vat && (
                 <div className="flex items-center gap-2">
                   <Label className="text-xs text-slate-500 w-32 shrink-0">VAT Rate (%)</Label>
-                  <Input type="number" min="0" max="100" className="h-8 w-20 font-mono text-sm text-right"
-                    value={header.tax_rate} onChange={e => setHeader(h => ({ ...h, tax_rate: parseFloat(e.target.value) || 0 }))} />
+                  <CalcInput className="h-8 w-20 font-mono text-sm text-right"
+ value={header.tax_rate} onChange={(v) => setHeader(h => ({ ...h, tax_rate: parseFloat(v) || 0 }))} />
                   <button onClick={() => setHeader(h => ({ ...h, show_vat: false }))}
                     className="text-slate-400 hover:text-red-500"><X size={13} /></button>
                 </div>
@@ -963,10 +961,9 @@ export default function PurchaseOrderPage() {
                       <option value="amount">₱</option>
                       <option value="percent">%</option>
                     </select>
-                    <input type="number" min="0"
-                      className="w-20 h-7 px-2 text-xs text-right font-mono border border-slate-200 rounded focus:outline-none focus:border-[#1A4D2E]"
-                      value={header.overall_discount_value} placeholder="0"
-                      onChange={e => setHeader(h => ({ ...h, overall_discount_value: e.target.value }))} />
+                    <CalcInput className="w-20 h-7 px-2 text-xs text-right font-mono border border-slate-200 rounded focus:outline-none focus:border-[#1A4D2E]"
+ value={header.overall_discount_value} placeholder="0"
+ onChange={(v) => setHeader(h => ({ ...h, overall_discount_value: v }))} />
                   </div>
                   {computed.overallDisc > 0 && (
                     <span className="text-xs font-mono text-emerald-600">-{formatPHP(computed.overallDisc)}</span>
@@ -1298,14 +1295,14 @@ export default function PurchaseOrderPage() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs text-slate-500">Terms (days)</Label>
-                <Input type="number" min="0" className="h-9 mt-1 font-mono" value={termsForm.terms_days}
-                  onChange={e => {
-                    const d = parseInt(e.target.value) || 0;
-                    const due = d > 0
-                      ? new Date(new Date(header.purchase_date).getTime() + d * 86400000).toISOString().slice(0, 10)
-                      : header.purchase_date;
-                    setTermsForm(f => ({ ...f, terms_days: d, due_date: due }));
-                  }} />
+                <CalcInput className="h-9 mt-1 font-mono" value={termsForm.terms_days}
+ onChange={(v) => {
+ const d = parseInt(v) || 0;
+ const due = d > 0
+ ? new Date(new Date(header.purchase_date).getTime() + d * 86400000).toISOString().slice(0, 10)
+ : header.purchase_date;
+ setTermsForm(f => ({ ...f, terms_days: d, due_date: due }));
+ }} />
               </div>
               <div>
                 <Label className="text-xs text-slate-500">Due Date</Label>
@@ -1478,15 +1475,15 @@ export default function PurchaseOrderPage() {
                       <div className="col-span-5 text-xs font-medium truncate">{item.product_name}</div>
                       <div className="col-span-3">
                         <Label className="text-[9px] text-slate-400">Qty</Label>
-                        <Input type="number" min={0} value={item.quantity}
-                          onChange={e => { const n = [...detailEditItems]; n[i] = { ...n[i], quantity: parseFloat(e.target.value) || 0 }; setDetailEditItems(n); }}
-                          className="h-7 text-sm text-right font-mono" />
+                        <CalcInput value={item.quantity}
+ onChange={(v) => { const n = [...detailEditItems]; n[i] = { ...n[i], quantity: parseFloat(v) || 0 }; setDetailEditItems(n); }}
+ className="h-7 text-sm text-right font-mono" />
                       </div>
                       <div className="col-span-4">
                         <Label className="text-[9px] text-slate-400">Unit Price</Label>
-                        <Input type="number" min={0} value={item.unit_price}
-                          onChange={e => { const n = [...detailEditItems]; n[i] = { ...n[i], unit_price: parseFloat(e.target.value) || 0 }; setDetailEditItems(n); }}
-                          className="h-7 text-sm text-right font-mono" />
+                        <CalcInput value={item.unit_price}
+ onChange={(v) => { const n = [...detailEditItems]; n[i] = { ...n[i], unit_price: parseFloat(v) || 0 }; setDetailEditItems(n); }}
+ className="h-7 text-sm text-right font-mono" />
                       </div>
                     </div>
                   ))}
@@ -1739,7 +1736,7 @@ export default function PurchaseOrderPage() {
                 </Select>
               </div>
               <div><Label>Unit</Label><Input value={newProdForm.unit} onChange={e => setNewProdForm(f => ({ ...f, unit: e.target.value }))} /></div>
-              <div><Label>Cost Price</Label><Input type="number" value={newProdForm.cost_price} onChange={e => setNewProdForm(f => ({ ...f, cost_price: parseFloat(e.target.value) || 0 }))} /></div>
+              <div><Label>Cost Price</Label><CalcInput value={newProdForm.cost_price} onChange={(v) => setNewProdForm(f => ({ ...f, cost_price: parseFloat(v) || 0 }))} /></div>
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setCreateProdDialog(false)}>Cancel</Button>

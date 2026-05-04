@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { formatPHP } from '../lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import CalcInput from '../components/CalcInput';
 
 export default function RepackPricingPage() {
   const { user } = useAuth();
@@ -313,15 +314,11 @@ export default function RepackPricingPage() {
                         : null;
                       return (
                         <td key={b.id} className="p-3 align-top" data-testid={`cell-${row.repack_id}-${b.id}`}>
-                          <Input
-                            type="number"
-                            step="0.01"
-                            value={cur}
-                            onChange={(e) => setCellValue(row.repack_id, b.id, e.target.value)}
-                            placeholder={bData.current_retail == null ? 'No retail' : ''}
-                            className={`h-8 ${isDirty ? 'border-amber-400 bg-amber-50' : ''} ${isBelowCapital ? 'border-red-500' : ''} ${bData.current_retail == null && !isDirty ? 'border-red-300' : ''}`}
-                            data-testid={`retail-input-${row.repack_id}-${b.id}`}
-                          />
+                          <CalcInput value={cur}
+ onChange={(v) => setCellValue(row.repack_id, b.id, v)}
+ placeholder={bData.current_retail == null ? 'No retail' : ''}
+ className={`h-8 ${isDirty ? 'border-amber-400 bg-amber-50' : ''} ${isBelowCapital ? 'border-red-500' : ''} ${bData.current_retail == null && !isDirty ? 'border-red-300' : ''}`}
+ data-testid={`retail-input-${row.repack_id}-${b.id}`} />
                           <div className="text-[11px] mt-1 space-y-0.5">
                             <div className="text-slate-500">
                               Capital: <span className="font-mono font-medium">{formatPHP(bData.capital)}</span>

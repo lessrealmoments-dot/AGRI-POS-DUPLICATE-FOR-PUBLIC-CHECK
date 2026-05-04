@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUnsavedChangesGuard } from '../lib/useUnsavedChangesGuard';
+import CalcInput from '../components/CalcInput';
 
 const ENTRY_TYPES = [
   { value: 'sale_adjustment', label: 'Sale Adjustment', desc: 'A sale happened but wasn\'t recorded in the system', color: 'bg-emerald-100 text-emerald-700' },
@@ -408,14 +409,14 @@ export default function JournalEntriesPage() {
                         </Select>
                       </div>
                       <div className="col-span-2">
-                        <Input type="number" min={0} step={0.01} placeholder="Debit" value={l.debit}
-                          onChange={e => { updateLine(i, 'debit', e.target.value); if (e.target.value) updateLine(i, 'credit', ''); }}
-                          className="h-8 text-xs font-mono" />
+                        <CalcInput placeholder="Debit" value={l.debit}
+ onChange={(v) => { updateLine(i, 'debit', v); if (v) updateLine(i, 'credit', ''); }}
+ className="h-8 text-xs font-mono" />
                       </div>
                       <div className="col-span-2">
-                        <Input type="number" min={0} step={0.01} placeholder="Credit" value={l.credit}
-                          onChange={e => { updateLine(i, 'credit', e.target.value); if (e.target.value) updateLine(i, 'debit', ''); }}
-                          className="h-8 text-xs font-mono" />
+                        <CalcInput placeholder="Credit" value={l.credit}
+ onChange={(v) => { updateLine(i, 'credit', v); if (v) updateLine(i, 'debit', ''); }}
+ className="h-8 text-xs font-mono" />
                       </div>
                       <div className="col-span-3">
                         <Input placeholder="Note..." value={l.memo} onChange={e => updateLine(i, 'memo', e.target.value)}

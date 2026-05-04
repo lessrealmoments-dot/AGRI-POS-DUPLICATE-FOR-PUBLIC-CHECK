@@ -6,6 +6,7 @@ import { Badge } from '../../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog';
 import { toast } from 'sonner';
 import { formatPHP, fmtDate } from '../../lib/utils';
+import CalcInput from '../../components/CalcInput';
 
 const STATUS_COLORS = {
   draft: 'bg-slate-100 text-slate-600',
@@ -249,13 +250,10 @@ export default function TerminalPOCheck({ api, session, isOnline, onRefreshRef }
                     <div className="flex-1">
                       <div className="flex items-center gap-1.5">
                         <label className="text-xs text-slate-500 whitespace-nowrap">Received:</label>
-                        <Input
-                          type="number"
-                          value={item.qty_received}
-                          onChange={e => updateReceivedQty(idx, e.target.value)}
-                          className="h-8 text-sm w-20"
-                          data-testid={`po-qty-${idx}`}
-                        />
+                        <CalcInput value={item.qty_received}
+ onChange={(v) => updateReceivedQty(idx, v)}
+ className="h-8 text-sm w-20"
+ data-testid={`po-qty-${idx}`} />
                       </div>
                     </div>
                     {item.has_variance ? (

@@ -11,6 +11,7 @@ import {
   RefreshCw, Printer, ShieldCheck,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import CalcInput from './CalcInput';
 
 const CONDITIONS = [
   { value: 'sellable', label: 'Sellable', desc: 'Unopened, good condition', color: 'emerald', action: 'shelf' },
@@ -286,15 +287,9 @@ export default function TerminalReturnRefundModal({
 
                         <div>
                           <label className="text-xs text-slate-500 mb-1 block">Return Quantity *</label>
-                          <Input
-                            type="number"
-                            step="0.01"
-                            min="0.01"
-                            max={si.original_qty}
-                            value={si.return_qty}
-                            onChange={(e) => updateItem(si.index, 'return_qty', e.target.value)}
-                            className="h-9 text-center font-mono"
-                          />
+                          <CalcInput value={si.return_qty}
+ onChange={(v) => updateItem(si.index, 'return_qty', v)}
+ className="h-9 text-center font-mono" />
                         </div>
 
                         <div>

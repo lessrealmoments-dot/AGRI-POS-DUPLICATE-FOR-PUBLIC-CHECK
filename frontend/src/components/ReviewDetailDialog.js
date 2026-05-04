@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import UploadQRDialog from './UploadQRDialog';
+import CalcInput from './CalcInput';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -627,10 +628,9 @@ export default function ReviewDetailDialog({
                           <div className="grid grid-cols-2 gap-2">
                             <div>
                               <label className="text-[10px] text-slate-500 font-medium">Amount</label>
-                              <Input type="number" value={payAmount}
-                                onChange={e => setPayAmount(e.target.value)}
-                                className="h-9 text-sm font-mono bg-white" step="0.01" min="0.01"
-                                data-testid="pay-amount-input" />
+                              <CalcInput value={payAmount}
+ onChange={(v) => setPayAmount(v)}
+ className="h-9 text-sm font-mono bg-white" data-testid="pay-amount-input" />
                             </div>
                             <div>
                               <label className="text-[10px] text-slate-500 font-medium">Method</label>

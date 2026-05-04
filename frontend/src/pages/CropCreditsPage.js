@@ -22,6 +22,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import AuthDialog from '../components/AuthDialog';
 import { QRCodeSVG } from 'qrcode.react';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
+import CalcInput from '../components/CalcInput';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -422,19 +423,17 @@ function CreateCropCreditModal({ open, onClose, onCreated }) {
             {/* Initial amount */}
             <div>
               <Label className="text-xs">Initial Credit Amount (₱)</Label>
-              <Input data-testid="initial-amount-input" type="number" placeholder="0.00" value={form.initial_amount}
-                onChange={e => setForm(f => ({ ...f, initial_amount: e.target.value }))}
-                className="mt-1"
-              />
+              <CalcInput data-testid="initial-amount-input" placeholder="0.00" value={form.initial_amount}
+ onChange={(v) => setForm(f => ({ ...f, initial_amount: v }))}
+ className="mt-1" />
             </div>
 
             {/* Interest rate */}
             <div>
               <Label className="text-xs">Monthly Interest Rate (%)</Label>
-              <Input type="number" step="0.1" placeholder="e.g. 2" value={form.monthly_interest_rate}
-                onChange={e => setForm(f => ({ ...f, monthly_interest_rate: e.target.value }))}
-                className="mt-1"
-              />
+              <CalcInput placeholder="e.g. 2" value={form.monthly_interest_rate}
+ onChange={(v) => setForm(f => ({ ...f, monthly_interest_rate: v }))}
+ className="mt-1" />
               <p className="text-[10px] text-slate-400 mt-0.5">Interest accrues monthly on principal only</p>
             </div>
 
@@ -619,8 +618,8 @@ function AddCreditModal({ open, onClose, credit, onAdded }) {
           </div>
           <div>
             <Label className="text-xs">Amount (₱) *</Label>
-            <Input data-testid="add-credit-amount-input" type="number" placeholder="0.00" value={amount}
-              onChange={e => setAmount(e.target.value)} className="mt-1" />
+            <CalcInput data-testid="add-credit-amount-input" placeholder="0.00" value={amount}
+ onChange={(v) => setAmount(v)} className="mt-1" />
           </div>
           <div>
             <Label className="text-xs">Description</Label>

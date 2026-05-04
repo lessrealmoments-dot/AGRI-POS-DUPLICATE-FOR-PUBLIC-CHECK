@@ -16,6 +16,7 @@ import {
   TrendingUp, AlertTriangle, CreditCard, Calendar, ChevronRight, UserCheck
 } from 'lucide-react';
 import { toast } from 'sonner';
+import CalcInput from '../components/CalcInput';
 
 const EMPLOYMENT_TYPES = [
   { key: 'regular', label: 'Regular' },
@@ -312,16 +313,16 @@ export default function EmployeesPage() {
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <Label className="text-xs">Monthly Salary</Label>
-                <Input type="number" value={form.salary} onChange={e => setForm({...form, salary: parseFloat(e.target.value) || 0})} className="h-9" />
+                <CalcInput value={form.salary} onChange={(v) => setForm({...form, salary: parseFloat(v) || 0})} className="h-9" />
               </div>
               <div>
                 <Label className="text-xs">Daily Rate</Label>
-                <Input type="number" value={form.daily_rate} onChange={e => setForm({...form, daily_rate: parseFloat(e.target.value) || 0})} className="h-9" />
+                <CalcInput value={form.daily_rate} onChange={(v) => setForm({...form, daily_rate: parseFloat(v) || 0})} className="h-9" />
               </div>
               <div>
                 <Label className="text-xs flex items-center gap-1"><CreditCard size={10} /> Monthly CA Limit</Label>
-                <Input type="number" value={form.monthly_ca_limit} onChange={e => setForm({...form, monthly_ca_limit: parseFloat(e.target.value) || 0})}
-                  placeholder="0 = no limit" className="h-9" />
+                <CalcInput value={form.monthly_ca_limit} onChange={(v) => setForm({...form, monthly_ca_limit: parseFloat(v) || 0})}
+ placeholder="0 = no limit" className="h-9" />
               </div>
             </div>
             <Separator />
@@ -520,8 +521,8 @@ export default function EmployeesPage() {
           <div className="space-y-4">
             <div>
               <Label className="text-xs">Amount to Deduct</Label>
-              <Input type="number" value={deductForm.amount} onChange={e => setDeductForm({...deductForm, amount: parseFloat(e.target.value) || 0})}
-                max={caSummary?.total_advance_balance || 0} className="h-10 text-lg" />
+              <CalcInput value={deductForm.amount} onChange={(v) => setDeductForm({...deductForm, amount: parseFloat(v) || 0})}
+ className="h-10 text-lg" />
             </div>
             <div>
               <Label className="text-xs">Reason</Label>

@@ -14,6 +14,7 @@ import PrintEngine from '../lib/PrintEngine';
 import PrintBridge from '../lib/PrintBridge';
 import TerminalReturnRefundModal from '../components/TerminalReturnRefundModal';
 import TerminalUpdateReceiptModal from '../components/TerminalUpdateReceiptModal';
+import CalcInput from '../components/CalcInput';
 
 const BACKEND = process.env.REACT_APP_BACKEND_URL || '';
 const php = (v) => `₱${(parseFloat(v) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -264,11 +265,11 @@ function WebPaymentSection({ basic, docCode, onPaymentRecorded, onReprintRequest
         </div>
         <div>
           <label className="text-xs text-slate-500 mb-1 block">Amount</label>
-          <input type="text" inputMode="decimal" autoComplete="off"
-            value={amount} onChange={e => setAmount(e.target.value)}
-            placeholder={`Max ${php(balance)}`}
-            className="w-full h-11 text-center text-xl font-bold font-mono rounded-lg border border-input bg-background px-3"
-            data-testid="web-payment-amount" autoFocus />
+          <CalcInput autoComplete="off"
+ value={amount} onChange={(v) => setAmount(v)}
+ placeholder={`Max ${php(balance)}`}
+ className="w-full h-11 text-center text-xl font-bold font-mono rounded-lg border border-input bg-background px-3"
+ data-testid="web-payment-amount" autoFocus />
           <button onClick={() => setAmount(String(balance))} className="text-xs text-emerald-600 hover:underline mt-1">Full balance</button>
         </div>
         {isDigital && (
@@ -282,11 +283,11 @@ function WebPaymentSection({ basic, docCode, onPaymentRecorded, onReprintRequest
         {authMethod === 'totp' && (
           <div>
             <label className="text-xs font-semibold text-blue-700 mb-1 block">Time-Based Code (TOTP)</label>
-            <input type="text" inputMode="numeric" autoComplete="off"
-              value={totpCode} maxLength={6}
-              onChange={e => { setTotpCode(e.target.value.replace(/\D/g, '')); setPayError(''); }}
-              placeholder="6-digit code" data-testid="web-totp-input"
-              className="w-full h-11 text-center text-2xl font-mono tracking-widest rounded-lg border border-input bg-background px-3" />
+            <CalcInput autoComplete="off"
+ value={totpCode} maxLength={6}
+ onChange={(v) => { setTotpCode(v.replace(/\D/g, '')); setPayError(''); }}
+ placeholder="6-digit code" data-testid="web-totp-input"
+ className="w-full h-11 text-center text-2xl font-mono tracking-widest rounded-lg border border-input bg-background px-3" />
           </div>
         )}
         {payError && <p className="text-red-500 text-xs flex items-center gap-1"><AlertTriangle size={12} />{payError}</p>}
@@ -720,15 +721,11 @@ function StockReleaseManager({ basic, docCode, onStatusChange, terminalId, devic
                         {!done && (
                           <div className="flex items-center gap-2">
                             <span className="text-xs text-slate-500 shrink-0">Release now:</span>
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              autoComplete="off"
-                              value={it.input_qty}
-                              onChange={e => setQty(idx, e.target.value)}
-                              className="h-9 w-28 text-center font-semibold rounded-md border border-input bg-background text-sm px-3"
-                              data-testid={`release-qty-${it.sold_product_id}`}
-                            />
+                            <CalcInput autoComplete="off"
+ value={it.input_qty}
+ onChange={(v) => setQty(idx, v)}
+ className="h-9 w-28 text-center font-semibold rounded-md border border-input bg-background text-sm px-3"
+ data-testid={`release-qty-${it.sold_product_id}`} />
                             <span className="text-xs text-slate-400">{it.sold_unit}</span>
                             <button onClick={() => setQty(idx, String(it.sold_qty_remaining))}
                               className="text-xs text-blue-600 hover:underline ml-auto shrink-0">All</button>
@@ -863,11 +860,11 @@ function ReceivePaymentPanel({ basic, docCode, storedPin, onPaymentRecorded, ter
           </div>
           <div>
             <label className="text-xs text-slate-500 mb-1 block">Amount</label>
-            <input type="text" inputMode="decimal" autoComplete="off"
-              value={amount} onChange={e => setAmount(e.target.value)}
-              placeholder={`Max ${php(balance)}`}
-              className="w-full h-11 text-center text-xl font-bold font-mono rounded-lg border border-input bg-background px-3"
-              data-testid="payment-amount-input" autoFocus />
+            <CalcInput autoComplete="off"
+ value={amount} onChange={(v) => setAmount(v)}
+ placeholder={`Max ${php(balance)}`}
+ className="w-full h-11 text-center text-xl font-bold font-mono rounded-lg border border-input bg-background px-3"
+ data-testid="payment-amount-input" autoFocus />
             <button onClick={() => setAmount(String(balance))} className="text-xs text-emerald-600 hover:underline mt-1">Full balance</button>
           </div>
           {isDigital && (
@@ -1204,11 +1201,11 @@ function TransferReceivePanel({ basic, docCode, onReceived, terminalId, deviceId
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-slate-500 shrink-0">Received:</span>
-                <input type="text" inputMode="decimal" autoComplete="off"
-                  value={it.input_qty}
-                  onChange={e => setQty(idx, e.target.value)}
-                  className="h-9 w-28 text-center font-semibold rounded-md border border-input bg-background text-sm px-3"
-                  data-testid={`receive-qty-${it.product_id || idx}`} />
+                <CalcInput autoComplete="off"
+ value={it.input_qty}
+ onChange={(v) => setQty(idx, v)}
+ className="h-9 w-28 text-center font-semibold rounded-md border border-input bg-background text-sm px-3"
+ data-testid={`receive-qty-${it.product_id || idx}`} />
                 <button onClick={() => setQty(idx, String(it.qty))} className="text-xs text-emerald-600 hover:underline ml-auto shrink-0">All</button>
               </div>
             </div>
@@ -1605,18 +1602,14 @@ export default function DocViewerPage() {
                 To take action (receive payment, release stock, etc.), you must verify with your <span className="font-semibold">TOTP time-based code</span>.
                 This prevents PIN leakage and creates a traceable cross-branch audit entry.
               </p>
-              <Input
-                type="text"
-                inputMode="numeric"
-                autoComplete="off"
-                value={crossBranchPin}
-                maxLength={6}
-                onChange={e => { setCrossBranchPin(e.target.value.replace(/\D/g, '')); setCrossBranchError(''); }}
-                onKeyDown={e => e.key === 'Enter' && handleCrossBranchVerify()}
-                placeholder="6-digit TOTP code"
-                className="h-12 text-center text-xl font-mono tracking-widest"
-                data-testid="cross-branch-totp-input"
-              />
+              <CalcInput autoComplete="off"
+ value={crossBranchPin}
+ maxLength={6}
+ onChange={(v) => { setCrossBranchPin(v.replace(/\D/g, '')); setCrossBranchError(''); }}
+ onKeyDown={e => e.key === 'Enter' && handleCrossBranchVerify()}
+ placeholder="6-digit TOTP code"
+ className="h-12 text-center text-xl font-mono tracking-widest"
+ data-testid="cross-branch-totp-input" />
               {crossBranchError && (
                 <p className="text-red-500 text-xs flex items-center gap-1">
                   <AlertTriangle size={12} />{crossBranchError}

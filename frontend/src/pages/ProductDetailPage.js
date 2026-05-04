@@ -20,6 +20,7 @@ import { BarcodeDisplay } from '../components/BarcodeDisplay';
 import CategorySelect from '../components/CategorySelect';
 import GlobalPriceBadge from '../components/GlobalPriceBadge';
 import CapitalSourceBadge from '../components/CapitalSourceBadge';
+import CalcInput from '../components/CalcInput';
 
 export default function ProductDetailPage() {
   const { id } = useParams();
@@ -440,13 +441,10 @@ export default function ProductDetailPage() {
                     <p className="text-xs text-slate-500 font-medium mb-1">{s.name}</p>
                     {editMode ? (
                       <div>
-                        <Input
-                          type="number"
-                          value={editForm.prices?.[s.key] || ''}
-                          onChange={e => updatePrice(s.key, e.target.value)}
-                          className={`h-9 text-lg font-bold ${isBelowCost ? 'border-red-400 text-red-700' : ''}`}
-                          data-testid={`edit-price-${s.key}`}
-                        />
+                        <CalcInput value={editForm.prices?.[s.key] || ''}
+ onChange={(v) => updatePrice(s.key, v)}
+ className={`h-9 text-lg font-bold ${isBelowCost ? 'border-red-400 text-red-700' : ''}`}
+ data-testid={`edit-price-${s.key}`} />
                         {/* Reference indicators below input */}
                         <div className="mt-2 space-y-1 border-t border-slate-200 pt-2">
                           {cost.moving_average > 0 && (
@@ -611,7 +609,7 @@ export default function ProductDetailPage() {
                 </p>
                 {editMode ? (
                   canEditCost ? (
-                    <Input type="number" value={editForm.cost_price || 0} onChange={e => setEditForm({ ...editForm, cost_price: parseFloat(e.target.value) || 0 })} className="h-9" />
+                    <CalcInput value={editForm.cost_price || 0} onChange={(v) => setEditForm({ ...editForm, cost_price: parseFloat(v) || 0 })} className="h-9" />
                   ) : (
                     <p className="text-xl font-bold text-slate-400">{formatPHP(product.cost_price)}</p>
                   )
@@ -759,16 +757,13 @@ export default function ProductDetailPage() {
                             <div key={s.id} className={`p-3 rounded-lg border ${overrideVal !== undefined ? 'bg-violet-50 border-violet-200' : 'bg-slate-50 border-slate-100'}`}>
                               <p className="text-xs text-slate-500 font-medium mb-1">{s.name}</p>
                               {isEditing ? (
-                                <Input
-                                  type="number"
-                                  className="h-8 text-sm font-bold"
-                                  value={branchPriceEdit.prices[s.key] ?? ''}
-                                  onChange={e => setBranchPriceEdit(prev => ({
-                                    ...prev,
-                                    prices: { ...prev.prices, [s.key]: parseFloat(e.target.value) || 0 }
-                                  }))}
-                                  data-testid={`branch-price-${b.id}-${s.key}`}
-                                />
+                                <CalcInput className="h-8 text-sm font-bold"
+ value={branchPriceEdit.prices[s.key] ?? ''}
+ onChange={(v) => setBranchPriceEdit(prev => ({
+ ...prev,
+ prices: { ...prev.prices, [s.key]: parseFloat(v) || 0 }
+ }))}
+ data-testid={`branch-price-${b.id}-${s.key}`} />
                               ) : (
                                 <>
                                   <p className={`text-lg font-bold ${overrideVal !== undefined ? 'text-violet-700' : ''}`} style={{ fontFamily: 'Manrope' }}>
@@ -790,15 +785,12 @@ export default function ProductDetailPage() {
                         <div>
                           <p className="text-xs text-slate-500 font-medium">Cost / Capital (Landed)</p>
                           {isEditing ? (
-                            <Input
-                              type="number"
-                              className="h-8 w-36 text-sm font-bold mt-1"
-                              placeholder="Use global"
-                              value={branchPriceEdit.cost_price ?? ''}
-                              onChange={e => setBranchPriceEdit(prev => ({
-                                ...prev, cost_price: parseFloat(e.target.value) || null
-                              }))}
-                            />
+                            <CalcInput className="h-8 w-36 text-sm font-bold mt-1"
+ placeholder="Use global"
+ value={branchPriceEdit.cost_price ?? ''}
+ onChange={(v) => setBranchPriceEdit(prev => ({
+ ...prev, cost_price: parseFloat(v) || null
+ }))} />
                           ) : (
                             <>
                               <p className={`text-lg font-bold mt-0.5 ${override?.cost_price !== undefined ? 'text-amber-700' : ''}`} style={{ fontFamily: 'Manrope' }}>
@@ -880,16 +872,13 @@ export default function ProductDetailPage() {
                             {schemes.map(s => (
                               <TableCell key={s.id} className="text-right">
                                 {isEditing ? (
-                                  <Input
-                                    type="number"
-                                    className="w-24 h-7 text-right text-xs"
-                                    value={branchPriceEdit.prices[s.key] ?? ''}
-                                    onChange={e => setBranchPriceEdit(prev => ({
-                                      ...prev,
-                                      prices: { ...prev.prices, [s.key]: parseFloat(e.target.value) || 0 }
-                                    }))}
-                                    data-testid={`branch-price-${b.id}-${s.key}`}
-                                  />
+                                  <CalcInput className="w-24 h-7 text-right text-xs"
+ value={branchPriceEdit.prices[s.key] ?? ''}
+ onChange={(v) => setBranchPriceEdit(prev => ({
+ ...prev,
+ prices: { ...prev.prices, [s.key]: parseFloat(v) || 0 }
+ }))}
+ data-testid={`branch-price-${b.id}-${s.key}`} />
                                 ) : (
                                   <span className={`font-mono text-sm ${override?.prices?.[s.key] !== undefined ? 'text-violet-700 font-semibold' : 'text-slate-400'}`}>
                                     {override?.prices?.[s.key] !== undefined
@@ -901,15 +890,12 @@ export default function ProductDetailPage() {
                             ))}
                             <TableCell className="text-right">
                               {isEditing ? (
-                                <Input
-                                  type="number"
-                                  className="w-24 h-7 text-right text-xs"
-                                  placeholder="Global"
-                                  value={branchPriceEdit.cost_price ?? ''}
-                                  onChange={e => setBranchPriceEdit(prev => ({
-                                    ...prev, cost_price: parseFloat(e.target.value) || null
-                                  }))}
-                                />
+                                <CalcInput className="w-24 h-7 text-right text-xs"
+ placeholder="Global"
+ value={branchPriceEdit.cost_price ?? ''}
+ onChange={(v) => setBranchPriceEdit(prev => ({
+ ...prev, cost_price: parseFloat(v) || null
+ }))} />
                               ) : (
                                 <span className={`font-mono text-sm ${override?.cost_price !== undefined ? 'text-violet-700 font-semibold' : 'text-slate-400'}`}>
                                   {override?.cost_price !== undefined ? formatPHP(override.cost_price) : '—'}
@@ -1191,16 +1177,16 @@ export default function ProductDetailPage() {
               <div><Label>Unit</Label><Input data-testid="repack-unit" value={repackForm.unit} onChange={e => setRepackForm({ ...repackForm, unit: e.target.value })} placeholder="Pack, Sachet, Piece" /></div>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <div><Label>Units per {product.unit}</Label><Input data-testid="repack-per-parent" type="number" value={repackForm.units_per_parent} onChange={e => {
-                const units = parseInt(e.target.value) || 1;
-                const autoCost = product.cost_price ? Math.round((product.cost_price / units + (repackForm.add_on_cost || 0)) * 100) / 100 : 0;
-                setRepackForm({ ...repackForm, units_per_parent: units, cost_price: autoCost });
-              }} min={1} /></div>
-              <div><Label>Add-on Cost</Label><Input type="number" value={repackForm.add_on_cost || 0} onChange={e => {
-                const addon = parseFloat(e.target.value) || 0;
-                const autoCost = Math.round((product.cost_price / (repackForm.units_per_parent || 1) + addon) * 100) / 100;
-                setRepackForm({ ...repackForm, add_on_cost: addon, cost_price: autoCost });
-              }} /></div>
+              <div><Label>Units per {product.unit}</Label><CalcInput data-testid="repack-per-parent" value={repackForm.units_per_parent} onChange={(v) => {
+ const units = parseInt(v) || 1;
+ const autoCost = product.cost_price ? Math.round((product.cost_price / units + (repackForm.add_on_cost || 0)) * 100) / 100 : 0;
+ setRepackForm({ ...repackForm, units_per_parent: units, cost_price: autoCost });
+ }} /></div>
+              <div><Label>Add-on Cost</Label><CalcInput value={repackForm.add_on_cost || 0} onChange={(v) => {
+ const addon = parseFloat(v) || 0;
+ const autoCost = Math.round((product.cost_price / (repackForm.units_per_parent || 1) + addon) * 100) / 100;
+ setRepackForm({ ...repackForm, add_on_cost: addon, cost_price: autoCost });
+ }} /></div>
             </div>
             <div className="p-2 bg-blue-50 rounded border border-blue-200 text-sm">
               <span className="text-blue-700">Auto Cost: ₱{(product.cost_price / (repackForm.units_per_parent || 1)).toFixed(2)} ÷ {repackForm.units_per_parent}
@@ -1211,7 +1197,7 @@ export default function ProductDetailPage() {
               <div className="grid grid-cols-2 gap-3 mt-2">
                 {schemes.map(s => (
                   <div key={s.id}><Label className="text-xs text-slate-500">{s.name}</Label>
-                    <Input type="number" value={repackForm.prices[s.key] || ''} onChange={e => updateRepackPrice(s.key, e.target.value)} placeholder="0.00" /></div>
+                    <CalcInput value={repackForm.prices[s.key] || ''} onChange={(v) => updateRepackPrice(s.key, v)} placeholder="0.00" /></div>
                 ))}
               </div>
             </div>
@@ -1245,7 +1231,7 @@ export default function ProductDetailPage() {
                 <p className="text-sm text-slate-400 mt-1">No suppliers found for this branch. Add suppliers first in the Suppliers page.</p>
               )}
             </div>
-            <div><Label>Last Price</Label><Input type="number" data-testid="vendor-last-price" value={vendorForm.last_price} onChange={e => setVendorForm({ ...vendorForm, last_price: parseFloat(e.target.value) || 0 })} /></div>
+            <div><Label>Last Price</Label><CalcInput data-testid="vendor-last-price" value={vendorForm.last_price} onChange={(v) => setVendorForm({ ...vendorForm, last_price: parseFloat(v) || 0 })} /></div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setVendorDialog(false)}>Cancel</Button>
               <Button data-testid="save-vendor" onClick={handleAddVendor} disabled={!vendorForm.supplier_id} className="bg-[#1A4D2E] hover:bg-[#14532d] text-white">Link Supplier</Button>

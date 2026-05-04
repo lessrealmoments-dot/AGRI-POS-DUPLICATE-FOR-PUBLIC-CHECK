@@ -16,6 +16,7 @@ import {
 import { toast } from 'sonner';
 import UploadQRDialog from '../components/UploadQRDialog';
 import ReviewDetailDialog from '../components/ReviewDetailDialog';
+import CalcInput from '../components/CalcInput';
 
 // payMethod is derived from fundSource — no separate method picker needed
 const FUND_METHOD_MAP = {
@@ -359,10 +360,10 @@ export default function PaySupplierPage() {
               {/* PAYMENT AMT + DATE + REF */}
               <div className="flex items-center gap-3 flex-wrap">
                 <Label className="text-xs text-slate-500 w-20 shrink-0 uppercase tracking-wide">Payment</Label>
-                <Input type="number" placeholder="0.00" value={budgetInput}
-                  onChange={e => handleBudgetChange(e.target.value)}
-                  className="h-9 w-36 text-lg font-bold font-mono"
-                  data-testid="budget-input" />
+                <CalcInput placeholder="0.00" value={budgetInput}
+ onChange={(v) => handleBudgetChange(v)}
+ className="h-9 w-36 text-lg font-bold font-mono"
+ data-testid="budget-input" />
                 <Separator orientation="vertical" className="h-7 hidden sm:block" />
                 <div className="flex items-center gap-1.5">
                   <Label className="text-[10px] text-slate-400 uppercase">Date</Label>
@@ -541,16 +542,14 @@ export default function PaySupplierPage() {
                           <td className="px-3 py-2.5 text-right" onClick={e => e.stopPropagation()}>
                             {checked ? (
                               <div className="flex flex-col items-end gap-0.5">
-                                <Input type="number" min="0.01" max={bal} step="0.01"
-                                  value={amt === 0 ? '' : amt}
-                                  placeholder="0.00"
-                                  className={`h-8 w-28 text-right text-sm font-mono ${isPartial ? 'border-amber-400 bg-amber-50' : 'border-emerald-400 bg-emerald-50'}`}
-                                  onChange={e => {
-                                    const v = Math.min(parseFloat(e.target.value) || 0, bal);
-                                    setCheckedPos(prev => ({ ...prev, [po.id]: round2(v) }));
-                                  }}
-                                  onFocus={e => e.target.select()}
-                                  data-testid={`pay-amount-${po.id}`} />
+                                <CalcInput value={amt === 0 ? '' : amt}
+ placeholder="0.00"
+ className={`h-8 w-28 text-right text-sm font-mono ${isPartial ? 'border-amber-400 bg-amber-50' : 'border-emerald-400 bg-emerald-50'}`}
+ onChange={(raw) => {
+ const v = Math.min(parseFloat(raw) || 0, bal);
+ setCheckedPos(prev => ({ ...prev, [po.id]: round2(v) }));
+ }}
+ data-testid={`pay-amount-${po.id}`} selectOnFocus />
                                 {isPartial && <span className="text-[9px] text-amber-600 font-medium">Partial</span>}
                               </div>
                             ) : (

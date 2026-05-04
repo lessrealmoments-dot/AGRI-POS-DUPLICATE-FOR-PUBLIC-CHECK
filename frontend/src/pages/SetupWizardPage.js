@@ -10,6 +10,7 @@ import {
   Check, Loader2, Eye, EyeOff, DollarSign, Vault, Building
 } from 'lucide-react';
 import { toast } from 'sonner';
+import CalcInput from '../components/CalcInput';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -368,15 +369,12 @@ export default function SetupWizardPage() {
                 </div>
                 <div className="flex-1 space-y-2">
                   <Label htmlFor="opening_cashier_balance">Operating Fund Balance</Label>
-                  <Input
-                    id="opening_cashier_balance"
-                    data-testid="setup-cashier-balance"
-                    type="number"
-                    value={formData.opening_cashier_balance}
-                    onChange={e => updateField('opening_cashier_balance', e.target.value)}
-                    placeholder="0.00"
-                    className="max-w-[200px]"
-                  />
+                  <CalcInput id="opening_cashier_balance"
+ data-testid="setup-cashier-balance"
+ value={formData.opening_cashier_balance}
+ onChange={(v) => updateField('opening_cashier_balance', v)}
+ placeholder="0.00"
+ className="max-w-[200px]" />
                   <p className="text-xs text-slate-500">Cash currently in the register</p>
                 </div>
               </div>
@@ -387,15 +385,12 @@ export default function SetupWizardPage() {
                 </div>
                 <div className="flex-1 space-y-2">
                   <Label htmlFor="opening_safe_balance">Safe Balance</Label>
-                  <Input
-                    id="opening_safe_balance"
-                    data-testid="setup-safe-balance"
-                    type="number"
-                    value={formData.opening_safe_balance}
-                    onChange={e => updateField('opening_safe_balance', e.target.value)}
-                    placeholder="0.00"
-                    className="max-w-[200px]"
-                  />
+                  <CalcInput id="opening_safe_balance"
+ data-testid="setup-safe-balance"
+ value={formData.opening_safe_balance}
+ onChange={(v) => updateField('opening_safe_balance', v)}
+ placeholder="0.00"
+ className="max-w-[200px]" />
                   <p className="text-xs text-slate-500">Cash stored in your safe</p>
                 </div>
               </div>
@@ -419,15 +414,12 @@ export default function SetupWizardPage() {
                       placeholder="Account number"
                     />
                   </div>
-                  <Input
-                    id="opening_bank_balance"
-                    data-testid="setup-bank-balance"
-                    type="number"
-                    value={formData.opening_bank_balance}
-                    onChange={e => updateField('opening_bank_balance', e.target.value)}
-                    placeholder="Current bank balance"
-                    className="max-w-[200px]"
-                  />
+                  <CalcInput id="opening_bank_balance"
+ data-testid="setup-bank-balance"
+ value={formData.opening_bank_balance}
+ onChange={(v) => updateField('opening_bank_balance', v)}
+ placeholder="Current bank balance"
+ className="max-w-[200px]" />
                 </div>
               </div>
             </div>

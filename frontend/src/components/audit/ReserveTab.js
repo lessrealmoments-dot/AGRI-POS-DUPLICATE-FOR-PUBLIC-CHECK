@@ -20,6 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { ShieldCheck, AlertTriangle, RefreshCw, RotateCcw, Wallet, History, ArrowRight } from 'lucide-react';
 import { toast } from 'sonner';
+import CalcInput from '../CalcInput';
 
 const fmt = (n) => '₱' + (parseFloat(n) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 });
 
@@ -52,8 +53,8 @@ function PinActionModal({ open, onClose, onSubmit, title, description, defaultAm
         {showAmount && (
           <div className="mb-3">
             <Label className="text-xs">Amount {maxAmount != null && <span className="text-slate-400">(max {fmt(maxAmount)})</span>}</Label>
-            <Input type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)}
-              className="mt-1" data-testid="reserve-action-amount" />
+            <CalcInput value={amount} onChange={(v) => setAmount(v)}
+ className="mt-1" data-testid="reserve-action-amount" />
           </div>
         )}
 

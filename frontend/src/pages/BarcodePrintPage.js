@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Printer, Search, Package, Plus, Minus, Trash2, ScanBarcode, X, CheckCircle, Warehouse } from 'lucide-react';
 import { toast } from 'sonner';
+import CalcInput from '../components/CalcInput';
 
 const LABEL_SIZES = {
   '40x30': { w: 40, h: 30, label: '40 x 30 mm (Default)', barcodeH: 22, fontSize: 8, barcodeW: 1.0, nameSize: '7px' },
@@ -295,13 +296,10 @@ export default function BarcodePrintPage() {
                         >
                           <Minus size={12} />
                         </Button>
-                        <Input
-                          type="number" min={1}
-                          value={qty}
-                          onChange={e => updateQty(product.id, parseInt(e.target.value) || 1)}
-                          className="w-16 h-8 text-center text-sm font-mono"
-                          data-testid={`qty-input-${product.id}`}
-                        />
+                        <CalcInput value={qty}
+ onChange={(v) => updateQty(product.id, parseInt(v) || 1)}
+ className="w-16 h-8 text-center text-sm font-mono"
+ data-testid={`qty-input-${product.id}`} />
                         <Button
                           variant="outline" size="sm"
                           onClick={() => updateQty(product.id, qty + 1)}

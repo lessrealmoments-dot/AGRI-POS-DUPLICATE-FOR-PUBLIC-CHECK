@@ -21,6 +21,7 @@ import ExpenseDetailModal from '../components/ExpenseDetailModal';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
 import CustomerStatementModal from '../components/CustomerStatementModal';
 import CustomerBalanceBadge, { useCustomerBalances } from '../components/CustomerBalanceBadge';
+import CalcInput from '../components/CalcInput';
 
 const EXPENSE_CATEGORIES = [
   "Utilities", "Rent", "Supplies", "Transportation", "Fuel/Gas",
@@ -808,7 +809,7 @@ export default function AccountingPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label className="text-xs text-slate-500">Amount (₱)</Label>
-                <Input data-testid="expense-amount" type="number" className="h-10" value={expenseForm.amount} onChange={e => setExpenseForm({ ...expenseForm, amount: parseFloat(e.target.value) || 0 })} />
+                <CalcInput data-testid="expense-amount" className="h-10" value={expenseForm.amount} onChange={(v) => setExpenseForm({ ...expenseForm, amount: parseFloat(v) || 0 })} />
               </div>
               <div>
                 <Label className="text-xs text-slate-500">Payment Method</Label>
@@ -917,13 +918,10 @@ export default function AccountingPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label className="text-xs text-slate-500">Amount (₱) *</Label>
-                <Input
-                  type="number"
-                  className="h-10"
-                  value={farmExpenseForm.amount}
-                  onChange={e => setFarmExpenseForm({ ...farmExpenseForm, amount: parseFloat(e.target.value) || 0 })}
-                  data-testid="farm-expense-amount"
-                />
+                <CalcInput className="h-10"
+ value={farmExpenseForm.amount}
+ onChange={(v) => setFarmExpenseForm({ ...farmExpenseForm, amount: parseFloat(v) || 0 })}
+ data-testid="farm-expense-amount" />
               </div>
               <div>
                 <Label className="text-xs text-slate-500">Date</Label>
@@ -1040,13 +1038,10 @@ export default function AccountingPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label className="text-xs text-slate-500">Amount (₱) *</Label>
-                <Input
-                  type="number"
-                  className="h-10"
-                  value={cashOutForm.amount}
-                  onChange={e => setCashOutForm({ ...cashOutForm, amount: parseFloat(e.target.value) || 0 })}
-                  data-testid="cashout-amount"
-                />
+                <CalcInput className="h-10"
+ value={cashOutForm.amount}
+ onChange={(v) => setCashOutForm({ ...cashOutForm, amount: parseFloat(v) || 0 })}
+ data-testid="cashout-amount" />
               </div>
               <div>
                 <Label className="text-xs text-slate-500">Date</Label>
@@ -1156,7 +1151,7 @@ export default function AccountingPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label className="text-xs text-slate-500">Amount (₱)</Label>
-                <Input data-testid="payable-amount" type="number" className="h-10" value={payableForm.amount} onChange={e => setPayableForm({ ...payableForm, amount: parseFloat(e.target.value) || 0 })} />
+                <CalcInput data-testid="payable-amount" className="h-10" value={payableForm.amount} onChange={(v) => setPayableForm({ ...payableForm, amount: parseFloat(v) || 0 })} />
               </div>
               <div>
                 <Label className="text-xs text-slate-500">Due Date</Label>
@@ -1181,7 +1176,7 @@ export default function AccountingPage() {
             <p className="text-sm">Outstanding Balance: <span className="font-bold">{formatPHP(paymentTarget?.balance || 0)}</span></p>
             <div>
               <Label className="text-xs text-slate-500">Payment Amount (₱)</Label>
-              <Input data-testid="payment-amount-input" type="number" className="h-10" value={paymentAmount} onChange={e => setPaymentAmount(parseFloat(e.target.value) || 0)} />
+              <CalcInput data-testid="payment-amount-input" className="h-10" value={paymentAmount} onChange={(v) => setPaymentAmount(parseFloat(v) || 0)} />
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setPaymentDialog(false)}>Cancel</Button>

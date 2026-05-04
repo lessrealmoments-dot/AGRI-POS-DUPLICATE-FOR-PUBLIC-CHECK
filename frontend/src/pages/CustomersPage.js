@@ -15,6 +15,7 @@ import { Users, Plus, Pencil, Trash2, Search, FileText, Eye, X, Printer, AlertTr
 import { toast } from 'sonner';
 import CustomerStatementModal from '../components/CustomerStatementModal';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
+import CalcInput from '../components/CalcInput';
 
 const SALE_TYPE_LABELS = {
   farm_expense: { label: 'Farm Expense', cls: 'bg-green-100 text-green-700' },
@@ -453,30 +454,27 @@ export default function CustomersPage() {
               </div>
               <div>
                 <Label>Credit Limit</Label>
-                <Input data-testid="customer-credit-input" type="number" value={form.credit_limit}
-                  onChange={e => setForm({ ...form, credit_limit: parseFloat(e.target.value) || 0 })}
-                  disabled={!canManageCredit}
-                  className={!canManageCredit ? 'bg-slate-100 cursor-not-allowed opacity-60' : ''}
-                  title={!canManageCredit ? 'No permission to manage credit' : ''}
-                />
+                <CalcInput data-testid="customer-credit-input" value={form.credit_limit}
+ onChange={(v) => setForm({ ...form, credit_limit: parseFloat(v) || 0 })}
+ disabled={!canManageCredit}
+ className={!canManageCredit ? 'bg-slate-100 cursor-not-allowed opacity-60' : ''}
+ title={!canManageCredit ? 'No permission to manage credit' : ''} />
               </div>
               <div>
                 <Label>Interest (%/mo)</Label>
-                <Input type="number" step="0.1" value={form.interest_rate}
-                  onChange={e => setForm({ ...form, interest_rate: parseFloat(e.target.value) || 0 })}
-                  disabled={!canManageCredit}
-                  className={!canManageCredit ? 'bg-slate-100 cursor-not-allowed opacity-60' : ''}
-                  title={!canManageCredit ? 'No permission to manage credit' : ''}
-                />
+                <CalcInput value={form.interest_rate}
+ onChange={(v) => setForm({ ...form, interest_rate: parseFloat(v) || 0 })}
+ disabled={!canManageCredit}
+ className={!canManageCredit ? 'bg-slate-100 cursor-not-allowed opacity-60' : ''}
+ title={!canManageCredit ? 'No permission to manage credit' : ''} />
               </div>
               <div>
                 <Label>Grace Period (days)</Label>
-                <Input type="number" value={form.grace_period}
-                  onChange={e => setForm({ ...form, grace_period: parseInt(e.target.value) || 7 })} placeholder="7"
-                  disabled={!canManageCredit}
-                  className={!canManageCredit ? 'bg-slate-100 cursor-not-allowed opacity-60' : ''}
-                  title={!canManageCredit ? 'No permission to manage credit' : ''}
-                />
+                <CalcInput value={form.grace_period}
+ onChange={(v) => setForm({ ...form, grace_period: parseInt(v) || 7 })} placeholder="7"
+ disabled={!canManageCredit}
+ className={!canManageCredit ? 'bg-slate-100 cursor-not-allowed opacity-60' : ''}
+ title={!canManageCredit ? 'No permission to manage credit' : ''} />
               </div>
             </div>
             <div className="flex justify-end gap-2">

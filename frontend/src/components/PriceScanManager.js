@@ -16,6 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { AlertTriangle, RefreshCw, Check, Clock, ChevronDown, X, TrendingUp, TrendingDown, Lock } from 'lucide-react';
 import { toast } from 'sonner';
+import CalcInput from './CalcInput';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const SCAN_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
@@ -527,22 +528,17 @@ export default function PriceScanManager() {
                                 was: {formatPHP(currentPrice)}
                               </div>
                               {/* New price input */}
-                              <Input
-                                type="number"
-                                min={issue.effective_cost}
-                                step="0.01"
-                                value={editVal}
-                                onChange={e => updatePrice(issue.product_id, s.key, e.target.value)}
-                                placeholder={`min ₱${issue.effective_cost.toFixed(2)}`}
-                                className={`h-8 text-sm text-right font-mono font-bold w-full ${
-                                  isBad && (!editNum || editNum < issue.effective_cost)
-                                    ? 'border-red-400 bg-red-50 text-red-700'
-                                    : isFixed
-                                    ? 'border-emerald-400 bg-emerald-50 text-emerald-800'
-                                    : 'border-slate-200'
-                                }`}
-                                data-testid={`price-${issue.product_id}-${s.key}`}
-                              />
+                              <CalcInput value={editVal}
+ onChange={(v) => updatePrice(issue.product_id, s.key, v)}
+ placeholder={`min ₱${issue.effective_cost.toFixed(2)}`}
+ className={`h-8 text-sm text-right font-mono font-bold w-full ${
+ isBad && (!editNum || editNum < issue.effective_cost)
+ ? 'border-red-400 bg-red-50 text-red-700'
+ : isFixed
+ ? 'border-emerald-400 bg-emerald-50 text-emerald-800'
+ : 'border-slate-200'
+ }`}
+ data-testid={`price-${issue.product_id}-${s.key}`} />
                               {/* Margin indicator */}
                               {isFixed && (
                                 <p className="text-[9px] text-emerald-600 mt-0.5 text-right font-mono">
@@ -569,20 +565,15 @@ export default function PriceScanManager() {
                               <div className={`text-[10px] mb-0.5 font-mono ${isBad ? 'text-amber-500 line-through' : 'text-slate-400'}`}>
                                 {formatPHP(currentPrice)}
                               </div>
-                              <Input
-                                type="number"
-                                min={0}
-                                step="0.01"
-                                value={editVal}
-                                onChange={e => updatePrice(issue.product_id, s.key, e.target.value)}
-                                placeholder="optional"
-                                className={`h-8 text-sm text-right font-mono w-full text-slate-600 ${
-                                  isBad && (!editNum || editNum < issue.effective_cost)
-                                    ? 'border-amber-300 bg-amber-50/50'
-                                    : 'border-slate-200'
-                                }`}
-                                data-testid={`price-${issue.product_id}-${s.key}`}
-                              />
+                              <CalcInput value={editVal}
+ onChange={(v) => updatePrice(issue.product_id, s.key, v)}
+ placeholder="optional"
+ className={`h-8 text-sm text-right font-mono w-full text-slate-600 ${
+ isBad && (!editNum || editNum < issue.effective_cost)
+ ? 'border-amber-300 bg-amber-50/50'
+ : 'border-slate-200'
+ }`}
+ data-testid={`price-${issue.product_id}-${s.key}`} />
                               {isBad && (
                                 <p className="text-[9px] text-amber-500 mt-0.5 text-right">optional to fix</p>
                               )}

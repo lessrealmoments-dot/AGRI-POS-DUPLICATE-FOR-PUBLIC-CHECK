@@ -13,6 +13,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs';
+import CalcInput from '../components/CalcInput';
 
 /* ── helpers ──────────────────────────────────────────────────────────────── */
 const PLAN_COLORS = {
@@ -1337,9 +1338,9 @@ function EditSubscriptionModal({ org, onClose, onSaved }) {
                   </button>
                 ))}
               </div>
-              <Input value={form.trial_days} onChange={e => set('trial_days', e.target.value)}
-                type="number" min="1" placeholder="Custom days (e.g. 14)"
-                className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-600 h-9 text-sm" />
+              <CalcInput value={form.trial_days} onChange={(v) => set('trial_days', v)}
+ placeholder="Custom days (e.g. 14)"
+ className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-600 h-9 text-sm" />
               {org.trial_ends_at && (
                 <p className="text-slate-500 text-xs mt-1">
                   Current trial ends: {new Date(org.trial_ends_at).toLocaleDateString()}

@@ -17,6 +17,7 @@ import UploadQRDialog from '../components/UploadQRDialog';
 import { TotpVerifyDialog } from '../components/TotpVerifyDialog';
 import CategorySelect from '../components/CategorySelect';
 import StockInjectionDialog from '../components/StockInjectionDialog';
+import CalcInput from '../components/CalcInput';
 
 export default function ProductsPage() {
   const navigate = useNavigate();
@@ -891,15 +892,12 @@ export default function ProductsPage() {
                     </span>
                   )}
                 </Label>
-                <Input
-                  data-testid="product-cost-input"
-                  type="number"
-                  value={form.cost_price}
-                  onChange={e => setForm({ ...form, cost_price: parseFloat(e.target.value) || 0 })}
-                  disabled={!!editing && !canEditCost}
-                  title={editing && !canEditCost ? 'You do not have permission to edit the capital/cost price' : ''}
-                  className={editing && !canEditCost ? 'bg-slate-100 cursor-not-allowed opacity-60' : ''}
-                />
+                <CalcInput data-testid="product-cost-input"
+ value={form.cost_price}
+ onChange={(v) => setForm({ ...form, cost_price: parseFloat(v) || 0 })}
+ disabled={!!editing && !canEditCost}
+ title={editing && !canEditCost ? 'You do not have permission to edit the capital/cost price' : ''}
+ className={editing && !canEditCost ? 'bg-slate-100 cursor-not-allowed opacity-60' : ''} />
                 {editing && !canEditCost && (
                   <p className="text-[10px] text-amber-600 mt-0.5">No permission to edit capital</p>
                 )}
@@ -932,13 +930,10 @@ export default function ProductsPage() {
                 {schemes.map(s => (
                   <div key={s.id}>
                     <Label className="text-xs text-slate-500">{s.name}</Label>
-                    <Input
-                      data-testid={`price-${s.key}`}
-                      type="number"
-                      value={form.prices[s.key] || ''}
-                      onChange={e => updatePrice(s.key, e.target.value)}
-                      placeholder="0.00"
-                    />
+                    <CalcInput data-testid={`price-${s.key}`}
+ value={form.prices[s.key] || ''}
+ onChange={(v) => updatePrice(s.key, v)}
+ placeholder="0.00" />
                   </div>
                 ))}
               </div>
@@ -946,7 +941,7 @@ export default function ProductsPage() {
             {!editing && (
               <div>
                 <Label>Starting Inventory ({currentBranch?.name || 'Current Branch'})</Label>
-                <Input data-testid="product-starting-inventory" type="number" value={form.starting_inventory || 0} onChange={e => setForm({ ...form, starting_inventory: parseFloat(e.target.value) || 0 })} placeholder="0" />
+                <CalcInput data-testid="product-starting-inventory" value={form.starting_inventory || 0} onChange={(v) => setForm({ ...form, starting_inventory: parseFloat(v) || 0 })} placeholder="0" />
                 <p className="text-[11px] text-slate-400 mt-0.5">Leave 0 if no stock yet</p>
               </div>
             )}
@@ -990,17 +985,12 @@ export default function ProductsPage() {
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <Label className="text-xs">New Quantity</Label>
-                        <Input
-                          data-testid="correction-qty-input"
-                          type="number"
-                          min={0}
-                          step={1}
-                          value={correctionQty}
-                          onChange={e => setCorrectionQty(e.target.value)}
-                          placeholder={currentStock !== null ? `Current: ${currentStock}` : 'Enter qty'}
-                          className="h-9 mt-1 font-mono"
-                          disabled={!currentBranch}
-                        />
+                        <CalcInput data-testid="correction-qty-input"
+ value={correctionQty}
+ onChange={(v) => setCorrectionQty(v)}
+ placeholder={currentStock !== null ? `Current: ${currentStock}` : 'Enter qty'}
+ className="h-9 mt-1 font-mono"
+ disabled={!currentBranch} />
                       </div>
                       <div>
                         <Label className="text-xs">Reason <span className="text-red-400">*</span></Label>
@@ -1133,30 +1123,25 @@ export default function ProductsPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label>Units per Parent ({selectedParent.unit})</Label>
-                  <Input
-                    data-testid="repack-units-per-parent"
-                    type="number"
-                    value={repackForm.units_per_parent}
-                    onChange={e => {
-                      const units = parseInt(e.target.value) || 1;
-                      const autoCost = selectedParent.cost_price ? Math.round((selectedParent.cost_price / units + (repackForm.add_on_cost || 0)) * 100) / 100 : 0;
-                      setRepackForm({ ...repackForm, units_per_parent: units, cost_price: autoCost });
-                    }}
-                    min={1}
-                  />
+                  <CalcInput data-testid="repack-units-per-parent"
+ value={repackForm.units_per_parent}
+ onChange={(v) => {
+ const units = parseInt(v) || 1;
+ const autoCost = selectedParent.cost_price ? Math.round((selectedParent.cost_price / units + (repackForm.add_on_cost || 0)) * 100) / 100 : 0;
+ setRepackForm({ ...repackForm, units_per_parent: units, cost_price: autoCost });
+ }} />
                   <p className="text-[11px] text-slate-500 mt-1">How many {repackForm.unit || 'pieces'} inside 1 {selectedParent.unit}?</p>
                 </div>
                 <div>
                   <Label>Add-on Cost (optional)</Label>
-                  <Input data-testid="repack-addon-cost" type="number" value={repackForm.add_on_cost || 0}
-                    onChange={e => {
-                      const addon = parseFloat(e.target.value) || 0;
-                      const units = repackForm.units_per_parent || 1;
-                      const autoCost = Math.round((selectedParent.cost_price / units + addon) * 100) / 100;
-                      setRepackForm({ ...repackForm, add_on_cost: addon, cost_price: autoCost });
-                    }}
-                    placeholder="Extra cost per repack"
-                  />
+                  <CalcInput data-testid="repack-addon-cost" value={repackForm.add_on_cost || 0}
+ onChange={(v) => {
+ const addon = parseFloat(v) || 0;
+ const units = repackForm.units_per_parent || 1;
+ const autoCost = Math.round((selectedParent.cost_price / units + addon) * 100) / 100;
+ setRepackForm({ ...repackForm, add_on_cost: addon, cost_price: autoCost });
+ }}
+ placeholder="Extra cost per repack" />
                   <p className="text-[11px] text-slate-500 mt-1">Repacking labor, packaging, etc.</p>
                 </div>
               </div>
@@ -1174,7 +1159,7 @@ export default function ProductsPage() {
                   {schemes.map(s => (
                     <div key={s.id}>
                       <Label className="text-xs text-slate-500">{s.name}</Label>
-                      <Input type="number" value={repackForm.prices[s.key] || ''} onChange={e => updateRepackPrice(s.key, e.target.value)} placeholder="0.00" />
+                      <CalcInput value={repackForm.prices[s.key] || ''} onChange={(v) => updateRepackPrice(s.key, v)} placeholder="0.00" />
                     </div>
                   ))}
                 </div>
@@ -1369,24 +1354,24 @@ export default function ProductsPage() {
 
                           {/* Qty per parent */}
                           <td className="px-2 py-1.5" style={{minWidth:'90px'}}>
-                            <Input type="number" min={1} value={row.unitsPerParent}
-                              onChange={e => {
-                                const v = parseInt(e.target.value) || 1;
-                                updateRow(row.id, { unitsPerParent: v, capital: computeCapital(row.parent, v, row.addOnCost) });
-                              }}
-                              className="h-8 text-sm text-right font-mono"
-                              data-testid={`qr-units-${row.id}`} />
+                            <CalcInput value={row.unitsPerParent}
+ onChange={(raw) => {
+ const v = parseInt(raw) || 1;
+ updateRow(row.id, { unitsPerParent: v, capital: computeCapital(row.parent, v, row.addOnCost) });
+ }}
+ className="h-8 text-sm text-right font-mono"
+ data-testid={`qr-units-${row.id}`} />
                           </td>
 
                           {/* Add-on cost */}
                           <td className="px-2 py-1.5" style={{minWidth:'90px'}}>
-                            <Input type="number" min={0} step="0.01" value={row.addOnCost}
-                              onChange={e => {
-                                const v = parseFloat(e.target.value) || 0;
-                                updateRow(row.id, { addOnCost: v, capital: computeCapital(row.parent, row.unitsPerParent, v) });
-                              }}
-                              className="h-8 text-sm text-right font-mono"
-                              data-testid={`qr-addon-${row.id}`} />
+                            <CalcInput value={row.addOnCost}
+ onChange={(raw) => {
+ const v = parseFloat(raw) || 0;
+ updateRow(row.id, { addOnCost: v, capital: computeCapital(row.parent, row.unitsPerParent, v) });
+ }}
+ className="h-8 text-sm text-right font-mono"
+ data-testid={`qr-addon-${row.id}`} />
                           </td>
 
                           {/* Capital — read-only computed */}
@@ -1398,9 +1383,9 @@ export default function ProductsPage() {
 
                           {/* Retail price — blank, validated on blur */}
                           <td className="px-2 py-1.5" style={{minWidth:'115px'}}>
-                            <Input type="number" min={0} step="0.01" value={row.retailPrice}
+                            <CalcInput value={row.retailPrice}
                               placeholder="0.00"
-                              onChange={e => updateRow(row.id, { retailPrice: e.target.value, retailError: null })}
+                              onChange={(v) => updateRow(row.id, { retailPrice: v, retailError: null })}
                               onBlur={e => handleRetailBlur(row.id, e.target.value)}
                               onKeyDown={e => {
                                 if (e.key === 'Tab' && !e.shiftKey) {

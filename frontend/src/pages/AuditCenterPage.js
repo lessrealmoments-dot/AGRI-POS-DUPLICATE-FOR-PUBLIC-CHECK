@@ -27,6 +27,7 @@ import SignatureVerifyToolbar from '../components/SignatureVerifyToolbar';
 import ReserveTab from '../components/audit/ReserveTab';
 
 import { Wallet } from 'lucide-react';
+import CalcInput from '../components/CalcInput';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -1355,9 +1356,9 @@ export default function AuditCenterPage() {
                   <div className="flex items-center gap-3 p-3 rounded-lg bg-amber-50 border border-amber-200">
                     <div className="flex-1">
                       <Label className="text-xs text-amber-800 font-medium">Enter Actual Cash Count (Cashier Drawer Only)</Label>
-                      <Input type="number" min={0} value={actualCashCount}
-                        onChange={e => setActualCashCount(e.target.value)}
-                        placeholder="0.00" className="mt-1 h-8 font-mono" />
+                      <CalcInput value={actualCashCount}
+ onChange={(v) => setActualCashCount(v)}
+ placeholder="0.00" className="mt-1 h-8 font-mono" />
                     </div>
                     {actualCashCount && (
                       <div className="text-right shrink-0">

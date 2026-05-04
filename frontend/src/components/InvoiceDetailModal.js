@@ -24,6 +24,7 @@ import {
   Truck, CreditCard, Wallet, Pencil, RefreshCw, Printer, MessageSquare
 } from 'lucide-react';
 import { toast } from 'sonner';
+import CalcInput from './CalcInput';
 
 export default function InvoiceDetailModal({
   open, onOpenChange, invoiceId, invoiceNumber, expenseId, onUpdated,
@@ -474,15 +475,15 @@ export default function InvoiceDetailModal({
                           <div className="col-span-5 text-xs font-medium truncate">{item.product_name}</div>
                           <div className="col-span-3">
                             <Label className="text-[9px] text-slate-400">Qty</Label>
-                            <Input type="number" min={0} value={item.quantity}
-                              onChange={e => handleItemChange(i, 'quantity', parseFloat(e.target.value) || 0)}
-                              className="h-7 text-sm text-right font-mono" />
+                            <CalcInput value={item.quantity}
+ onChange={(v) => handleItemChange(i, 'quantity', parseFloat(v) || 0)}
+ className="h-7 text-sm text-right font-mono" />
                           </div>
                           <div className="col-span-4">
                             <Label className="text-[9px] text-slate-400">Price</Label>
-                            <Input type="number" min={0} value={item.rate || item.unit_price || item.price}
-                              onChange={e => handleItemChange(i, 'rate', parseFloat(e.target.value) || 0)}
-                              className="h-7 text-sm text-right font-mono" />
+                            <CalcInput value={item.rate || item.unit_price || item.price}
+ onChange={(v) => handleItemChange(i, 'rate', parseFloat(v) || 0)}
+ className="h-7 text-sm text-right font-mono" />
                           </div>
                         </div>
                       ))}
@@ -951,12 +952,12 @@ export default function InvoiceDetailModal({
                                 </TableCell>
                                 <TableCell className="text-right">
                                   {editMode ? (
-                                    <Input type="number" value={item.quantity} onChange={e => handleItemChange(i, 'quantity', parseFloat(e.target.value) || 0)} className="h-8 w-16 text-right" />
+                                    <CalcInput value={item.quantity} onChange={(v) => handleItemChange(i, 'quantity', parseFloat(v) || 0)} className="h-8 w-16 text-right" />
                                   ) : <span className="text-sm">{item.quantity}</span>}
                                 </TableCell>
                                 <TableCell className="text-right">
                                   {editMode ? (
-                                    <Input type="number" value={item.rate || item.unit_price} onChange={e => handleItemChange(i, 'rate', parseFloat(e.target.value) || 0)} className="h-8 w-24 text-right" />
+                                    <CalcInput value={item.rate || item.unit_price} onChange={(v) => handleItemChange(i, 'rate', parseFloat(v) || 0)} className="h-8 w-24 text-right" />
                                   ) : <span className="text-sm">{formatPHP(item.rate || item.unit_price || 0)}</span>}
                                 </TableCell>
                                 <TableCell className="text-right text-sm text-slate-500">
@@ -979,12 +980,12 @@ export default function InvoiceDetailModal({
                         <div className="flex justify-between text-sm"><span className="text-slate-500">Subtotal</span><span>{formatPHP(editMode ? subtotal : (invoice.subtotal || invoice.line_subtotal || 0))}</span></div>
                         <div className="flex justify-between text-sm">
                           <span className="text-slate-500">Freight</span>
-                          {editMode ? <Input type="number" value={editData.freight} onChange={e => setEditData({...editData, freight: parseFloat(e.target.value) || 0})} className="h-7 w-24 text-right" /> : <span>{formatPHP(invoice.freight || 0)}</span>}
+                          {editMode ? <CalcInput value={editData.freight} onChange={(v) => setEditData({...editData, freight: parseFloat(v) || 0})} className="h-7 w-24 text-right" /> : <span>{formatPHP(invoice.freight || 0)}</span>}
                         </div>
                         {(invoice.overall_discount > 0 || invoice.overall_discount_amount > 0 || editMode) && (
                           <div className="flex justify-between text-sm">
                             <span className="text-slate-500">Discount</span>
-                            {editMode ? <Input type="number" value={editData.overall_discount} onChange={e => setEditData({...editData, overall_discount: parseFloat(e.target.value) || 0})} className="h-7 w-24 text-right" /> : <span>{formatPHP(invoice.overall_discount || invoice.overall_discount_amount || 0)}</span>}
+                            {editMode ? <CalcInput value={editData.overall_discount} onChange={(v) => setEditData({...editData, overall_discount: parseFloat(v) || 0})} className="h-7 w-24 text-right" /> : <span>{formatPHP(invoice.overall_discount || invoice.overall_discount_amount || 0)}</span>}
                           </div>
                         )}
                         {(invoice.tax_amount || 0) > 0 && (

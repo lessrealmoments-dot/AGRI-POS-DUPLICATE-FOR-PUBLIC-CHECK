@@ -11,6 +11,7 @@ import {
   RefreshCw, Printer, ShieldCheck, Package
 } from 'lucide-react';
 import { toast } from 'sonner';
+import CalcInput from './CalcInput';
 
 export default function TerminalUpdateReceiptModal({
   invoice,
@@ -172,16 +173,10 @@ export default function TerminalUpdateReceiptModal({
                             </div>
                             <div>
                               <label className="text-xs text-slate-500 block mb-1">Actually Given</label>
-                              <Input
-                                type="number"
-                                min="0"
-                                max={q.original_qty}
-                                step="0.01"
-                                value={q.actual_qty}
-                                onChange={(e) => updateQuantity(idx, e.target.value)}
-                                className={`h-10 ${hasDifference ? 'border-amber-400' : ''}`}
-                                data-testid={`update-actual-qty-${idx}`}
-                              />
+                              <CalcInput value={q.actual_qty}
+ onChange={(v) => updateQuantity(idx, v)}
+ className={`h-10 ${hasDifference ? 'border-amber-400' : ''}`}
+ data-testid={`update-actual-qty-${idx}`} />
                             </div>
                           </div>
                         </div>

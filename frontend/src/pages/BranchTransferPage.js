@@ -28,6 +28,7 @@ import {
 import PrintEngine from '../lib/PrintEngine';
 import { toast } from 'sonner';
 import { useUnsavedChangesGuard } from '../lib/useUnsavedChangesGuard';
+import CalcInput from '../components/CalcInput';
 
 // Smart quantity formatter — display max 3 decimal places, no trailing zeros.
 // Raw precision is preserved in the database — this is display only.
@@ -1070,10 +1071,9 @@ export default function BranchTransferPage() {
             </div>
             <div className="w-40">
               <Label className="text-xs">Min Margin (₱ / unit)</Label>
-              <Input type="number" min={0} value={minMargin}
-                onChange={e => setMinMargin(parseFloat(e.target.value) || 0)}
-                onWheel={noWheel}
-                className="mt-1 h-9 font-mono" data-testid="min-margin-input" />
+              <CalcInput value={minMargin}
+ onChange={(v) => setMinMargin(parseFloat(v) || 0)}
+ className="mt-1 h-9 font-mono" data-testid="min-margin-input" />
             </div>
             {toBranchId && (
               <Button variant="outline" size="sm" onClick={saveTemplate} className="h-9 mt-5">
@@ -1120,12 +1120,11 @@ export default function BranchTransferPage() {
                                 {MARKUP_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
                               </SelectContent>
                             </Select>
-                            <Input type="number" min={0} placeholder="0"
-                              value={mk.value}
-                              onChange={e => setMarkup(cat, 'value', e.target.value)}
-                              className="h-7 text-xs font-mono flex-1"
-                              data-testid={`markup-${cat}`}
-                            />
+                            <CalcInput placeholder="0"
+ value={mk.value}
+ onChange={(v) => setMarkup(cat, 'value', v)}
+ className="h-7 text-xs font-mono flex-1"
+ data-testid={`markup-${cat}`} />
                           </div>
                         </div>
                       );
@@ -1281,15 +1280,14 @@ export default function BranchTransferPage() {
 
                             {/* Qty / Send Qty */}
                             <td className="px-2 py-1.5 text-center">
-                              <Input type="number" min={0} value={row.qty}
-                                onChange={e => updateRow(row.id, { qty: e.target.value })}
-                                onWheel={noWheel}
-                                className={`h-8 text-sm text-center font-mono w-16 ${
-                                  isFromRequest && row.requested_qty != null && parseFloat(row.qty) < row.requested_qty
-                                    ? 'border-amber-300 bg-amber-50'
-                                    : ''
-                                }`}
-                                data-testid={`qty-${row.id}`} />
+                              <CalcInput value={row.qty}
+ onChange={(v) => updateRow(row.id, { qty: v })}
+ className={`h-8 text-sm text-center font-mono w-16 ${
+ isFromRequest && row.requested_qty != null && parseFloat(row.qty) < row.requested_qty
+ ? 'border-amber-300 bg-amber-50'
+ : ''
+ }`}
+ data-testid={`qty-${row.id}`} />
                               {isFromRequest && row.requested_qty != null && parseFloat(row.qty) < row.requested_qty && (
                                 <span className="text-[9px] text-amber-500 block">partial</span>
                               )}
@@ -1310,10 +1308,9 @@ export default function BranchTransferPage() {
                             {/* Transfer Capital — editable */}
                             <td className="px-2 py-1.5">
                               <div>
-                                <Input type="number" min={0} step="0.01"
+                                <CalcInput
                                   value={row.transfer_capital}
-                                  onChange={e => updateRow(row.id, { transfer_capital: e.target.value })}
-                                  onWheel={noWheel}
+                                  onChange={(v) => updateRow(row.id, { transfer_capital: v })}
                                   onKeyDown={e => {
                                     // Tab on the LAST row when branch_retail is disabled (non-admin) → auto-add new row
                                     if (e.key === 'Tab' && !e.shiftKey && !isAdmin) {
@@ -1373,10 +1370,9 @@ export default function BranchTransferPage() {
                             {/* Branch Retail — admin only for editing */}
                             <td className="px-2 py-1.5">
                               <div>
-                                <Input type="number" min={0} step="0.01"
+                                <CalcInput
                                   value={row.branch_retail}
-                                  onChange={e => updateRow(row.id, { branch_retail: e.target.value })}
-                                  onWheel={noWheel}
+                                  onChange={(v) => updateRow(row.id, { branch_retail: v })}
                                   onKeyDown={e => {
                                     // Tab on the LAST row's last input → auto-add new row & focus it
                                     if (e.key === 'Tab' && !e.shiftKey) {
@@ -1513,22 +1509,16 @@ export default function BranchTransferPage() {
                                       </div>
                                       <div className="flex items-center gap-1 ml-1">
                                         <span className="text-slate-400">→</span>
-                                        <input
-                                          type="number"
-                                          min={0}
-                                          step="0.01"
-                                          value={rp.new_retail_price}
-                                          onChange={e => {
-                                            const updated = (row.repacks || []).map((r2, r2i) =>
-                                              r2i === ri ? { ...r2, new_retail_price: e.target.value } : r2
-                                            );
-                                            updateRow(row.id, { repacks: updated });
-                                          }}
-                                          onWheel={noWheel}
-                                          placeholder="New price"
-                                          className="w-24 h-7 border border-blue-300 rounded-md px-2 text-xs font-mono text-right focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
-                                          data-testid={`repack-price-${rp.id}`}
-                                        />
+                                        <CalcInput value={rp.new_retail_price}
+ onChange={(v) => {
+ const updated = (row.repacks || []).map((r2, r2i) =>
+ r2i === ri ? { ...r2, new_retail_price: v } : r2
+ );
+ updateRow(row.id, { repacks: updated });
+ }}
+ placeholder="New price"
+ className="w-24 h-7 border border-blue-300 rounded-md px-2 text-xs font-mono text-right focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+ data-testid={`repack-price-${rp.id}`} />
                                         {rp.new_retail_price && parseFloat(rp.new_retail_price) > 0 && (
                                           <span className={`text-[10px] font-bold font-mono ml-1 ${parseFloat(rp.new_retail_price) > rp.capital_per_repack ? 'text-emerald-600' : 'text-red-500'}`}>
                                             {parseFloat(rp.new_retail_price) > rp.capital_per_repack
@@ -1719,16 +1709,11 @@ export default function BranchTransferPage() {
                         </div>
                       )}
                     </div>
-                    <Input
-                      type="number"
-                      className="h-9 text-sm text-center"
-                      value={row.qty}
-                      onChange={e => updateReqRow(row.id, { qty: e.target.value })}
-                      onWheel={noWheel}
-                      placeholder="0"
-                      min="1"
-                      data-testid={`req-qty-${row.id}`}
-                    />
+                    <CalcInput className="h-9 text-sm text-center"
+ value={row.qty}
+ onChange={(v) => updateReqRow(row.id, { qty: v })}
+ placeholder="0"
+ data-testid={`req-qty-${row.id}`} />
                     <span className="h-9 flex items-center text-xs text-slate-500 px-1">{row.product?.unit || '—'}</span>
                     <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-slate-400 hover:text-red-500"
                       onClick={() => removeReqRow(row.id)} disabled={reqRows.length <= 1}>
@@ -2769,19 +2754,14 @@ export default function BranchTransferPage() {
                       </td>
                       <td className="px-3 py-2 text-right font-mono text-slate-500">{ordered} {item.unit}</td>
                       <td className="px-3 py-2">
-                        <Input
-                          type="number"
-                          min={0}
-                          value={receiveQtys[item.product_id] ?? ordered}
-                          onChange={e => setReceiveQtys(q => ({ ...q, [item.product_id]: e.target.value }))}
-                          onWheel={noWheel}
-                          className={`h-8 text-sm text-center font-mono w-24 mx-auto block font-bold ${
-                            isShort ? 'border-amber-400 bg-amber-50 text-amber-800' :
-                            isExcess ? 'border-blue-400 bg-blue-50 text-blue-800' :
-                            'border-emerald-300'
-                          }`}
-                          data-testid={`receive-qty-${item.product_id}`}
-                        />
+                        <CalcInput value={receiveQtys[item.product_id] ?? ordered}
+ onChange={(v) => setReceiveQtys(q => ({ ...q, [item.product_id]: v }))}
+ className={`h-8 text-sm text-center font-mono w-24 mx-auto block font-bold ${
+ isShort ? 'border-amber-400 bg-amber-50 text-amber-800' :
+ isExcess ? 'border-blue-400 bg-blue-50 text-blue-800' :
+ 'border-emerald-300'
+ }`}
+ data-testid={`receive-qty-${item.product_id}`} />
                       </td>
                       <td className="px-3 py-2 text-center">
                         {isOk && <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">✓ OK</span>}

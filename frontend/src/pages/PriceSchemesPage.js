@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tags, Plus, Pencil, Trash2, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
+import CalcInput from '../components/CalcInput';
 
 const CALC_METHODS = [
   { value: 'fixed', label: 'Fixed Price' },
@@ -153,7 +154,7 @@ export default function PriceSchemesPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div><Label>Value</Label><Input data-testid="scheme-value-input" type="number" value={form.calculation_value} onChange={e => setForm({ ...form, calculation_value: parseFloat(e.target.value) || 0 })} /></div>
+              <div><Label>Value</Label><CalcInput data-testid="scheme-value-input" value={form.calculation_value} onChange={(v) => setForm({ ...form, calculation_value: parseFloat(v) || 0 })} /></div>
             </div>
             <div>
               <Label>Base Scheme</Label>

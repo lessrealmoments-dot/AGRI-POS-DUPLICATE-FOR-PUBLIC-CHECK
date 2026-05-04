@@ -35,6 +35,7 @@ import {
   KeyRound, Hash, Eye, EyeOff, X
 } from 'lucide-react';
 import { toast } from 'sonner';
+import CalcInput from './CalcInput';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -230,13 +231,13 @@ export default function AuthDialog({
                     <div className="grid grid-cols-3 gap-2">
                       <div>
                         <label className="text-[11px] font-medium text-amber-800 mb-1 block">Expected</label>
-                        <input type="number" value={expectedQty} onChange={e => setExpectedQty(e.target.value)} placeholder="15"
-                          className="w-full border border-amber-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none bg-white" />
+                        <CalcInput value={expectedQty} onChange={(v) => setExpectedQty(v)} placeholder="15"
+ className="w-full border border-amber-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none bg-white" />
                       </div>
                       <div>
                         <label className="text-[11px] font-medium text-amber-800 mb-1 block">Found</label>
-                        <input type="number" value={foundQty} onChange={e => setFoundQty(e.target.value)} placeholder="5"
-                          className="w-full border border-amber-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none bg-white" />
+                        <CalcInput value={foundQty} onChange={(v) => setFoundQty(v)} placeholder="5"
+ className="w-full border border-amber-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none bg-white" />
                       </div>
                       <div>
                         <label className="text-[11px] font-medium text-amber-800 mb-1 block">Unit</label>
@@ -246,8 +247,8 @@ export default function AuthDialog({
                     </div>
                     <div>
                       <label className="text-[11px] font-medium text-amber-800 mb-1 block">Unit Cost (&#8369;)</label>
-                      <input type="number" value={unitCost} onChange={e => setUnitCost(e.target.value)} placeholder="500.00"
-                        className="w-full border border-amber-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none bg-white" />
+                      <CalcInput value={unitCost} onChange={(v) => setUnitCost(v)} placeholder="500.00"
+ className="w-full border border-amber-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none bg-white" />
                     </div>
                     {valueImpact !== null && (
                       <div className={`text-xs font-bold rounded-lg px-3 py-1.5 text-center ${parseFloat(valueImpact) < 0 ? 'bg-red-100 text-red-700' : parseFloat(valueImpact) > 0 ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}>

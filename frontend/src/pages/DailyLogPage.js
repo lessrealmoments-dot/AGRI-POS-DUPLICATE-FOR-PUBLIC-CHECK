@@ -21,6 +21,7 @@ import {
 import { toast } from 'sonner';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
 import CustomerStatementModal from '../components/CustomerStatementModal';
+import CalcInput from '../components/CalcInput';
 
 // ── Small helper components ───────────────────────────────────────────────────
 function SectionCard({ title, children, accent = 'slate', note }) {
@@ -1073,20 +1074,19 @@ export default function DailyLogPage() {
                     <div className="space-y-4">
                       <div>
                         <Label className="font-semibold mb-1.5 block">Actual Cash in Counter <span className="text-red-500">*</span></Label>
-                        <Input type="number" min={0} step="0.01"
-                          value={actualCash}
-                          onChange={e => {
-                            setActualCash(e.target.value);
-                            // Auto-fill cash to safe and drawer if not yet touched
-                            const a = parseFloat(e.target.value) || 0;
-                            if (!cashToDrawer && !cashToSafe) {
-                              setCashToSafe(String(r2(a - 2000 > 0 ? a - 2000 : 0)));
-                              setCashToDrawer(String(r2(Math.min(a, 2000))));
-                            }
-                          }}
-                          className="h-12 text-xl font-bold font-mono"
-                          placeholder="Enter actual cash counted"
-                          data-testid="actual-cash-input" />
+                        <CalcInput value={actualCash}
+ onChange={(v) => {
+ setActualCash(v);
+ // Auto-fill cash to safe and drawer if not yet touched
+ const a = parseFloat(v) || 0;
+ if (!cashToDrawer && !cashToSafe) {
+ setCashToSafe(String(r2(a - 2000 > 0 ? a - 2000 : 0)));
+ setCashToDrawer(String(r2(Math.min(a, 2000))));
+ }
+ }}
+ className="h-12 text-xl font-bold font-mono"
+ placeholder="Enter actual cash counted"
+ data-testid="actual-cash-input" />
                       </div>
 
                       {actualCash !== '' && (
@@ -1130,24 +1130,24 @@ export default function DailyLogPage() {
                       <div className="grid grid-cols-2 gap-4">
                         <div>
                           <Label className="mb-1.5 block">Transfer to Vault</Label>
-                          <Input type="number" min={0} step="0.01" value={cashToSafe}
-                            onChange={e => {
-                              setCashToSafe(e.target.value);
-                              setCashToDrawer(String(r2(actualNum - (parseFloat(e.target.value) || 0))));
-                            }}
-                            className="h-10 font-mono" data-testid="cash-to-safe-input" />
+                          <CalcInput value={cashToSafe}
+ onChange={(v) => {
+ setCashToSafe(v);
+ setCashToDrawer(String(r2(actualNum - (parseFloat(v) || 0))));
+ }}
+ className="h-10 font-mono" data-testid="cash-to-safe-input" />
                         </div>
                         <div>
                           <Label className="mb-1.5 block">
                             Stays as Opening Float (Next Day)
                             <span className="text-xs text-slate-400 font-normal ml-1">(= tomorrow's starting float)</span>
                           </Label>
-                          <Input type="number" min={0} step="0.01" value={cashToDrawer}
-                            onChange={e => {
-                              setCashToDrawer(e.target.value);
-                              setCashToSafe(String(r2(actualNum - (parseFloat(e.target.value) || 0))));
-                            }}
-                            className="h-10 font-mono font-bold bg-emerald-50 border-emerald-300" data-testid="cash-to-drawer-input" />
+                          <CalcInput value={cashToDrawer}
+ onChange={(v) => {
+ setCashToDrawer(v);
+ setCashToSafe(String(r2(actualNum - (parseFloat(v) || 0))));
+ }}
+ className="h-10 font-mono font-bold bg-emerald-50 border-emerald-300" data-testid="cash-to-drawer-input" />
                           <p className="text-[10px] text-emerald-600 mt-0.5">This becomes the starting float for tomorrow</p>
                         </div>
                       </div>
@@ -1502,7 +1502,7 @@ export default function DailyLogPage() {
               </div>
             )}
             <div><Label>Description</Label><Input value={expForm.description} onChange={e => setExpForm({ ...expForm, description: e.target.value })} /></div>
-            <div><Label>Amount</Label><Input type="number" value={expForm.amount} onChange={e => setExpForm({ ...expForm, amount: parseFloat(e.target.value) || 0 })} className="h-11 text-lg font-bold" /></div>
+            <div><Label>Amount</Label><CalcInput value={expForm.amount} onChange={(v) => setExpForm({ ...expForm, amount: parseFloat(v) || 0 })} className="h-11 text-lg font-bold" /></div>
             <Button onClick={handleExpense} className="w-full bg-[#1A4D2E] hover:bg-[#14532d] text-white">Save</Button>
           </div>
         </DialogContent>

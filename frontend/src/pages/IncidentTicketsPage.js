@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import TransferDetailModal from '../components/TransferDetailModal';
+import CalcInput from '../components/CalcInput';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -921,8 +922,8 @@ export default function IncidentTicketsPage() {
             {resolutionType !== 'sender_error' && (
               <div>
                 <label className="text-xs text-slate-500 font-medium block mb-1">Recovery Amount</label>
-                <Input type="number" value={recoveryAmount} onChange={e => setRecoveryAmount(parseFloat(e.target.value) || 0)}
-                  placeholder="0.00" className="h-9" data-testid="recovery-amount-input" />
+                <CalcInput value={recoveryAmount} onChange={(v) => setRecoveryAmount(parseFloat(v) || 0)}
+ placeholder="0.00" className="h-9" data-testid="recovery-amount-input" />
                 <p className="text-[10px] text-slate-400 mt-1">Amount recovered/to be recovered from responsible party</p>
               </div>
             )}
@@ -1012,14 +1013,13 @@ export default function IncidentTicketsPage() {
                       <td className="px-3 py-2 text-right font-mono">{item.qty_ordered}</td>
                       <td className="px-3 py-2 text-right font-mono font-bold">{item.qty_received}</td>
                       <td className="px-3 py-2 text-right">
-                        <Input type="number" className="h-7 w-20 text-sm text-center ml-auto font-mono font-bold"
-                          value={item.sender_confirmed_qty}
-                          onChange={e => {
-                            const val = parseFloat(e.target.value) || 0;
-                            setSenderConfirmItems(prev => prev.map((p, j) => j === i ? { ...p, sender_confirmed_qty: val } : p));
-                          }}
-                          data-testid={`sender-confirm-qty-${i}`}
-                        />
+                        <CalcInput className="h-7 w-20 text-sm text-center ml-auto font-mono font-bold"
+ value={item.sender_confirmed_qty}
+ onChange={(v) => {
+ const val = parseFloat(v) || 0;
+ setSenderConfirmItems(prev => prev.map((p, j) => j === i ? { ...p, sender_confirmed_qty: val } : p));
+ }}
+ data-testid={`sender-confirm-qty-${i}`} />
                         {matches && <span className="text-[10px] text-emerald-600 font-medium block mt-0.5">Matches receiver</span>}
                       </td>
                     </tr>

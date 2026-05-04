@@ -23,6 +23,7 @@ import ReviewDetailDialog from '../components/ReviewDetailDialog';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
 import CustomerStatementModal from '../components/CustomerStatementModal';
 import ExpenseDetailModal from '../components/ExpenseDetailModal';
+import CalcInput from '../components/CalcInput';
 
 const STEPS = [
   { id: 1, title: 'Sales Log',        icon: Receipt,      desc: 'Verify all cash & credit sales' },
@@ -1402,8 +1403,8 @@ export default function CloseWizardPage() {
                                 <Percent size={11} /> {findPayGenerating === 'interest' ? 'Working...' : 'Interest'}
                               </Button>
                               <div className="flex items-center gap-0.5 bg-white border border-slate-200 rounded px-1.5 py-1">
-                                <Input type="number" value={findPayPenaltyRate} onChange={e => setFindPayPenaltyRate(parseFloat(e.target.value) || 0)}
-                                  className="w-10 h-5 text-[11px] text-center border-0 bg-transparent p-0" />
+                                <CalcInput value={findPayPenaltyRate} onChange={(v) => setFindPayPenaltyRate(parseFloat(v) || 0)}
+ className="w-10 h-5 text-[11px] text-center border-0 bg-transparent p-0" />
                                 <span className="text-[11px] text-slate-500">%</span>
                               </div>
                               <Button size="sm" variant="outline" onClick={handleFindPayGeneratePenalty}
@@ -1458,12 +1459,10 @@ export default function CloseWizardPage() {
                                         </td>
                                         <td className="px-2 py-1.5 text-right font-mono font-semibold">{formatPHP(inv.balance)}</td>
                                         <td className="px-2 py-1.5 text-right">
-                                          <Input type="number" min="0" max={inv.balance} step="0.01" value={rowAmt} placeholder="0.00"
-                                            className={`h-7 w-24 text-right text-xs ml-auto ${isApplied ? 'border-emerald-400 bg-emerald-50' : 'border-slate-200'}`}
-                                            onChange={e => setFindPayRowAmounts(prev => ({ ...prev, [inv.id]: e.target.value }))}
-                                            onFocus={e => e.target.select()}
-                                            data-testid={`find-pay-row-${inv.id}`}
-                                          />
+                                          <CalcInput value={rowAmt} placeholder="0.00"
+ className={`h-7 w-24 text-right text-xs ml-auto ${isApplied ? 'border-emerald-400 bg-emerald-50' : 'border-slate-200'}`}
+ onChange={(v) => setFindPayRowAmounts(prev => ({ ...prev, [inv.id]: v }))}
+ data-testid={`find-pay-row-${inv.id}`} selectOnFocus />
                                         </td>
                                       </tr>
                                     );
@@ -1475,8 +1474,8 @@ export default function CloseWizardPage() {
                               <div className="flex flex-wrap items-center gap-2 pt-1">
                                 <div className="flex items-center gap-1.5">
                                   <span className="text-[11px] text-slate-500">Quick:</span>
-                                  <Input type="number" placeholder="Total amount" className="h-7 w-24 text-xs"
-                                    onChange={e => findPayAutoApply(e.target.value)} data-testid="find-pay-total-input" />
+                                  <CalcInput placeholder="Total amount" className="h-7 w-24 text-xs"
+ onChange={(v) => findPayAutoApply(v)} data-testid="find-pay-total-input" />
                                   <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1" onClick={() => findPayAutoApply(findPayTotalOpen)}>
                                     <Zap size={11} /> All
                                   </Button>
@@ -1683,14 +1682,11 @@ export default function CloseWizardPage() {
               <Separator />
               <div>
                 <Label className="text-sm font-semibold">Actual Fund Count</Label>
-                <Input
-                  data-testid="actual-cash-input"
-                  type="number" min={0} step="0.01"
-                  value={actualCash}
-                  onChange={e => setActualCash(e.target.value)}
-                  placeholder="Count the cash and enter here"
-                  className="h-12 text-xl font-mono mt-1"
-                />
+                <CalcInput data-testid="actual-cash-input"
+ value={actualCash}
+ onChange={(v) => setActualCash(v)}
+ placeholder="Count the cash and enter here"
+ className="h-12 text-xl font-mono mt-1" />
               </div>
               {overShort !== null && (
                 <div className={`p-3 rounded-lg border text-center ${overShort > 0 ? 'bg-emerald-50 border-emerald-200' : overShort < 0 ? 'bg-red-50 border-red-200' : 'bg-slate-50 border-slate-200'}`}>
@@ -1722,17 +1718,15 @@ export default function CloseWizardPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label>Transfer to Vault</Label>
-                  <Input data-testid="cash-to-safe-input" type="number" min={0} step="0.01"
-                    value={cashToSafe}
-                    onChange={e => { setCashToSafe(e.target.value); const rem = r2((parseFloat(actualCash)||0)-(parseFloat(e.target.value)||0)); setCashToDrawer(String(Math.max(0,rem))); }}
-                    className="h-10 font-mono mt-1" />
+                  <CalcInput data-testid="cash-to-safe-input" value={cashToSafe}
+ onChange={(v) => { setCashToSafe(v); const rem = r2((parseFloat(actualCash)||0)-(parseFloat(v)||0)); setCashToDrawer(String(Math.max(0,rem))); }}
+ className="h-10 font-mono mt-1" />
                 </div>
                 <div>
                   <Label>Stay as Opening Float (Next Day)</Label>
-                  <Input data-testid="cash-to-drawer-input" type="number" min={0} step="0.01"
-                    value={cashToDrawer}
-                    onChange={e => { setCashToDrawer(e.target.value); const rem = r2((parseFloat(actualCash)||0)-(parseFloat(e.target.value)||0)); setCashToSafe(String(Math.max(0,rem))); }}
-                    className="h-10 font-mono mt-1" />
+                  <CalcInput data-testid="cash-to-drawer-input" value={cashToDrawer}
+ onChange={(v) => { setCashToDrawer(v); const rem = r2((parseFloat(actualCash)||0)-(parseFloat(v)||0)); setCashToSafe(String(Math.max(0,rem))); }}
+ className="h-10 font-mono mt-1" />
                 </div>
               </div>
               {(() => {
@@ -2328,10 +2322,10 @@ export default function CloseWizardPage() {
             </div>
             {saleForm.product && (
               <div className="grid grid-cols-2 gap-3">
-                <div><Label>Quantity</Label><Input type="number" min={1} value={saleForm.qty}
-                  onChange={e => setSaleForm(f => ({ ...f, qty: parseInt(e.target.value)||1 }))} className="h-9 mt-1" /></div>
-                <div><Label>Unit Price</Label><Input type="number" min={0} value={saleForm.price}
-                  onChange={e => setSaleForm(f => ({ ...f, price: e.target.value }))} className="h-9 mt-1 font-mono" /></div>
+                <div><Label>Quantity</Label><CalcInput value={saleForm.qty}
+ onChange={(v) => setSaleForm(f => ({ ...f, qty: parseInt(v)||1 }))} className="h-9 mt-1" /></div>
+                <div><Label>Unit Price</Label><CalcInput value={saleForm.price}
+ onChange={(v) => setSaleForm(f => ({ ...f, price: v }))} className="h-9 mt-1 font-mono" /></div>
               </div>
             )}
             <div>
@@ -2507,9 +2501,9 @@ export default function CloseWizardPage() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs text-slate-500">Amount (₱)</Label>
-                <Input type="number" min={0} value={expForm.amount}
-                  onChange={e => setExpForm(f => ({ ...f, amount: e.target.value }))}
-                  className="h-9 mt-1 font-mono" placeholder="0.00" />
+                <CalcInput value={expForm.amount}
+ onChange={(v) => setExpForm(f => ({ ...f, amount: v }))}
+ className="h-9 mt-1 font-mono" placeholder="0.00" />
               </div>
               <div>
                 <Label className="text-xs text-slate-500">Payment Method</Label>
@@ -2557,10 +2551,10 @@ export default function CloseWizardPage() {
                 <p className="text-xs text-slate-500">{pmtDialog.invoice.invoice_number} · Balance: {formatPHP(pmtDialog.invoice.remaining_balance)}</p>
               </div>
               <div><Label>Amount Paid</Label>
-                <Input type="number" min={0} step="0.01" value={pmtAmount}
-                  onChange={e => setPmtAmount(e.target.value)}
-                  placeholder={`Max ${formatPHP(pmtDialog.invoice.remaining_balance)}`}
-                  className="h-9 mt-1 font-mono" autoFocus /></div>
+                <CalcInput value={pmtAmount}
+ onChange={(v) => setPmtAmount(v)}
+ placeholder={`Max ${formatPHP(pmtDialog.invoice.remaining_balance)}`}
+ className="h-9 mt-1 font-mono" autoFocus /></div>
               <div className="flex gap-2 pt-1">
                 <Button variant="outline" className="flex-1" onClick={() => setPmtDialog({ open: false, invoice: null })}>Cancel</Button>
                 <Button className="flex-1 bg-blue-600 text-white" onClick={quickReceivePayment} disabled={pmtSaving}>

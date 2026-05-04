@@ -15,6 +15,7 @@ import {
   AlertTriangle, ArrowRight, FileText, Calendar, User, ChevronLeft
 } from 'lucide-react';
 import { toast } from 'sonner';
+import CalcInput from '../components/CalcInput';
 
 const STATUS_STYLES = {
   draft: { bg: 'bg-slate-100', text: 'text-slate-700', label: 'Draft' },
@@ -616,52 +617,42 @@ export default function CountSheetsPage() {
                                 <div className="flex items-center gap-1.5 justify-end flex-nowrap">
                                   <div className="flex flex-col items-center gap-0.5">
                                     <span className="text-[10px] text-slate-400 leading-none">{item.unit}</span>
-                                    <Input
-                                      type="number"
-                                      min="0"
-                                      step="1"
-                                      className="w-16 h-8 text-center font-mono text-sm"
-                                      placeholder={String(item.system_whole)}
-                                      value={item.actual_whole ?? ''}
-                                      onChange={e => {
-                                        const whole = e.target.value === '' ? 0 : parseInt(e.target.value) || 0;
-                                        const loose = item.actual_loose ?? 0;
-                                        handleUpdateCount(item.product_id, { actual_whole: whole, actual_loose: loose });
-                                      }}
-                                      onBlur={e => {
-                                        // Skip save if focus is moving to the paired loose input
-                                        if (e.relatedTarget?.getAttribute('data-testid') === `actual-loose-${item.product_id}`) return;
-                                        const whole = parseInt(e.target.value) || 0;
-                                        const loose = item.actual_loose ?? 0;
-                                        saveToServer(item.product_id, { actual_whole: whole, actual_loose: loose });
-                                      }}
-                                      data-testid={`actual-whole-${item.product_id}`}
-                                    />
+                                    <CalcInput className="w-16 h-8 text-center font-mono text-sm"
+ placeholder={String(item.system_whole)}
+ value={item.actual_whole ?? ''}
+ onChange={(v) => {
+ const whole = v === '' ? 0 : parseInt(v) || 0;
+ const loose = item.actual_loose ?? 0;
+ handleUpdateCount(item.product_id, { actual_whole: whole, actual_loose: loose });
+ }}
+ onBlur={e => {
+ // Skip save if focus is moving to the paired loose input
+ if (e.relatedTarget?.getAttribute('data-testid') === `actual-loose-${item.product_id}`) return;
+ const whole = parseInt(e.target.value) || 0;
+ const loose = item.actual_loose ?? 0;
+ saveToServer(item.product_id, { actual_whole: whole, actual_loose: loose });
+ }}
+ data-testid={`actual-whole-${item.product_id}`} />
                                   </div>
                                   <span className="text-slate-300 text-sm mt-3">+</span>
                                   <div className="flex flex-col items-center gap-0.5">
                                     <span className="text-[10px] text-slate-400 leading-none">{repackUnit}</span>
-                                    <Input
-                                      type="number"
-                                      min="0"
-                                      step="1"
-                                      className="w-14 h-8 text-center font-mono text-sm"
-                                      placeholder="0"
-                                      value={item.actual_loose ?? ''}
-                                      onChange={e => {
-                                        const loose = e.target.value === '' ? 0 : parseInt(e.target.value) || 0;
-                                        const whole = item.actual_whole ?? item.system_whole ?? 0;
-                                        handleUpdateCount(item.product_id, { actual_whole: whole, actual_loose: loose });
-                                      }}
-                                      onBlur={e => {
-                                        // Skip save if focus is moving to the paired whole input
-                                        if (e.relatedTarget?.getAttribute('data-testid') === `actual-whole-${item.product_id}`) return;
-                                        const loose = parseInt(e.target.value) || 0;
-                                        const whole = item.actual_whole ?? item.system_whole ?? 0;
-                                        saveToServer(item.product_id, { actual_whole: whole, actual_loose: loose });
-                                      }}
-                                      data-testid={`actual-loose-${item.product_id}`}
-                                    />
+                                    <CalcInput className="w-14 h-8 text-center font-mono text-sm"
+ placeholder="0"
+ value={item.actual_loose ?? ''}
+ onChange={(v) => {
+ const loose = v === '' ? 0 : parseInt(v) || 0;
+ const whole = item.actual_whole ?? item.system_whole ?? 0;
+ handleUpdateCount(item.product_id, { actual_whole: whole, actual_loose: loose });
+ }}
+ onBlur={e => {
+ // Skip save if focus is moving to the paired whole input
+ if (e.relatedTarget?.getAttribute('data-testid') === `actual-whole-${item.product_id}`) return;
+ const loose = parseInt(e.target.value) || 0;
+ const whole = item.actual_whole ?? item.system_whole ?? 0;
+ saveToServer(item.product_id, { actual_whole: whole, actual_loose: loose });
+ }}
+ data-testid={`actual-loose-${item.product_id}`} />
                                   </div>
                                   {item.counted && item.actual_quantity !== undefined && (
                                     <span className="text-[10px] text-emerald-600 font-medium whitespace-nowrap mt-3">
@@ -671,22 +662,18 @@ export default function CountSheetsPage() {
                                 </div>
                               ) : (
                                 // Simple decimal input — display updates on change, saves on blur
-                                <Input
-                                  type="number"
-                                  step="0.01"
-                                  className="w-24 h-8 text-right font-mono"
-                                  value={item.actual_quantity ?? ''}
-                                  onChange={e => {
-                                    const val = e.target.value;
-                                    if (val === '') return;
-                                    handleUpdateCount(item.product_id, { actual_quantity: parseFloat(val) });
-                                  }}
-                                  onBlur={e => {
-                                    if (e.target.value === '' && !item.counted) return;
-                                    saveToServer(item.product_id, { actual_quantity: parseFloat(e.target.value) || 0 });
-                                  }}
-                                  data-testid={`actual-input-${item.product_id}`}
-                                />
+                                <CalcInput className="w-24 h-8 text-right font-mono"
+ value={item.actual_quantity ?? ''}
+ onChange={(v) => {
+ const val = v;
+ if (val === '') return;
+ handleUpdateCount(item.product_id, { actual_quantity: parseFloat(val) });
+ }}
+ onBlur={e => {
+ if (e.target.value === '' && !item.counted) return;
+ saveToServer(item.product_id, { actual_quantity: parseFloat(e.target.value) || 0 });
+ }}
+ data-testid={`actual-input-${item.product_id}`} />
                               )
                             ) : (
                               // Read-only display

@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import PrintEngine from '../lib/PrintEngine';
+import CalcInput from './CalcInput';
 
 const fundBadge = (src) => {
   if (src === 'safe') return 'bg-amber-100 text-amber-700';
@@ -193,7 +194,7 @@ export default function ExpenseDetailModal({ open, onOpenChange, expenseId, onUp
                     </div>
                     <div>
                       <Label className="text-xs text-slate-500">Amount</Label>
-                      <Input type="number" value={editForm.amount} onChange={e => setEditForm(f => ({ ...f, amount: parseFloat(e.target.value) || 0 }))} className="mt-1 h-9" />
+                      <CalcInput value={editForm.amount} onChange={(v) => setEditForm(f => ({ ...f, amount: parseFloat(v) || 0 }))} className="mt-1 h-9" />
                     </div>
                     <div>
                       <Label className="text-xs text-slate-500">Date</Label>

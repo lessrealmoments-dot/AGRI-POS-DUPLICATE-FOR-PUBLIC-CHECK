@@ -18,6 +18,7 @@ import {
   BellRing
 } from 'lucide-react';
 import { toast } from 'sonner';
+import CalcInput from '../components/CalcInput';
 
 const STATUS_CONFIG = {
   pending: { label: 'Pending', icon: Clock, cls: 'bg-amber-100 text-amber-700', dotCls: 'bg-amber-400' },
@@ -1195,10 +1196,10 @@ export default function MessagesPage() {
               <div className="flex items-center gap-4 flex-wrap">
                 <div className="flex items-center gap-2">
                   <Label className="text-xs text-slate-500 shrink-0">Min Balance:</Label>
-                  <Input type="number" value={creditBlastMinBal}
-                    onChange={e => { setCreditBlastMinBal(e.target.value); setCreditBlastPreview(null); }}
-                    placeholder="0 (all)" className="h-8 w-28 text-xs"
-                    data-testid="credit-blast-min-balance" />
+                  <CalcInput value={creditBlastMinBal}
+ onChange={(v) => { setCreditBlastMinBal(v); setCreditBlastPreview(null); }}
+ placeholder="0 (all)" className="h-8 w-28 text-xs"
+ data-testid="credit-blast-min-balance" />
                 </div>
                 <div className="text-xs text-slate-400">
                   Branch: <strong>{currentBranch?.name || 'All branches'}</strong>
@@ -1313,10 +1314,10 @@ export default function MessagesPage() {
               <div className="flex items-center gap-4 flex-wrap">
                 <div className="flex items-center gap-2">
                   <Label className="text-xs text-slate-500">Min Balance:</Label>
-                  <Input type="number" value={blastMinBal}
-                    onChange={e => setBlastMinBal(e.target.value)}
-                    placeholder="e.g. 5000" className="h-8 w-28 text-xs"
-                    data-testid="blast-min-balance" />
+                  <CalcInput value={blastMinBal}
+ onChange={(v) => setBlastMinBal(v)}
+ placeholder="e.g. 5000" className="h-8 w-28 text-xs"
+ data-testid="blast-min-balance" />
                 </div>
                 <div className="text-xs text-slate-400">
                   Branch: <strong>{currentBranch?.name || 'All branches'}</strong>

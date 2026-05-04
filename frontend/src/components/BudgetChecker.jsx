@@ -6,6 +6,7 @@ import {
   Package, X, Calculator, ScanBarcode, ArrowRight, Check, AlertCircle
 } from 'lucide-react';
 import { toast } from 'sonner';
+import CalcInput from './CalcInput';
 
 const STORAGE_KEY_LIST = 'kiosk_order_list';
 const STORAGE_KEY_BUDGET = 'kiosk_budget';
@@ -457,14 +458,10 @@ export default function BudgetChecker({ onUnlock, branchId }) {
                         >
                           <Minus size={14} />
                         </button>
-                        <input
-                          data-testid={`kiosk-qty-input-${item.id}`}
-                          type="number"
-                          value={item.quantity}
-                          onChange={e => setQty(item.id, e.target.value)}
-                          className="w-10 h-7 text-center text-sm font-semibold border border-slate-200 rounded-md bg-white focus:ring-1 focus:ring-emerald-400 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                          min="1"
-                        />
+                        <CalcInput data-testid={`kiosk-qty-input-${item.id}`}
+ value={item.quantity}
+ onChange={(v) => setQty(item.id, v)}
+ className="w-10 h-7 text-center text-sm font-semibold border border-slate-200 rounded-md bg-white focus:ring-1 focus:ring-emerald-400 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
                         <button
                           data-testid={`kiosk-qty-plus-${item.id}`}
                           onClick={() => updateQty(item.id, 1)}
@@ -514,14 +511,11 @@ export default function BudgetChecker({ onUnlock, branchId }) {
                 </label>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-medium">₱</span>
-                  <input
-                    data-testid="kiosk-budget-input"
-                    type="number"
-                    value={budgetInput}
-                    onChange={e => handleBudgetChange(e.target.value)}
-                    placeholder="Enter your budget..."
-                    className="w-full h-11 pl-8 pr-4 text-base font-semibold border-2 border-slate-200 rounded-xl focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all bg-white text-slate-800 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  />
+                  <CalcInput data-testid="kiosk-budget-input"
+ value={budgetInput}
+ onChange={(v) => handleBudgetChange(v)}
+ placeholder="Enter your budget..."
+ className="w-full h-11 pl-8 pr-4 text-base font-semibold border-2 border-slate-200 rounded-xl focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all bg-white text-slate-800 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
                 </div>
                 {hasBudget && (
                   <div className={`mt-3 flex items-center justify-between px-3 py-2.5 rounded-lg ${

@@ -16,6 +16,7 @@ import {
 import { toast } from 'sonner';
 import UploadQRDialog from '../components/UploadQRDialog';
 import { useUnsavedChangesGuard } from '../lib/useUnsavedChangesGuard';
+import CalcInput from '../components/CalcInput';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -408,9 +409,9 @@ export default function ReturnRefundWizard() {
                           {it.is_vet && <Badge className="text-[9px] bg-red-100 text-red-700 mt-0.5">Veterinary — will be pulled out</Badge>}
                         </td>
                         <td className="px-3 py-2 text-center">
-                          <Input type="number" min={1} value={it.quantity}
-                            onChange={e => updateItem(idx, { quantity: parseInt(e.target.value) || 1 })}
-                            className="h-8 w-16 text-center font-mono mx-auto" />
+                          <CalcInput value={it.quantity}
+ onChange={(v) => updateItem(idx, { quantity: parseInt(v) || 1 })}
+ className="h-8 w-16 text-center font-mono mx-auto" />
                         </td>
                         <td className="px-3 py-2 text-right font-mono text-sm">{formatPHP(it.prices?.retail || 0)}</td>
                         <td className="px-2 py-2">
@@ -590,9 +591,9 @@ export default function ReturnRefundWizard() {
                 {refundMethod === 'partial' && (
                   <div className="mt-2">
                     <Label className="text-xs text-slate-500">Custom Amount</Label>
-                    <Input type="number" min={0} value={customRefund}
-                      onChange={e => setCustomRefund(e.target.value)}
-                      className="mt-1 h-9 font-mono text-lg" placeholder="0.00" autoFocus />
+                    <CalcInput value={customRefund}
+ onChange={(v) => setCustomRefund(v)}
+ className="mt-1 h-9 font-mono text-lg" placeholder="0.00" autoFocus />
                   </div>
                 )}
               </div>

@@ -25,6 +25,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Zap, ChevronRight, CheckCircle, AlertTriangle, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPHP } from '../lib/utils';
+import CalcInput from './CalcInput';
 
 const STEP = { SOURCE: 'source', RULES: 'rules', RESULT: 'result' };
 
@@ -261,12 +262,11 @@ export function BranchCapitalWizard({ open, onClose, targetBranch }) {
                               <span className="text-xs text-slate-400">
                                 {rule.add_on_type === 'flat' ? '₱' : '+'}
                               </span>
-                              <Input type="number" min={0} step={rule.add_on_type === 'percent' ? '0.1' : '1'}
-                                value={rule.add_on_value}
-                                onChange={e => updateRule(rule.category, { add_on_value: parseFloat(e.target.value) || 0 })}
-                                disabled={!rule.selected}
-                                className="h-7 w-20 text-right text-xs font-mono"
-                                data-testid={`addon-${rule.category}`} />
+                              <CalcInput value={rule.add_on_value}
+ onChange={(v) => updateRule(rule.category, { add_on_value: parseFloat(v) || 0 })}
+ disabled={!rule.selected}
+ className="h-7 w-20 text-right text-xs font-mono"
+ data-testid={`addon-${rule.category}`} />
                               {rule.add_on_type === 'percent' && <span className="text-xs text-slate-400">%</span>}
                             </div>
                           </td>

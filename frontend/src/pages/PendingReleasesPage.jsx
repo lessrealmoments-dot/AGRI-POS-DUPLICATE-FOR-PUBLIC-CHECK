@@ -14,6 +14,7 @@ import {
   Package, RefreshCw, ExternalLink, AlertTriangle, Search,
   CheckCircle2, Lock, ShieldCheck, Boxes, ChevronDown
 } from 'lucide-react';
+import CalcInput from '../components/CalcInput';
 
 const fmtDate = (d) => { try { return new Date(d).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }); } catch { return d || ''; } };
 const fmtDateTime = (d) => { try { return new Date(d).toLocaleString('en-PH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return d || ''; } };
@@ -195,13 +196,11 @@ function ReleaseDialog({ open, onClose, invoice, onReleased }) {
                       {!done && (
                         <div className="flex items-center gap-2">
                           <span className="text-xs text-slate-500 shrink-0">Release now:</span>
-                          <input
-                            type="text" inputMode="decimal" autoComplete="off"
-                            value={it.input_qty}
-                            onChange={e => setQty(idx, e.target.value)}
-                            className="h-8 w-24 text-center font-semibold rounded-md border border-input bg-background text-sm px-2"
-                            data-testid={`release-qty-${it.sold_product_id}`}
-                          />
+                          <CalcInput autoComplete="off"
+ value={it.input_qty}
+ onChange={(v) => setQty(idx, v)}
+ className="h-8 w-24 text-center font-semibold rounded-md border border-input bg-background text-sm px-2"
+ data-testid={`release-qty-${it.sold_product_id}`} />
                           <span className="text-xs text-slate-400">{it.sold_unit}</span>
                           <button
                             onClick={() => setQty(idx, String(it.sold_qty_remaining))}

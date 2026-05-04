@@ -9,6 +9,7 @@ import { useParams } from 'react-router-dom';
 import axios from 'axios';
 import { fmtDateTime } from '../lib/utils';
 import { ShieldCheck, ShieldAlert, ChevronLeft, ChevronRight, X, ZoomIn, FileText, RefreshCw, Shield } from 'lucide-react';
+import CalcInput from '../components/CalcInput';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -283,11 +284,11 @@ export default function ViewReceiptsPage() {
               <div className="bg-amber-900/20 border border-amber-700/40 rounded-2xl p-3 mb-3 flex flex-col gap-2">
                 <input type="text" value={itemDesc} onChange={e => setItemDesc(e.target.value)} placeholder="Item / description" className="w-full bg-gray-800 rounded-xl px-3 py-2 text-white text-xs focus:outline-none" />
                 <div className="grid grid-cols-3 gap-2">
-                  <input type="number" value={expQty} onChange={e => setExpQty(e.target.value)} placeholder="Expected" className="bg-gray-800 rounded-xl px-3 py-2 text-white text-xs focus:outline-none" />
-                  <input type="number" value={fndQty} onChange={e => setFndQty(e.target.value)} placeholder="Found" className="bg-gray-800 rounded-xl px-3 py-2 text-white text-xs focus:outline-none" />
+                  <CalcInput value={expQty} onChange={(v) => setExpQty(v)} placeholder="Expected" className="bg-gray-800 rounded-xl px-3 py-2 text-white text-xs focus:outline-none" />
+                  <CalcInput value={fndQty} onChange={(v) => setFndQty(v)} placeholder="Found" className="bg-gray-800 rounded-xl px-3 py-2 text-white text-xs focus:outline-none" />
                   <input type="text" value={unit} onChange={e => setUnit(e.target.value)} placeholder="Unit" className="bg-gray-800 rounded-xl px-3 py-2 text-white text-xs focus:outline-none" />
                 </div>
-                <input type="number" value={unitCost} onChange={e => setUnitCost(e.target.value)} placeholder="Unit cost (₱)" className="w-full bg-gray-800 rounded-xl px-3 py-2 text-white text-xs focus:outline-none" />
+                <CalcInput value={unitCost} onChange={(v) => setUnitCost(v)} placeholder="Unit cost (₱)" className="w-full bg-gray-800 rounded-xl px-3 py-2 text-white text-xs focus:outline-none" />
                 {valueImpact !== null && (
                   <p className={`text-xs font-bold text-center ${valueImpact < 0 ? 'text-red-400' : 'text-green-400'}`}>
                     Value: {valueImpact > 0 ? '+' : ''}{php(valueImpact)}

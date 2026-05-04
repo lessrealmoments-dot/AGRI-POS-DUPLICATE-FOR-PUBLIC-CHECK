@@ -13,6 +13,7 @@ import {
   Search, Plus, Save, RefreshCw, Zap, X, Package, TrendingUp
 } from 'lucide-react';
 import { toast } from 'sonner';
+import CalcInput from '../components/CalcInput';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -69,16 +70,11 @@ function PriceInput({ value, capital, onChange, placeholder = '0.00', readOnly =
   const s = priceStatus(value, capital);
   const borderClass = s === 'error' ? 'border-red-400 bg-red-50' : s === 'warning' ? 'border-amber-400 bg-amber-50/50' : '';
   return (
-    <Input
-      type="number"
-      value={value === '' || value === undefined ? '' : value}
-      onChange={e => onChange(e.target.value)}
-      placeholder={placeholder}
-      readOnly={readOnly}
-      className={`h-7 text-xs w-24 px-2 ${borderClass} ${readOnly ? 'bg-slate-50 text-slate-400' : ''}`}
-      step="0.01"
-      min="0"
-    />
+    <CalcInput value={value === '' || value === undefined ? '' : value}
+ onChange={(v) => onChange(v)}
+ placeholder={placeholder}
+ readOnly={readOnly}
+ className={`h-7 text-xs w-24 px-2 ${borderClass} ${readOnly ? 'bg-slate-50 text-slate-400' : ''}`} />
   );
 }
 
@@ -100,15 +96,10 @@ function BranchRow({ bd, entry, schemeKeys, isCapitalTab, onChange, onCapitalCha
       {/* Capital column */}
       <td className="py-1.5 px-2 text-xs text-slate-500 w-28">
         {isCapitalTab ? (
-          <Input
-            type="number"
-            value={pendingCap !== undefined ? pendingCap : (bd.capital || '')}
-            onChange={e => onCapitalChange(bd.branch_id, e.target.value)}
-            placeholder="0.00"
-            className="h-7 text-xs w-24 px-2"
-            step="0.01"
-            min="0"
-          />
+          <CalcInput value={pendingCap !== undefined ? pendingCap : (bd.capital || '')}
+ onChange={(v) => onCapitalChange(bd.branch_id, v)}
+ placeholder="0.00"
+ className="h-7 text-xs w-24 px-2" />
         ) : (
           <span className={!displayCap ? 'text-slate-300' : ''}>
             {displayCap ? formatPHP(displayCap) : '—'}
@@ -362,8 +353,8 @@ function SmartFillBar({ categories, schemeKeys, onApply }) {
           </div>
           <div>
             <Label className="text-[10px] text-slate-400">{mode === 'flat' ? 'Amount (₱)' : 'Percent (%)'}</Label>
-            <Input type="number" value={amount} onChange={e => setAmount(e.target.value)}
-              className="h-7 text-xs w-20 mt-0.5" placeholder="0" min="0" step="0.5" />
+            <CalcInput value={amount} onChange={(v) => setAmount(v)}
+ className="h-7 text-xs w-20 mt-0.5" placeholder="0" />
           </div>
           <Button size="sm" className="h-7 text-xs bg-amber-500 hover:bg-amber-600 text-white"
             onClick={() => { if (!amount || !scheme) return; onApply({ category: cat || '__all__', scheme, basis, amount: parseFloat(amount), mode }); }}
