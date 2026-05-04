@@ -22,19 +22,22 @@ import { toast } from 'sonner';
 
 export default function DateMovesTab() {
   const [rows, setRows] = useState([]);
+  const [backdated, setBackdated] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showAll, setShowAll] = useState(false);        // default = closed-source only
   const [restoring, setRestoring] = useState(null);     // invoice_id in-flight
-  const [pinDialog, setPinDialog] = useState(null);     // { row } or null
+  const [pinDialog, setPinDialog] = useState(null);     // { row, mode: 'restore'|'retag' } | null
   const [pin, setPin] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get('/invoices/audit/date-moves', {
-        params: { closed_source_only: !showAll },
-      });
-      setRows(Array.isArray(res.data) ? res.data : []);
+      const [a, b] = await Promise.all([
+        api.get('/invoices/audit/date-moves', { params: { closed_source_only: !showAll } }),
+        api.get('/invoices/audit/backdated-charges'),
+      ]);
+      setRows(Array.isArray(a.data) ? a.data : []);
+      setBackdated(Array.isArray(b.data) ? b.data : []);
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Failed to load date-move audit');
     }
@@ -43,23 +46,29 @@ export default function DateMovesTab() {
 
   useEffect(() => { load(); }, [load]);
 
-  const confirmRestore = (row) => { setPin(''); setPinDialog({ row }); };
+  const confirmRestore = (row) => { setPin(''); setPinDialog({ row, mode: 'restore' }); };
+  const confirmRetag = (row) => { setPin(''); setPinDialog({ row, mode: 'retag' }); };
 
   const doRestore = async () => {
     if (!pinDialog?.row || !pin) return;
-    const row = pinDialog.row;
+    const { row, mode } = pinDialog;
     setRestoring(row.invoice_id);
     try {
-      const res = await api.post(`/invoices/${row.invoice_id}/restore-date`, { pin });
-      toast.success(
-        `Restored ${res.data.invoice.invoice_number} — ` +
-        (res.data.changes || []).find(c => c.startsWith('order_date'))?.replace('(restored)', '').trim()
-      );
+      if (mode === 'retag') {
+        const res = await api.post(`/invoices/${row.invoice_id}/retag-order-date-to-today`, { pin });
+        toast.success(`Retagged ${res.data.invoice.invoice_number} — order_date now ${res.data.invoice.order_date}`);
+      } else {
+        const res = await api.post(`/invoices/${row.invoice_id}/restore-date`, { pin });
+        toast.success(
+          `Restored ${res.data.invoice.invoice_number} — ` +
+          (res.data.changes || []).find(c => c.startsWith('order_date'))?.replace('(restored)', '').trim()
+        );
+      }
       setPinDialog(null);
       setPin('');
       await load();
     } catch (e) {
-      toast.error(e.response?.data?.detail || 'Restore failed');
+      toast.error(e.response?.data?.detail || 'Operation failed');
     }
     setRestoring(null);
   };
@@ -180,23 +189,105 @@ export default function DateMovesTab() {
         </div>
       )}
 
+      {/* ── SECTION 2: Backdated Interest / Penalty (Iter 232) ─────────── */}
+      {backdated.length > 0 && (
+        <div className="mt-6">
+          <h3 className="text-md font-semibold text-slate-800 flex items-center gap-2 mb-1">
+            <ShieldAlert size={16} className="text-rose-600" />
+            Backdated Interest / Penalty Invoices
+            <span className="text-[10px] font-mono bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded">{backdated.length}</span>
+          </h3>
+          <p className="text-xs text-slate-500 mb-3">
+            Interest / penalty rows whose <code className="text-[11px] bg-slate-100 px-1 rounded">order_date</code> is
+            more than one day before <code className="text-[11px] bg-slate-100 px-1 rounded">created_at</code> — i.e.
+            the date was picked wrong in the PaymentsPage date picker. Click <b>Retag</b> to move the date to the real
+            creation day. (Iter 232 guard prevents new occurrences.)
+          </p>
+          <div className="overflow-x-auto rounded-lg border border-rose-200">
+            <table className="w-full text-sm">
+              <thead className="bg-rose-50 text-[11px] uppercase tracking-wider text-rose-700">
+                <tr>
+                  <th className="px-3 py-2 text-left">Invoice #</th>
+                  <th className="px-3 py-2 text-left">Customer</th>
+                  <th className="px-3 py-2 text-right">Amount</th>
+                  <th className="px-3 py-2 text-left">Dates</th>
+                  <th className="px-3 py-2 text-right">Gap</th>
+                  <th className="px-3 py-2 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-rose-100">
+                {backdated.map(r => (
+                  <tr key={r.invoice_id} className={r.on_closed_day ? 'bg-rose-50/40' : 'bg-white'}>
+                    <td className="px-3 py-2 font-mono text-[12px] text-slate-800">
+                      {r.invoice_number}
+                      <span className={`ml-1 text-[9px] px-1 py-0.5 rounded font-medium ${
+                        r.sale_type === 'penalty_charge' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                      }`}>{r.sale_type === 'penalty_charge' ? 'PEN' : 'INT'}</span>
+                      {r.on_closed_day && (
+                        <span className="ml-1 text-[9px] px-1 py-0.5 rounded bg-rose-100 text-rose-700 font-medium">
+                          <Lock size={8} className="inline mr-0.5" /> closed-day
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-slate-700">{r.customer_name || '—'}</td>
+                    <td className="px-3 py-2 text-right font-mono text-slate-700">{formatPHP(r.grand_total)}</td>
+                    <td className="px-3 py-2 text-[11px]">
+                      <div className="font-mono">
+                        <span className="text-slate-400">order_date:</span> <span className="text-rose-600">{r.order_date}</span>
+                      </div>
+                      <div className="font-mono text-[10px] text-slate-400">
+                        created_at: {(r.created_at || '').slice(0, 10)}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono text-[11px] text-rose-700 font-semibold">
+                      {r.gap_days}d
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={restoring === r.invoice_id}
+                        onClick={() => confirmRetag(r)}
+                        className="text-emerald-700 border-emerald-300 hover:bg-emerald-50"
+                        data-testid={`dmt-retag-btn-${r.invoice_id}`}>
+                        <Undo2 size={13} className="mr-1" />
+                        {restoring === r.invoice_id ? 'Retagging…' : 'Retag to created_at'}
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* PIN dialog */}
       <Dialog open={!!pinDialog} onOpenChange={o => { if (!o) { setPinDialog(null); setPin(''); } }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Undo2 size={16} className="text-emerald-600" /> Restore Original Dates
+              <Undo2 size={16} className="text-emerald-600" />
+              {pinDialog?.mode === 'retag' ? 'Retag Interest Date' : 'Restore Original Dates'}
             </DialogTitle>
           </DialogHeader>
           {pinDialog?.row && (
             <div className="space-y-3 text-sm">
-              <p className="text-slate-600">
-                Restore <span className="font-mono font-medium">{pinDialog.row.invoice_number}</span> to its original
-                dates on closed day <span className="font-mono text-rose-600">{(pinDialog.row.closed_source_dates || [])[0] || '—'}</span>?
-              </p>
+              {pinDialog.mode === 'retag' ? (
+                <p className="text-slate-600">
+                  Move <span className="font-mono font-medium">{pinDialog.row.invoice_number}</span>'s
+                  {' '}<code className="text-[11px] bg-slate-100 px-1 rounded">order_date</code> from
+                  {' '}<span className="font-mono text-rose-600">{pinDialog.row.order_date}</span> forward to the real creation day
+                  {' '}<span className="font-mono text-emerald-700">{(pinDialog.row.created_at || '').slice(0, 10)}</span>?
+                </p>
+              ) : (
+                <p className="text-slate-600">
+                  Restore <span className="font-mono font-medium">{pinDialog.row.invoice_number}</span> to its original
+                  dates on closed day <span className="font-mono text-rose-600">{(pinDialog.row.closed_source_dates || [])[0] || '—'}</span>?
+                </p>
+              )}
               <p className="text-[11px] text-slate-500 bg-slate-50 p-2 rounded border border-slate-200">
-                This also rewinds the <code>due_date</code> if terms are set, and writes an audit trail entry.
-                Closed-day Z-Report snapshots are unchanged; only the live ledger moves back.
+                Writes an audit trail entry. Closed-day Z-Report snapshots are unchanged; only the live ledger moves.
               </p>
               <div>
                 <Label className="text-xs text-slate-500">Manager PIN</Label>
@@ -216,7 +307,9 @@ export default function DateMovesTab() {
                   className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
                   onClick={doRestore}
                   data-testid="dmt-pin-confirm-btn">
-                  {restoring === pinDialog.row.invoice_id ? 'Restoring…' : 'Restore'}
+                  {restoring === pinDialog.row.invoice_id
+                    ? (pinDialog.mode === 'retag' ? 'Retagging…' : 'Restoring…')
+                    : (pinDialog.mode === 'retag' ? 'Retag' : 'Restore')}
                 </Button>
               </div>
             </div>

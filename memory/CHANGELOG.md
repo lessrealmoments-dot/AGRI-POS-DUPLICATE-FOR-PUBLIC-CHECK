@@ -1,5 +1,24 @@
 # AgriBooks Changelog
 
+## Feb 2026 — Interest/Penalty Backdate Guard + Retag Audit (Iter 232)
+
+**User report**: Generated interest on 5/4 but dated it as 5/3 (via PaymentsPage date picker), and also collected the payment dated 5/3. The Close Wizard for 5/4 still showed it in "Interest & Penalty Invoices Created Today" because the header/UI trusted the creation timestamp while the ledger used `order_date` — mismatched dates leak across the auditor's view.
+
+**Fix — 2 pieces on top of Iter 231**:
+
+**A. Interest & Penalty generators — closed-day guard** (`routes/accounting.py`):
+- `POST /customers/:id/generate-interest` and `POST /customers/:id/generate-penalty` now check the proposed `as_of_date` against `daily_closings`. If that day is already closed for the customer's active branch, return HTTP 400 with a clear error. Escape hatch: `force_backdate_to_closed=true` with manager PIN (for hard corrections).
+- Removes the only remaining way to silently land an interest/penalty row with a wrong `order_date` relative to the true insert day.
+
+**B. Backdated-charge detector & retag endpoint**:
+- `GET /api/invoices/audit/backdated-charges` — scans every non-voided interest/penalty invoice and returns those where `order_date` is more than one day earlier than the `created_at` date (the "create-with-wrong-date" pattern that Iter 231's `date-moves` audit didn't catch because there's no edit event). Flags closed-day hits with `on_closed_day: true` and sorts worst-first.
+- `POST /api/invoices/:id/retag-order-date-to-today` — forward-shifts `order_date` + `invoice_date` to the real creation date (`created_at[:10]`) for interest/penalty invoices. Refuses if the target day is also closed. Writes an `invoice_edits` row with `reason=backdated_charge_retag` for the audit trail. PIN-gated.
+
+**Frontend**: `DateMovesTab.js` now fetches both endpoints in parallel. Renders a second "Backdated Interest / Penalty Invoices" section under the existing Date Moves table with a red-tinted row per backdated charge and a single "Retag to created_at" button per row. Same PIN dialog handles both flows; `data-testid="dmt-retag-btn-<invoice_id>"` for each row.
+
+**Test coverage preserved**: All 5 Iter 231 tests still pass. New audit endpoint smoke-tested via curl against the preview env (returns empty array as expected).
+
+
 ## Feb 2026 — Closed-Day Date-Move Guard + Audit Tab + One-Click Restore (Iter 231)
 
 **User report**: Interest invoices INT-SB-001004/5 created on 4/3/25 (closed day) appeared again on 5/4/25 Z-Report. User suspected "cancellation not properly reversed".

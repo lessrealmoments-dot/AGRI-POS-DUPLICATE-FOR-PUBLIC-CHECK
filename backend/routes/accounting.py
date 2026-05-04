@@ -1503,6 +1503,37 @@ async def generate_interest_invoice(customer_id: str, data: dict, user=Depends(g
     manual_amount = float(data.get("manual_amount", 0))  # > 0 = skip computation
     MIN_INTERVAL_DAYS = 30
 
+    # ── Closed-day guard (Iter 232) ────────────────────────────────────────
+    # Block creation of interest invoices dated on a day that's already been
+    # closed. Without this, owners who pick the wrong date in the PaymentsPage
+    # date picker end up with interest rows that land in the Close Wizard's
+    # "Interest & Penalty Invoices Created Today" section of a later day
+    # (because the wizard trusts `order_date` while `created_at` tells a
+    # different story), corrupting the auditor's view. Escape hatch:
+    # `force_backdate_to_closed=True` + manager PIN to explicitly override.
+    _any_inv_for_branch = await db.invoices.find_one(
+        {"customer_id": customer_id, "balance": {"$gt": 0},
+         "status": {"$nin": ["voided", "paid"]}},
+        {"_id": 0, "branch_id": 1},
+    )
+    _guard_branch = (_any_inv_for_branch or {}).get("branch_id", "")
+    _force_backdate = bool(data.get("force_backdate_to_closed"))
+    if _guard_branch:
+        _closed = await db.daily_closings.find_one(
+            {"branch_id": _guard_branch, "date": as_of_str, "status": "closed"},
+            {"_id": 0},
+        )
+        if _closed and not _force_backdate:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Cannot create interest dated {as_of_str} — that day is "
+                    f"already closed. Use today's date, or pass "
+                    f"force_backdate_to_closed=true (with manager PIN and a "
+                    f"written reason) if you must override."
+                ),
+            )
+
     # ── Minimum interval guard (prevents accumulation of many tiny INT invoices) ──
     if not force:
         last_int_inv = await db.invoices.find_one(
@@ -1641,6 +1672,156 @@ async def generate_interest_invoice(customer_id: str, data: dict, user=Depends(g
             "total_interest": round(total_interest, 2), "invoice": interest_invoice}
 
 
+@router.get("/invoices/audit/backdated-charges")
+async def audit_backdated_charges(user=Depends(get_current_user)):
+    """List interest / penalty invoices whose `order_date` is MORE THAN ONE
+    DAY earlier than the `created_at` timestamp. Surfaces the Iter 232 bug
+    where owners used the PaymentsPage date picker to pick a past date (often
+    by accident), creating an interest/penalty row that physically exists
+    today but accounting-dates to yesterday-or-earlier.
+
+    Multi-tenant safe (org scoping handled by the `db.invoices` wrapper).
+    """
+    check_perm(user, "reports", "view")
+    cursor = db.invoices.find(
+        {"sale_type": {"$in": ["interest_charge", "penalty_charge"]},
+         "status": {"$ne": "voided"}},
+        {"_id": 0, "id": 1, "invoice_number": 1, "customer_name": 1,
+         "branch_id": 1, "grand_total": 1, "amount_paid": 1, "balance": 1,
+         "status": 1, "sale_type": 1, "manual_interest": 1,
+         "order_date": 1, "invoice_date": 1, "created_at": 1},
+    ).sort("created_at", -1).limit(1000)
+    out: list[dict] = []
+    async for inv in cursor:
+        od = inv.get("order_date") or ""
+        ca = inv.get("created_at") or ""
+        if not od or not ca:
+            continue
+        try:
+            od_dt = datetime.strptime(od, "%Y-%m-%d").date()
+            # `created_at` is stored as ISO; take its date part (UTC-aware or naive)
+            ca_date = ca[:10]
+            ca_dt = datetime.strptime(ca_date, "%Y-%m-%d").date()
+        except (ValueError, TypeError):
+            continue
+        gap_days = (ca_dt - od_dt).days
+        if gap_days <= 1:
+            continue  # one day drift is normal TZ wiggle
+        # Was the order_date on a closed day at the time of creation?
+        closed = await db.daily_closings.find_one(
+            {"branch_id": inv.get("branch_id", ""), "date": od, "status": "closed"},
+            {"_id": 0, "closed_at": 1},
+        )
+        out.append({
+            "invoice_id": inv.get("id", ""),
+            "invoice_number": inv.get("invoice_number", ""),
+            "customer_name": inv.get("customer_name", ""),
+            "branch_id": inv.get("branch_id", ""),
+            "sale_type": inv.get("sale_type", ""),
+            "manual_interest": inv.get("manual_interest", False),
+            "grand_total": round(float(inv.get("grand_total", 0)), 2),
+            "amount_paid": round(float(inv.get("amount_paid", 0)), 2),
+            "balance": round(float(inv.get("balance", 0)), 2),
+            "status": inv.get("status", ""),
+            "order_date": od,
+            "created_at": ca,
+            "gap_days": gap_days,
+            "on_closed_day": bool(closed),
+        })
+    # Most suspicious first — biggest gap, and closed-day hits prioritised
+    out.sort(key=lambda r: (not r["on_closed_day"], -r["gap_days"]))
+    return out
+
+
+@router.post("/invoices/{invoice_id}/retag-order-date-to-today")
+async def retag_order_date_to_today(
+    invoice_id: str,
+    data: dict,
+    user=Depends(get_current_user),
+):
+    """Fix a backdated interest/penalty invoice by moving its `order_date`
+    and `invoice_date` forward to `created_at` (the real insert day). Only
+    applicable to interest_charge / penalty_charge rows. PIN-gated.
+
+    This is the inverse of `restore-date` — here we WANT to move the date
+    forward because the original date was wrong (user picked the wrong day
+    in the date picker). Writes an audit entry so Date Moves tab records it.
+    """
+    check_perm(user, "pos", "edit")
+    pin = data.get("pin") or data.get("manager_pin") or ""
+    if not pin:
+        raise HTTPException(status_code=400, detail="Manager PIN is required")
+    from routes.verify import verify_pin_for_action
+    verifier = await verify_pin_for_action(pin, "invoice_edit")
+    if not verifier:
+        raise HTTPException(status_code=403, detail="Invalid manager PIN")
+
+    inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if inv.get("sale_type") not in ("interest_charge", "penalty_charge"):
+        raise HTTPException(status_code=400, detail="Only interest or penalty invoices can be retagged.")
+    ca = inv.get("created_at") or ""
+    if not ca or len(ca) < 10:
+        raise HTTPException(status_code=400, detail="Invoice has no `created_at` to retag against.")
+    new_date = ca[:10]
+    # Refuse if that target day is CLOSED — admin should pick a real
+    # open-day retag target via the generic edit flow with force_move_date.
+    branch_id = inv.get("branch_id", "")
+    if branch_id:
+        closed = await db.daily_closings.find_one(
+            {"branch_id": branch_id, "date": new_date, "status": "closed"},
+            {"_id": 0},
+        )
+        if closed:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Retag target {new_date} is also a closed day. "
+                    f"Use the manual edit flow with force_move_date=true "
+                    f"to pick a different open date."
+                ),
+            )
+
+    old_order = inv.get("order_date", "")
+    old_invoice = inv.get("invoice_date", "")
+    update_data = {"order_date": new_date, "invoice_date": new_date,
+                   "last_edited_at": now_iso(),
+                   "last_edited_by": user.get("full_name", user["username"]),
+                   "updated_at": now_iso()}
+    changes_made = [
+        f"order_date: '{old_order}' → '{new_date}'",
+        f"invoice_date: '{old_invoice}' → '{new_date}'",
+        "(retagged to created_at — was backdated)",
+    ]
+    # Recompute due_date if terms exist (rare for INT/PEN but safe)
+    if inv.get("terms_days", 0):
+        try:
+            od = datetime.strptime(new_date, "%Y-%m-%d")
+            new_due = (od + timedelta(days=int(inv["terms_days"]))).strftime("%Y-%m-%d")
+            update_data["due_date"] = new_due
+            changes_made.append(f"due_date: '{inv.get('due_date')}' → '{new_due}'")
+        except Exception:
+            pass
+
+    await db.invoices.update_one({"id": invoice_id}, {"$set": update_data})
+    await db.invoice_edits.insert_one({
+        "id": new_id(),
+        "invoice_id": invoice_id,
+        "invoice_number": inv.get("invoice_number", ""),
+        "collection": "invoices",
+        "edited_by_id": user["id"],
+        "edited_by_name": user.get("full_name", user["username"]),
+        "edited_at": now_iso(),
+        "reason": "backdated_charge_retag",
+        "authorized_by": verifier.get("verifier_name", ""),
+        "changes": changes_made,
+    })
+    fresh = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    return {"message": "Order date retagged to created_at", "changes": changes_made, "invoice": fresh}
+
+
+
 @router.post("/customers/{customer_id}/generate-penalty")
 async def generate_penalty_invoice(customer_id: str, data: dict, user=Depends(get_current_user)):
     """Generate a one-time penalty invoice for all overdue invoices not yet penalized."""
@@ -1653,6 +1834,31 @@ async def generate_penalty_invoice(customer_id: str, data: dict, user=Depends(ge
     as_of_str = data.get("as_of_date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
     comp_date = datetime.strptime(as_of_str, "%Y-%m-%d")
     grace_period = int(customer.get("grace_period", 7))
+
+    # Closed-day guard (Iter 232) — mirrors generate-interest. Prevents the
+    # owner from accidentally dating a penalty invoice onto an already-closed
+    # day (which then shows up in a later day's close wizard because
+    # created_at ≠ order_date). Force override via `force_backdate_to_closed`.
+    _any_inv_for_branch = await db.invoices.find_one(
+        {"customer_id": customer_id, "balance": {"$gt": 0},
+         "status": {"$nin": ["voided", "paid"]}},
+        {"_id": 0, "branch_id": 1},
+    )
+    _guard_branch = (_any_inv_for_branch or {}).get("branch_id", "")
+    if _guard_branch and not bool(data.get("force_backdate_to_closed")):
+        _closed = await db.daily_closings.find_one(
+            {"branch_id": _guard_branch, "date": as_of_str, "status": "closed"},
+            {"_id": 0},
+        )
+        if _closed:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Cannot create penalty dated {as_of_str} — that day is "
+                    f"already closed. Use today's date, or pass "
+                    f"force_backdate_to_closed=true (with manager PIN)."
+                ),
+            )
 
     open_invoices = await db.invoices.find(
         {"customer_id": customer_id, "balance": {"$gt": 0},
