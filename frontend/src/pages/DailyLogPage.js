@@ -49,7 +49,7 @@ function InfoRow({ label, value, bold, className = '' }) {
   );
 }
 
-function ZReport({ data, branchName, onPrint }) {
+function ZReport({ data, branchName, onPrint, onDownloadPdf }) {
   if (!data) return null;
   const r2 = n => Math.round((parseFloat(n) || 0) * 100) / 100;
   return (
@@ -61,7 +61,14 @@ function ZReport({ data, branchName, onPrint }) {
             Day closed by {data.closed_by_name} · {new Date(data.closed_at).toLocaleString()}
           </p>
         </CardContent></Card>
-        <Button variant="outline" size="sm" onClick={onPrint}><Printer size={14} className="mr-1" /> Print</Button>
+        <div className="flex gap-2 shrink-0">
+          <Button variant="outline" size="sm" onClick={onPrint} data-testid="z-normal-print-btn">
+            <Printer size={14} className="mr-1" /> Print
+          </Button>
+          <Button variant="outline" size="sm" onClick={onDownloadPdf} data-testid="z-normal-download-btn">
+            <ArrowDown size={14} className="mr-1" /> Download PDF
+          </Button>
+        </div>
       </div>
 
       {/* Print header */}
@@ -217,7 +224,7 @@ function ZReport({ data, branchName, onPrint }) {
 // Data source: `/daily-close-preview` which recomputes from sales_log +
 // invoices + fund_transfers for any date (also works for already-closed days).
 // Read-only — no input fields, no close actions.
-function ZReportDetailed({ preview, closing, branchName, onPrint }) {
+function ZReportDetailed({ preview, closing, branchName, onPrint, onDownloadPdf }) {
   if (!preview) return null;
   const total_ar_payments = (preview.ar_payments || [])
     .filter(p => p.fund_source !== 'discount')
@@ -234,7 +241,14 @@ function ZReportDetailed({ preview, closing, branchName, onPrint }) {
             {closing?.closed_by_name && <> · closed by {closing.closed_by_name}</>}
           </p>
         </CardContent></Card>
-        <Button variant="outline" size="sm" onClick={onPrint}><Printer size={14} className="mr-1" /> Print</Button>
+        <div className="flex gap-2 shrink-0">
+          <Button variant="outline" size="sm" onClick={onPrint} data-testid="z-detailed-print-btn">
+            <Printer size={14} className="mr-1" /> Print
+          </Button>
+          <Button variant="outline" size="sm" onClick={onDownloadPdf} data-testid="z-detailed-download-btn">
+            <ArrowDown size={14} className="mr-1" /> Download PDF
+          </Button>
+        </div>
       </div>
 
       {/* Print header */}
@@ -586,6 +600,60 @@ export default function DailyLogPage() {
     } catch { toast.error('Failed to load Z-report'); }
     setZreportLoading(false);
   };
+
+  // ── Z-Report PDF helpers ─────────────────────────────────────────────────
+  // We fetch the PDF as a blob using the axios-wired `api` instance (which
+  // carries the JWT). `window.open(url)` and `<a download>` CAN'T attach
+  // Authorization headers, which is why the previous "Download PDF" button
+  // in the Close Wizard silently 401'd. These helpers cover both Print and
+  // Download flows from any Z-Report view (Normal or Detailed) — the PDF
+  // endpoint already renders the full Close-Wizard-Step-7 detail.
+  const fetchZReportBlob = useCallback(async (date, branchId) => {
+    const res = await api.get('/reports/z-report-pdf', {
+      params: { date, branch_id: branchId },
+      responseType: 'blob',
+    });
+    return URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+  }, []);
+
+  const printZReportPdf = useCallback(async (date, branchId) => {
+    const toastId = toast.loading('Preparing PDF for print…');
+    try {
+      const objUrl = await fetchZReportBlob(date, branchId);
+      const w = window.open(objUrl, '_blank');
+      if (!w) {
+        toast.error('Pop-up blocked — please allow pop-ups for this site to print.', { id: toastId });
+        URL.revokeObjectURL(objUrl);
+        return;
+      }
+      // Trigger the browser's native print dialog once the PDF is loaded.
+      // Revoke the object URL after a delay so the print preview has time
+      // to finish reading the blob.
+      w.addEventListener('load', () => { try { w.focus(); w.print(); } catch { /* same-origin retries silently */ } });
+      setTimeout(() => URL.revokeObjectURL(objUrl), 60_000);
+      toast.dismiss(toastId);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Could not generate Z-Report PDF', { id: toastId });
+    }
+  }, [fetchZReportBlob]);
+
+  const downloadZReportPdf = useCallback(async (date, branchId, branchName) => {
+    const toastId = toast.loading('Building PDF…');
+    try {
+      const objUrl = await fetchZReportBlob(date, branchId);
+      const a = document.createElement('a');
+      a.href = objUrl;
+      const safeBranch = (branchName || 'branch').replace(/\s+/g, '_');
+      a.download = `ZReport_${safeBranch}_${date}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(objUrl), 2_000);
+      toast.success('PDF downloaded', { id: toastId });
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Could not download Z-Report PDF', { id: toastId });
+    }
+  }, [fetchZReportBlob]);
 
   // Lazy-loads the rich preview payload used by the "Detailed" Z-Report view.
   // Same endpoint Close Wizard Step 7 uses — recomputes from sales_log +
@@ -1227,7 +1295,12 @@ export default function DailyLogPage() {
         <TabsContent value="close" className="mt-4 space-y-0 print:mt-0">
           {isClosed ? (
             /* ── CLOSED: Show the Z-Report ── */
-            <ZReport data={closing} branchName={currentBranch?.name} onPrint={() => window.print()} />
+            <ZReport
+              data={closing}
+              branchName={currentBranch?.name}
+              onPrint={() => printZReportPdf(closing.date, closing.branch_id || currentBranch?.id)}
+              onDownloadPdf={() => downloadZReportPdf(closing.date, closing.branch_id || currentBranch?.id, currentBranch?.name)}
+            />
           ) : (
             /* ── OPEN: Cash Reconciliation Form ── */
             <div className="space-y-4">
@@ -1813,7 +1886,8 @@ export default function DailyLogPage() {
                       preview={zreportDetail}
                       closing={zreportData}
                       branchName={zreportData.branch_name || currentBranch?.name}
-                      onPrint={() => window.print()}
+                      onPrint={() => printZReportPdf(zreportData.date, zreportData.branch_id)}
+                      onDownloadPdf={() => downloadZReportPdf(zreportData.date, zreportData.branch_id, zreportData.branch_name || currentBranch?.name)}
                     />
                   ) : (
                     <p className="text-center py-8 text-slate-400">Could not load detailed breakdown.</p>
@@ -1822,7 +1896,8 @@ export default function DailyLogPage() {
                   <ZReport
                     data={zreportData}
                     branchName={zreportData.branch_name || currentBranch?.name}
-                    onPrint={() => window.print()}
+                    onPrint={() => printZReportPdf(zreportData.date, zreportData.branch_id)}
+                    onDownloadPdf={() => downloadZReportPdf(zreportData.date, zreportData.branch_id, zreportData.branch_name || currentBranch?.name)}
                   />
                 )
               ) : (

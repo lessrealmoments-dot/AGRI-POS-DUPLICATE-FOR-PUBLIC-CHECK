@@ -1,5 +1,24 @@
 # AgriBooks Changelog
 
+## Feb 2026 — Z-Report Print via PDF + Download PDF Button (Iter 230)
+
+**User report**: After the `id="printable-report"` CSS fix, the Z-Report Print button still prints a blank page. Also requested a Download PDF option.
+
+**Root cause (why the CSS fix wasn't enough)**: Radix Dialog renders inside a `DialogPortal` with `position: fixed` and `transform` on the content container. These create a new CSS containing block, so the `#printable-report { position: absolute; left: 0; top: 0 }` rules get trapped inside the modal's transform box — not laid out at page-scale. Even with `visibility: visible`, the print-time layout is broken.
+
+**Fix — ditch browser-print entirely, use the existing PDF endpoint** (`/api/reports/z-report-pdf`, already fully detailed):
+- New helpers in `DailyLogPage.js`:
+  - `fetchZReportBlob(date, branchId)` — calls the endpoint through the axios `api` instance (with JWT) using `responseType: 'blob'`, returns an object URL.
+  - `printZReportPdf(...)` — opens the PDF in a new tab and triggers the browser's print dialog once loaded. Handles popup-blocker gracefully with a clear toast.
+  - `downloadZReportPdf(..., branchName)` — saves the PDF with a meaningful filename like `ZReport_MainBranch_2026-05-01.pdf`.
+- Both `<ZReport>` and `<ZReportDetailed>` now expose two buttons: **Print** (opens PDF for printing) and **Download PDF**. Since the backend PDF is already the full detailed version, both views produce the same — reliable — printed output.
+- `CloseWizardPage.js` Step 8 `Print Z-Report` and `Download PDF` buttons switched from unauthenticated `window.open(url)` (which would silently 401 on a JWT-gated endpoint) to the same authenticated blob flow. Previously broken; now working.
+
+**Why this also makes the earlier `id="printable-report"` change obsolete for normal users**: the CSS still works for any page-level content with that ID, but the Z-Report paths don't rely on browser print anymore. PDFs are consistent across platforms (Windows/Mac/iPad/Android Chrome), respect page margins automatically, and produce archivable files for the accountant / BIR audit trail.
+
+`data-testid` added to all four new buttons: `z-normal-print-btn`, `z-normal-download-btn`, `z-detailed-print-btn`, `z-detailed-download-btn`, plus `wiz-print-z-btn` / `wiz-download-z-btn` on the Close Wizard. Lint clean on both edited files.
+
+
 ## Feb 2026 — Detailed Z-Report Toggle (Iter 229)
 
 **User ask**: "Step 7 preview in the Close Wizard has SO MANY details (price changes, discounts, AR by method, fund transfers, per-category expenses). The regular Z-Report I can print later doesn't show any of that. Give me a Detailed Z-Report next to the Normal one so I can choose which to view & print."

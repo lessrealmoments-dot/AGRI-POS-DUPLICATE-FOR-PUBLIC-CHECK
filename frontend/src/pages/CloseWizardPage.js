@@ -2253,10 +2253,40 @@ export default function CloseWizardPage() {
                     </div>
                   )}
                   <div className="flex gap-3 justify-center mt-4">
-                    <Button variant="outline" onClick={() => window.print()}>Print Z-Report</Button>
-                    <Button variant="outline" onClick={() => {
-                      const url = `${process.env.REACT_APP_BACKEND_URL}/api/reports/z-report-pdf?date=${inGroupMode ? batchDates[0] : preview?.date || ''}&branch_id=${preview?.branch_id || ''}`;
-                      window.open(url, '_blank');
+                    <Button variant="outline" data-testid="wiz-print-z-btn" onClick={async () => {
+                      const date = inGroupMode ? batchDates[0] : preview?.date;
+                      const branchId = preview?.branch_id;
+                      if (!date || !branchId) { toast.error('Missing date or branch'); return; }
+                      const tid = toast.loading('Preparing PDF for print…');
+                      try {
+                        const res = await api.get('/reports/z-report-pdf',
+                          { params: { date, branch_id: branchId }, responseType: 'blob' });
+                        const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+                        const w = window.open(url, '_blank');
+                        if (!w) { toast.error('Pop-up blocked — allow pop-ups to print.', { id: tid }); URL.revokeObjectURL(url); return; }
+                        w.addEventListener('load', () => { try { w.focus(); w.print(); } catch { /* noop */ } });
+                        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+                        toast.dismiss(tid);
+                      } catch (e) { toast.error(e.response?.data?.detail || 'Print failed', { id: tid }); }
+                    }}>Print Z-Report</Button>
+                    <Button variant="outline" data-testid="wiz-download-z-btn" onClick={async () => {
+                      const date = inGroupMode ? batchDates[0] : preview?.date;
+                      const branchId = preview?.branch_id;
+                      if (!date || !branchId) { toast.error('Missing date or branch'); return; }
+                      const tid = toast.loading('Building PDF…');
+                      try {
+                        const res = await api.get('/reports/z-report-pdf',
+                          { params: { date, branch_id: branchId }, responseType: 'blob' });
+                        const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `ZReport_${(preview?.branch_name || 'branch').replace(/\s+/g, '_')}_${date}.pdf`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        setTimeout(() => URL.revokeObjectURL(url), 2_000);
+                        toast.success('PDF downloaded', { id: tid });
+                      } catch (e) { toast.error(e.response?.data?.detail || 'Download failed', { id: tid }); }
                     }}>
                       <Download size={14} className="mr-1.5" /> Download PDF
                     </Button>
