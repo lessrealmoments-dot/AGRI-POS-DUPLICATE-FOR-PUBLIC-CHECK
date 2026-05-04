@@ -84,6 +84,11 @@ export default function ExpensesPage() {
   const [expenseReceiptData, setExpenseReceiptData] = useState(null);
   const [farmReceiptData, setFarmReceiptData] = useState(null);
 
+  // Farm Expense customer search (replaces dropdown)
+  const [farmCustomerQuery, setFarmCustomerQuery] = useState('');
+  const [farmCustomerHighlight, setFarmCustomerHighlight] = useState(0);
+  const [farmCustomerListOpen, setFarmCustomerListOpen] = useState(false);
+
   const [encodingDate, setEncodingDate] = useState(new Date().toISOString().slice(0, 10));
 
   const [filters, setFilters] = useState({
@@ -158,6 +163,9 @@ export default function ExpensesPage() {
       payment_method: 'Cash', reference_number: '', date: encodingDate,
       due_date: '', terms: ''
     });
+    setFarmCustomerQuery('');
+    setFarmCustomerHighlight(0);
+    setFarmCustomerListOpen(false);
     setFarmExpenseDialog(true);
   };
 
@@ -748,6 +756,105 @@ export default function ExpensesPage() {
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
               This will record a farm expense and automatically create an invoice for the selected customer.
             </div>
+            {/* Bill to Customer — moved to top per user feedback. Replaces the
+                dropdown with a typeahead search; press Enter (or click) to
+                pick the highlighted match. */}
+            <div>
+              <Label className="text-xs text-slate-500 font-semibold">Bill to Customer *</Label>
+              <p className="text-xs text-slate-400 mb-2">Search by name — an invoice will be auto-created for the selected customer</p>
+              {(() => {
+                const selectedCustomer = customers.find(c => c.id === farmExpenseForm.customer_id);
+                if (selectedCustomer) {
+                  return (
+                    <div className="flex items-center justify-between h-10 px-3 rounded-md border-2 border-amber-400 bg-amber-50/50"
+                      data-testid="farm-customer-selected">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-sm font-semibold text-slate-800 truncate">{selectedCustomer.name}</span>
+                        {selectedCustomer.balance > 0 && (
+                          <span className="text-[10px] font-mono text-red-600 bg-red-50 px-1.5 py-0.5 rounded">
+                            AR: {formatPHP(selectedCustomer.balance)}
+                          </span>
+                        )}
+                      </div>
+                      <button type="button"
+                        onClick={() => {
+                          setFarmExpenseForm({ ...farmExpenseForm, customer_id: '' });
+                          setFarmCustomerQuery('');
+                          setFarmCustomerListOpen(false);
+                        }}
+                        className="text-[11px] text-slate-500 hover:text-red-600 underline"
+                        data-testid="farm-customer-clear">
+                        Change
+                      </button>
+                    </div>
+                  );
+                }
+                const q = farmCustomerQuery.trim().toLowerCase();
+                const matches = q
+                  ? customers.filter(c => (c.name || '').toLowerCase().includes(q)).slice(0, 8)
+                  : [];
+                const pick = (c) => {
+                  setFarmExpenseForm({ ...farmExpenseForm, customer_id: c.id });
+                  setFarmCustomerQuery('');
+                  setFarmCustomerListOpen(false);
+                };
+                return (
+                  <div className="relative">
+                    <Input
+                      className="h-10"
+                      autoFocus
+                      placeholder="Type customer name..."
+                      value={farmCustomerQuery}
+                      onChange={e => {
+                        setFarmCustomerQuery(e.target.value);
+                        setFarmCustomerHighlight(0);
+                        setFarmCustomerListOpen(true);
+                      }}
+                      onFocus={() => setFarmCustomerListOpen(true)}
+                      onKeyDown={(e) => {
+                        if (matches.length === 0) return;
+                        if (e.key === 'ArrowDown') {
+                          e.preventDefault();
+                          setFarmCustomerHighlight(h => Math.min(h + 1, matches.length - 1));
+                        } else if (e.key === 'ArrowUp') {
+                          e.preventDefault();
+                          setFarmCustomerHighlight(h => Math.max(h - 1, 0));
+                        } else if (e.key === 'Enter') {
+                          e.preventDefault();
+                          pick(matches[farmCustomerHighlight]);
+                        } else if (e.key === 'Escape') {
+                          setFarmCustomerListOpen(false);
+                        }
+                      }}
+                      data-testid="farm-customer-search" />
+                    {farmCustomerListOpen && matches.length > 0 && (
+                      <div className="absolute z-30 left-0 right-0 mt-1 bg-white rounded-lg shadow-lg border border-slate-200 max-h-60 overflow-y-auto"
+                        data-testid="farm-customer-results">
+                        {matches.map((c, i) => (
+                          <button type="button" key={c.id}
+                            onClick={() => pick(c)}
+                            onMouseEnter={() => setFarmCustomerHighlight(i)}
+                            className={`w-full text-left px-3 py-2 text-sm border-b border-slate-50 last:border-0 ${
+                              i === farmCustomerHighlight ? 'bg-amber-50' : 'hover:bg-slate-50'
+                            }`}
+                            data-testid={`farm-customer-result-${i}`}>
+                            <div className="font-medium text-slate-800">{c.name}</div>
+                            {c.balance > 0 && (
+                              <div className="text-[10px] font-mono text-red-600">AR: {formatPHP(c.balance)}</div>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {farmCustomerListOpen && q && matches.length === 0 && (
+                      <div className="absolute z-30 left-0 right-0 mt-1 bg-white rounded-lg shadow-lg border border-slate-200 px-3 py-3 text-xs text-slate-400">
+                        No customer found for "{farmCustomerQuery}"
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
             <div>
               <Label className="text-xs text-slate-500">Service Description *</Label>
               <Input className="h-10" value={farmExpenseForm.description} onChange={e => setFarmExpenseForm({ ...farmExpenseForm, description: e.target.value })}
@@ -785,18 +892,6 @@ export default function ExpensesPage() {
                 <Input className="h-10" value={farmExpenseForm.reference_number}
                   onChange={e => setFarmExpenseForm({ ...farmExpenseForm, reference_number: e.target.value })} placeholder="Optional" />
               </div>
-            </div>
-            <div className="border-t pt-4 mt-4">
-              <Label className="text-xs text-slate-500 font-semibold">Bill to Customer *</Label>
-              <p className="text-xs text-slate-400 mb-2">An invoice will be automatically created for this customer</p>
-              <Select value={farmExpenseForm.customer_id} onValueChange={v => setFarmExpenseForm({ ...farmExpenseForm, customer_id: v })}>
-                <SelectTrigger className="h-10" data-testid="expenses-farm-customer">
-                  <SelectValue placeholder="Select customer to bill" />
-                </SelectTrigger>
-                <SelectContent>
-                  {customers.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
