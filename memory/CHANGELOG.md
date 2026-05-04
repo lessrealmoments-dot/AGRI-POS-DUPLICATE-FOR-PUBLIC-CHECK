@@ -1,5 +1,25 @@
 # AgriBooks Changelog
 
+## May 2026 — Z-Report PDF preview/print parity + Unicode crash fix (Iter 234)
+
+**User reports**:
+1. *"The preview is different from the one being printed"* — clicking Download/Print from the Normal Z-Report view produced a tiny PDF that only had the Cash Drawer Reconciliation block, while the on-screen Normal view also shows Walk-in Sales by Category, Credit Extended Today, AR Payments Received, AR Balance at Close, and Expenses.
+2. *"Could not generate Z-Report PDF for Detailed Mode"* — Detailed Mode PDF download threw an error whenever the data contained non-Latin-1 characters.
+
+**Root causes**:
+1. PDF Normal layout was hardcoded to a stub (Cash Reconciliation only), whereas the on-screen `<ZReport>` component in `DailyLogPage.js` renders 7 sections.
+2. `FPDF`'s default Helvetica font is Latin-1 only — customer names / expense descriptions / transfer notes routinely contain em-dashes (`—`), peso signs (`₱`), curly quotes, bullets, arrows, ellipsis. Any single occurrence raised `FPDFUnicodeEncodingException` and aborted the whole download.
+
+**Fix** (`/app/backend/routes/zreport_pdf.py`, full rewrite):
+- Added `_s()` unicode sanitizer that folds common typographic characters to ASCII equivalents (`—`→`-`, `₱`→`P`, `→`→`->`, `•`→`-`, `…`→`...`, curly quotes → straight, `✓`→`OK`) and strips anything still outside Latin-1 instead of crashing. Applied to every `cell()` / `output()` write via `_s(...)`.
+- Added `render_normal()` that mirrors the on-screen Normal `<ZReport>` layout 1:1: **Opening** (Safe Balance + Opening Float), **Cash Reconciliation** (Expected/Actual/Over-Short/Vault/Next Float), **Walk-in Sales by Category**, **New Credit Extended Today** (credit_sales_today + ar_credits_today as a table), **AR Payments Received** (credit_collections with Interest/Penalty columns), **AR Balance at Close**, **Expenses** (with Employee Advance CA details + monthly-limit/approver notes).
+- PDF header now shows `COMPACT` or `DETAILED` mode label for at-a-glance version identification.
+- Endpoint now looks up the `daily_closings` record by `date+branch_id` (previously only by `closing_id`), so closed-day actuals — actual cash, over/short, cash to vault, next float — populate properly even when the frontend calls with just date+branch.
+- Detailed layout unchanged functionally; every text write now goes through `_s()` so it's crash-proof.
+
+**Regression**: `backend/tests/test_zreport_pdf_unicode_232.py` — 14 passing tests cover (a) the sanitizer against em-dash/peso/arrow/bullet/ellipsis/curly-quotes/emoji, (b) both Normal and Detailed PDF generation with unicode-heavy customer / employee / description data, (c) the Normal PDF containing all 7 UI sections.
+
+
 ## Feb 2026 — Z-Report PDF respects Normal vs Detailed mode (Iter 233)
 
 **User report**: Whether the user clicked Print/Download from the **Normal** or the **Detailed** Z-Report view, the PDF that came out was always the same (compact). Detailed view's Print/Download was effectively cosmetic — the backend ignored which view triggered it.
