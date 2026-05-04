@@ -877,8 +877,8 @@ export default function ExpensesPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label className="text-xs text-slate-500">Amount (₱) *</Label>
-                <Input type="number" className="h-10" value={farmExpenseForm.amount}
-                  onChange={e => setFarmExpenseForm({ ...farmExpenseForm, amount: parseFloat(e.target.value) || 0 })} data-testid="expenses-farm-amount" />
+                <CalcInput className="h-10" value={String(farmExpenseForm.amount || '')}
+                  onChange={(v) => setFarmExpenseForm({ ...farmExpenseForm, amount: parseFloat(v) || 0 })} data-testid="expenses-farm-amount" />
               </div>
               <div>
                 <Label className="text-xs text-slate-500">Date</Label>

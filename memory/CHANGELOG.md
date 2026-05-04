@@ -1097,3 +1097,57 @@ the terminal until the cashier manually forced a full resync.
 - NEW: `tests/test_branch_price_delta_sync_225.py` — fails on the old code,
   passes after the fix. Reproduces the exact "global 2065 vs branch 2075"
   scenario end-to-end.
+
+## Iter 226 — Feb 2026 (QuickBooks-Style Inline Calculator)
+
+### Feature
+Every monetary/quantity input now supports a QuickBooks-style inline calculator.
+Type a number, press +, −, *, or / and a "tape" bubble appears under the field
+showing the live expression and a running total. Press Enter to commit. Escape
+to cancel. Invalid expressions silently revert. Backspace strips characters.
+
+User-confirmed scope:
+- Operators: + − * / only ("safest")
+- Trigger: only after a number is typed and the user presses an operator
+- Aesthetic: dark monospace bubble below the field with `1500+250 = 1750  ↵ commit · Esc cancel`
+- Must work fully offline (no backend, no eval) — used by Terminal POS
+
+### New
+- `frontend/src/components/CalcInput.jsx` — drop-in for shadcn Input.
+  - Pure-JS shunting-yard parser (no `eval`, no `Function()`, no deps).
+  - Plain mode = controlled text input. Operator key snapshots current value
+    and switches to expression mode.
+  - 19/19 unit cases pass (digits, precedence, unary minus, div-by-zero,
+    garbage, trailing operator, etc.).
+  - Props: `value`, `onChange(stringValue)`, `onBlur`, `onKeyDown`, `onFocus`,
+    `placeholder`, `disabled`, `selectOnFocus`, `integerOnly`, `data-testid`,
+    `className` (matches shadcn Input defaults).
+  - Exposes `safeEval` for tests.
+
+### Phase 1 wiring (highest-impact monetary/qty inputs)
+- `pages/terminal/TerminalSales.jsx` — discount, amount-tendered, split-cash,
+  split-digital, scan-qty (integerOnly).
+- `pages/UnifiedSalesPage.js` — Quick-mode cart qty + price, Order-mode line
+  qty + rate + discount_value, freight, overall discount, amount-tendered,
+  partial amount, split cash/digital.
+- `pages/PaymentsPage.js` — receive-amount, edit-payment-amount,
+  manual-interest-input, payment-row-* (per invoice), discount-row-* (per
+  invoice), rate-prompt-input, interest-rate-input.
+- `pages/ExpensesPage.js` — record-expense, farm-expense, customer-cash-out,
+  employee-advance amounts.
+- `components/FundTransferDialog.js` — transfer/capital-injection amount.
+- `components/StockInjectionDialog.js` — quantity.
+
+### Tests
+- Reusable smoke at `frontend/src/components/__tests__/CalcInput.smoke.mjs`.
+- Live Playwright validated by testing agent (iteration_192) on multiple flows:
+  Cash Out: typing `1500+250` then Enter committed `1750`; Escape reverted;
+  garbage was silently rejected; calc-active=1 toggled correctly.
+
+### Phase 2 (next, awaiting user green light)
+- `PurchaseOrderPage.js` — line qty/cost, freight/discount, terms days.
+- `BranchTransferPage.js` — line qty/cost rows.
+- `RepackPricingPage.js`, `PriceManagerPage.js` — price/cost editors.
+- `CountSheetsPage.js` — physical count entries.
+- `CloseWizardPage.js` — cash-count denominations.
+- Misc dialogs in `BranchCapitalWizard`, `ReturnRefundWizard`, etc.

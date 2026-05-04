@@ -1295,10 +1295,9 @@ export default function PaymentsPage() {
                   <p className="text-[11px] text-amber-700 mt-0.5">This account has overdue invoices. Set a monthly rate to auto-compute charges now.</p>
                   <div className="flex items-center gap-2 mt-2 flex-wrap">
                     <div className="flex items-center gap-1 bg-white border border-amber-300 rounded-md px-2 py-1">
-                      <input
-                        type="number" min="0" step="0.5"
+                      <CalcInput
                         value={ratePromptInput}
-                        onChange={e => setRatePromptInput(e.target.value)}
+                        onChange={setRatePromptInput}
                         onKeyDown={e => e.key === 'Enter' && handleSetRateFromPrompt()}
                         placeholder="e.g. 3"
                         className="w-14 text-sm text-center border-0 outline-none font-bold text-amber-700 bg-transparent"
@@ -1353,8 +1352,8 @@ export default function PaymentsPage() {
                     <Percent size={13} className="text-amber-600" />
                     <Label className="text-[10px] font-semibold text-amber-700 uppercase tracking-wide">Interest Rate</Label>
                     <div className="flex items-center bg-white border border-amber-300 rounded-md px-2 py-0.5">
-                      <Input type="number" min="0" step="0.5" value={interestRateInput}
-                        onChange={e => setInterestRateInput(e.target.value)}
+                      <CalcInput value={interestRateInput}
+                        onChange={setInterestRateInput}
                         placeholder="0"
                         className="w-12 h-6 text-sm text-center border-0 bg-transparent p-0 font-bold text-amber-700"
                         data-testid="interest-rate-input" />

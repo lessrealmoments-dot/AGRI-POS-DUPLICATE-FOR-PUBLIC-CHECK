@@ -3706,8 +3706,8 @@ export default function UnifiedSalesPage() {
                   </div>
                   <div>
                     <Label className="text-xs text-blue-700">{digitalPlatform} Amount</Label>
-                    <Input type="number" value={splitDigital} data-testid="split-digital"
-                      onChange={e => { setSplitDigital(e.target.value); setSplitCash(String(Math.max(0, grandTotal - (parseFloat(e.target.value)||0)))); }}
+                    <CalcInput value={splitDigital} data-testid="split-digital"
+                      onChange={(v) => { setSplitDigital(v); setSplitCash(String(Math.max(0, grandTotal - (parseFloat(v)||0)))); }}
                       placeholder="0.00" className="mt-1 h-9 border-blue-200" />
                   </div>
                 </div>
