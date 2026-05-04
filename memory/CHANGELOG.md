@@ -1,5 +1,30 @@
 # AgriBooks Changelog
 
+## May 2026 — Z-Report Detailed: Price-Change refinements + Interest reorder (Iter 235)
+
+User feedback on the Detailed Z-Report:
+1. Move "Interest & Penalty Invoices Issued Today" directly under "AR Payments Received" (instead of buried near the bottom of the PDF) so the owner can audit collections vs new charges side-by-side.
+2. **Permanent Price Changes** improvements:
+   - Group rows by **category** (alphabetical), with products inside each category sorted alphabetically.
+   - Add **Cap MA** (capital moving average) and **Last Purchase** columns for each row so the owner can see immediately how the new price compares against the cost basis.
+   - Color the new price **green** when it went up vs old, **red** when it went down (signal margin compression at a glance).
+
+**Backend** (`/app/backend/routes/daily_operations.py · _get_price_changes_today`):
+- Now enriches each `price_change_log` row with `category` (from products), `moving_average_cost` and `last_purchase_cost` (computed branch-specific from `movements` purchase + transfer_in entries; repack-aware).
+- Returns rows pre-sorted by `(category.lower(), product_name.lower())`.
+- Per-product enrichment is cached per call so multi-line price changes for the same SKU don't re-query.
+
+**Backend PDF** (`/app/backend/routes/zreport_pdf.py · render_detailed`):
+- Reordered: Interest & Penalty Invoices block now appears immediately after AR Payments Received (was section #10 → now #3).
+- Permanent Price Changes table: grouped by category sub-headers (with row count per category), 7-column layout — Product · From · → · To · Cap MA · Last Pur · OK by — colored by direction (green up / red down).
+
+**Frontend** (`/app/frontend/src/pages/DailyLogPage.js · ZReportDetailed`):
+- Same category grouping + Cap MA + Last Pur columns on the on-screen Detailed view, so what's shown matches what's printed.
+- Existing on-screen order already had Interest right under AR Collections — no further change needed there.
+
+Regression tests (`backend/tests/test_zreport_pdf_unicode_232.py`) — all 14 pass against the rewritten PDF generator.
+
+
 ## May 2026 — Z-Report PDF preview/print parity + Unicode crash fix (Iter 234)
 
 **User reports**:

@@ -378,7 +378,29 @@ def render_detailed(pdf: ZReportPDF, preview: dict, closing: Optional[dict]):
             )
         pdf.ln(3)
 
-    # 3. Fund Transfers
+    # 3. Interest & Penalty Invoices  (placed directly under AR Payments so the
+    #    owner can immediately see what NEW receivables were created today
+    #    while reviewing the AR collections that came in.)
+    int_invs = preview.get("interest_invoices_today") or []
+    if int_invs:
+        int_total = sum(float(i.get("grand_total", 0)) for i in int_invs)
+        pdf.section_header("INTEREST & PENALTY INVOICES ISSUED TODAY", php(int_total))
+        pdf.detail_row("Customer", "Invoice #", "Amount", "Type", header=True)
+        for inv in int_invs:
+            inv_type = (
+                "Penalty" if inv.get("sale_type") == "penalty_charge"
+                else "Manual INT" if inv.get("manual_interest")
+                else "Interest"
+            )
+            pdf.detail_row(
+                str(inv.get("customer_name", ""))[:30],
+                str(inv.get("invoice_number", "")),
+                php(inv.get("grand_total", 0)),
+                inv_type,
+            )
+        pdf.ln(3)
+
+    # 4. Fund Transfers
     fund_transfers = preview.get("fund_transfers_today", [])
     if fund_transfers:
         pdf.section_header("FUND TRANSFERS", php(net_ft))
@@ -398,7 +420,7 @@ def render_detailed(pdf: ZReportPDF, preview: dict, closing: Optional[dict]):
             )
         pdf.ln(3)
 
-    # 4. Expenses Detail
+    # 5. Expenses Detail
     expenses = preview.get("expenses", [])
     cashier_exps = [e for e in expenses if e.get("fund_source") != "safe"]
     safe_exps = [e for e in expenses if e.get("fund_source") == "safe"]
@@ -420,7 +442,7 @@ def render_detailed(pdf: ZReportPDF, preview: dict, closing: Optional[dict]):
             pdf.detail_row(str(e.get("description", ""))[:40], str(e.get("category", ""))[:20], php(e.get("amount", 0)))
         pdf.ln(3)
 
-    # 5. Credit Extended Today
+    # 6. Credit Extended Today
     credit_sales = preview.get("credit_sales_today", [])
     if credit_sales:
         pdf.section_header("CREDIT EXTENDED TODAY", php(preview.get("total_credit_today", 0)))
@@ -434,7 +456,7 @@ def render_detailed(pdf: ZReportPDF, preview: dict, closing: Optional[dict]):
             )
         pdf.ln(3)
 
-    # 6. Digital/E-Wallet Payments
+    # 7. Digital/E-Wallet Payments
     digital_sales = preview.get("digital_sales_today", [])
     if digital_sales:
         pdf.section_header("E-WALLET / DIGITAL PAYMENTS", php(preview.get("total_digital_today", 0)))
@@ -451,7 +473,7 @@ def render_detailed(pdf: ZReportPDF, preview: dict, closing: Optional[dict]):
             pdf.row(f"  {platform} Total", php(amt), indent=6)
         pdf.ln(3)
 
-    # 7. Cash Sales by Category
+    # 8. Cash Sales by Category
     categories = preview.get("cash_sales_by_category", [])
     if categories:
         pdf.section_header("CASH SALES BY CATEGORY", php(preview.get("total_cash_sales", 0)))
@@ -460,7 +482,7 @@ def render_detailed(pdf: ZReportPDF, preview: dict, closing: Optional[dict]):
             pdf.detail_row(str(cat.get("category", "General"))[:30], str(cat.get("qty", 0)), php(cat.get("total", 0)))
         pdf.ln(3)
 
-    # 8. Discount Breakdown
+    # 9. Discount Breakdown
     disc = preview.get("discount_breakdown") or {}
     disc_products = disc.get("products") or []
     if disc_products or float(disc.get("total_discount", 0)) > 0:
@@ -478,42 +500,90 @@ def render_detailed(pdf: ZReportPDF, preview: dict, closing: Optional[dict]):
             pdf.row("Overall (invoice-level) discounts", php(disc.get("total_overall_discount", 0)), indent=6)
         pdf.ln(3)
 
-    # 9. Permanent Price Changes
+    # 10. Permanent Price Changes — grouped by category, alphabetical, with
+    #     capital references (moving avg + last purchase). Per-row coloring:
+    #     GREEN when the new price is higher than the old (margin up), RED
+    #     when lower (margin compressed). Helps the owner spot suspicious
+    #     downward overrides at a glance.
     price_changes = (preview.get("price_changes_today") or {}).get("rows") or []
     if price_changes:
         pdf.section_header(
             "PERMANENT PRICE CHANGES",
             f"{(preview.get('price_changes_today') or {}).get('count', len(price_changes))} change(s)",
         )
-        pdf.detail_row("Product / Invoice", "From", "To", "OK by", header=True)
-        for r in price_changes:
-            pdf.detail_row(
-                f"{str(r.get('product_name', ''))[:25]} / {str(r.get('invoice_number', ''))[:15]}",
-                php(r.get("old_price", 0)),
-                php(r.get("new_price", 0)),
-                str(r.get("approver_name", ""))[:15],
-            )
-        pdf.ln(3)
 
-    # 10. Interest & Penalty Invoices
-    int_invs = preview.get("interest_invoices_today") or []
-    if int_invs:
-        int_total = sum(float(i.get("grand_total", 0)) for i in int_invs)
-        pdf.section_header("INTEREST & PENALTY INVOICES ISSUED TODAY", php(int_total))
-        pdf.detail_row("Customer", "Invoice #", "Amount", "Type", header=True)
-        for inv in int_invs:
-            inv_type = (
-                "Penalty" if inv.get("sale_type") == "penalty_charge"
-                else "Manual INT" if inv.get("manual_interest")
-                else "Interest"
-            )
-            pdf.detail_row(
-                str(inv.get("customer_name", ""))[:30],
-                str(inv.get("invoice_number", "")),
-                php(inv.get("grand_total", 0)),
-                inv_type,
-            )
-        pdf.ln(3)
+        # Column layout: Product (52) | From (22) | -> | To (22) | Cap MA (24) | Last Pur (24) | OK by (38) = 188mm
+        def _pc_header():
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.set_fill_color(248, 248, 248)
+            pdf.set_x(14)
+            pdf.cell(52, 5, _s("Product"), fill=True)
+            pdf.cell(22, 5, _s("From"), align="R", fill=True)
+            pdf.cell(6, 5, _s(""), fill=True)
+            pdf.cell(22, 5, _s("To"), align="R", fill=True)
+            pdf.cell(24, 5, _s("Cap MA"), align="R", fill=True)
+            pdf.cell(24, 5, _s("Last Pur"), align="R", fill=True)
+            pdf.cell(38, 5, _s("OK by"), fill=True)
+            pdf.ln(5)
+
+        # Group rows by category (already sorted by backend (category, name))
+        from itertools import groupby
+        for cat, group in groupby(
+            price_changes,
+            key=lambda r: r.get("category") or "Uncategorized",
+        ):
+            group = list(group)
+            # Category sub-header
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.set_text_color(26, 77, 46)
+            pdf.set_fill_color(236, 245, 240)
+            pdf.set_x(14)
+            pdf.cell(0, 5, _s(f"  {cat}  ({len(group)})"), fill=True)
+            pdf.ln(5)
+            pdf.set_text_color(30, 30, 30)
+            _pc_header()
+
+            for r in group:
+                old_p = float(r.get("old_price") or 0)
+                new_p = float(r.get("new_price") or 0)
+                price_color = (
+                    (21, 128, 61) if new_p > old_p
+                    else (220, 38, 38) if new_p < old_p
+                    else (30, 30, 30)
+                )
+                ma = float(r.get("moving_average_cost") or 0)
+                lp = float(r.get("last_purchase_cost") or 0)
+
+                pdf.set_font("Helvetica", "", 8)
+                pdf.set_x(14)
+                # Product
+                pdf.set_text_color(30, 30, 30)
+                pdf.cell(52, 5, _s(str(r.get("product_name", ""))[:32]))
+                # From (struck-through visually impossible in fpdf — italic instead)
+                pdf.set_text_color(120, 120, 120)
+                pdf.set_font("Helvetica", "I", 8)
+                pdf.cell(22, 5, _s(php(old_p)), align="R")
+                # arrow
+                pdf.set_font("Helvetica", "", 8)
+                pdf.set_text_color(120, 120, 120)
+                pdf.cell(6, 5, _s("->"), align="C")
+                # To — colored
+                pdf.set_text_color(*price_color)
+                pdf.set_font("Helvetica", "B", 8)
+                pdf.cell(22, 5, _s(php(new_p)), align="R")
+                # Cap MA
+                pdf.set_font("Helvetica", "", 8)
+                pdf.set_text_color(80, 80, 80)
+                pdf.cell(24, 5, _s(php(ma) if ma else "-"), align="R")
+                # Last Pur
+                pdf.cell(24, 5, _s(php(lp) if lp else "-"), align="R")
+                # OK by
+                pdf.set_text_color(30, 30, 30)
+                pdf.cell(38, 5, _s(str(r.get("approver_name", ""))[:22]))
+                pdf.ln(5)
+                pdf.set_text_color(30, 30, 30)
+            pdf.ln(1)
+        pdf.ln(2)
 
 
 # ── Endpoint ─────────────────────────────────────────────────────────────────

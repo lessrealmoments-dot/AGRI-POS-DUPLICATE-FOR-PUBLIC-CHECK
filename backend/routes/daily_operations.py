@@ -239,15 +239,100 @@ async def _get_discount_breakdown(branch_id: str, date: str) -> dict:
 
 
 async def _get_price_changes_today(branch_id: str, date: str) -> dict:
-    """Return summary of all permanent price changes (Price Match) for the day."""
+    """Return summary of all permanent price changes (Price Match) for the day.
+
+    Each row is enriched with the product's `category`, branch-specific
+    `moving_average_cost`, and `last_purchase_cost` so the Z-Report can
+    show how the new price compares against capital. Rows are sorted
+    alphabetically by (category, product_name) so the Z-Report can group
+    them per category for at-a-glance review.
+    """
     q = {"date": date, "invoice_voided": {"$ne": True}}
     if branch_id:
         q["branch_id"] = branch_id
     rows = await db.price_change_log.find(
-        q, {"_id": 0, "product_name": 1, "old_price": 1, "new_price": 1, "scheme": 1,
-            "reason": 1, "approver_name": 1, "cashier_name": 1, "invoice_number": 1}
-    ).sort("created_at", 1).to_list(500)
-    return {"count": len(rows), "rows": rows}
+        q, {"_id": 0, "product_id": 1, "product_name": 1,
+            "old_price": 1, "new_price": 1, "scheme": 1,
+            "reason": 1, "approver_name": 1, "cashier_name": 1,
+            "invoice_number": 1, "branch_id": 1}
+    ).to_list(500)
+
+    # Cache per-product enrichment so we don't repeatedly hit movements/products
+    # for the same SKU (multi-line/multi-invoice price changes are common).
+    enrich_cache: dict = {}
+
+    async def _enrich(pid: str, br_id: str) -> dict:
+        key = (pid, br_id)
+        if key in enrich_cache:
+            return enrich_cache[key]
+        product = await db.products.find_one(
+            {"id": pid},
+            {"_id": 0, "category": 1, "is_repack": 1, "parent_id": 1,
+             "units_per_parent": 1, "cost_price": 1},
+        ) or {}
+        category = product.get("category") or "Uncategorized"
+
+        lookup_id = product.get("parent_id") if product.get("is_repack") and product.get("parent_id") else pid
+        acq_query = {
+            "product_id": lookup_id,
+            "type": {"$in": ["purchase", "transfer_in"]},
+            "quantity_change": {"$gt": 0},
+        }
+        if br_id:
+            acq_query["branch_id"] = br_id
+
+        last_acq = await db.movements.find_one(
+            acq_query, {"_id": 0, "price_at_time": 1}, sort=[("created_at", -1)]
+        )
+        last_purchase = float(last_acq.get("price_at_time", 0)) if last_acq else 0.0
+
+        all_acqs = await db.movements.find(
+            acq_query, {"_id": 0, "price_at_time": 1, "quantity_change": 1}
+        ).to_list(10000)
+        total_qty = sum(float(m.get("quantity_change", 0)) for m in all_acqs)
+        total_cost = sum(float(m.get("quantity_change", 0)) * float(m.get("price_at_time", 0)) for m in all_acqs)
+        ma = round(total_cost / total_qty, 4) if total_qty > 0 else float(product.get("cost_price", 0))
+
+        # For repacks, scale parent-level cost down to the repack unit so the
+        # capital reference is comparable to the line price the cashier sees.
+        if product.get("is_repack") and float(product.get("units_per_parent") or 0) > 1:
+            upp = float(product["units_per_parent"])
+            last_purchase = round(last_purchase / upp, 4) if last_purchase else last_purchase
+            ma = round(ma / upp, 4) if ma else ma
+
+        enriched = {
+            "category": category,
+            "last_purchase_cost": last_purchase,
+            "moving_average_cost": ma,
+        }
+        enrich_cache[key] = enriched
+        return enriched
+
+    enriched_rows = []
+    for r in rows:
+        pid = r.get("product_id") or ""
+        br_id = r.get("branch_id") or branch_id or ""
+        info = await _enrich(pid, br_id) if pid else {
+            "category": "Uncategorized",
+            "last_purchase_cost": 0.0,
+            "moving_average_cost": 0.0,
+        }
+        old_p = float(r.get("old_price") or 0)
+        new_p = float(r.get("new_price") or 0)
+        enriched_rows.append({
+            **r,
+            "category": info["category"],
+            "last_purchase_cost": info["last_purchase_cost"],
+            "moving_average_cost": info["moving_average_cost"],
+            "delta": round(new_p - old_p, 2),
+            "delta_pct": round((new_p - old_p) / old_p * 100, 2) if old_p > 0 else 0,
+        })
+
+    enriched_rows.sort(key=lambda r: (
+        (r.get("category") or "").lower(),
+        (r.get("product_name") or "").lower(),
+    ))
+    return {"count": len(enriched_rows), "rows": enriched_rows}
 
 
 @router.get("/daily-close-preview")

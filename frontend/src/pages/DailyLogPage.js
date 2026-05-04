@@ -349,33 +349,81 @@ function ZReportDetailed({ preview, closing, branchName, onPrint, onDownloadPdf 
         </div>
       )}
 
-      {/* ── Price Changes Today ───────────────────────────────────────── */}
+      {/* ── Price Changes Today ─ grouped by category, with capital refs ──
+          Backend `_get_price_changes_today` enriches each row with category,
+          `moving_average_cost` and `last_purchase_cost`, and returns rows
+          pre-sorted by (category, product_name). We groupBy here so the
+          owner can audit by department (Feeds, Meds, etc.) and immediately
+          see how the override compares against capital. */}
       {(preview.price_changes_today?.count || 0) > 0 && (
         <div className="rounded-xl border border-amber-200 overflow-hidden">
           <div className="px-4 py-2 bg-amber-50 text-xs font-bold uppercase tracking-wider text-amber-700 flex items-center justify-between">
             <span>Permanent Price Changes Today</span>
             <span className="font-mono">{preview.price_changes_today.count} change(s)</span>
           </div>
-          <div className="p-3 space-y-1 text-xs">
-            {(preview.price_changes_today.rows || []).map((r, i) => (
-              <div key={i} className="flex items-center justify-between border-b border-amber-50 last:border-0 py-1">
-                <div className="min-w-0 flex-1">
-                  <span className="font-medium text-slate-700">{r.product_name}</span>
-                  <span className="ml-2 text-[10px] text-slate-400 font-mono">{r.invoice_number}</span>
+          <div className="px-3 pt-2 pb-1 grid grid-cols-12 text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
+            <div className="col-span-4">Product</div>
+            <div className="col-span-3 text-right">From → To</div>
+            <div className="col-span-2 text-right">Cap MA</div>
+            <div className="col-span-2 text-right">Last Pur.</div>
+            <div className="col-span-1 text-right">OK by</div>
+          </div>
+          {(() => {
+            // Group rows by category for sub-header dividers.
+            const rows = preview.price_changes_today.rows || [];
+            const groups = [];
+            let currentCat = null;
+            let currentBucket = null;
+            for (const r of rows) {
+              const cat = r.category || 'Uncategorized';
+              if (cat !== currentCat) {
+                currentCat = cat;
+                currentBucket = { cat, items: [] };
+                groups.push(currentBucket);
+              }
+              currentBucket.items.push(r);
+            }
+            return groups.map((g, gi) => (
+              <div key={gi} className="border-t border-amber-100">
+                <div className="px-3 py-1 bg-amber-50/50 text-[10px] uppercase tracking-wider text-amber-800 font-bold flex items-center justify-between">
+                  <span>{g.cat}</span>
+                  <span className="font-mono text-amber-600">{g.items.length}</span>
                 </div>
-                <div className="font-mono w-44 text-right">
-                  <span className="line-through text-slate-400">{formatPHP(r.old_price)}</span>
-                  {' → '}
-                  <span className={`font-semibold ${r.new_price < r.old_price ? 'text-red-600' : 'text-emerald-600'}`}>
-                    {formatPHP(r.new_price)}
-                  </span>
-                </div>
-                <div className="w-32 text-right text-[10px] text-slate-500">
-                  {r.approver_name && `OK ${r.approver_name}`}
+                <div className="px-3 py-1 text-xs">
+                  {g.items.map((r, i) => {
+                    const up = r.new_price > r.old_price;
+                    const down = r.new_price < r.old_price;
+                    const ma = parseFloat(r.moving_average_cost || 0);
+                    const lp = parseFloat(r.last_purchase_cost || 0);
+                    return (
+                      <div key={i} className="grid grid-cols-12 items-center border-b border-amber-50 last:border-0 py-1">
+                        <div className="col-span-4 min-w-0">
+                          <span className="font-medium text-slate-700 truncate block">{r.product_name}</span>
+                          <span className="text-[10px] text-slate-400 font-mono">{r.invoice_number}</span>
+                        </div>
+                        <div className="col-span-3 font-mono text-right">
+                          <span className="line-through text-slate-400">{formatPHP(r.old_price)}</span>
+                          {' → '}
+                          <span className={`font-semibold ${down ? 'text-red-600' : up ? 'text-emerald-600' : 'text-slate-700'}`}>
+                            {formatPHP(r.new_price)}
+                          </span>
+                        </div>
+                        <div className="col-span-2 text-right text-[11px] font-mono text-slate-500">
+                          {ma > 0 ? formatPHP(ma) : '—'}
+                        </div>
+                        <div className="col-span-2 text-right text-[11px] font-mono text-slate-500">
+                          {lp > 0 ? formatPHP(lp) : '—'}
+                        </div>
+                        <div className="col-span-1 text-right text-[10px] text-slate-500 truncate">
+                          {r.approver_name || '—'}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
-            ))}
-          </div>
+            ));
+          })()}
         </div>
       )}
 
