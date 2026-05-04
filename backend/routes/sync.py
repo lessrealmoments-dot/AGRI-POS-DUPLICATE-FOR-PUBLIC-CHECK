@@ -88,6 +88,35 @@ async def get_pos_sync_data(user=Depends(get_current_user), branch_id: str = Non
             bp_query = {**bp_query, **time_filter}
         branch_prices = await db.branch_prices.find(bp_query, {"_id": 0}).to_list(10000)
 
+    # ── Critical fix (price drift): on delta sync, also include products whose
+    # branch_prices row changed since last_sync — even if the master products
+    # row didn't change. Otherwise the terminal's cached `product.prices` map
+    # is never re-merged and the cashier sees the stale (global) price.
+    # See: branch retail "Galimax 1" updated on web → terminal kept old global.
+    if is_delta and branch_id and branch_prices:
+        bp_pids_changed = list({bp.get("product_id") for bp in branch_prices if bp.get("product_id")})
+        existing_pids = {p.get("id") for p in products}
+        missing_pids = [pid for pid in bp_pids_changed if pid and pid not in existing_pids]
+        if missing_pids:
+            extra_products = await db.products.find(
+                {"id": {"$in": missing_pids}, "active": True}, {"_id": 0}
+            ).to_list(len(missing_pids))
+            products.extend(extra_products)
+        # Also re-emit repack children of any parent whose branch_prices.cost_price
+        # changed, since their derived capital/cost depends on parent's branch cost.
+        parent_pids = [
+            bp.get("product_id") for bp in branch_prices
+            if bp.get("product_id") and (bp.get("cost_price") is not None)
+        ]
+        if parent_pids:
+            repack_children = await db.products.find(
+                {"parent_id": {"$in": parent_pids}, "is_repack": True, "active": True},
+                {"_id": 0}
+            ).to_list(10000)
+            for rc in repack_children:
+                if rc.get("id") not in {p.get("id") for p in products}:
+                    products.append(rc)
+
     # Deleted/deactivated products since last_sync (for delta cache cleanup)
     deleted_ids = []
     deleted_customer_ids = []

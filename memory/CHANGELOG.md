@@ -1069,3 +1069,31 @@ so short numeric tokens no longer leak unrelated products via SKU collisions.
 - Testing agent performed 2-pass Playwright (admin + seeded limited-perm manager) verification.
 - 0 UI/integration/backend issues. Admin sees everything; limited manager sees no gated buttons.
 - NEW: `tests/seed_limited_manager_iter219.py` (testing-agent authored) seeds a perm-restricted manager.
+
+## Iter 225 — Feb 2026 (Critical: Terminal Price Drift Fix)
+
+### Bug
+Cashier ringing up "Galimax 1" on the paired Terminal saw ₱2065 while the
+web Sales (`/sales-new`) showed ₱2075 — the freshly-encoded branch retail.
+Root cause: the Terminal performs **delta** syncs against `/sync/pos-data`.
+When an admin edits only the per-branch price (writes `branch_prices`), the
+master `products` document is untouched, so its `updated_at` does not change.
+The delta sync therefore emitted only the new `branch_prices` row but not the
+product itself — and `TerminalSales.jsx` reads `product.prices[scheme]`
+directly, never re-merging branch overrides at runtime. Result: terminal kept
+its stale, global cached price. **Data-integrity hazard:** every per-branch
+retail change written via the web after the first full sync was invisible to
+the terminal until the cashier manually forced a full resync.
+
+### Fix
+- `backend/routes/sync.py` (`/sync/pos-data`): on delta + branch context, also
+  pull products whose `branch_prices` row was updated since `last_sync` (and
+  any repack children whose parent's branch cost changed) and append them
+  into the `products[]` payload **before** the existing enrichment loop.
+  The merge logic at lines 213-222 then injects the override correctly so the
+  terminal upserts the cached row with the new merged retail.
+
+### Tests
+- NEW: `tests/test_branch_price_delta_sync_225.py` — fails on the old code,
+  passes after the fix. Reproduces the exact "global 2065 vs branch 2075"
+  scenario end-to-end.
