@@ -9,7 +9,7 @@ import os
 import time
 import requests
 
-API = os.environ.get("API_URL", "https://backdated-guard.preview.emergentagent.com").rstrip("/") + "/api"
+API = os.environ.get("API_URL", "https://zreport-adjustments.preview.emergentagent.com").rstrip("/") + "/api"
 EMAIL = os.environ.get("TEST_EMAIL", "janmarkeahig@gmail.com")
 PASSWORD = os.environ.get("TEST_PASSWORD", "Aa@58798546521325")
 
