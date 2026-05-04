@@ -1,5 +1,17 @@
 # AgriBooks Changelog
 
+## Feb 2026 — Accounting Page: Customer Typeahead Search in Farm Expense & Cash Out Dialogs
+
+**User request**: On `/accounting`, the Farm Expense and Customer Cash Out dialogs used a `<Select>` dropdown for picking the customer to bill — unusable with 500+ customers. User asked for a typeahead input, and to move **Bill to Customer** to the **top**, above **Service Description**.
+
+**Fix** (`/app/frontend/src/pages/AccountingPage.js`):
+- Replaced the `<Select>` dropdown in both the Farm Expense dialog and the Customer Cash Out dialog with a typeahead `<Input>` — matches by `customer.name.toLowerCase().includes(query)`, shows up to 8 suggestions, supports keyboard navigation (`ArrowUp/Down/Enter/Escape`).
+- Re-ordered the Farm Expense dialog so **Bill to Customer** is now the first field (above Service Description), matching user-chosen workflow.
+- Added typeahead state (`farmCustomerQuery/Highlight/ListOpen`, `cashOutCustomerQuery/Highlight/ListOpen`).
+- Shows an AR balance badge on the selected customer (red pill) for quick credit visibility.
+- Mirrors the proven pattern already in `ExpensesPage.js` (`data-testid="farm-customer-search"`, `cashout-customer-search`, etc.).
+
+
 ## Feb 2026 — Close Wizard AR Payments: Voided Payments Double-Counted (Iter 224)
 
 **User report**: Close Wizard Step 3 "AR Payments" showed customer DEMAYO ROLANDO's invoice `SI-SB-001029` **twice** — once as ₱42,295 paid, again as ₱38,995 paid (total ₱81,290), against a real collection of only ₱43,105. User rightly suspected "the math is wrong."

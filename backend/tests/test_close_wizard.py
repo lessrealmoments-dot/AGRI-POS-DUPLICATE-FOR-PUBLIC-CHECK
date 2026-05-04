@@ -11,7 +11,7 @@ import pytest
 import requests
 import os
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://audit-pulse-9.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://branch-sync-10.preview.emergentagent.com').rstrip('/')
 
 # Main Branch - Downtown
 BRANCH_ID = "da114e26-fd00-467f-8728-6b8047a244b5"

@@ -110,6 +110,14 @@ export default function AccountingPage() {
     due_date: '', terms: ''
   });
   const [payableForm, setPayableForm] = useState({ supplier: '', description: '', amount: 0, due_date: '' });
+  // Typeahead state for Bill-to-Customer (Farm Expense) and Customer Cash Out —
+  // replaces the <Select> dropdown that forced scrolling through 500+ customers.
+  const [farmCustomerQuery, setFarmCustomerQuery] = useState('');
+  const [farmCustomerHighlight, setFarmCustomerHighlight] = useState(0);
+  const [farmCustomerListOpen, setFarmCustomerListOpen] = useState(false);
+  const [cashOutCustomerQuery, setCashOutCustomerQuery] = useState('');
+  const [cashOutCustomerHighlight, setCashOutCustomerHighlight] = useState(0);
+  const [cashOutCustomerListOpen, setCashOutCustomerListOpen] = useState(false);
   const [expenseReceiptData, setExpenseReceiptData] = useState(null);
   
   // Filters
@@ -892,7 +900,105 @@ export default function AccountingPage() {
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
               This will record a farm expense and automatically create an invoice for the selected customer.
             </div>
-            
+
+            {/* Bill to Customer — moved to top per user feedback. Replaces
+                dropdown with typeahead (500+ customers can't be browsed). */}
+            <div>
+              <Label className="text-xs text-slate-500 font-semibold">Bill to Customer *</Label>
+              <p className="text-xs text-slate-400 mb-2">Search by name — an invoice will be auto-created for the selected customer</p>
+              {(() => {
+                const selectedCustomer = customers.find(c => c.id === farmExpenseForm.customer_id);
+                if (selectedCustomer) {
+                  return (
+                    <div className="flex items-center justify-between h-10 px-3 rounded-md border-2 border-amber-400 bg-amber-50/50"
+                      data-testid="farm-customer-selected">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-sm font-semibold text-slate-800 truncate">{selectedCustomer.name}</span>
+                        {selectedCustomer.balance > 0 && (
+                          <span className="text-[10px] font-mono text-red-600 bg-red-50 px-1.5 py-0.5 rounded">
+                            AR: {formatPHP(selectedCustomer.balance)}
+                          </span>
+                        )}
+                      </div>
+                      <button type="button"
+                        onClick={() => {
+                          setFarmExpenseForm({ ...farmExpenseForm, customer_id: '' });
+                          setFarmCustomerQuery('');
+                          setFarmCustomerListOpen(false);
+                        }}
+                        className="text-[11px] text-slate-500 hover:text-red-600 underline"
+                        data-testid="farm-customer-clear">
+                        Change
+                      </button>
+                    </div>
+                  );
+                }
+                const q = farmCustomerQuery.trim().toLowerCase();
+                const matches = q
+                  ? customers.filter(c => (c.name || '').toLowerCase().includes(q)).slice(0, 8)
+                  : [];
+                const pick = (c) => {
+                  setFarmExpenseForm({ ...farmExpenseForm, customer_id: c.id });
+                  setFarmCustomerQuery('');
+                  setFarmCustomerListOpen(false);
+                };
+                return (
+                  <div className="relative">
+                    <Input
+                      className="h-10"
+                      placeholder="Type customer name..."
+                      value={farmCustomerQuery}
+                      onChange={e => {
+                        setFarmCustomerQuery(e.target.value);
+                        setFarmCustomerHighlight(0);
+                        setFarmCustomerListOpen(true);
+                      }}
+                      onFocus={() => setFarmCustomerListOpen(true)}
+                      onKeyDown={(e) => {
+                        if (matches.length === 0) return;
+                        if (e.key === 'ArrowDown') {
+                          e.preventDefault();
+                          setFarmCustomerHighlight(h => Math.min(h + 1, matches.length - 1));
+                        } else if (e.key === 'ArrowUp') {
+                          e.preventDefault();
+                          setFarmCustomerHighlight(h => Math.max(h - 1, 0));
+                        } else if (e.key === 'Enter') {
+                          e.preventDefault();
+                          pick(matches[farmCustomerHighlight]);
+                        } else if (e.key === 'Escape') {
+                          setFarmCustomerListOpen(false);
+                        }
+                      }}
+                      data-testid="farm-customer-search" />
+                    {farmCustomerListOpen && matches.length > 0 && (
+                      <div className="absolute z-30 left-0 right-0 mt-1 bg-white rounded-lg shadow-lg border border-slate-200 max-h-60 overflow-y-auto"
+                        data-testid="farm-customer-results">
+                        {matches.map((c, i) => (
+                          <button type="button" key={c.id}
+                            onClick={() => pick(c)}
+                            onMouseEnter={() => setFarmCustomerHighlight(i)}
+                            className={`w-full text-left px-3 py-2 text-sm border-b border-slate-50 last:border-0 ${
+                              i === farmCustomerHighlight ? 'bg-amber-50' : 'hover:bg-slate-50'
+                            }`}
+                            data-testid={`farm-customer-result-${i}`}>
+                            <div className="font-medium text-slate-800">{c.name}</div>
+                            {c.balance > 0 && (
+                              <div className="text-[10px] font-mono text-red-600">AR: {formatPHP(c.balance)}</div>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {farmCustomerListOpen && q && matches.length === 0 && (
+                      <div className="absolute z-30 left-0 right-0 mt-1 bg-white rounded-lg shadow-lg border border-slate-200 px-3 py-3 text-xs text-slate-400">
+                        No customer found for "{farmCustomerQuery}"
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+
             <div>
               <Label className="text-xs text-slate-500">Service Description *</Label>
               <Input
@@ -955,21 +1061,6 @@ export default function AccountingPage() {
               </div>
             </div>
 
-            <div className="border-t pt-4 mt-4">
-              <Label className="text-xs text-slate-500 font-semibold">Bill to Customer *</Label>
-              <p className="text-xs text-slate-400 mb-2">An invoice will be automatically created for this customer</p>
-              <Select value={farmExpenseForm.customer_id} onValueChange={v => setFarmExpenseForm({ ...farmExpenseForm, customer_id: v })}>
-                <SelectTrigger className="h-10" data-testid="farm-expense-customer">
-                  <SelectValue placeholder="Select customer to bill" />
-                </SelectTrigger>
-                <SelectContent>
-                  {customers.map(c => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label className="text-xs text-slate-500">Invoice Due Date</Label>
@@ -1021,18 +1112,99 @@ export default function AccountingPage() {
             </div>
             
             <div>
-              <Label className="text-xs text-slate-500">Select Customer *</Label>
-              <p className="text-xs text-slate-400 mb-2">An invoice will be automatically created for this customer</p>
-              <Select value={cashOutForm.customer_id} onValueChange={v => setCashOutForm({ ...cashOutForm, customer_id: v })}>
-                <SelectTrigger className="h-10" data-testid="cashout-customer">
-                  <SelectValue placeholder="Select customer" />
-                </SelectTrigger>
-                <SelectContent>
-                  {customers.map(c => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label className="text-xs text-slate-500 font-semibold">Select Customer *</Label>
+              <p className="text-xs text-slate-400 mb-2">Search by name — an invoice will be auto-created for the selected customer</p>
+              {(() => {
+                const selectedCustomer = customers.find(c => c.id === cashOutForm.customer_id);
+                if (selectedCustomer) {
+                  return (
+                    <div className="flex items-center justify-between h-10 px-3 rounded-md border-2 border-blue-400 bg-blue-50/50"
+                      data-testid="cashout-customer-selected">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-sm font-semibold text-slate-800 truncate">{selectedCustomer.name}</span>
+                        {selectedCustomer.balance > 0 && (
+                          <span className="text-[10px] font-mono text-red-600 bg-red-50 px-1.5 py-0.5 rounded">
+                            AR: {formatPHP(selectedCustomer.balance)}
+                          </span>
+                        )}
+                      </div>
+                      <button type="button"
+                        onClick={() => {
+                          setCashOutForm({ ...cashOutForm, customer_id: '' });
+                          setCashOutCustomerQuery('');
+                          setCashOutCustomerListOpen(false);
+                        }}
+                        className="text-[11px] text-slate-500 hover:text-red-600 underline"
+                        data-testid="cashout-customer-clear">
+                        Change
+                      </button>
+                    </div>
+                  );
+                }
+                const q = cashOutCustomerQuery.trim().toLowerCase();
+                const matches = q
+                  ? customers.filter(c => (c.name || '').toLowerCase().includes(q)).slice(0, 8)
+                  : [];
+                const pick = (c) => {
+                  setCashOutForm({ ...cashOutForm, customer_id: c.id });
+                  setCashOutCustomerQuery('');
+                  setCashOutCustomerListOpen(false);
+                };
+                return (
+                  <div className="relative">
+                    <Input
+                      className="h-10"
+                      placeholder="Type customer name..."
+                      value={cashOutCustomerQuery}
+                      onChange={e => {
+                        setCashOutCustomerQuery(e.target.value);
+                        setCashOutCustomerHighlight(0);
+                        setCashOutCustomerListOpen(true);
+                      }}
+                      onFocus={() => setCashOutCustomerListOpen(true)}
+                      onKeyDown={(e) => {
+                        if (matches.length === 0) return;
+                        if (e.key === 'ArrowDown') {
+                          e.preventDefault();
+                          setCashOutCustomerHighlight(h => Math.min(h + 1, matches.length - 1));
+                        } else if (e.key === 'ArrowUp') {
+                          e.preventDefault();
+                          setCashOutCustomerHighlight(h => Math.max(h - 1, 0));
+                        } else if (e.key === 'Enter') {
+                          e.preventDefault();
+                          pick(matches[cashOutCustomerHighlight]);
+                        } else if (e.key === 'Escape') {
+                          setCashOutCustomerListOpen(false);
+                        }
+                      }}
+                      data-testid="cashout-customer-search" />
+                    {cashOutCustomerListOpen && matches.length > 0 && (
+                      <div className="absolute z-30 left-0 right-0 mt-1 bg-white rounded-lg shadow-lg border border-slate-200 max-h-60 overflow-y-auto"
+                        data-testid="cashout-customer-results">
+                        {matches.map((c, i) => (
+                          <button type="button" key={c.id}
+                            onClick={() => pick(c)}
+                            onMouseEnter={() => setCashOutCustomerHighlight(i)}
+                            className={`w-full text-left px-3 py-2 text-sm border-b border-slate-50 last:border-0 ${
+                              i === cashOutCustomerHighlight ? 'bg-blue-50' : 'hover:bg-slate-50'
+                            }`}
+                            data-testid={`cashout-customer-result-${i}`}>
+                            <div className="font-medium text-slate-800">{c.name}</div>
+                            {c.balance > 0 && (
+                              <div className="text-[10px] font-mono text-red-600">AR: {formatPHP(c.balance)}</div>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {cashOutCustomerListOpen && q && matches.length === 0 && (
+                      <div className="absolute z-30 left-0 right-0 mt-1 bg-white rounded-lg shadow-lg border border-slate-200 px-3 py-3 text-xs text-slate-400">
+                        No customer found for "{cashOutCustomerQuery}"
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             <div className="grid grid-cols-2 gap-4">
