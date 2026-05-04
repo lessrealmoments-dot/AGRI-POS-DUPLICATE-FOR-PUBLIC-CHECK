@@ -1,5 +1,40 @@
 # AgriBooks Changelog
 
+## Feb 2026 — Fund Injection Date + Offline Receipt Numbering + Payment Date Edit (Iter 191)
+
+**User reports**:
+- "Closing wizard and Z report didn't include fund injection"
+- "Fund Injection should have at least a date that can be added, only possible on open days not on closed days"
+- "Sales receipt number on offline is not based on our standard — use our online standard with a postfix that differentiates it from online"
+- "On payment history add a change date feature" (already-posted payments)
+
+**Three minor but high-value improvements:**
+
+### 1. Fund Injection Date Field + Closed-Day Guard
+- `FundTransferDialog` now has a native date picker (defaults to local today, `max=today`)
+- Pre-flight validation via `/invoices/check-date-closed` — Confirm button disabled when the chosen date is already closed; inline message explains why
+- Backend `POST /fund-transfers` accepts `date` and rejects with `403` if the date is in a closed Z-Report day
+- `GET /daily-close-preview/batch` now returns the missing `fund_transfers_today` list, so batch Z-Reports finally show capital injections
+- Per-row `date` field added to both single-day and batch `fund_transfers_today` payloads; Close Wizard renders it next to each transfer
+
+### 2. Offline Sales Receipt Numbering Standard
+- New helper `getNextOfflineReceiptNumber(prefix, branchCode)` in `/app/frontend/src/lib/offlineDB.js`
+- Format: `{PREFIX}-{BRANCH_CODE}-OFF-{6-digit local seq}` e.g. `SI-MN-OFF-000001`
+- Per-device counter persisted in IndexedDB `meta` store — different sequence from online, zero collision risk
+- Offline sales attach `invoice_number` before `addPendingSale()`; `/sales/sync` already preserves it (no renumbering)
+- Fallback: if a sale starts online and falls back to offline due to network error, a number is minted at the fallback point
+- Pre-invoice signature dialog no longer shows `(pending)` in offline mode — uses the real offline number
+
+### 3. Payment History — Change Date Feature
+- New backend endpoint: `POST /api/customers/{customer_id}/edit-payment-date`
+- PIN-gated (manager PIN, action_key=`modify_payment`), audit-logged via `date_edit_history` array appended to the payment record (from, to, reason, edited_by, authorized_by, edited_at)
+- Guards: cannot edit voided payments; both the original and the target date must be open (not in a closed Z-Report)
+- UI: `CalendarDays` "Date" button added to both customer-level payment history rows and the global Payment History table (data-testid=`edit-payment-date-{payment_id}` and `hist-edit-date-{i}`)
+- Reusable `edit-payment-date-dialog` with old date display, new date picker, optional reason, manager PIN
+
+**Testing**: Iter 191 testing agent — 11/11 pytest backend PASS, frontend UI smoke confirmed (customer-row + global-history "Date" buttons open the dialog; FundTransferDialog date-closed validation visible).
+
+
 ## Feb 2026 — Sales Page Perf Pass: Cache + Debounce (Iter 222)
 
 **User reports**:

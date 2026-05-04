@@ -1,5 +1,24 @@
 # AgriBooks PRD
 
+## Iter 223 (Feb 2026) — Fund Injection Date + Offline Receipt Numbering + Payment Date Edit ✅
+
+**Three minor improvements requested by user:**
+1. **Fund Injection Date + Closed-Day Guard**: `FundTransferDialog` now has a date picker (default today, max=today); backend rejects capital injections backdated to a closed Z-Report day with 403. Batch and single-day close preview now both include `fund_transfers_today` with per-row `date`, fixing the bug where Z-Reports did not show fund injections.
+2. **Offline Receipt Numbering Standard**: Offline sales mint `{PREFIX}-{BRANCH_CODE}-OFF-{6-digit local seq}` (e.g. `SI-MN-OFF-000001`). Per-device counter in IndexedDB. Preserved by `/sales/sync` — no renumbering.
+3. **Payment History Change Date**: New PIN-gated endpoint `POST /customers/{id}/edit-payment-date` with audit trail (`date_edit_history` array). Guards: voided payments blocked; both old and new dates must be on open (unclosed) days. UI: `CalendarDays` buttons in customer history and global Payment History rows; reusable `edit-payment-date-dialog`.
+
+**Testing**: iteration_191.json — backend 11/11 PASS; frontend UI smoke verified.
+
+**Files touched**:
+- `/app/backend/routes/accounting.py` — fund_transfers date+closed-day validation; new edit-payment-date endpoint.
+- `/app/backend/routes/daily_operations.py` — batch preview now returns `fund_transfers_today`; per-row `date` field.
+- `/app/frontend/src/components/FundTransferDialog.js` — date picker + closed-day pre-flight.
+- `/app/frontend/src/lib/offlineDB.js` — `getNextOfflineReceiptNumber()` helper.
+- `/app/frontend/src/pages/UnifiedSalesPage.js` — offline invoice_number minting + fallback.
+- `/app/frontend/src/pages/PaymentsPage.js` — Change Date dialog + action buttons.
+- `/app/frontend/src/pages/CloseWizardPage.js` — render per-row date on fund transfers.
+
+
 ## Iter 219 (Feb 2026) — UI Permission Gating Audit: Suppliers/Accounting/Inventory ✅
 
 Follow-up to Iter 218. Extended the same button-level `hasPerm` gating pattern to 3 more pages.
