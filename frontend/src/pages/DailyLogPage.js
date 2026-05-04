@@ -53,7 +53,7 @@ function ZReport({ data, branchName, onPrint }) {
   if (!data) return null;
   const r2 = n => Math.round((parseFloat(n) || 0) * 100) / 100;
   return (
-    <div className="space-y-4 print:space-y-3">
+    <div id="printable-report" className="space-y-4 print:space-y-3">
       <div className="flex items-center justify-between print:hidden">
         <Card className="border-emerald-200 bg-emerald-50 flex-1 mr-3"><CardContent className="p-3">
           <p className="font-bold text-emerald-800">

@@ -2217,7 +2217,7 @@ export default function CloseWizardPage() {
 
           {/* ── STEP 8: Open Tomorrow ── */}
           {step === 8 && (
-            <div className="space-y-4 text-center max-w-lg mx-auto py-4">
+            <div id="printable-report" className="space-y-4 text-center max-w-lg mx-auto py-4">
               {isClosed ? (
                 <>
                   <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto">

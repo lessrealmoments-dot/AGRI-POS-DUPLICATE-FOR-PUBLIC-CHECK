@@ -1,5 +1,24 @@
 # AgriBooks Changelog
 
+## Feb 2026 — Z-Report Print = Blank Page (Iter 228)
+
+**User report**: On `/daily-ops` the Z-Report dialog renders fine on screen, but clicking **Print** produces an entirely blank page preview.
+
+**Root cause**: `/app/frontend/src/index.css` has a global `@media print` block:
+```css
+body * { visibility: hidden !important; }
+#printable-report, #printable-report * { visibility: visible !important; }
+#printable-report { position: absolute; left: 0; top: 0; width: 100%; padding: 24px; background: white; }
+```
+This hides EVERYTHING during print except an element with `id="printable-report"`. But that ID existed nowhere in the codebase — neither the `ZReport` component (`DailyLogPage.js` line 52) nor the Close Wizard Step 8 success view had it. So browser printed a blank page, exactly as the CSS instructed.
+
+**Fix** — added `id="printable-report"` to:
+1. `ZReport` component's root `<div>` (`DailyLogPage.js`) — covers both the inline close-day view AND the Z-Report Archive dialog.
+2. Close Wizard Step 8 success container (`CloseWizardPage.js`) — covers the "Print Z-Report" button at the end of the wizard.
+
+No other CSS or component changes needed; the existing print rules already layout + paginate the report cleanly once the ID is present.
+
+
 ## Feb 2026 — SMS ONE-SHOT Dispatch Policy (Iter 227) — Carrier-Flag Recovery
 
 **User report**: After the 60-SMS spam flood, the user's **carrier FLAGGED the SIM for spam**. User correctly pointed out: "If the server says pending, the gateway will send it the moment it comes back online. One send is enough. Retries are pointless and cause duplicates." They use the **web gateway** (not Android app), so there's no local app cache to clear.
