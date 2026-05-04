@@ -1,0 +1,53 @@
+{
+  "summary": "Tested CalcInput (QuickBooks-style inline calculator) wiring across ExpensesPage, PaymentsPage, UnifiedSalesPage, TerminalSales, FundTransferDialog, StockInjectionDialog. Core CalcInput component behaviour is WORKING correctly where wired (verified live with Playwright on expenses-expense-amount and expenses-cashout-amount: operator key pops bubble with data-calc-active=1, running total previews correctly, Enter commits, Escape reverts, double-operator is merged, non-numeric keys are blocked). Found 2 confirmed Phase-1 wiring misses where a plain <Input type=\"number\"> was left in place instead of <CalcInput>.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "ExpensesPage Farm Expense dialog",
+        "issue": "Amount field is still a plain <Input type=\"number\"> — CalcInput NOT wired. Operator key does not open calc tape. data-calc-active attribute absent. Confirmed by source inspection (/app/frontend/src/pages/ExpensesPage.js line 880-881) and live Playwright test (a0=None, a1=None, tape not shown, typing '200+50' was silently truncated to '050').",
+        "selector": "[data-testid=\"expenses-farm-amount\"]",
+        "priority": "HIGH"
+      },
+      {
+        "component": "UnifiedSalesPage Quick-mode split payment",
+        "issue": "Split Digital amount field uses plain <Input type=\"number\"> instead of CalcInput. Confirmed at /app/frontend/src/pages/UnifiedSalesPage.js line 3709. split-cash at line 3703 is correctly a CalcInput, but its sibling split-digital is not. Inconsistent UX (cash supports calc, digital does not).",
+        "selector": "[data-testid=\"split-digital\"]",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "verified_working": [
+    "expenses-expense-amount: PASS (1500+250=1750, 20*3=60, escape reverts to 5, double-op '5++3' handled, letters blocked — visual confirmation in screenshot tape bubble '5+3 = 8')",
+    "expenses-cashout-amount: PASS (200+50=250, full tape text '200+50\\n=\\n250\\n↵ commit · Esc cancel')",
+    "CalcInput component rendering: data-testid={testId}-tape bubble appears on operator keypress, data-calc-active flips 0↔1 correctly, offline-safe (no eval used)"
+  ],
+  "not_tested_reasons": [
+    "PaymentsPage receive-amount: element present and wired as CalcInput, but disabled={!selectedCustomer} blocked direct test. Could not auto-locate customer selector (tried multiple placeholder patterns). Wiring itself is correct in source.",
+    "FundTransferDialog fund-transfer-amount: could not auto-locate the button that opens the dialog on /accounts, /funds, /wallet, /dashboard routes. Source at /app/frontend/src/components/FundTransferDialog.js line 138 confirms it uses CalcInput.",
+    "StockInjectionDialog injection-qty: confirmed via source (line 203) uses CalcInput; dialog entry point not auto-located. Source wiring correct.",
+    "TerminalSales (POS) live POS testing: /terminal route shows pairing screen requiring manager-pairing flow; cannot test pairing + offline from Playwright in 1 run. Source inspection confirms 6 CalcInput usages correctly wired (scan-qty-input, discount-input, amount-tendered-input, split-cash-input, split-digital-input, and one more). Note: TerminalSales testids end with -input suffix, not matching the names in the review doc, but source is wired correctly.",
+    "UnifiedSalesPage cart/line/freight/overall-discount/amount-tendered/partial calc wiring: confirmed via grep (11 CalcInput occurrences) but live flow testing for each requires adding line items which is several steps — not run."
+  ],
+  "test_report_links": [],
+  "action_items": [
+    "Fix ExpensesPage Farm Expense amount (line 880-881) — replace <Input type=\"number\"> with <CalcInput>. onChange signature will change from e=>parseFloat(e.target.value) to (v)=>parseFloat(v). data-testid stays 'expenses-farm-amount'.",
+    "Fix UnifiedSalesPage split-digital (line 3709) — replace <Input type=\"number\"> with <CalcInput> to match its sibling split-cash at line 3703. onChange signature change (drop e.target).",
+    "Optional: After fixes, main agent can self-test by opening each dialog and pressing '+' on the input — if data-calc-active flips to '1' and the {testid}-tape bubble appears, it works."
+  ],
+  "critical_code_review_comments": [
+    "Two Phase-1 wiring misses (expenses-farm-amount, split-digital) — easy to miss because onChange signature differs between raw <Input> (e.target.value) and <CalcInput> (v). Recommend a lint/grep check: 'rg \"<Input type=\\\"number\\\"\" frontend/src | wc -l' to ensure Phase-2 sweep doesn't miss any.",
+    "CalcInput itself is well-designed: pure JS shunting-yard (no eval — offline-safe), proper keydown preventDefault, tape has role=status aria-live=polite for screen readers, data-calc-active attribute enables robust test hooks. No bugs found in the component.",
+    "PaymentsPage receive-amount correctly disables itself until a customer is selected (line 1245 disabled={!selectedCustomer}) — this is expected business logic, not a calc bug."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped per request)", "frontend": "2 confirmed wiring misses / ~25 expected CalcInput locations = ~92% Phase-1 completion"},
+  "test_credentials": "Used test_org_admin@regression.local / RegressionPass!2026 from /app/memory/test_credentials.md — works.",
+  "seed_data_creation": "None",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Main agent should patch the 2 inputs flagged above. After patch, next testing agent can verify: (1) open Farm Expense dialog, focus amount, type '10+5', Enter → expect '15'; (2) in UnifiedSales Quick mode split payment, test split-digital supports calc the same way split-cash does. Also, the Terminal POS offline mode + FundTransfer/StockInjection flows were NOT exercised live due to multi-step entry paths — those source files do import & use CalcInput correctly but live e2e is still pending.",
+  "rca of the issue": "Phase 1 wiring was a manual file-by-file replacement of <Input type=\"number\"> with <CalcInput>. The two misses are where the Input was in a less-travelled branch of the file (Farm Expense secondary dialog in ExpensesPage; split-digital sibling in UnifiedSalesPage). Likely human oversight — both adjacent siblings (expenses-expense-amount, split-cash) were correctly migrated, but the mirror input was missed. Mitigation: a single rg sweep 'rg \"<Input type=\\\"number\\\"\" frontend/src/pages frontend/src/components' will reveal any remaining plain numeric inputs; consider converting them all (or whitelisting ones that legitimately shouldn't be calc fields, e.g. quantity-in-units where user never does math)."
+}

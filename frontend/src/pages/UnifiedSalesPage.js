@@ -3,6 +3,7 @@ import { useAuth, api } from '../contexts/AuthContext';
 import { formatPHP, fmtDateTime, fmtDate } from '../lib/utils';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
+import CalcInput from '../components/CalcInput';
 import { Label } from '../components/ui/label';
 import { Badge } from '../components/ui/badge';
 import { Card, CardContent } from '../components/ui/card';
@@ -3145,43 +3146,39 @@ export default function UnifiedSalesPage() {
                             {/* Quantity controls */}
                             <div className="flex items-center border border-slate-200 rounded overflow-hidden flex-shrink-0">
                               <button className="px-1.5 py-1 text-slate-400 hover:bg-slate-100 h-7" onClick={() => updateQty(item.product_id, -1)}><Minus size={11} /></button>
-                              <input
-                                type="text"
-                                inputMode="decimal"
+                              <CalcInput
                                 className="w-12 text-center text-sm h-7 border-0 focus:outline-none"
-                                value={item._qtyStr ?? item.quantity}
-                                onChange={e => setCartQty(item.product_id, e.target.value)}
-                                onBlur={e => {
-                                  const v = parseFloat(e.target.value) || 0;
-                                  if (v === 0) removeFromCart(item.product_id);
-                                  else setCartQty(item.product_id, v);
+                                value={String(item._qtyStr ?? item.quantity ?? '')}
+                                onChange={(v) => setCartQty(item.product_id, v)}
+                                onBlur={() => {
+                                  const n = parseFloat(item._qtyStr ?? item.quantity) || 0;
+                                  if (n === 0) removeFromCart(item.product_id);
+                                  else setCartQty(item.product_id, n);
                                 }}
-                                onFocus={e => e.target.select()}
+                                selectOnFocus
                                 data-testid={`cart-qty-${item.product_id}`}
                               />
                               <button className="px-1.5 py-1 text-slate-400 hover:bg-slate-100 h-7" onClick={() => updateQty(item.product_id, 1)}><Plus size={11} /></button>
                             </div>
                             <span className="text-xs text-slate-400">×</span>
                             {/* Price (editable) */}
-                            <input
-                              type="text"
-                              inputMode="decimal"
+                            <CalcInput
                               className={`w-24 h-7 text-sm text-right px-2 border rounded focus:outline-none focus:ring-1 focus:ring-[#1A4D2E]/30 ${
                                 item.price <= 0 ? 'border-amber-400 bg-amber-50 text-amber-700'
                                 : !item.is_repack && parseFloat(item.original_price) > 0 && Math.abs(item.price - item.original_price) > 0.001 ? 'border-amber-500 bg-amber-50 text-amber-800 font-semibold'
                                 : canViewCost && (item.effective_capital || item.cost_price) > 0 && item.price < (item.effective_capital || item.cost_price) ? 'border-red-300 bg-red-50 text-red-600'
                                 : 'border-slate-200'
                               }`}
-                              value={item._priceStr ?? item.price}
-                              onChange={e => updateCartPrice(item.product_id, e.target.value)}
-                              onFocus={e => e.target.select()}
+                              value={String(item._priceStr ?? item.price ?? '')}
+                              onChange={(v) => updateCartPrice(item.product_id, v)}
                               onBlur={() => {
                                 if (item._priceStr !== undefined) {
                                   const p = parseFloat(item._priceStr) || 0;
                                   setCart(prev => prev.map(c => c.product_id !== item.product_id ? c : { ...c, price: p, total: p * c.quantity, _priceStr: undefined }));
                                 }
                               }}
-                              readOnly={!canDiscount}
+                              selectOnFocus
+                              disabled={!canDiscount}
                               title={!canDiscount ? 'No permission to change prices' : 'Edit to trigger Price Match (manager PIN required at checkout)'}
                             />
                             <span className="text-xs font-semibold text-[#1A4D2E] text-right flex-1">{formatPHP(item.total)}</span>
@@ -3371,33 +3368,29 @@ export default function UnifiedSalesPage() {
                             />
                           </td>
                           <td className="px-3 py-1">
-                            <Input
+                            <CalcInput
                               ref={el => qtyRefs.current[i] = el}
-                              type="text"
-                              inputMode="decimal"
                               className="h-8 text-right w-16"
-                              value={line._quantityStr ?? line.quantity}
-                              onFocus={e => e.target.select()}
-                              onChange={e => updateLine(i, 'quantity', e.target.value)}
+                              value={String(line._quantityStr ?? line.quantity ?? '')}
+                              selectOnFocus
+                              onChange={(v) => updateLine(i, 'quantity', v)}
                               onBlur={() => finalizeLineField(i, 'quantity')}
                             />
                           </td>
                           <td className="px-3 py-1">
                             <div>
-                              <Input
-                                type="text"
-                                inputMode="decimal"
+                              <CalcInput
                                 className={`h-8 text-right w-24 ${
                                   line.product_id && line.rate <= 0 ? 'border-amber-400 bg-amber-50'
                                   : line.product_id && !line.is_repack && parseFloat(line.original_rate) > 0 && Math.abs(line.rate - line.original_rate) > 0.001 ? 'border-amber-500 bg-amber-50 text-amber-800 font-semibold'
                                   : canViewCost && line.product_id && (line.effective_capital || line.cost_price) > 0 && line.rate > 0 && line.rate < (line.effective_capital || line.cost_price) ? 'border-red-300 bg-red-50 text-red-700'
                                   : ''
                                 }`}
-                                value={line._rateStr ?? line.rate}
-                                onFocus={e => e.target.select()}
-                                onChange={e => updateLine(i, 'rate', e.target.value)}
+                                value={String(line._rateStr ?? line.rate ?? '')}
+                                selectOnFocus
+                                onChange={(v) => updateLine(i, 'rate', v)}
                                 onBlur={() => finalizeLineField(i, 'rate')}
-                                readOnly={!canDiscount}
+                                disabled={!canDiscount}
                                 title={!canDiscount ? 'No permission to change prices' : 'Edit to trigger Price Match (manager PIN required at checkout)'}
                               />
                               {/* Price Match flag for changed rate — directional + delta */}
@@ -3450,13 +3443,11 @@ export default function UnifiedSalesPage() {
                               const isBelowCap = canViewCost && net !== null && cap > 0 && net < cap;
                               return (
                                 <div>
-                                  <Input
-                                    type="text"
-                                    inputMode="decimal"
+                                  <CalcInput
                                     className={`h-8 text-right w-20 ${isBelowCap ? 'border-red-400 bg-red-50 text-red-700' : ''} ${!canDiscount ? 'bg-slate-100 cursor-not-allowed' : ''}`}
-                                    value={line._discount_valueStr ?? line.discount_value}
-                                    onFocus={e => e.target.select()}
-                                    onChange={e => updateLine(i, 'discount_value', e.target.value)}
+                                    value={String(line._discount_valueStr ?? line.discount_value ?? '')}
+                                    selectOnFocus
+                                    onChange={(v) => updateLine(i, 'discount_value', v)}
                                     onBlur={() => finalizeLineField(i, 'discount_value')}
                                     disabled={!canDiscount}
                                     title={!canDiscount ? 'No discount permission' : ''}
@@ -3507,11 +3498,11 @@ export default function UnifiedSalesPage() {
                         <div className="flex justify-between text-sm"><span className="text-slate-500">Sub-Total</span><span className="font-medium">{formatPHP(subtotal)}</span></div>
                         <div className="flex items-center justify-between text-sm">
                           <span className="text-slate-500">Freight</span>
-                          <Input type="number" className="h-7 w-24 text-right" value={freight} onChange={e => setFreight(parseFloat(e.target.value) || 0)} />
+                          <CalcInput className="h-7 w-24 text-right" value={String(freight || '')} onChange={(v) => setFreight(parseFloat(v) || 0)} />
                         </div>
                         <div className="flex items-center justify-between text-sm">
                           <span className="text-slate-500">Discount</span>
-                          <Input type="number" className={`h-7 w-24 text-right ${!canDiscount ? 'bg-slate-100 cursor-not-allowed' : ''}`} value={overallDiscount} onChange={e => setOverallDiscount(parseFloat(e.target.value) || 0)} disabled={!canDiscount} />
+                          <CalcInput className={`h-7 w-24 text-right ${!canDiscount ? 'bg-slate-100 cursor-not-allowed' : ''}`} value={String(overallDiscount || '')} onChange={(v) => setOverallDiscount(parseFloat(v) || 0)} disabled={!canDiscount} />
                         </div>
                         <Separator />
                         <div className="flex justify-between font-bold text-base" style={{ fontFamily: 'Manrope' }}>
@@ -3640,11 +3631,10 @@ export default function UnifiedSalesPage() {
             {paymentType === 'cash' && (
               <div>
                 <Label>Amount Tendered</Label>
-                <Input
+                <CalcInput
                   data-testid="amount-tendered"
-                  type="number"
-                  value={amountTendered}
-                  onChange={e => setAmountTendered(parseFloat(e.target.value) || 0)}
+                  value={String(amountTendered || '')}
+                  onChange={(v) => setAmountTendered(parseFloat(v) || 0)}
                   className="text-lg h-12"
                 />
                 {change > 0 && (
@@ -3710,8 +3700,8 @@ export default function UnifiedSalesPage() {
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <Label className="text-xs text-emerald-700">Cash Amount</Label>
-                    <Input type="number" value={splitCash} data-testid="split-cash"
-                      onChange={e => { setSplitCash(e.target.value); setSplitDigital(String(Math.max(0, grandTotal - (parseFloat(e.target.value)||0)))); }}
+                    <CalcInput value={splitCash} data-testid="split-cash"
+                      onChange={(v) => { setSplitCash(v); setSplitDigital(String(Math.max(0, grandTotal - (parseFloat(v)||0)))); }}
                       placeholder="0.00" className="mt-1 h-9 border-emerald-200" />
                   </div>
                   <div>
@@ -3756,11 +3746,10 @@ export default function UnifiedSalesPage() {
                 {selectedCustomer ? (
                   <>
                     <Label>Amount Paid Now</Label>
-                    <Input
+                    <CalcInput
                       data-testid="partial-amount"
-                      type="number"
-                      value={partialPayment}
-                      onChange={e => setPartialPayment(Math.min(parseFloat(e.target.value) || 0, grandTotal))}
+                      value={String(partialPayment || '')}
+                      onChange={(v) => setPartialPayment(Math.min(parseFloat(v) || 0, grandTotal))}
                       className="text-lg h-12"
                     />
                     <div className="flex justify-between mt-2 p-2 bg-amber-50 rounded-lg">

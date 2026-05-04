@@ -18,6 +18,7 @@ import { invalidateBalanceCache } from '../../components/CustomerBalanceBadge';
 import RequestSignatureDialog from '../../components/RequestSignatureDialog';
 import OfflineCreditBypassDialog from '../../components/OfflineCreditBypassDialog';
 import GlobalPriceBadge from '../../components/GlobalPriceBadge';
+import CalcInput from '../../components/CalcInput';
 
 const COLLAPSE_THRESHOLD = 4; // show all if ≤ 4, add "More" toggle if > 4
 
@@ -1078,10 +1079,9 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
                 <label className="text-[10px] text-slate-400 font-medium mb-1 block">Discount</label>
                 <div className="flex items-center gap-1.5">
                   <div className="relative flex-1">
-                    <Input
-                      type="number" inputMode="decimal" min={0} step="0.01"
+                    <CalcInput
                       value={discountInput}
-                      onChange={e => { setDiscountInput(e.target.value); setMarginWarningAccepted(false); }}
+                      onChange={(v) => { setDiscountInput(v); setMarginWarningAccepted(false); }}
                       placeholder={discountMode === 'percent' ? '0%' : '₱0'}
                       className="h-8 text-sm font-mono pr-8"
                       data-testid="discount-input"
@@ -1195,8 +1195,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
               <div className="space-y-3" data-testid="cash-payment-form">
                 <div>
                   <label className="text-xs text-slate-500 font-medium mb-1 block">Amount Tendered</label>
-                  <Input type="number" inputMode="decimal" min={0} step="0.01"
-                    value={amountTendered} onChange={e => setAmountTendered(e.target.value)}
+                  <CalcInput value={amountTendered} onChange={setAmountTendered}
                     placeholder={formatPHP(grandTotal)} className="h-12 text-xl font-mono text-center font-bold"
                     data-testid="amount-tendered-input" autoFocus />
                 </div>
@@ -1298,14 +1297,14 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-slate-500 font-medium mb-1 block">Cash Amount</label>
-                    <Input type="number" inputMode="decimal" value={splitCash}
-                      onChange={e => { setSplitCash(e.target.value); setSplitDigital(String(Math.max(0, grandTotal - (parseFloat(e.target.value) || 0)))); }}
+                    <CalcInput value={splitCash}
+                      onChange={(v) => { setSplitCash(v); setSplitDigital(String(Math.max(0, grandTotal - (parseFloat(v) || 0)))); }}
                       placeholder="0.00" className="h-10 font-mono" data-testid="split-cash-input" />
                   </div>
                   <div>
                     <label className="text-xs text-slate-500 font-medium mb-1 block">Digital Amount</label>
-                    <Input type="number" inputMode="decimal" value={splitDigital}
-                      onChange={e => { setSplitDigital(e.target.value); setSplitCash(String(Math.max(0, grandTotal - (parseFloat(e.target.value) || 0)))); }}
+                    <CalcInput value={splitDigital}
+                      onChange={(v) => { setSplitDigital(v); setSplitCash(String(Math.max(0, grandTotal - (parseFloat(v) || 0)))); }}
                       placeholder="0.00" className="h-10 font-mono" data-testid="split-digital-input" />
                   </div>
                 </div>
@@ -1679,15 +1678,13 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
             </div>
             <div>
               <label className="text-xs text-slate-500 font-medium mb-1 block">Quantity</label>
-              <Input
-                type="number"
-                inputMode="numeric"
-                min={1}
+              <CalcInput
                 value={scanQty}
-                onChange={e => setScanQty(e.target.value)}
+                onChange={setScanQty}
                 onKeyDown={e => { if (e.key === 'Enter') handleScanQtyConfirm(false); }}
                 className="h-12 text-xl font-mono text-center font-bold"
                 data-testid="scan-qty-input"
+                integerOnly
                 autoFocus
               />
             </div>

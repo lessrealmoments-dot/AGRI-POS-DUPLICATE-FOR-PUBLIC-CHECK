@@ -10,6 +10,7 @@ import { Badge } from './ui/badge';
 import { AlertTriangle, Building2, Package, Plus, Minus, Equal, Loader2, ShieldAlert } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPHP } from '../lib/utils';
+import CalcInput from './CalcInput';
 
 const REASON_LABELS = {
   opening_balance:  'Opening Balance (new branch seed)',
@@ -194,14 +195,9 @@ export default function StockInjectionDialog({ open, onOpenChange, product, onDo
             <Label className="text-xs font-semibold text-slate-700">
               3. {mode === 'set' ? 'New Total Quantity' : 'Quantity to ' + (mode === 'add' ? 'Add' : 'Deduct')} *
             </Label>
-            <Input
-              type="number"
-              min="0"
-              step="0.01"
-              inputMode="decimal"
+            <CalcInput
               value={quantity}
-              onChange={e => setQuantity(e.target.value)}
-              onWheel={e => e.currentTarget.blur()}
+              onChange={setQuantity}
               className="font-mono text-lg"
               placeholder="0"
               data-testid="injection-qty"

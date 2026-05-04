@@ -17,6 +17,7 @@ import { Label } from './ui/label';
 import { Shield, RefreshCw, ArrowRightLeft } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPHP } from '../lib/utils';
+import CalcInput from './CalcInput';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -132,7 +133,7 @@ export default function FundTransferDialog({ open, onClose, transferType, wallet
         <div className="space-y-3">
           <div>
             <Label className="text-xs text-slate-600">Amount (&#8369;) *</Label>
-            <Input type="number" value={amount} onChange={e => setAmount(e.target.value)}
+            <CalcInput value={amount} onChange={setAmount}
               placeholder="0.00" className="mt-1 h-10 text-lg font-mono" autoFocus
               data-testid="fund-transfer-amount" />
           </div>

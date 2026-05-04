@@ -19,6 +19,7 @@ import {
 import { toast } from 'sonner';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
 import { invalidateBalanceCache } from '../components/CustomerBalanceBadge';
+import CalcInput from '../components/CalcInput';
 
 const METHODS = [
   { value: 'Cash', label: 'Cash', icon: Banknote },
@@ -1236,15 +1237,14 @@ export default function PaymentsPage() {
                 <Label className="text-[9px] font-semibold text-slate-500 uppercase tracking-wide leading-none">
                   Payment Amount
                 </Label>
-                <Input
-                  type="number"
+                <CalcInput
                   placeholder="0.00"
                   value={paymentAmtInput}
                   className="h-7 w-36 text-xl font-bold font-mono border-0 px-0 py-0 shadow-none focus-visible:ring-0"
                   data-testid="receive-amount"
                   disabled={!selectedCustomer}
-                  onFocus={e => e.target.select()}
-                  onChange={e => autoApply(e.target.value)}
+                  selectOnFocus
+                  onChange={(v) => autoApply(v)}
                 />
               </div>
             </div>
@@ -1382,11 +1382,10 @@ export default function PaymentsPage() {
                     <Label className="text-[10px] font-semibold text-amber-700 uppercase tracking-wide">Manual Interest</Label>
                     <div className="flex items-center bg-white border border-amber-300 rounded-md px-2 py-0.5">
                       <span className="text-[10px] text-amber-600 font-medium mr-0.5">₱</span>
-                      <input
-                        type="text" inputMode="decimal"
+                      <CalcInput
                         value={manualInterestAmt}
-                        onChange={e => setManualInterestAmt(e.target.value)}
-                        onFocus={e => e.target.select()}
+                        onChange={setManualInterestAmt}
+                        selectOnFocus
                         placeholder="0.00"
                         className="w-20 h-6 text-sm text-right border-0 bg-transparent outline-none font-bold text-amber-700"
                         data-testid="manual-interest-input"
@@ -1463,21 +1462,21 @@ export default function PaymentsPage() {
                                     className="text-[9px] text-blue-500 hover:text-blue-700 font-medium w-5 text-center shrink-0" title="Toggle % / fixed">
                                     {mode === 'percent' ? '%' : '₱'}
                                   </button>
-                                  <Input type="number" min="0" step="0.01" placeholder="0.00"
+                                  <CalcInput placeholder="0.00"
                                     className="h-7 w-20 text-right text-xs border-blue-200 bg-blue-50/50"
                                     value={rowDiscounts[inv.id] || ''}
-                                    onChange={e => setRowDiscounts(p => ({ ...p, [inv.id]: e.target.value }))}
-                                    onFocus={e => e.target.select()}
+                                    onChange={(v) => setRowDiscounts(p => ({ ...p, [inv.id]: v }))}
+                                    selectOnFocus
                                     data-testid={`discount-row-${inv.id}`} />
                                   {discAmt > 0 && <span className="text-[9px] text-blue-600 ml-0.5">-{formatPHP(discAmt)}</span>}
                                 </div>
                               ) : <span className="text-xs text-slate-300">—</span>}
                             </td>
                             <td className="px-3 py-2 text-right">
-                              <Input type="number" min="0" max={inv.balance - discAmt} step="0.01" value={rowAmt} placeholder="0.00"
+                              <CalcInput value={rowAmt} placeholder="0.00"
                                 className={`h-8 w-28 text-right text-sm ml-auto font-mono ${isApplied ? 'border-emerald-400 bg-emerald-50' : 'border-slate-200'}`}
-                                onChange={e => setRowAmounts(p => ({ ...p, [inv.id]: e.target.value }))}
-                                onFocus={e => e.target.select()}
+                                onChange={(v) => setRowAmounts(p => ({ ...p, [inv.id]: v }))}
+                                selectOnFocus
                                 data-testid={`payment-row-${inv.id}`} />
                             </td>
                           </tr>
@@ -1707,8 +1706,8 @@ export default function PaymentsPage() {
             </div>
             <div>
               <Label className="text-xs">New Amount</Label>
-              <Input type="text" inputMode="decimal" value={editAmount} onChange={e => setEditAmount(e.target.value)}
-                onFocus={e => e.target.select()} className="h-9 mt-1 font-mono text-lg text-right" autoFocus
+              <CalcInput value={editAmount} onChange={setEditAmount}
+                selectOnFocus className="h-9 mt-1 font-mono text-lg text-right" autoFocus
                 data-testid="edit-payment-amount" />
               <p className="text-[10px] text-slate-400 mt-0.5">Enter 0 to void without re-applying</p>
             </div>

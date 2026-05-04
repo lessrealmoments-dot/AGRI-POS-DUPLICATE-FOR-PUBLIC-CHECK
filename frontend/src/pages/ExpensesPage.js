@@ -16,6 +16,7 @@ import UploadQRDialog from '../components/UploadQRDialog';
 import ReceiptUploadInline from '../components/ReceiptUploadInline';
 import VerificationBadge from '../components/VerificationBadge';
 import VerifyPinDialog from '../components/VerifyPinDialog';
+import CalcInput from '../components/CalcInput';
 import ViewQRDialog from '../components/ViewQRDialog';
 import ExpenseDetailModal from '../components/ExpenseDetailModal';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
@@ -683,7 +684,7 @@ export default function ExpensesPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label className="text-xs text-slate-500">Amount (₱)</Label>
-                <Input data-testid="expenses-expense-amount" type="number" className="h-10" value={expenseForm.amount} onChange={e => setExpenseForm({ ...expenseForm, amount: parseFloat(e.target.value) || 0 })} />
+                <CalcInput data-testid="expenses-expense-amount" className="h-10" value={String(expenseForm.amount || '')} onChange={(v) => setExpenseForm({ ...expenseForm, amount: parseFloat(v) || 0 })} />
               </div>
               <div>
                 <Label className="text-xs text-slate-500">Payment Method</Label>
@@ -1053,8 +1054,8 @@ export default function ExpensesPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label className="text-xs text-slate-500">Amount (₱) *</Label>
-                <Input type="number" className="h-10" value={cashOutForm.amount}
-                  onChange={e => setCashOutForm({ ...cashOutForm, amount: parseFloat(e.target.value) || 0 })} data-testid="expenses-cashout-amount" />
+                <CalcInput className="h-10" value={String(cashOutForm.amount || '')}
+                  onChange={(v) => setCashOutForm({ ...cashOutForm, amount: parseFloat(v) || 0 })} data-testid="expenses-cashout-amount" />
               </div>
               <div>
                 <Label className="text-xs text-slate-500">Date</Label>
@@ -1163,8 +1164,8 @@ export default function ExpensesPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label className="text-xs text-slate-500">Amount (₱) *</Label>
-                <Input type="number" className="h-10" value={employeeAdvanceForm.amount}
-                  onChange={e => setEmployeeAdvanceForm({ ...employeeAdvanceForm, amount: parseFloat(e.target.value) || 0 })} data-testid="expenses-ea-amount" />
+                <CalcInput className="h-10" value={String(employeeAdvanceForm.amount || '')}
+                  onChange={(v) => setEmployeeAdvanceForm({ ...employeeAdvanceForm, amount: parseFloat(v) || 0 })} data-testid="expenses-ea-amount" />
               </div>
               <div>
                 <Label className="text-xs text-slate-500">Date</Label>
