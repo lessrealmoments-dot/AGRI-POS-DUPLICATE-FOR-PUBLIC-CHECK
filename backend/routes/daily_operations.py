@@ -1060,12 +1060,167 @@ async def get_daily_report(user=Depends(get_current_user), branch_id: Optional[s
 
 @router.get("/daily-close/{date}")
 async def get_daily_close(date: str, user=Depends(get_current_user), branch_id: Optional[str] = None):
-    """Get status of daily close for a date."""
+    """Get status of daily close for a date.
+
+    Response is augmented with any non-voided reconciliation adjustments so
+    the on-screen Z-Report and the Z-Report PDF render `adjusted_over_short`
+    in addition to the original `over_short`. The original closing values
+    (`expected_counter`, `actual_cash`, `over_short`) are NEVER mutated —
+    corrections live exclusively in `daily_closing_adjustments`.
+    """
     query = {"date": date}
     if branch_id:
         query["branch_id"] = branch_id
     closing = await db.daily_closings.find_one(query, {"_id": 0})
-    return closing or {"status": "open", "date": date}
+    if not closing:
+        return {"status": "open", "date": date}
+
+    adjustments = await db.daily_closing_adjustments.find(
+        {"closing_id": closing["id"], "voided": {"$ne": True}},
+        {"_id": 0},
+    ).sort("created_at", 1).to_list(50)
+    adj_total = round(sum(float(a.get("amount", 0)) for a in adjustments), 2)
+    closing["adjustments"] = adjustments
+    closing["adjustment_total"] = adj_total
+    closing["adjusted_over_short"] = round(float(closing.get("over_short", 0)) + adj_total, 2)
+    return closing
+
+
+# ── Reconciliation Adjustments on Closed Days ────────────────────────────────
+# Admin-only override to correct a closed day's Net Over/Short when the
+# original Expected/Actual values are themselves wrong (classic case:
+# migration carry-over contaminating early-period drawer math). Rather than
+# mutate the historical closing record, we add an immutable adjustment
+# entry that shifts the effective Over/Short. Every create and void is
+# audit-logged; the original closing doc remains verbatim so auditors can
+# reconstruct both the raw-as-recorded numbers and the corrected view.
+@router.get("/daily-closings/{closing_id}/adjustments")
+async def list_closing_adjustments(closing_id: str, user=Depends(get_current_user)):
+    check_perm(user, "reports", "view")
+    closing = await db.daily_closings.find_one({"id": closing_id}, {"_id": 0, "id": 1})
+    if not closing:
+        raise HTTPException(404, "Closing not found")
+    rows = await db.daily_closing_adjustments.find(
+        {"closing_id": closing_id}, {"_id": 0},
+    ).sort("created_at", 1).to_list(100)
+    return {"adjustments": rows}
+
+
+@router.post("/daily-closings/{closing_id}/adjustments")
+async def create_closing_adjustment(
+    closing_id: str, data: dict, user=Depends(get_current_user),
+):
+    """Create a reconciliation adjustment on a closed day (admin-only)."""
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Only admins can add closing adjustments")
+
+    try:
+        amount = float(data.get("amount", 0))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Invalid amount")
+    if amount == 0:
+        raise HTTPException(400, "Adjustment amount must be non-zero")
+
+    reason = (data.get("reason") or "").strip()
+    if len(reason) < 3:
+        raise HTTPException(400, "Reason is required (min 3 characters) for audit trail")
+
+    closing = await db.daily_closings.find_one({"id": closing_id}, {"_id": 0})
+    if not closing:
+        raise HTTPException(404, "Closing not found")
+
+    adj = {
+        "id": new_id(),
+        "closing_id": closing_id,
+        "branch_id": closing.get("branch_id"),
+        "date": closing.get("date"),
+        "amount": round(amount, 2),
+        "reason": reason,
+        "original_over_short": float(closing.get("over_short", 0)),
+        "original_expected_counter": float(closing.get("expected_counter", 0)),
+        "original_actual_cash": float(closing.get("actual_cash", 0)),
+        "created_by": user["id"],
+        "created_by_name": user.get("full_name", user.get("username", "")),
+        "created_at": now_iso(),
+        "voided": False,
+    }
+    await db.daily_closing_adjustments.insert_one(adj)
+    adj.pop("_id", None)
+
+    await db.audit_log.insert_one({
+        "id": new_id(),
+        "type": "closing_adjustment_created",
+        "entity_type": "daily_closing",
+        "entity_id": closing_id,
+        "description": (
+            f"Closing adjustment +P{amount:,.2f} on {closing.get('date')} "
+            f"(original over/short P{closing.get('over_short', 0):,.2f}): {reason}"
+        ),
+        "metadata": {
+            "adjustment_id": adj["id"],
+            "amount": adj["amount"],
+            "reason": reason,
+            "date": closing.get("date"),
+            "branch_id": closing.get("branch_id"),
+            "original_over_short": adj["original_over_short"],
+            "new_adjusted_over_short": round(adj["original_over_short"] + amount, 2),
+        },
+        "user_id": user["id"],
+        "user_name": adj["created_by_name"],
+        "created_at": now_iso(),
+    })
+    return adj
+
+
+@router.post("/daily-closings/{closing_id}/adjustments/{adj_id}/void")
+async def void_closing_adjustment(
+    closing_id: str, adj_id: str, data: dict, user=Depends(get_current_user),
+):
+    """Void a previously-created adjustment (admin-only). Original record
+    is retained with `voided=True` so the history is never destroyed."""
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Only admins can void closing adjustments")
+
+    reason = (data.get("reason") or "").strip()
+    if len(reason) < 3:
+        raise HTTPException(400, "Reason is required (min 3 characters)")
+
+    adj = await db.daily_closing_adjustments.find_one({"id": adj_id, "closing_id": closing_id}, {"_id": 0})
+    if not adj:
+        raise HTTPException(404, "Adjustment not found")
+    if adj.get("voided"):
+        raise HTTPException(400, "Adjustment already voided")
+
+    await db.daily_closing_adjustments.update_one(
+        {"id": adj_id},
+        {"$set": {
+            "voided": True,
+            "voided_by": user["id"],
+            "voided_by_name": user.get("full_name", user.get("username", "")),
+            "voided_at": now_iso(),
+            "voided_reason": reason,
+        }},
+    )
+    await db.audit_log.insert_one({
+        "id": new_id(),
+        "type": "closing_adjustment_voided",
+        "entity_type": "daily_closing",
+        "entity_id": closing_id,
+        "description": (
+            f"Closing adjustment P{float(adj.get('amount', 0)):,.2f} on "
+            f"{adj.get('date')} voided: {reason}"
+        ),
+        "metadata": {
+            "adjustment_id": adj_id,
+            "void_reason": reason,
+            "voided_amount": float(adj.get("amount", 0)),
+        },
+        "user_id": user["id"],
+        "user_name": user.get("full_name", user.get("username", "")),
+        "created_at": now_iso(),
+    })
+    return {"voided": True}
+
 
 
 
@@ -1969,6 +2124,28 @@ async def get_variance_history(
             b = await db.branches.find_one({"id": bid}, {"_id": 0, "name": 1})
             branch_names[bid] = b["name"] if b else bid
         r["branch_name"] = branch_names.get(bid, "")
+
+    # ── Attach reconciliation adjustment totals ──────────────────────────────
+    # Aggregate non-voided adjustments per closing so the archive grid and
+    # the top-of-page "Net Over/Short" KPI reflect the corrected values
+    # without mutating the historical `over_short` field on daily_closings.
+    closing_ids = [r["id"] for r in records if r.get("id")]
+    if closing_ids:
+        adj_pipeline = [
+            {"$match": {"closing_id": {"$in": closing_ids}, "voided": {"$ne": True}}},
+            {"$group": {"_id": "$closing_id",
+                        "total": {"$sum": "$amount"},
+                        "count": {"$sum": 1}}},
+        ]
+        adj_by_closing = {
+            a["_id"]: {"total": round(float(a["total"]), 2), "count": a["count"]}
+            async for a in db.daily_closing_adjustments.aggregate(adj_pipeline)
+        }
+        for r in records:
+            adj = adj_by_closing.get(r.get("id"), {"total": 0.0, "count": 0})
+            r["adjustment_total"] = adj["total"]
+            r["adjustment_count"] = adj["count"]
+            r["adjusted_over_short"] = round(float(r.get("over_short", 0)) + adj["total"], 2)
 
     return {"records": records, "total": total}
 

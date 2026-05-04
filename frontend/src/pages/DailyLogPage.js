@@ -49,6 +49,198 @@ function InfoRow({ label, value, bold, className = '' }) {
   );
 }
 
+// ── Closing Adjustments Panel ──────────────────────────────────────────────
+// Shown inside the Z-Report viewer for any closed day. Admins see an inline
+// form to shift the effective Over/Short (original expected/actual stay
+// untouched per the audit-first design in backend/daily_operations.py).
+// Non-admins see a read-only list of existing adjustments when present.
+function ClosingAdjustmentsPanel({ closing, isAdmin, onAdjusted }) {
+  const [rows, setRows] = React.useState(closing?.adjustments || []);
+  const [showForm, setShowForm] = React.useState(false);
+  const [amount, setAmount] = React.useState('');
+  const [reason, setReason] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+
+  React.useEffect(() => {
+    setRows(closing?.adjustments || []);
+  }, [closing]);
+
+  const rawOS = parseFloat(closing?.over_short || 0);
+  const adjTotal = rows.filter(r => !r.voided).reduce((s, r) => s + parseFloat(r.amount || 0), 0);
+  const adjusted = rawOS + adjTotal;
+
+  const reload = async () => {
+    if (!closing?.id) return;
+    try {
+      const res = await api.get(`/daily-closings/${closing.id}/adjustments`);
+      setRows(res.data?.adjustments || []);
+      onAdjusted && onAdjusted();
+    } catch { /* silent */ }
+  };
+
+  const submit = async () => {
+    const amt = parseFloat(amount);
+    if (!amt || Number.isNaN(amt)) { toast.error('Enter a non-zero amount'); return; }
+    if ((reason || '').trim().length < 3) { toast.error('Reason is required (min 3 chars)'); return; }
+    setSaving(true);
+    try {
+      await api.post(`/daily-closings/${closing.id}/adjustments`, { amount: amt, reason: reason.trim() });
+      toast.success('Adjustment applied');
+      setAmount(''); setReason(''); setShowForm(false);
+      await reload();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to apply adjustment');
+    }
+    setSaving(false);
+  };
+
+  const voidRow = async (row) => {
+    const why = window.prompt('Reason for voiding this adjustment?');
+    if (!why || why.trim().length < 3) { toast.error('Void reason required (min 3 chars)'); return; }
+    try {
+      await api.post(`/daily-closings/${closing.id}/adjustments/${row.id}/void`, { reason: why.trim() });
+      toast.success('Adjustment voided');
+      await reload();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to void');
+    }
+  };
+
+  // Hide panel entirely if not admin and there are no adjustments — keeps
+  // the Z-Report clean for cashiers/managers on normal days.
+  const nonVoided = rows.filter(r => !r.voided);
+  if (!isAdmin && nonVoided.length === 0) return null;
+
+  return (
+    <div className="rounded-xl border border-amber-200 overflow-hidden" data-testid="closing-adjustments-panel">
+      <div className="px-4 py-2 bg-amber-50 flex items-center justify-between">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wider text-amber-700">
+            Reconciliation Adjustments
+          </p>
+          <p className="text-[10px] text-slate-500">
+            Admin-only override for correcting historical data. Original close values are never modified.
+          </p>
+        </div>
+        {isAdmin && !showForm && (
+          <Button
+            size="sm" variant="outline"
+            className="h-7 text-xs border-amber-300 text-amber-700 hover:bg-amber-100"
+            onClick={() => setShowForm(true)}
+            data-testid="add-closing-adjustment-btn"
+          >
+            + Add Adjustment
+          </Button>
+        )}
+      </div>
+
+      {/* Totals strip */}
+      <div className="px-4 py-2 grid grid-cols-3 gap-2 bg-white border-b border-amber-100 text-xs">
+        <div>
+          <p className="text-slate-400">Raw Over/Short</p>
+          <p className={`font-mono font-semibold ${rawOS >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+            {rawOS > 0 ? '+' : ''}{formatPHP(rawOS)}
+          </p>
+        </div>
+        <div>
+          <p className="text-slate-400">Adjustments</p>
+          <p className={`font-mono font-semibold ${adjTotal === 0 ? 'text-slate-400' : adjTotal > 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+            {adjTotal > 0 ? '+' : ''}{adjTotal === 0 ? '—' : formatPHP(adjTotal)}
+          </p>
+        </div>
+        <div>
+          <p className="text-slate-400 font-semibold">Adjusted Over/Short</p>
+          <p className={`font-mono font-bold ${adjusted >= 0 ? 'text-emerald-700' : 'text-red-600'}`} data-testid="adjusted-over-short-value">
+            {adjusted > 0 ? '+' : ''}{formatPHP(adjusted)}
+          </p>
+        </div>
+      </div>
+
+      {showForm && (
+        <div className="px-4 py-3 bg-amber-50/40 border-b border-amber-100 space-y-2">
+          <div className="grid grid-cols-3 gap-2">
+            <div className="col-span-1">
+              <Label className="text-[11px] text-slate-500">Amount (signed)</Label>
+              <Input
+                type="number" step="0.01" value={amount}
+                onChange={e => setAmount(e.target.value)}
+                placeholder="e.g. 147354.40 or -500"
+                data-testid="closing-adjustment-amount-input"
+              />
+              <p className="text-[10px] text-slate-400 mt-1">
+                Positive = increases Over; negative = decreases.
+              </p>
+            </div>
+            <div className="col-span-2">
+              <Label className="text-[11px] text-slate-500">Reason (required)</Label>
+              <Input
+                value={reason}
+                onChange={e => setReason(e.target.value)}
+                placeholder="e.g. Pre-migration AR double-counted in initial sync"
+                data-testid="closing-adjustment-reason-input"
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button size="sm" variant="ghost" onClick={() => { setShowForm(false); setAmount(''); setReason(''); }}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="bg-[#1A4D2E] text-white hover:bg-[#163f25]"
+              onClick={submit}
+              disabled={saving}
+              data-testid="save-closing-adjustment-btn"
+            >
+              {saving ? 'Saving…' : 'Apply Adjustment'}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {rows.length === 0 ? (
+        <div className="px-4 py-3 text-center text-xs text-slate-400">
+          No adjustments on this day.
+        </div>
+      ) : (
+        <div className="divide-y divide-amber-100">
+          {rows.map((r, i) => (
+            <div key={r.id || i} className={`px-4 py-2 flex items-center gap-3 ${r.voided ? 'opacity-50' : ''}`}>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className={`font-mono font-semibold text-sm ${parseFloat(r.amount) >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+                    {parseFloat(r.amount) > 0 ? '+' : ''}{formatPHP(parseFloat(r.amount || 0))}
+                  </span>
+                  {r.voided && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 uppercase tracking-wider">Voided</span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-600 mt-0.5">{r.reason}</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">
+                  by {r.created_by_name} · {new Date(r.created_at).toLocaleString()}
+                  {r.voided && r.voided_reason && (
+                    <> · voided by {r.voided_by_name}: "{r.voided_reason}"</>
+                  )}
+                </p>
+              </div>
+              {isAdmin && !r.voided && (
+                <Button
+                  size="sm" variant="ghost"
+                  className="h-7 text-xs text-red-600 hover:bg-red-50"
+                  onClick={() => voidRow(r)}
+                  data-testid={`void-closing-adjustment-${r.id}`}
+                >
+                  Void
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ZReport({ data, branchName, onPrint, onDownloadPdf }) {
   if (!data) return null;
   const r2 = n => Math.round((parseFloat(n) || 0) * 100) / 100;
@@ -583,7 +775,7 @@ function ZReportDetailed({ preview, closing, branchName, onPrint, onDownloadPdf 
 }
 
 export default function DailyLogPage() {
-  const { currentBranch, branches, hasPerm } = useAuth();
+  const { currentBranch, branches, hasPerm, user } = useAuth();
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [tab, setTab] = useState('log');
   const [logEntries, setLogEntries] = useState([]);
@@ -1803,7 +1995,13 @@ export default function DailyLogPage() {
             const totalSales   = filtered.reduce((s, r) => s + (r.total_cash_sales || 0), 0);
             const totalAR      = filtered.reduce((s, r) => s + (r.total_ar_received || 0), 0);
             const totalExp     = filtered.reduce((s, r) => s + (r.total_expenses || 0), 0);
-            const totalOS      = filtered.reduce((s, r) => s + (r.over_short || 0), 0);
+            // Use adjusted over/short so any admin reconciliation overrides
+            // (daily_closing_adjustments) are reflected in the KPI tile.
+            // Falls back to raw over_short for closings that have no
+            // adjustments (adjusted_over_short is absent on pre-feature rows).
+            const totalOS = filtered.reduce((s, r) => s + (
+              r.adjusted_over_short !== undefined ? r.adjusted_over_short : (r.over_short || 0)
+            ), 0);
             return (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {[
@@ -1859,7 +2057,9 @@ export default function DailyLogPage() {
                         </TableRow>
                       );
                       return filtered.map((r, i) => {
-                        const os = r.over_short || 0;
+                        const rawOs = r.over_short || 0;
+                        const adjusted = r.adjusted_over_short !== undefined ? r.adjusted_over_short : rawOs;
+                        const hasAdj = (r.adjustment_count || 0) > 0;
                         return (
                           <TableRow key={r.id || i} className="table-row-hover">
                             <TableCell className="font-mono text-sm font-semibold">{r.date}</TableCell>
@@ -1868,9 +2068,25 @@ export default function DailyLogPage() {
                             <TableCell className="text-right font-mono text-blue-700">{formatPHP(r.total_ar_received || 0)}</TableCell>
                             <TableCell className="text-right font-mono text-red-600">{formatPHP(r.total_expenses || 0)}</TableCell>
                             <TableCell className="text-right font-mono">
-                              <span className={os > 0 ? 'text-emerald-600 font-semibold' : os < 0 ? 'text-red-600 font-semibold' : 'text-slate-400'}>
-                                {os > 0 ? '+' : ''}{formatPHP(os)}
-                              </span>
+                              <div className="flex items-center justify-end gap-1.5">
+                                {hasAdj && (
+                                  <span
+                                    title={`Admin adjustment of ${formatPHP(r.adjustment_total || 0)} applied. Raw was ${formatPHP(rawOs)}.`}
+                                    className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200 uppercase tracking-wider"
+                                    data-testid={`adj-badge-${r.date}`}
+                                  >
+                                    ADJ
+                                  </span>
+                                )}
+                                <span className={adjusted > 0 ? 'text-emerald-600 font-semibold' : adjusted < 0 ? 'text-red-600 font-semibold' : 'text-slate-400'}>
+                                  {adjusted > 0 ? '+' : ''}{formatPHP(adjusted)}
+                                </span>
+                              </div>
+                              {hasAdj && (
+                                <div className="text-[9px] text-slate-400 mt-0.5 font-mono">
+                                  raw {rawOs > 0 ? '+' : ''}{formatPHP(rawOs)}
+                                </div>
+                              )}
                             </TableCell>
                             <TableCell className="text-sm text-slate-500">{r.closed_by_name}</TableCell>
                             <TableCell>
@@ -1941,31 +2157,43 @@ export default function DailyLogPage() {
                   <RefreshCw size={22} className="animate-spin text-slate-400" />
                 </div>
               ) : zreportData ? (
-                zreportMode === 'detailed' ? (
-                  zreportDetailLoading ? (
-                    <div className="flex items-center justify-center py-12">
-                      <RefreshCw size={22} className="animate-spin text-slate-400" />
-                      <span className="ml-2 text-sm text-slate-400">Loading detailed breakdown…</span>
-                    </div>
-                  ) : zreportDetail ? (
-                    <ZReportDetailed
-                      preview={zreportDetail}
-                      closing={zreportData}
-                      branchName={zreportData.branch_name || currentBranch?.name}
-                      onPrint={() => printZReportPdf(zreportData.date, zreportData.branch_id, true)}
-                      onDownloadPdf={() => downloadZReportPdf(zreportData.date, zreportData.branch_id, zreportData.branch_name || currentBranch?.name, true)}
-                    />
-                  ) : (
-                    <p className="text-center py-8 text-slate-400">Could not load detailed breakdown.</p>
-                  )
-                ) : (
-                  <ZReport
-                    data={zreportData}
-                    branchName={zreportData.branch_name || currentBranch?.name}
-                    onPrint={() => printZReportPdf(zreportData.date, zreportData.branch_id, false)}
-                    onDownloadPdf={() => downloadZReportPdf(zreportData.date, zreportData.branch_id, zreportData.branch_name || currentBranch?.name, false)}
+                <>
+                  <ClosingAdjustmentsPanel
+                    closing={zreportData}
+                    isAdmin={user?.role === 'admin'}
+                    onAdjusted={() => {
+                      // Refetch so the panel + archive summary sync.
+                      openZreport({ date: zreportData.date, branch_id: zreportData.branch_id });
+                      loadArchive(zreportData.branch_id || 'all');
+                    }}
                   />
-                )
+                  <div className="h-3" />
+                  {zreportMode === 'detailed' ? (
+                    zreportDetailLoading ? (
+                      <div className="flex items-center justify-center py-12">
+                        <RefreshCw size={22} className="animate-spin text-slate-400" />
+                        <span className="ml-2 text-sm text-slate-400">Loading detailed breakdown…</span>
+                      </div>
+                    ) : zreportDetail ? (
+                      <ZReportDetailed
+                        preview={zreportDetail}
+                        closing={zreportData}
+                        branchName={zreportData.branch_name || currentBranch?.name}
+                        onPrint={() => printZReportPdf(zreportData.date, zreportData.branch_id, true)}
+                        onDownloadPdf={() => downloadZReportPdf(zreportData.date, zreportData.branch_id, zreportData.branch_name || currentBranch?.name, true)}
+                      />
+                    ) : (
+                      <p className="text-center py-8 text-slate-400">Could not load detailed breakdown.</p>
+                    )
+                  ) : (
+                    <ZReport
+                      data={zreportData}
+                      branchName={zreportData.branch_name || currentBranch?.name}
+                      onPrint={() => printZReportPdf(zreportData.date, zreportData.branch_id, false)}
+                      onDownloadPdf={() => downloadZReportPdf(zreportData.date, zreportData.branch_id, zreportData.branch_name || currentBranch?.name, false)}
+                    />
+                  )}
+                </>
               ) : (
                 <p className="text-center py-8 text-slate-400">Could not load Z-report data.</p>
               )}

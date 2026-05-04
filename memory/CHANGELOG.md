@@ -1,5 +1,31 @@
 # AgriBooks Changelog
 
+## May 2026 — Admin Reconciliation Adjustments on Closed Days (Iter 237)
+
+User scenario that prompted this: a branch migrated from a legacy POS had its first few days' sync double-count AR carry-over, producing phantom Over/Short figures like `−₱145,608.40` when the physical drawer was actually `+₱1,746` over. The user needed a way to correct the displayed Net Over/Short **without** rewriting history — Expected/Actual values must remain the raw-as-recorded figures for auditability.
+
+**Design chosen (Option C — bookkeeper-approved):** immutable adjustment entries that shift the *effective* Over/Short. Original closing doc is never mutated. Each adjustment is signed, reason-stamped, and audit-logged.
+
+**Backend** (`/app/backend/routes/daily_operations.py`):
+- New collection `daily_closing_adjustments` with fields `closing_id`, `amount` (signed), `reason`, `original_over_short/expected/actual` (frozen at creation time), `created_by_name`, `voided` + `voided_by/reason/at` for history-preserving voids.
+- New endpoints:
+  - `GET /api/daily-closings/{closing_id}/adjustments` — full history including voided
+  - `POST /api/daily-closings/{closing_id}/adjustments` — admin-only; requires non-zero amount + reason (min 3 chars)
+  - `POST /api/daily-closings/{closing_id}/adjustments/{adj_id}/void` — admin-only; requires reason
+- `GET /api/daily-close/{date}` now also returns `adjustments` (non-voided), `adjustment_total`, and `adjusted_over_short = over_short + adjustment_total`. Original `over_short` stays verbatim.
+- `GET /api/daily-variance-history` aggregates non-voided adjustments per closing and attaches `adjustment_count`, `adjustment_total`, `adjusted_over_short` so the archive grid and the Net Over/Short KPI reflect the corrected value.
+- Every create/void writes an `audit_log` entry (`closing_adjustment_created` / `closing_adjustment_voided`) with before/after values and the actor.
+
+**Authorization:** strictly admin role (`user.role == 'admin'`). No PIN, no manager bypass. Non-admins get 403.
+
+**Frontend** (`DailyLogPage.js`):
+- New `<ClosingAdjustmentsPanel>` component rendered at the top of the Z-Report viewer dialog. Shows a three-column strip (Raw Over/Short → Adjustments → Adjusted Over/Short), a list of all adjustments (voided ones dimmed), and — for admins only — an inline form (Amount + Reason) to apply a new adjustment or void an existing one.
+- Z-Report Archive table: uses `adjusted_over_short` for the Over/Short cell, shows an amber `ADJ` pill next to the value when adjustments exist, and renders the raw value below in small grey mono so the paper trail is visible at-a-glance.
+- KPI tile "Net Over/Short" now sums `adjusted_over_short` across filtered rows.
+
+**Regression**: `backend/tests/test_closing_adjustments_237.py` — 5 end-to-end tests covering admin create, aggregation in variance history, manager 403, amount/reason validation, void semantics + audit trail.
+
+
 ## May 2026 — Z-Report Detailed: Capital columns next to Product + Last-Purchase fallback (Iter 236)
 
 Follow-up polish to iter 235:
