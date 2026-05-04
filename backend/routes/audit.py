@@ -658,10 +658,14 @@ async def _compute_cash(branch_id: str, date_from: str, date_to: str) -> dict:
     total_split_cash = round(sum(float(inv.get("cash_amount", 0)) for inv in split_invoices), 2)
 
     # ── AR payments — split by fund source (cash vs digital) ──────────────
+    # Exclude voided payments (modify/void cycles would otherwise double-count).
     ar_pipeline = [
         {"$match": {"branch_id": branch_id, "status": {"$ne": "voided"}}},
         {"$unwind": "$payments"},
-        {"$match": {"payments.date": {"$gte": date_from, "$lte": date_to}}},
+        {"$match": {
+            "payments.date": {"$gte": date_from, "$lte": date_to},
+            "payments.voided": {"$ne": True},
+        }},
         {"$project": {
             "_id": 0, "customer_name": 1, "invoice_number": 1, "customer_id": 1, "balance": 1,
             "payment": "$payments"
@@ -1011,10 +1015,14 @@ async def _compute_ar(branch_id: str, date_from: str, date_to: str) -> dict:
         else:
             buckets["b90plus"] += float(inv.get("balance", 0))
 
-    # Collections in period
+    # Collections in period (excludes voided payments)
     coll_r = await db.invoices.aggregate([
         {"$unwind": "$payments"},
-        {"$match": {"branch_id": branch_id, "payments.date": {"$gte": date_from, "$lte": date_to}}},
+        {"$match": {
+            "branch_id": branch_id,
+            "payments.date": {"$gte": date_from, "$lte": date_to},
+            "payments.voided": {"$ne": True},
+        }},
         {"$group": {"_id": None, "total": {"$sum": "$payments.amount"}}}
     ]).to_list(1)
     collected = round(coll_r[0]["total"] if coll_r else 0, 2)

@@ -1,5 +1,23 @@
 # AgriBooks Changelog
 
+## Feb 2026 — Close Wizard AR Payments: Voided Payments Double-Counted (Iter 224)
+
+**User report**: Close Wizard Step 3 "AR Payments" showed customer DEMAYO ROLANDO's invoice `SI-SB-001029` **twice** — once as ₱42,295 paid, again as ₱38,995 paid (total ₱81,290), against a real collection of only ₱43,105. User rightly suspected "the math is wrong."
+
+### Root cause
+The AR-payments / credit-collections aggregation pipelines **unwound every payment on every invoice and matched on date only** — voided payments (created when a cashier uses the Edit/Cancel flow) slipped through silently, double-counting the collection. The same invoice appeared once for the voided ₱42,295 and again for the live ₱38,995.
+
+### Fix
+Added `"payments.voided": {"$ne": True}` to the `$match` stage of **every** payment-unwind pipeline across three files:
+- `/app/backend/routes/daily_operations.py` — 5 pipelines: single-day preview, batch preview, close day POST, batch close POST, sales-cashflow.
+- `/app/backend/routes/audit.py` — 2 pipelines: AR payments detail + aging collections.
+- `/app/backend/routes/dashboard.py` — 2 pipelines: today's AR collected + per-branch AR.
+
+### Tests: `tests/test_voided_payments_excluded_224.py` — 2/2 PASS
+- Seeds a fake invoice with ONE voided payment (₱5,000) + ONE live payment (₱3,000), both dated today → asserts single-day `/daily-close-preview` returns EXACTLY 1 row with ₱3,000.
+- Asserts `/daily-close-preview/batch` `total_ar_received` equals the non-voided aggregate (₱5,000 excluded).
+
+
 ## Feb 2026 — Branch Transfer: Pre-Flight Stock Guard + Audit Trail Fix (Iter 224)
 
 **User report**: Live ticket `BTO-20260503-0003` on agri-books.com — "Created a branch transfer, injected the product from source to main. It says FAILED but stocks got deducted."

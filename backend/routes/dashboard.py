@@ -174,10 +174,14 @@ async def dashboard_stats(
     ]
 
     # ── AR collected today (payments on older invoices) ───────────────────────
+    # Exclude voided payments so modify/void cycles don't double-count.
     ar_pay_pipeline = [
         {"$match": apply_branch_filter({"status": {"$ne": "voided"}, "order_date": {"$ne": today}}, branch_filter)},
         {"$unwind": "$payments"},
-        {"$match": {"payments.date": today}},
+        {"$match": {
+            "payments.date": today,
+            "payments.voided": {"$ne": True},
+        }},
         {"$group": {"_id": None, "total": {"$sum": "$payments.amount"},
                     "payments": {"$push": {
                         "customer_name": "$customer_name",
@@ -422,11 +426,14 @@ async def branch_summary(user=Depends(get_current_user)):
                 today_cash_sales = round(today_cash_sales + float(inv.get("cash_amount", 0)), 2)
                 today_digital_sales = round(today_digital_sales + float(inv.get("digital_amount", 0)), 2)
 
-        # AR collected today (payments on older invoices)
+        # AR collected today (payments on older invoices, excludes voided)
         ar_today = await db.invoices.aggregate([
             {"$match": {"branch_id": branch_id, "status": {"$ne": "voided"}, "order_date": {"$ne": today}}},
             {"$unwind": "$payments"},
-            {"$match": {"payments.date": today}},
+            {"$match": {
+                "payments.date": today,
+                "payments.voided": {"$ne": True},
+            }},
             {"$group": {"_id": None, "total": {"$sum": "$payments.amount"}}}
         ]).to_list(1)
         ar_collected_today = round(ar_today[0]["total"] if ar_today else 0, 2)

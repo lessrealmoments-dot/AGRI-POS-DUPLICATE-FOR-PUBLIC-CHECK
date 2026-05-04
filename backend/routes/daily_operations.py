@@ -331,11 +331,18 @@ async def get_daily_close_preview(
     total_credit_today = round(sum(c["balance"] for c in credit_sales_today), 2)
 
     # ── AR payments received today (on OLDER invoices) ───────────────────────
+    # IMPORTANT: Exclude voided payments. Without this, a single payment that
+    # was later modified/voided still appears in the Z-Report, double-counting
+    # the collection (bug seen with SI-SB-001029 where the same invoice
+    # appeared twice — once as ₱42,295 voided, once as ₱38,995 live).
     ar_pipeline = [
         {"$match": {"branch_id": branch_id, "status": {"$ne": "voided"},
                     "order_date": {"$ne": date}}},
         {"$unwind": "$payments"},
-        {"$match": {"payments.date": date}},
+        {"$match": {
+            "payments.date": date,
+            "payments.voided": {"$ne": True},
+        }},
         {"$project": {
             "_id": 0,
             "id": 1, "customer_name": 1, "invoice_number": 1,
@@ -885,10 +892,14 @@ async def get_daily_report(user=Depends(get_current_user), branch_id: Optional[s
     total_ar_credits_today = round(sum(float(inv.get("grand_total", 0)) for inv in ar_credits_today), 2)
     
     # Credit collections: only payments on OLD invoices (not today's new sales)
+    # Excludes voided payments so modify/void cycles don't double-count.
     pay_pipeline = [
         {"$match": {"status": {"$ne": "voided"}}},
         {"$unwind": "$payments"},
-        {"$match": {"payments.date": date}},
+        {"$match": {
+            "payments.date": date,
+            "payments.voided": {"$ne": True},
+        }},
     ]
     if branch_id:
         pay_pipeline[0]["$match"]["branch_id"] = branch_id
@@ -1002,11 +1013,15 @@ async def batch_close_preview(
     ).to_list(500)
     partial_total = round(sum(float(inv.get("amount_paid", 0)) for inv in partial_invoices), 2)
 
-    # AR collections — need per-payment detail to split cash vs digital
+    # AR collections — need per-payment detail to split cash vs digital.
+    # Exclude voided payments so modify/void cycles don't inflate totals.
     ar_pipeline = [
         {"$match": {"branch_id": branch_id, "status": {"$ne": "voided"}, "order_date": {"$nin": date_list}}},
         {"$unwind": "$payments"},
-        {"$match": {"payments.date": date_filter}},
+        {"$match": {
+            "payments.date": date_filter,
+            "payments.voided": {"$ne": True},
+        }},
         {"$project": {"_id": 0, "payment": "$payments"}}
     ]
     ar_payments_raw = await db.invoices.aggregate(ar_pipeline).to_list(500)
@@ -1230,7 +1245,10 @@ async def close_day(data: dict, user=Depends(get_current_user)):
     ar_pipeline = [
         {"$match": {"branch_id": branch_id, "status": {"$ne": "voided"}, "order_date": {"$ne": date}}},
         {"$unwind": "$payments"},
-        {"$match": {"payments.date": date}},
+        {"$match": {
+            "payments.date": date,
+            "payments.voided": {"$ne": True},
+        }},
         {"$project": {"_id": 0, "customer_name": 1, "invoice_number": 1, "balance": 1, "payment": "$payments"}}
     ]
     ar_raw = await db.invoices.aggregate(ar_pipeline).to_list(500)
@@ -1560,7 +1578,10 @@ async def batch_close_days(data: dict, user=Depends(get_current_user)):
     ar_pipeline = [
         {"$match": {"branch_id": branch_id, "status": {"$ne": "voided"}, "order_date": {"$nin": dates}}},
         {"$unwind": "$payments"},
-        {"$match": {"payments.date": date_filter}},
+        {"$match": {
+            "payments.date": date_filter,
+            "payments.voided": {"$ne": True},
+        }},
         {"$project": {"_id": 0, "customer_name": 1, "invoice_number": 1, "balance": 1, "payment": "$payments"}}
     ]
     ar_raw = await db.invoices.aggregate(ar_pipeline).to_list(500)
