@@ -81,6 +81,13 @@ DISPATCH_QUIET_END_H   = 7    # 7 AM local
 # any pending close-reminder row older than this threshold so it can never
 # leak out after the situation has changed.
 CLOSE_REMINDER_TTL_HOURS = 24
+
+# Gateway heartbeat (Iter 237). Every authenticated `GET /sms/queue/pending`
+# call updates `settings.sms_gateway_heartbeat`. If no poll lands within this
+# window the UI flashes a red badge so a stuck/disconnected gateway is
+# visible immediately — instead of leaking 5 days of replayed SMS at the
+# owner. 15 min matches the gateway app's default poll cadence × 3.
+GATEWAY_STALE_SECONDS = 15 * 60
 # Close-reminder cap equals the global one-shot cap. Explicit alias kept
 # so future per-template overrides (e.g. payment reminders allowed 2) can
 # land without re-plumbing. ONE means: one dispatch, one chance to send.
@@ -158,7 +165,6 @@ async def _get_org_pause_state(org_id: str) -> dict:
         until = value.get("until")
         if not until:
             return {"paused": False, "until": None, "reason": None}
-        # Auto-expire the pause once `until` is in the past.
         if until <= now_iso():
             return {"paused": False, "until": until, "reason": value.get("reason")}
         return {
@@ -170,7 +176,39 @@ async def _get_org_pause_state(org_id: str) -> dict:
         return {"paused": False, "until": None, "reason": None}
 
 
-# ── Org-scoped company-name resolver (no cross-tenant bleed) ──────────────
+async def _get_gateway_heartbeat(org_id: str) -> dict:
+    """Return `{last_poll_at, age_seconds, last_returned_count, healthy}` for
+    the org's SMS gateway. The gateway is considered healthy if it polled
+    within the last `GATEWAY_STALE_SECONDS` window. Surfaces a stuck/
+    disconnected gateway BEFORE it leaks 5 days of replayed SMS at the user.
+    """
+    if not org_id:
+        return {"last_poll_at": None, "age_seconds": None,
+                "last_returned_count": None, "healthy": False}
+    try:
+        doc = await _raw_db.settings.find_one(
+            {"key": "sms_gateway_heartbeat", "organization_id": org_id},
+            {"_id": 0, "value": 1},
+        )
+        value = (doc or {}).get("value") or {}
+        last = value.get("last_poll_at")
+        if not last:
+            return {"last_poll_at": None, "age_seconds": None,
+                    "last_returned_count": None, "healthy": False}
+        try:
+            last_dt = datetime.fromisoformat(last.replace("Z", "+00:00"))
+            age = int((datetime.now(timezone.utc) - last_dt).total_seconds())
+        except Exception:
+            age = None
+        return {
+            "last_poll_at": last,
+            "age_seconds": age,
+            "last_returned_count": value.get("last_returned_count"),
+            "healthy": age is not None and age <= GATEWAY_STALE_SECONDS,
+        }
+    except Exception:
+        return {"last_poll_at": None, "age_seconds": None,
+                "last_returned_count": None, "healthy": False}
 # Falls back to the immutable organizations.name when the settings doc is
 # missing (e.g. after Reset Company before the user re-saves Settings).
 # Mirrors the contract used in sms_hooks.get_company_name — never reads
@@ -1148,6 +1186,28 @@ async def get_pending_sms(limit: int = 50, user=Depends(get_current_user)):
     now = now_iso()
     org_id = user.get("organization_id") or ""
 
+    # ── GATEWAY HEARTBEAT (Iter 237) ────────────────────────────────────────
+    # Record the timestamp of every successful poll so the UI can surface
+    # "Gateway last polled X min ago" — a stuck/disconnected gateway used
+    # to be invisible until 5 days of replayed SMS hit the owner.
+    try:
+        await _raw_db.settings.update_one(
+            {"key": "sms_gateway_heartbeat", "organization_id": org_id},
+            {"$set": {
+                "key": "sms_gateway_heartbeat",
+                "organization_id": org_id,
+                "value": {
+                    "last_poll_at": now,
+                    "last_poll_user_id": user.get("id") or user.get("username") or "",
+                    "last_returned_count": 0,  # set after items computed
+                },
+                "updated_at": now,
+            }},
+            upsert=True,
+        )
+    except Exception:
+        pass
+
     # ── STALE-ROW EXPIRY (Iter 237) ─────────────────────────────────────────
     # Expire any close-reminder row whose created_at is older than the TTL.
     # This prevents the 1 AM / 2 AM "leftover from 3 days ago" spam that
@@ -1296,6 +1356,18 @@ async def get_pending_sms(limit: int = 50, user=Depends(get_current_user)):
         )
         if claimed:
             items.append(claimed)
+
+    # Update the heartbeat row with the actual returned count so admins
+    # can see at a glance whether polls are returning real work.
+    try:
+        await _raw_db.settings.update_one(
+            {"key": "sms_gateway_heartbeat", "organization_id": org_id},
+            {"$set": {"value.last_returned_count": len(items),
+                      "value.last_poll_at": now}},
+        )
+    except Exception:
+        pass
+
     return items
 
 
@@ -1610,6 +1682,7 @@ async def queue_audit_report(user=Depends(get_current_user)):
     # Global pause state + quiet-hours state right now
     pause = await _get_org_pause_state(org_id)
     quiet = await _is_org_in_quiet_hours(org_id)
+    heartbeat = await _get_gateway_heartbeat(org_id)
 
     return {
         "oldest_pending": {
@@ -1625,12 +1698,24 @@ async def queue_audit_report(user=Depends(get_current_user)):
         "muted_branches": muted_branches,
         "global_pause": pause,
         "dispatch_quiet_hours_now": quiet,
+        "gateway_heartbeat": heartbeat,
         "config": {
             "close_reminder_ttl_hours": CLOSE_REMINDER_TTL_HOURS,
             "dispatch_quiet_window": f"{DISPATCH_QUIET_START_H:02d}:00–{DISPATCH_QUIET_END_H:02d}:00 local",
             "max_sms_per_phone_per_day": MAX_SMS_PER_PHONE_PER_DAY,
+            "gateway_stale_seconds": GATEWAY_STALE_SECONDS,
         },
     }
+
+
+@router.get("/queue/gateway-heartbeat")
+async def gateway_heartbeat_status(user=Depends(get_current_user)):
+    """Lightweight endpoint for the UI badge. Returns last-poll-at, age in
+    seconds, and a `healthy` flag (true if poll was within GATEWAY_STALE_SECONDS).
+    Used by the SMS Team card to flag a disconnected gateway in real time.
+    """
+    org_id = user.get("organization_id") or ""
+    return await _get_gateway_heartbeat(org_id)
 
 
 @router.post("/queue/{sms_id}/skip")

@@ -14,11 +14,23 @@ const ROLE_META = {
   auditor: { label: 'Auditor', color: 'bg-purple-100 text-purple-700 border-purple-300' },
 };
 
+// Format an "age in seconds" value as a human-friendly string for the
+// gateway heartbeat banner.
+function formatHeartbeatAge(seconds) {
+  if (seconds === null || seconds === undefined) return '?';
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${m % 60}m`;
+  const d = Math.floor(h / 24);
+  return `${d}d ${h % 24}h`;
+}
+
 // Render a read-only time string (e.g. "15:00") given a branch close_time_h
 // and a stage's `timing` hint — lets the admin see EXACTLY what local time
 // the stage fires at for a given branch without maths.
-function computeDisplayTime(timing, closeH) {
-  // Simple heuristic: parse hints like "3 hours before close" / "At closing
+function computeDisplayTime(timing, closeH) {  // Simple heuristic: parse hints like "3 hours before close" / "At closing
   // time" / "1.5 h after close" and produce HH:mm. Falls back to the hint
   // text when the phrase doesn't match a known shape.
   if (!timing || typeof closeH !== 'number') return timing;
@@ -257,13 +269,26 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
   // so the gateway honours it across polls. Calling again while paused
   // extends the pause.
   const [pauseState, setPauseState] = useState({ paused: false, until: null });
+  const [heartbeat, setHeartbeat] = useState(null);
   const refreshPauseState = useCallback(async () => {
     try {
       const r = await api.get('/sms/queue/pause-status');
       setPauseState(r.data || { paused: false, until: null });
     } catch { /* non-fatal */ }
   }, []);
-  useEffect(() => { refreshPauseState(); }, [refreshPauseState]);
+  const refreshHeartbeat = useCallback(async () => {
+    try {
+      const r = await api.get('/sms/queue/gateway-heartbeat');
+      setHeartbeat(r.data || null);
+    } catch { /* non-fatal */ }
+  }, []);
+  useEffect(() => {
+    refreshPauseState();
+    refreshHeartbeat();
+    // Poll heartbeat every 30s so the badge stays current without a refresh
+    const t = setInterval(refreshHeartbeat, 30_000);
+    return () => clearInterval(t);
+  }, [refreshPauseState, refreshHeartbeat]);
 
   const [pausing, setPausing] = useState(false);
   const pauseAll = async (hours = 24) => {
@@ -511,6 +536,43 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
                 pause/resume + queue audit. Stacked so admins can pick the
                 right blast radius during a storm. */}
             <div className="mt-3 pt-3 border-t border-slate-200 space-y-2">
+              {/* Gateway heartbeat banner — flashes red if the SMS gateway
+                  app hasn't successfully polled within GATEWAY_STALE_SECONDS.
+                  Catches a stuck/disconnected gateway BEFORE it leaks days
+                  of replayed SMS. */}
+              {heartbeat && (
+                <div
+                  data-testid="sms-gateway-heartbeat-banner"
+                  className={`flex items-center justify-between gap-3 px-3 py-2 rounded-md border ${
+                    heartbeat.healthy
+                      ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                      : heartbeat.last_poll_at
+                        ? 'bg-red-50 border-red-400 text-red-900'
+                        : 'bg-slate-50 border-slate-300 text-slate-700'
+                  }`}>
+                  <p className="text-[11px]">
+                    <span className="font-semibold">
+                      {heartbeat.healthy ? '🟢 Gateway online' :
+                        heartbeat.last_poll_at ? '🔴 Gateway disconnected' :
+                          '⚪ Gateway never polled'}
+                    </span>
+                    {heartbeat.last_poll_at && (
+                      <> — last poll {formatHeartbeatAge(heartbeat.age_seconds)} ago</>
+                    )}
+                    {heartbeat.last_returned_count !== null
+                      && heartbeat.last_returned_count !== undefined
+                      && heartbeat.healthy && (
+                        <> · returned {heartbeat.last_returned_count} row{heartbeat.last_returned_count === 1 ? '' : 's'}</>
+                      )}
+                  </p>
+                  {!heartbeat.healthy && heartbeat.last_poll_at && (
+                    <span className="text-[10px] italic">
+                      Check gateway phone: app running? URL = agribooks.com? Internet?
+                    </span>
+                  )}
+                </div>
+              )}
+
               {/* Pause state banner */}
               {pauseState.paused && (
                 <div

@@ -253,10 +253,30 @@ def test_endpoints_require_auth():
         ("/sms/queue/resume-all", "POST"),
         ("/sms/queue/audit-report", "GET"),
         ("/sms/queue/pause-status", "GET"),
+        ("/sms/queue/gateway-heartbeat", "GET"),
     ]:
         r = requests.request(method, f"{API}{path}")
         assert r.status_code in (401, 403), \
             f"{method} {path} should reject anon, got {r.status_code}"
+
+
+def test_gateway_heartbeat_endpoint_shape():
+    """Heartbeat endpoint must return last_poll_at + age_seconds + healthy."""
+    r = requests.get(f"{API}/sms/queue/gateway-heartbeat", headers=_auth_headers())
+    assert r.status_code == 200, r.text
+    data = r.json()
+    for key in ("last_poll_at", "age_seconds", "last_returned_count", "healthy"):
+        assert key in data, f"heartbeat missing key: {key}"
+    # `healthy` must always be a bool (never None / undefined)
+    assert isinstance(data["healthy"], bool)
+
+
+def test_audit_report_includes_gateway_heartbeat():
+    r = requests.get(f"{API}/sms/queue/audit-report", headers=_auth_headers())
+    assert r.status_code == 200
+    data = r.json()
+    assert "gateway_heartbeat" in data
+    assert "gateway_stale_seconds" in data["config"]
 
 
 def test_stop_all_auto_endpoint_rejects_non_admin():

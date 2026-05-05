@@ -1,8 +1,8 @@
 # AgriBooks PRD
 
-## Iter 237 (May 2026) — SMS Emergency Controls + Quiet-Hours Dispatch Gate ✅
+## Iter 237 (May 2026) — SMS Emergency Controls + Quiet-Hours Dispatch Gate + Gateway Heartbeat ✅
 
-**Problem**: User reported receiving SMS 3 days old (from 5/2/26) at 1 AM, 2 AM, 5 AM local time on 5/5/26, including messages from a branch that was already muted. "Emergency Stop" button felt ineffective. Full code audit identified 6 root-cause bugs.
+**Problem**: User reported receiving SMS 3 days old (from 5/2/26) at 1 AM, 2 AM, 5 AM local time on 5/5/26, including messages from a branch that was already muted. "Emergency Stop" button felt ineffective. Even after wiping the backend queue, SMS kept coming — gateway logs revealed the Android app was looping locally on 7 stuck rows because its API URL pointed to `agri-books.com` (NXDOMAIN), so `mark-sent` ACKs all failed and rows replayed forever. Full code audit identified 6 root-cause bugs PLUS the missing observability layer that allowed the gateway disconnection to go unnoticed for days.
 
 ### Root-cause fixes
 1. **Dispatch-time quiet-hours gate** — `GET /sms/queue/pending` now blocks non-manual rows inside the org's local 22:00–07:00 window. Previously only the *enqueuer* honoured quiet hours; the gateway happily picked up rows at 1 AM.
@@ -12,17 +12,22 @@
 5. **Global pause / resume** — `POST /sms/queue/pause-all {hours}` sets a settings-level flag (`sms_global_pause`) that blocks both enqueue and dispatch for the window (clamp 15min..7d). `POST /sms/queue/resume-all` clears it. `GET /sms/queue/pause-status` surfaces the state for the UI banner.
 6. **Scoping fix** — `POST /sms/queue/clear-stuck` now uses `_raw_db` with explicit `organization_id` filter (was leaking through the request-scoped `db` proxy).
 7. **Audit-report endpoint** — new `GET /sms/queue/audit-report` surfaces oldest-pending age, status counts, TTL expiries 24h, mute-leak cancellations 24h, muted-branch count, current pause + quiet-hours state. Wired to a Queue Health modal in the Team SMS card.
+8. **Gateway heartbeat** — every authenticated `GET /sms/queue/pending` updates `settings.sms_gateway_heartbeat` (last_poll_at, last_returned_count). New `GET /sms/queue/gateway-heartbeat` endpoint + UI banner in Team SMS card flashes red when no poll lands within 15 min — catches a disconnected gateway BEFORE it leaks days of replayed SMS.
 
 ### UI changes
-- **TeamSmsRemindersCard**: 3-button emergency row (Stop Close-Day / Stop EVERY Auto SMS / Pause ALL 24h) + pause banner with inline Resume + Queue Health Report modal. Data-testids: `emergency-cancel-close-sms-btn`, `emergency-stop-all-auto-sms-btn`, `emergency-pause-24h-btn`, `sms-resume-btn`, `sms-audit-report-btn`, `sms-audit-modal`, `sms-pause-banner`.
+- **TeamSmsRemindersCard**: 3-button emergency row (Stop Close-Day / Stop EVERY Auto SMS / Pause ALL 24h) + pause banner with inline Resume + Queue Health Report modal + **Gateway Heartbeat banner** (green/red/grey, polls every 30s). Data-testids: `emergency-cancel-close-sms-btn`, `emergency-stop-all-auto-sms-btn`, `emergency-pause-24h-btn`, `sms-resume-btn`, `sms-audit-report-btn`, `sms-audit-modal`, `sms-pause-banner`, `sms-gateway-heartbeat-banner`.
+
+### Operational note (carrier incident 5/5/26)
+The user's gateway phone had its API base URL configured as `agri-books.com` (with hyphen — NXDOMAIN) instead of `agribooks.com`. After fixing 6 backend bugs and the user clearing the gateway phone's IndexedDB + repointing to `agribooks.com`, the spam loop ended. The new heartbeat banner + 24h TTL + true kill-switch ensure this scenario is observable and recoverable in seconds, not days.
 
 ### Testing
-- `tests/test_sms_emergency_controls_237.py` — 11/11 PASS (quiet-hours wrap logic, TTL expiry, mute superset, stop-all-auto, pause/resume flow, clamp, audit-report shape, auth gating on every new endpoint).
+- `tests/test_sms_emergency_controls_237.py` — **13/13 PASS** (quiet-hours wrap logic, TTL expiry, mute superset, stop-all-auto, pause/resume flow, clamp, audit-report shape, gateway-heartbeat shape, audit-report includes heartbeat, auth gating on every new endpoint).
+- End-to-end heartbeat verified via curl (before-poll → healthy=false; after-poll → healthy=true, age_seconds=0).
 
 ### Files touched
-- `/app/backend/routes/sms.py` — new constants (`MUTED_BRANCH_TEMPLATE_KEYS`, `DISPATCH_QUIET_START_H/END_H`, `CLOSE_REMINDER_TTL_HOURS`), new helpers (`_is_org_in_quiet_hours`, `_get_org_pause_state`), updated `get_pending_sms` (quiet-hours + TTL + global-pause gates, widened mute filter), updated mute-toggle purge (superset), updated `clear-stuck` scoping, new endpoints: `/queue/stop-all-auto`, `/queue/pause-all`, `/queue/resume-all`, `/queue/pause-status`, `/queue/audit-report`, updated `queue_sms` (pause-aware enqueue).
-- `/app/frontend/src/components/sms/TeamSmsRemindersCard.js` — 3-button emergency row + pause banner/resume + audit-report modal + refreshed handlers.
-- `/app/backend/tests/test_sms_emergency_controls_237.py` — new 11-test suite.
+- `/app/backend/routes/sms.py` — new constants (`MUTED_BRANCH_TEMPLATE_KEYS`, `DISPATCH_QUIET_START_H/END_H`, `CLOSE_REMINDER_TTL_HOURS`, `GATEWAY_STALE_SECONDS`), new helpers (`_is_org_in_quiet_hours`, `_get_org_pause_state`, `_get_gateway_heartbeat`), updated `get_pending_sms` (quiet-hours + TTL + global-pause gates, widened mute filter, heartbeat write), updated mute-toggle purge (superset), updated `clear-stuck` scoping, new endpoints: `/queue/stop-all-auto`, `/queue/pause-all`, `/queue/resume-all`, `/queue/pause-status`, `/queue/audit-report`, `/queue/gateway-heartbeat`, updated `queue_sms` (pause-aware enqueue).
+- `/app/frontend/src/components/sms/TeamSmsRemindersCard.js` — 3-button emergency row + pause banner/resume + audit-report modal + gateway heartbeat banner (30s poll) + `formatHeartbeatAge` helper.
+- `/app/backend/tests/test_sms_emergency_controls_237.py` — new 13-test suite.
 
 
 
