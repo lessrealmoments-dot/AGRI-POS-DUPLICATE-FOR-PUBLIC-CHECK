@@ -420,16 +420,18 @@ export default function UnifiedSalesPage() {
   const [floorDate, setFloorDate] = useState(null); // earliest operational date — blocks dates before this
   const [dateError, setDateError] = useState(null); // inline error shown below the Sale Date field
 
-  // Min selectable date for the date picker — day AFTER the last close date.
-  // The browser natively greys out every date before this, making closed dates visually obvious.
+  // Min selectable date for the date picker. Iter 243.1: expanded back by 7
+  // days so cashiers can pick a closed past day to trigger the Late-Encode
+  // flow (credit/partial only — server enforces). Capped at floorDate so
+  // dates before the system existed are still blocked.
   const minAllowedDate = useMemo(() => {
-    if (lastCloseDate) {
-      const d = new Date(lastCloseDate + 'T12:00:00');
-      d.setDate(d.getDate() + 1);
-      return d.toISOString().slice(0, 10);
-    }
-    return floorDate || undefined;
-  }, [lastCloseDate, floorDate]);
+    const today = localToday();
+    const d = new Date(today + 'T12:00:00');
+    d.setDate(d.getDate() - 7); // 7-day late-encode window (backend cap)
+    let candidate = d.toISOString().slice(0, 10);
+    if (floorDate && candidate < floorDate) candidate = floorDate;
+    return candidate;
+  }, [floorDate]);
 
   // Iter 243: Max selectable date = today, OR tomorrow IF today is already
   // closed. This prevents the native date input from dead-locking (min > max
@@ -2443,12 +2445,12 @@ export default function UnifiedSalesPage() {
     setDateError(null);
   }, [lastCloseDate, floorDate]);
 
-  // Returns true if the given date is blocked (on/before last closed day OR before floor date)
+  // Returns true if the given date is on/before the last closed day.
+  // Used for the informational "Late-Encode" hint — NOT to block selection.
   const isDateClosed = useCallback((date) => {
-    if (floorDate && date < floorDate) return true;
     if (!lastCloseDate) return false;
     return date <= lastCloseDate;
-  }, [lastCloseDate, floorDate]);
+  }, [lastCloseDate]);
 
   // Handle date selection from unclosed days banner OR the Sale Date field
   const handleEncodingDateChange = useCallback((date) => {
@@ -2463,10 +2465,6 @@ export default function UnifiedSalesPage() {
       setDateError(`Cannot encode before system start date (${floorDate}).`);
       return;
     }
-    if (isDateClosed(date)) {
-      setDateError(`${date} is a closed day — the last close was ${lastCloseDate}. Please choose a date after ${lastCloseDate}.`);
-      return; // reject — don't update order_date
-    }
     // Iter 243: Forward-date cap — never allow dates more than 1 day past today.
     // Without this, a cashier could stamp `order_date = 2027-01-01`, deduct
     // stock from inventory today, and the sale would never show on any
@@ -2475,9 +2473,14 @@ export default function UnifiedSalesPage() {
       setDateError(`Cannot encode beyond ${maxAllowedDate}. Future-dating is capped at the next open business day.`);
       return;
     }
+    // Iter 243.1: Closed past dates are ALLOWED here so credit/partial sales
+    // can flow into the Late-Encode dialog (auto-opens when the backend
+    // returns "already closed" for the order). Cash sales on closed days
+    // are still rejected by the server. We just show a hint, not an error,
+    // so the cashier knows what to expect.
     setDateError(null);
     setHeader(h => ({ ...h, order_date: date }));
-  }, [isDateClosed, floorDate, lastCloseDate, maxAllowedDate]);
+  }, [floorDate, maxAllowedDate]);
 
   // Handle manager override: retry the pending sale with override PIN
   const handleStockOverride = async (overridePin, _saleDataOverride) => {
@@ -2900,9 +2903,18 @@ export default function UnifiedSalesPage() {
                   data-testid="sale-date-input"
                 />
                 {/* Closed-through label — always visible when there's a close history */}
-                {lastCloseDate && !dateError && (
+                {lastCloseDate && !dateError && header.order_date > lastCloseDate && (
                   <p className="text-[9px] text-slate-400 mt-0.5 leading-tight">
                     Closed through {lastCloseDate}
+                  </p>
+                )}
+                {/* Iter 243.1: Past-closed-day hint — when the cashier picks a
+                    date on/before lastCloseDate, show an amber notice so they
+                    know the sale will go through Late-Encode (credit/partial only,
+                    triggers manager-PIN dialog on save). */}
+                {!dateError && lastCloseDate && header.order_date <= lastCloseDate && (
+                  <p className="text-[9px] text-amber-600 font-medium mt-0.5 leading-tight" data-testid="late-encode-hint">
+                    Past closed day — credit/partial will require manager PIN (Late-Encode).
                   </p>
                 )}
                 {/* Inline error — shown instead of a toast so it can't be missed */}
