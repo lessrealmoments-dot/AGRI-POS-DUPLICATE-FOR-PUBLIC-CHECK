@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useAuth, api } from '../contexts/AuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import UploadQRDialog from '../components/UploadQRDialog';
@@ -26,8 +26,12 @@ import {
   Search, History, ArrowRight, Receipt, UserPlus, Package,
   Wallet, Banknote, CreditCard, AlertTriangle, ChevronDown, RefreshCw,
   ShieldCheck, Clock, Pencil, Upload, ImageIcon, TrendingDown, TrendingUp, Printer,
-  Smartphone, Lock
+  Smartphone, Lock, PauseCircle, Inbox, RotateCcw, Wifi, WifiOff
 } from 'lucide-react';
+import {
+  buildParkPOPayload, parkPO, loadParkedPOs,
+  consumeParkedPO, discardParkedPO,
+} from '../lib/parkedPOSync';
 import { localTodayStr } from '../lib/dateFormat';
 import { toast } from 'sonner';
 import { useUnsavedChangesGuard } from '../lib/useUnsavedChangesGuard';
@@ -180,6 +184,27 @@ export default function PurchaseOrderPage() {
   const [historyDialog, setHistoryDialog] = useState(false);
   const [historyVendor, setHistoryVendor] = useState('');
   const [historyPOs, setHistoryPOs] = useState([]);
+
+  // ── Parked / Draft Purchase Orders ─────────────────────────────────────
+  // Branch-shared, server-only (no offline queue — buyers shouldn't be
+  // creating POs offline, that would race against the cash-on-hand check).
+  const [parkedPOs, setParkedPOs] = useState([]);
+  const [parkedDialogOpen, setParkedDialogOpen] = useState(false);
+  const [parkPromptOpen, setParkPromptOpen] = useState(false);
+  const [parkLabel, setParkLabel] = useState('');
+  const [parkSaving, setParkSaving] = useState(false);
+  const [discardPinPrompt, setDiscardPinPrompt] = useState({ open: false, parkId: null, pin: '' });
+  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  useEffect(() => {
+    const onUp = () => setIsOnline(true);
+    const onDown = () => setIsOnline(false);
+    window.addEventListener('online', onUp);
+    window.addEventListener('offline', onDown);
+    return () => {
+      window.removeEventListener('online', onUp);
+      window.removeEventListener('offline', onDown);
+    };
+  }, []);
 
   const qtyRefs = useRef([]);
 
@@ -693,6 +718,145 @@ export default function PurchaseOrderPage() {
     } catch (e) { toast.error(e.response?.data?.detail || 'Error'); }
   };
 
+  // ── Parked PO actions ──────────────────────────────────────────────────
+  const refreshParkedPOs = useCallback(async () => {
+    if (!currentBranch?.id) return;
+    try {
+      const list = await loadParkedPOs(currentBranch.id);
+      setParkedPOs(list);
+    } catch (err) {
+      // Silent — list will just stay stale until next refresh
+      console.error('Failed to load parked POs', err);
+    }
+  }, [currentBranch?.id]);
+
+  useEffect(() => { refreshParkedPOs(); }, [refreshParkedPOs]);
+
+  const computeParkSummary = () => {
+    const filled = lines.filter(l => l.product_id);
+    const itemCount = filled.reduce((s, l) => s + (parseFloat(l.quantity) || 0), 0);
+    return { itemCount, grandTotal: computed.grandTotal };
+  };
+
+  const openParkPrompt = () => {
+    if (!lines.some(l => l.product_id)) {
+      toast.error('Add at least one product before parking.');
+      return;
+    }
+    if (!currentBranch?.id) {
+      toast.error('No active branch — cannot park.');
+      return;
+    }
+    if (!isOnline) {
+      toast.error('You\'re offline — POs can only be parked when online. Use "Save Draft" instead.');
+      return;
+    }
+    setParkPromptOpen(true);
+  };
+
+  const handleParkConfirm = async () => {
+    const { itemCount, grandTotal } = computeParkSummary();
+    const auto = header.vendor
+      ? `${header.vendor} · ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+      : `Untitled · ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+    const label = parkLabel.trim() ? `${auto} — ${parkLabel.trim()}` : auto;
+    setParkSaving(true);
+    try {
+      await parkPO(buildParkPOPayload({
+        branchId: currentBranch.id,
+        label,
+        vendor: header.vendor,
+        header,
+        lines,
+        vendorPrices,
+        sourceType,
+        supplyBranchId,
+        receiptSessionId: createReceiptData?.sessionId || '',
+        receiptFileCount: createReceiptData?.fileCount || 0,
+        itemCount,
+        grandTotal,
+      }));
+      toast.success('PO parked');
+      setParkLabel('');
+      setParkPromptOpen(false);
+      resetForm();
+      refreshParkedPOs();
+    } catch (err) {
+      const msg = err?.response?.data?.detail || 'Failed to park PO';
+      toast.error(typeof msg === 'string' ? msg : 'Failed to park PO');
+    }
+    setParkSaving(false);
+  };
+
+  const resumeParkedPO = async (park) => {
+    let snapshot = park;
+    try {
+      const fresh = await consumeParkedPO(park.id);
+      if (fresh) snapshot = fresh;
+    } catch (err) {
+      const msg = err?.response?.data?.detail || err?.message || '';
+      if (err?.response?.status === 410) {
+        toast.error(typeof msg === 'string' ? msg : 'Already resumed by another device');
+        refreshParkedPOs();
+        setParkedDialogOpen(false);
+        return;
+      }
+      toast.error(typeof msg === 'string' ? msg : 'Failed to resume parked PO');
+      return;
+    }
+    // Rehydrate state
+    if (snapshot.header) setHeader(h => ({ ...h, ...snapshot.header }));
+    const filled = (snapshot.lines || []).filter(l => l.product_id);
+    setLines(filled.length ? [...filled, { ...EMPTY_LINE }] : [{ ...EMPTY_LINE }]);
+    setSupplierSearch(snapshot.vendor || '');
+    setVendorPrices(snapshot.vendor_prices || {});
+    setSourceType(snapshot.source_type || 'external');
+    setSupplyBranchId(snapshot.supply_branch_id || '');
+    if (snapshot.receipt_session_id) {
+      setCreateReceiptData({
+        sessionId: snapshot.receipt_session_id,
+        fileCount: snapshot.receipt_file_count || 0,
+      });
+    } else {
+      setCreateReceiptData(null);
+    }
+    setTab('create');
+    setParkedDialogOpen(false);
+    refreshParkedPOs();
+    toast.success(`Resumed: ${snapshot.label || 'Parked PO'}`);
+  };
+
+  const handleDiscardParkClick = async (park) => {
+    const isOwn = park.created_by === user?.id;
+    if (!isOwn) {
+      setDiscardPinPrompt({ open: true, parkId: park.id, pin: '' });
+      return;
+    }
+    try {
+      await discardParkedPO(park.id);
+      toast.success('Parked PO discarded');
+      refreshParkedPOs();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to discard');
+    }
+  };
+
+  const submitDiscardWithPin = async () => {
+    const { parkId, pin } = discardPinPrompt;
+    if (!pin || pin.length < 4) {
+      toast.error('PIN required');
+      return;
+    }
+    try {
+      await discardParkedPO(parkId, { pin });
+      toast.success('Parked PO discarded');
+      setDiscardPinPrompt({ open: false, parkId: null, pin: '' });
+      refreshParkedPOs();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Invalid PIN');
+    }
+  };
+
   // ── Filtered PO list ───────────────────────────────────────────────────
   const filteredOrders = useMemo(() => {
     if (listFilter === 'all') return orders;
@@ -706,35 +870,114 @@ export default function PurchaseOrderPage() {
   const poTotal = (po) => po.grand_total || po.subtotal || 0;
 
   // ── RENDER ─────────────────────────────────────────────────────────────
+  const draftCount = orders.filter(o => o.status === 'draft').length;
   return (
-    <div className="space-y-5 animate-fadeIn" data-testid="purchase-order-page">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2" style={{ fontFamily: 'Manrope' }}>
-          <FileText size={22} className="text-[#1A4D2E]" /> Purchase Orders
-        </h1>
-        <p className="text-sm text-slate-500">Receive stock, manage payables, pay suppliers</p>
+    <div className="space-y-4 animate-fadeIn" data-testid="purchase-order-page">
+      {/* ── Hero bar ───────────────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center justify-between gap-3 px-1 py-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="text-xl font-bold tracking-tight flex items-center gap-2" style={{ fontFamily: 'Manrope' }}>
+            <FileText size={20} className="text-[#1A4D2E]" /> Purchase Orders
+          </h1>
+
+          {/* Segmented tab toggle (Sales-style) */}
+          <div className="inline-flex items-center bg-slate-100/80 rounded-xl p-1 shadow-inner ring-1 ring-slate-200/40" data-testid="po-tab-toggle">
+            <button
+              onClick={() => setTab('create')}
+              data-testid="tab-create-po"
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${tab === 'create' ? 'bg-white shadow-sm ring-1 ring-slate-200/60 text-[#1A4D2E]' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              <Plus size={14} /> New PO
+            </button>
+            <button
+              onClick={() => setTab('list')}
+              data-testid="tab-list-po"
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${tab === 'list' ? 'bg-white shadow-sm ring-1 ring-slate-200/60 text-[#1A4D2E]' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              <FileText size={14} /> PO List
+              {totalOrders > 0 && (
+                <Badge variant="secondary" className="ml-1 text-[10px] h-4 px-1.5">{totalOrders}</Badge>
+              )}
+              {draftCount > 0 && tab !== 'list' && (
+                <Badge className="ml-0.5 text-[10px] h-4 px-1.5 bg-amber-100 text-amber-700 hover:bg-amber-100">
+                  {draftCount} draft
+                </Badge>
+              )}
+            </button>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Online indicator */}
+          <div className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
+            isOnline ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+          }`} data-testid="po-online-pill">
+            {isOnline ? <Wifi size={12} /> : <WifiOff size={12} />}
+            {isOnline ? 'Online' : 'Offline'}
+          </div>
+
+          {/* Park current PO */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={openParkPrompt}
+            disabled={!lines.some(l => l.product_id) || tab !== 'create'}
+            data-testid="park-po-btn"
+            title={tab !== 'create' ? 'Switch to New PO to park' : 'Pause this PO and start another'}
+            className="h-9"
+          >
+            <PauseCircle size={14} className="mr-1" /> Park
+          </Button>
+
+          {/* Parked POs list */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => { setParkedDialogOpen(true); refreshParkedPOs(); }}
+            data-testid="parked-pos-btn"
+            title="View and resume parked POs"
+            className="h-9"
+          >
+            <Inbox size={14} className="mr-1" /> Parked
+            {parkedPOs.length > 0 && (
+              <Badge variant="secondary" className="ml-1.5 text-[10px] h-4 px-1.5" data-testid="parked-po-count-badge">
+                {parkedPOs.length}
+              </Badge>
+            )}
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate('/pay-supplier')}
+            className="h-9 border-[#1A4D2E] text-[#1A4D2E] hover:bg-[#1A4D2E]/5"
+            data-testid="pay-supplier-btn"
+          >
+            <Banknote size={14} className="mr-1" /> Pay Supplier
+          </Button>
+
+          <Button variant="outline" size="sm" onClick={fetchOrders} disabled={!isOnline} className="h-9" data-testid="refresh-po-btn">
+            <RefreshCw size={14} className="mr-1" /> Refresh
+          </Button>
+        </div>
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList>
-          <TabsTrigger value="create" data-testid="tab-create-po">
-            <Plus size={14} className="mr-1.5" /> New PO
-          </TabsTrigger>
-          <TabsTrigger value="list" data-testid="tab-list-po">
-            <FileText size={14} className="mr-1.5" /> PO List ({totalOrders})
-          </TabsTrigger>
+        <TabsList className="hidden">
+          <TabsTrigger value="create">New PO</TabsTrigger>
+          <TabsTrigger value="list">PO List</TabsTrigger>
         </TabsList>
 
         {/* ── NEW PO TAB ─────────────────────────────────────────────── */}
-        <TabsContent value="create" className="mt-4 space-y-4">
+        <TabsContent value="create" className="mt-1 space-y-4">
 
-          {/* Header */}
-          <Card className="border-slate-200">
+          {/* Header card */}
+          <Card className="border-slate-200 shadow-sm">
             <CardContent className="p-5 space-y-4">
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 {/* Supplier */}
                 <div className="relative lg:col-span-2" ref={supplierRef}>
-                    <Label className="text-xs text-slate-500">Supplier / Vendor <span className="text-red-500">*</span></Label>
+                    <Label className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Supplier / Vendor <span className="text-red-500 normal-case">*</span></Label>
                     <div className="relative mt-1">
                       <Truck size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
                       <Input
@@ -765,14 +1008,14 @@ export default function PurchaseOrderPage() {
                   )}
                 </div>
                 <div>
-                  <Label className="text-xs text-slate-500">Purchase Date</Label>
+                  <Label className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Purchase Date</Label>
                   <Input className="h-9 mt-1" type="date" value={header.purchase_date}
                     onChange={e => setHeader(h => ({ ...h, purchase_date: e.target.value }))} />
                 </div>
 
                 {/* DR / Reference # */}
                 <div>
-                  <Label className="text-xs text-slate-500">DR / Reference #</Label>
+                  <Label className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">DR / Reference #</Label>
                   <Input className="h-9 mt-1" value={header.dr_number}
                     onChange={e => setHeader(h => ({ ...h, dr_number: e.target.value }))}
                     placeholder="Supplier's Delivery Receipt #" />
@@ -780,7 +1023,7 @@ export default function PurchaseOrderPage() {
 
                 {/* Payment Type */}
                 <div>
-                  <Label className="text-xs text-slate-500">Payment Type</Label>
+                  <Label className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Payment Type</Label>
                   <Select value={header.payment_type} onValueChange={v => setHeader(h => ({ ...h, payment_type: v }))}>
                     <SelectTrigger className="mt-1 h-9" data-testid="po-payment-type">
                       <SelectValue />
@@ -795,7 +1038,7 @@ export default function PurchaseOrderPage() {
                 {/* Terms selector — only when credit/terms */}
                 {header.payment_type === 'terms' && (
                   <div>
-                    <Label className="text-xs text-slate-500">Payment Terms</Label>
+                    <Label className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Payment Terms</Label>
                     <Select value={header.terms_label}
                       onValueChange={v => {
                         const opt = TERMS_OPTIONS.find(o => o.label === v) || { label: v, days: 30 };
@@ -815,7 +1058,7 @@ export default function PurchaseOrderPage() {
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 {/* PO Number */}
                 <div>
-                  <Label className="text-xs text-slate-500">PO Number (auto if blank)</Label>
+                  <Label className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">PO Number <span className="text-slate-300 normal-case font-normal tracking-normal">(auto if blank)</span></Label>
                   <Input data-testid="po-number" className="h-9 mt-1" value={header.po_number}
                     onChange={e => setHeader(h => ({ ...h, po_number: e.target.value }))}
                     placeholder="Auto-generated" />
@@ -823,7 +1066,7 @@ export default function PurchaseOrderPage() {
 
                 {/* Notes */}
                 <div className="lg:col-span-3">
-                  <Label className="text-xs text-slate-500">Notes</Label>
+                  <Label className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Notes</Label>
                   <Input className="h-9 mt-1" value={header.notes}
                     onChange={e => setHeader(h => ({ ...h, notes: e.target.value }))}
                     placeholder="Optional notes for this purchase order" />
@@ -832,29 +1075,29 @@ export default function PurchaseOrderPage() {
             </CardContent>
           </Card>
 
-          {/* Line Items */}
-          <Card className="border-slate-200">
+          {/* Line Items — Excel-style (Detailed Sale parity) */}
+          <Card className="border-slate-200 shadow-sm">
             <CardContent className="p-0">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm" data-testid="po-lines-table">
-                  <thead>
-                    <tr className="bg-slate-50 border-b">
-                      <th className="text-left px-3 py-2 text-xs uppercase text-slate-500 font-medium w-7">#</th>
-                      <th className="text-left px-3 py-2 text-xs uppercase text-slate-500 font-medium" style={{minWidth:'260px'}}>Product</th>
-                      <th className="text-left px-2 py-2 text-xs uppercase text-slate-500 font-medium w-16">Unit</th>
-                      <th className="text-left px-2 py-2 text-xs uppercase text-slate-500 font-medium w-28">Description</th>
-                      <th className="text-right px-2 py-2 text-xs uppercase text-slate-500 font-medium w-20">Qty</th>
-                      <th className="text-right px-2 py-2 text-xs uppercase text-slate-500 font-medium w-28">Unit Price</th>
-                      <th className="text-right px-2 py-2 text-xs uppercase text-slate-500 font-medium w-32">Discount</th>
-                      <th className="text-right px-2 py-2 text-xs uppercase text-slate-500 font-medium w-28">Total</th>
-                      <th className="w-8"></th>
+                  <thead className="sticky top-0 bg-slate-50 z-10">
+                    <tr className="border-b">
+                      <th className="text-left px-3 py-2.5 text-[10px] uppercase tracking-widest text-slate-500 font-semibold w-8">#</th>
+                      <th className="text-left px-3 py-2.5 text-[10px] uppercase tracking-widest text-slate-500 font-semibold" style={{minWidth:'260px'}}>Product</th>
+                      <th className="text-left px-2 py-2.5 text-[10px] uppercase tracking-widest text-slate-500 font-semibold w-16">Unit</th>
+                      <th className="text-left px-2 py-2.5 text-[10px] uppercase tracking-widest text-slate-500 font-semibold min-w-[120px]">Description</th>
+                      <th className="text-right px-2 py-2.5 text-[10px] uppercase tracking-widest text-slate-500 font-semibold w-20">Qty</th>
+                      <th className="text-right px-2 py-2.5 text-[10px] uppercase tracking-widest text-slate-500 font-semibold w-28">Unit Price</th>
+                      <th className="text-right px-2 py-2.5 text-[10px] uppercase tracking-widest text-slate-500 font-semibold w-32">Discount</th>
+                      <th className="text-right px-2 py-2.5 text-[10px] uppercase tracking-widest text-slate-500 font-semibold w-28">Sub-Total</th>
+                      <th className="w-10"></th>
                     </tr>
                   </thead>
                   <tbody>
                     {lines.map((line, i) => (
-                      <tr key={i} className="border-b border-slate-100 hover:bg-slate-50/40">
-                        <td className="px-3 py-1 text-xs text-slate-400">{i + 1}</td>
-                        <td className="px-2 py-1">
+                      <tr key={i} className="border-b border-slate-100 hover:bg-slate-50/50">
+                        <td className="px-3 py-1.5 text-xs text-slate-400">{i + 1}</td>
+                        <td className="px-2 py-1.5">
                           {line.product_id ? (
                             <div className="flex items-center gap-1.5">
                               <span className="font-medium text-sm">{line.product_name}</span>
@@ -911,88 +1154,98 @@ export default function PurchaseOrderPage() {
             </CardContent>
           </Card>
 
-          {/* Totals + Action Buttons */}
-          <div className="flex flex-col lg:flex-row gap-6 items-start justify-between">
+          {/* Totals + Action Buttons — Sales-style two-column panel */}
+          <Card className="border-slate-200 shadow-sm">
+            <CardContent className="p-0">
+              <div className="grid grid-cols-1 lg:grid-cols-3 divide-y lg:divide-y-0 lg:divide-x divide-slate-100">
 
-            {/* Optional toggles */}
-            <div className="flex flex-col gap-2">
-              {!header.show_freight && (
-                <button onClick={() => setHeader(h => ({ ...h, show_freight: true }))}
-                  className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1.5">
-                  <Plus size={12} /> Add Freight / Shipping Cost
-                </button>
-              )}
-              {header.show_freight && (
-                <div className="flex items-center gap-2">
-                  <Label className="text-xs text-slate-500 w-32 shrink-0">Freight (₱)</Label>
-                  <CalcInput className="h-8 w-28 font-mono text-sm text-right"
- value={header.freight} onChange={(v) => setHeader(h => ({ ...h, freight: v }))} />
-                  <button onClick={() => setHeader(h => ({ ...h, show_freight: false, freight: 0 }))}
-                    className="text-slate-400 hover:text-red-500"><X size={13} /></button>
-                </div>
-              )}
-              {!header.show_vat && (
-                <button onClick={() => setHeader(h => ({ ...h, show_vat: true }))}
-                  className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1.5">
-                  <Plus size={12} /> Add VAT
-                </button>
-              )}
-              {header.show_vat && (
-                <div className="flex items-center gap-2">
-                  <Label className="text-xs text-slate-500 w-32 shrink-0">VAT Rate (%)</Label>
-                  <CalcInput className="h-8 w-20 font-mono text-sm text-right"
- value={header.tax_rate} onChange={(v) => setHeader(h => ({ ...h, tax_rate: parseFloat(v) || 0 }))} />
-                  <button onClick={() => setHeader(h => ({ ...h, show_vat: false }))}
-                    className="text-slate-400 hover:text-red-500"><X size={13} /></button>
-                </div>
-              )}
-            </div>
-
-            {/* Totals + Buttons */}
-            <div className="w-full lg:w-80 space-y-2">
-              <div className="p-4 bg-slate-50 rounded-lg border border-slate-200 space-y-1">
-                <TotalsRow label="Subtotal (before discounts)" value={computed.subtotal} />
-                {/* Overall discount */}
-                <div className="flex items-center gap-2 py-1">
-                  <span className="text-sm text-slate-600 flex-1">Overall Discount</span>
-                  <div className="flex gap-1 items-center">
-                    <select value={header.overall_discount_type}
-                      onChange={e => setHeader(h => ({ ...h, overall_discount_type: e.target.value }))}
-                      className="h-7 text-xs border border-slate-200 rounded px-1 bg-white focus:outline-none">
-                      <option value="amount">₱</option>
-                      <option value="percent">%</option>
-                    </select>
-                    <CalcInput className="w-20 h-7 px-2 text-xs text-right font-mono border border-slate-200 rounded focus:outline-none focus:border-[#1A4D2E]"
- value={header.overall_discount_value} placeholder="0"
- onChange={(v) => setHeader(h => ({ ...h, overall_discount_value: v }))} />
+                {/* LEFT: Optional toggles */}
+                <div className="p-4 lg:col-span-2 space-y-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Optional Charges</p>
+                  <div className="flex flex-wrap gap-3">
+                    {!header.show_freight ? (
+                      <button onClick={() => setHeader(h => ({ ...h, show_freight: true }))}
+                        className="text-xs text-slate-500 hover:text-[#1A4D2E] flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-50 hover:bg-emerald-50 ring-1 ring-slate-200/60 transition-colors"
+                        data-testid="add-freight-btn">
+                        <Plus size={12} /> Add Freight / Shipping
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-50 ring-1 ring-emerald-200/60">
+                        <Label className="text-xs text-slate-600 shrink-0">Freight ₱</Label>
+                        <CalcInput className="h-7 w-24 font-mono text-sm text-right"
+                          value={header.freight} onChange={(v) => setHeader(h => ({ ...h, freight: v }))} />
+                        <button onClick={() => setHeader(h => ({ ...h, show_freight: false, freight: 0 }))}
+                          className="text-slate-400 hover:text-red-500"><X size={13} /></button>
+                      </div>
+                    )}
+                    {!header.show_vat ? (
+                      <button onClick={() => setHeader(h => ({ ...h, show_vat: true }))}
+                        className="text-xs text-slate-500 hover:text-[#1A4D2E] flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-50 hover:bg-emerald-50 ring-1 ring-slate-200/60 transition-colors"
+                        data-testid="add-vat-btn">
+                        <Plus size={12} /> Add VAT
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-50 ring-1 ring-emerald-200/60">
+                        <Label className="text-xs text-slate-600 shrink-0">VAT %</Label>
+                        <CalcInput className="h-7 w-16 font-mono text-sm text-right"
+                          value={header.tax_rate} onChange={(v) => setHeader(h => ({ ...h, tax_rate: parseFloat(v) || 0 }))} />
+                        <button onClick={() => setHeader(h => ({ ...h, show_vat: false }))}
+                          className="text-slate-400 hover:text-red-500"><X size={13} /></button>
+                      </div>
+                    )}
                   </div>
-                  {computed.overallDisc > 0 && (
-                    <span className="text-xs font-mono text-emerald-600">-{formatPHP(computed.overallDisc)}</span>
-                  )}
+
+                  {/* Receipt Upload — mandatory for actual PO */}
+                  <div className="pt-2">
+                    <ReceiptUploadInline
+                      required={true}
+                      label="Receipt / DR Photo (Required)"
+                      recordType="purchase_order"
+                      recordSummary={{
+                        type_label: 'Purchase Order',
+                        title: header.vendor ? `PO for ${header.vendor}` : 'New Purchase Order',
+                        description: `${lines.filter(l => l.product_id).length} item(s)${header.dr_number ? ` · DR# ${header.dr_number}` : ''}`,
+                        amount: computed.grandTotal || 0,
+                        date: header.purchase_date,
+                      }}
+                      onUploaded={(data) => setCreateReceiptData(data)}
+                    />
+                  </div>
                 </div>
-                {header.show_freight && <TotalsRow label="Freight" value={computed.freight} />}
-                {header.show_vat && <TotalsRow label={`VAT (${header.tax_rate}%)`} value={computed.taxAmt} />}
-                <Separator className="my-1" />
-                <TotalsRow label="Grand Total" value={computed.grandTotal} bold accent="text-[#1A4D2E]" />
-              </div>
 
-              {/* Action Buttons — change based on source type */}
-              {/* Receipt Upload — mandatory for actual PO */}
-              <ReceiptUploadInline
-                required={true}
-                label="Receipt / DR Photo (Required)"
-                recordType="purchase_order"
-                recordSummary={{
-                  type_label: 'Purchase Order',
-                  title: header.vendor ? `PO for ${header.vendor}` : 'New Purchase Order',
-                  description: `${lines.filter(l => l.product_id).length} item(s)${header.dr_number ? ` · DR# ${header.dr_number}` : ''}`,
-                  amount: computed.grandTotal || 0,
-                  date: header.purchase_date,
-                }}
-                onUploaded={(data) => setCreateReceiptData(data)}
-              />
+                {/* RIGHT: Totals + Buttons */}
+                <div className="p-4 space-y-3 bg-gradient-to-br from-slate-50/40 to-emerald-50/20">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Totals</p>
+                  <div className="space-y-1.5">
+                    <TotalsRow label="Subtotal" value={computed.subtotal} />
+                    {/* Overall discount */}
+                    <div className="flex items-center gap-2 py-1">
+                      <span className="text-sm text-slate-600 flex-1">Overall Discount</span>
+                      <div className="flex gap-1 items-center">
+                        <select value={header.overall_discount_type}
+                          onChange={e => setHeader(h => ({ ...h, overall_discount_type: e.target.value }))}
+                          className="h-7 text-xs border border-slate-200 rounded px-1 bg-white focus:outline-none">
+                          <option value="amount">₱</option>
+                          <option value="percent">%</option>
+                        </select>
+                        <CalcInput className="w-20 h-7 px-2 text-xs text-right font-mono border border-slate-200 rounded focus:outline-none focus:border-[#1A4D2E]"
+                          value={header.overall_discount_value} placeholder="0"
+                          onChange={(v) => setHeader(h => ({ ...h, overall_discount_value: v }))} />
+                      </div>
+                    </div>
+                    {computed.overallDisc > 0 && (
+                      <p className="text-[11px] font-mono text-emerald-600 text-right -mt-1">−{formatPHP(computed.overallDisc)}</p>
+                    )}
+                    {header.show_freight && <TotalsRow label="Freight" value={computed.freight} />}
+                    {header.show_vat && <TotalsRow label={`VAT (${header.tax_rate}%)`} value={computed.taxAmt} />}
+                    <Separator className="my-1" />
+                    <div className="flex justify-between font-bold text-base" style={{ fontFamily: 'Manrope' }}>
+                      <span>Grand Total</span>
+                      <span className="text-[#1A4D2E] font-mono">{formatPHP(computed.grandTotal)}</span>
+                    </div>
+                  </div>
 
-              <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-3 gap-2 pt-1">
                     <Button variant="outline" size="sm" onClick={handleSaveDraft} disabled={saving}
                       data-testid="save-draft-btn" className="flex flex-col h-14 gap-0.5">
                       <Save size={16} /><span className="text-[10px] leading-tight text-center">Save Draft</span>
@@ -1017,13 +1270,14 @@ export default function PurchaseOrderPage() {
                       ? `Terms pre-set to ${header.terms_label} — click "Terms" to confirm`
                       : 'Both "Receive" options immediately update inventory'}
                   </p>
-            </div>
-          </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* ── PO LIST TAB ───────────────────────────────────────────── */}
-        <TabsContent value="list" className="mt-4 space-y-3">
-          {/* Unpaid POs banner → link to Pay Supplier page */}
+        <TabsContent value="list" className="mt-1 space-y-3">
           {/* Filter chips */}
           <div className="flex items-center gap-2 flex-wrap">
             {[
@@ -1035,36 +1289,27 @@ export default function PurchaseOrderPage() {
             ].map(f => (
               <button key={f.key} onClick={() => setListFilter(f.key)}
                 data-testid={`filter-${f.key}`}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${listFilter === f.key ? 'bg-[#1A4D2E] text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${listFilter === f.key ? 'bg-[#1A4D2E] text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
                 {f.label}
               </button>
             ))}
-            <div className="ml-auto flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => navigate('/pay-supplier')}
-                className="h-7 border-[#1A4D2E] text-[#1A4D2E] hover:bg-[#1A4D2E]/5">
-                <Banknote size={12} className="mr-1" /> Pay Supplier
-              </Button>
-              <Button variant="outline" size="sm" onClick={fetchOrders} className="h-7">
-                <RefreshCw size={12} className="mr-1" /> Refresh
-              </Button>
-            </div>
           </div>
 
-          <Card className="border-slate-200">
+          <Card className="border-slate-200 shadow-sm">
             <CardContent className="p-0">
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-slate-50">
-                    <TableHead className="text-xs uppercase text-slate-500">PO #</TableHead>
-                    <TableHead className="text-xs uppercase text-slate-500">Supplier</TableHead>
-                    <TableHead className="text-xs uppercase text-slate-500">DR #</TableHead>
-                    <TableHead className="text-xs uppercase text-slate-500">Items</TableHead>
-                    <TableHead className="text-xs uppercase text-slate-500 text-right">Grand Total</TableHead>
-                    <TableHead className="text-xs uppercase text-slate-500">Date</TableHead>
-                    <TableHead className="text-xs uppercase text-slate-500">Receive</TableHead>
-                    <TableHead className="text-xs uppercase text-slate-500">Payment</TableHead>
-                    <TableHead className="text-xs uppercase text-slate-500">Receipts</TableHead>
-                    <TableHead className="w-36">Actions</TableHead>
+                  <TableRow className="bg-slate-50 hover:bg-slate-50">
+                    <TableHead className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">PO #</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Supplier</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">DR #</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Items</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold text-right">Grand Total</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Date</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Receive</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Payment</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Receipts</TableHead>
+                    <TableHead className="w-36 text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -2022,6 +2267,185 @@ export default function PurchaseOrderPage() {
       type="po"
       title={refPrompt.vendor}
     />
+
+    {/* ── Park PO prompt ─────────────────────────────────────────────── */}
+    <Dialog open={parkPromptOpen} onOpenChange={(o) => { setParkPromptOpen(o); if (!o) setParkLabel(''); }}>
+      <DialogContent data-testid="park-po-prompt-dialog" className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <PauseCircle size={18} className="text-amber-600" /> Park this PO
+          </DialogTitle>
+          <DialogDescription>
+            Save the current PO draft so you can switch suppliers or come back later. Anyone at <strong>{currentBranch?.name || 'this branch'}</strong> can resume it from <strong>Parked</strong>.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          <div>
+            <Label className="text-xs">Optional note (helps you find it later)</Label>
+            <Input
+              value={parkLabel}
+              onChange={e => setParkLabel(e.target.value)}
+              placeholder='e.g. "waiting for invoice", "morning delivery"'
+              maxLength={60}
+              data-testid="park-po-label-input"
+              onKeyDown={(e) => { if (e.key === 'Enter') handleParkConfirm(); }}
+              autoFocus
+            />
+            <p className="text-[10px] text-slate-400 mt-1">
+              Auto-tagged with {header.vendor ? <b>{header.vendor}</b> : <b>Untitled</b>} and the time.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 rounded p-2">
+            {(() => { const { itemCount, grandTotal } = computeParkSummary(); return (
+              <>
+                <Package size={12} />
+                <span>{itemCount.toFixed(0)} item{itemCount === 1 ? '' : 's'} · {formatPHP(grandTotal)}</span>
+                <span className="ml-auto text-amber-600 italic">Inventory NOT yet updated</span>
+              </>
+            ); })()}
+          </div>
+          {createReceiptData?.fileCount > 0 && (
+            <div className="flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded p-2">
+              <ImageIcon size={12} /> {createReceiptData.fileCount} receipt photo{createReceiptData.fileCount === 1 ? '' : 's'} attached — will resume with the PO.
+            </div>
+          )}
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => { setParkPromptOpen(false); setParkLabel(''); }} data-testid="park-po-cancel-btn">
+            Cancel
+          </Button>
+          <Button
+            className="bg-amber-600 hover:bg-amber-700 text-white"
+            onClick={handleParkConfirm}
+            disabled={parkSaving}
+            data-testid="park-po-confirm-btn"
+          >
+            {parkSaving ? <RefreshCw size={14} className="mr-1.5 animate-spin" /> : <PauseCircle size={14} className="mr-1.5" />}
+            Park PO
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    {/* ── Parked POs: list + resume + discard ───────────────────────── */}
+    <Dialog open={parkedDialogOpen} onOpenChange={setParkedDialogOpen}>
+      <DialogContent data-testid="parked-pos-dialog" className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Inbox size={18} className="text-[#1A4D2E]" /> Parked Purchase Orders
+            {parkedPOs.length > 0 && (
+              <Badge variant="secondary" className="ml-1">{parkedPOs.length}</Badge>
+            )}
+          </DialogTitle>
+          <DialogDescription>
+            Drafts saved at this branch. Auto-purged after 24 hours.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="max-h-[60vh] overflow-y-auto -mx-6 px-6 divide-y divide-slate-100">
+          {parkedPOs.length === 0 ? (
+            <div className="text-center py-8 text-slate-400 text-sm">
+              No parked POs right now.
+            </div>
+          ) : parkedPOs.map((park) => {
+            const isOwn = park.created_by === user?.id;
+            const ageMin = Math.max(0, Math.floor((Date.now() - new Date(park.created_at).getTime()) / 60000));
+            const ageStr = ageMin < 60 ? `${ageMin}m ago` : ageMin < 1440 ? `${Math.floor(ageMin / 60)}h ago` : `${Math.floor(ageMin / 1440)}d ago`;
+            return (
+              <div key={park.id} className="py-3 flex items-start gap-3" data-testid={`parked-po-row-${park.id}`}>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-medium text-sm truncate">{park.label || 'Untitled park'}</span>
+                    {park.vendor && (
+                      <Badge variant="outline" className="text-[9px] py-0 px-1.5">
+                        <Truck size={9} className="mr-0.5" /> {park.vendor}
+                      </Badge>
+                    )}
+                    {!isOwn && (
+                      <Badge className="text-[9px] py-0 px-1.5 bg-slate-100 text-slate-600 hover:bg-slate-100">
+                        {park.created_by_name || 'Other user'}
+                      </Badge>
+                    )}
+                    {park.receipt_file_count > 0 && (
+                      <Badge className="text-[9px] py-0 px-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-50">
+                        <ImageIcon size={9} className="mr-0.5" /> {park.receipt_file_count}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex gap-3 mt-0.5 text-[11px] text-slate-500">
+                    <span>{(park.item_count || 0).toFixed(0)} items</span>
+                    <span>·</span>
+                    <span className="font-semibold text-slate-700">{formatPHP(park.grand_total || 0)}</span>
+                    <span>·</span>
+                    <span>{ageStr}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <Button
+                    size="sm"
+                    onClick={() => resumeParkedPO(park)}
+                    data-testid={`resume-park-po-${park.id}`}
+                    className="bg-[#1A4D2E] hover:bg-[#14532d] text-white h-8"
+                  >
+                    <RotateCcw size={12} className="mr-1" /> Resume
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => handleDiscardParkClick(park)}
+                    data-testid={`discard-park-po-${park.id}`}
+                    className="h-8 text-red-500 hover:bg-red-50"
+                    title={isOwn ? 'Discard this park' : "Discard (manager PIN required)"}
+                  >
+                    <Trash2 size={12} />
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="flex justify-end pt-2">
+          <Button variant="outline" size="sm" onClick={refreshParkedPOs} disabled={!isOnline}>
+            <RefreshCw size={12} className="mr-1" /> Refresh
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    {/* ── Discard PIN prompt (other-user parks only) ──────────────────── */}
+    <Dialog open={discardPinPrompt.open} onOpenChange={(o) => !o && setDiscardPinPrompt({ open: false, parkId: null, pin: '' })}>
+      <DialogContent data-testid="discard-park-po-pin-dialog" className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Lock size={16} className="text-amber-600" /> Manager PIN required
+          </DialogTitle>
+          <DialogDescription>
+            Discarding another user's parked PO needs a manager / admin PIN.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2 py-1">
+          <Label className="text-xs">Manager / Admin PIN</Label>
+          <Input
+            type="password"
+            value={discardPinPrompt.pin}
+            onChange={e => setDiscardPinPrompt(p => ({ ...p, pin: e.target.value }))}
+            onKeyDown={(e) => { if (e.key === 'Enter') submitDiscardWithPin(); }}
+            placeholder="Enter PIN"
+            data-testid="discard-park-po-pin-input"
+            autoFocus
+          />
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setDiscardPinPrompt({ open: false, parkId: null, pin: '' })}>
+            Cancel
+          </Button>
+          <Button onClick={submitDiscardWithPin} className="bg-red-600 hover:bg-red-700 text-white" data-testid="discard-park-po-confirm-btn">
+            <Trash2 size={14} className="mr-1.5" /> Discard
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   </div>
   );
 }
