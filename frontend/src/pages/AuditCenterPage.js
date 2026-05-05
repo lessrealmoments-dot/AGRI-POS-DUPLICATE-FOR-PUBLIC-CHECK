@@ -719,6 +719,11 @@ export default function AuditCenterPage() {
   // ── Security Flags ─────────────────────────────────────────────────────
   const [securityFlags, setSecurityFlags] = useState([]);
   const [loadingFlags, setLoadingFlags] = useState(false);
+
+  // ── Iter 240 backfill (admin-only data maintenance) ────────────────────
+  const [iter240Loading, setIter240Loading] = useState(false);
+  const [iter240Report, setIter240Report] = useState(null);
+  const [iter240Confirm, setIter240Confirm] = useState(false);
   const [ackDialog, setAckDialog] = useState(null); // event being acknowledged
   const [ackNote, setAckNote] = useState('');
   const [ackSaving, setAckSaving] = useState(false);
@@ -778,6 +783,32 @@ export default function AuditCenterPage() {
       loadSecurityFlags();
     } catch (e) { toast.error(e.response?.data?.detail || 'Failed'); }
     setAckSaving(false);
+  };
+
+  // ── Iter 240 backfill (one-shot data fix) ──────────────────────────────
+  // Hits the admin-gated /api/admin/backfill/iter240 endpoint.
+  // GET (mode='preview') → DRY-RUN report only, no writes.
+  // POST?apply=1 (mode='apply') → applies + returns same report.
+  const runIter240Backfill = async (mode) => {
+    setIter240Loading(true);
+    try {
+      const res = mode === 'apply'
+        ? await api.post(`${BACKEND_URL}/api/admin/backfill/iter240?apply=true`)
+        : await api.get(`${BACKEND_URL}/api/admin/backfill/iter240`);
+      setIter240Report(res.data);
+      if (mode === 'apply') {
+        toast.success(`Fixed ${res.data.affected_invoices} invoice(s)`);
+      } else {
+        toast.success(res.data.affected_invoices === 0
+          ? 'Clean — no invoices need fixing.'
+          : `${res.data.affected_invoices} invoice(s) need fixing — review below.`);
+      }
+    } catch (e) {
+      const msg = e.response?.data?.detail || e.message || 'Backfill failed';
+      toast.error(typeof msg === 'string' ? msg : 'Backfill failed');
+    }
+    setIter240Loading(false);
+    setIter240Confirm(false);
   };
 
   const prepareForAudit = async () => {
@@ -2406,10 +2437,144 @@ export default function AuditCenterPage() {
               ))}
             </div>
           )}
+
+          {/* ── Data Maintenance: Iter 240 backfill ─────────────────── */}
+          <Card className="border-2 border-amber-200 bg-amber-50/50 mt-6" data-testid="iter240-backfill-card">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2" style={{ fontFamily: 'Manrope' }}>
+                <KeyRound size={16} className="text-amber-600" /> Data Maintenance — Offline-Sync Discount Fix
+              </CardTitle>
+              <p className="text-xs text-slate-600 leading-relaxed pt-1">
+                Repairs invoices saved before the May 2026 fix where offline-synced sales with per-line discounts
+                stored an inflated <code className="bg-white/60 px-1 rounded text-[10px]">total</code> (ignored the discount).
+                <strong> Always click Preview first</strong> — it's a DRY-RUN with no writes. Apply only after reviewing.
+              </p>
+            </CardHeader>
+            <CardContent className="pt-0 space-y-3">
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm" variant="outline"
+                  onClick={() => runIter240Backfill('preview')}
+                  disabled={iter240Loading}
+                  data-testid="iter240-preview-btn"
+                >
+                  {iter240Loading
+                    ? <RefreshCw size={13} className="animate-spin mr-1.5" />
+                    : <Eye size={13} className="mr-1.5" />}
+                  Preview (Dry-Run)
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => setIter240Confirm(true)}
+                  disabled={iter240Loading || !iter240Report || (iter240Report?.affected_invoices || 0) === 0}
+                  className="bg-amber-600 hover:bg-amber-700 text-white"
+                  data-testid="iter240-apply-btn"
+                >
+                  <Check size={13} className="mr-1.5" /> Apply Fix
+                  {iter240Report?.affected_invoices > 0 && (
+                    <Badge className="ml-2 bg-white/20 text-white text-[10px]">{iter240Report.affected_invoices}</Badge>
+                  )}
+                </Button>
+              </div>
+
+              {iter240Report && (
+                <div className="bg-white border border-slate-200 rounded-lg p-3 space-y-2 text-xs" data-testid="iter240-report">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Mode</span>
+                    <Badge variant={iter240Report.mode === 'applied' ? 'default' : 'secondary'} className="text-[10px]">
+                      {iter240Report.mode === 'applied' ? 'APPLIED ✓' : 'DRY-RUN'}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Affected invoices</span>
+                    <span className="font-semibold text-slate-800">{iter240Report.affected_invoices}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Net grand-total reduction</span>
+                    <span className="font-mono font-semibold text-emerald-700">
+                      {formatPHP(iter240Report.net_grand_total_reduction || 0)}
+                    </span>
+                  </div>
+
+                  {iter240Report.affected_invoices === 0 ? (
+                    <p className="text-emerald-700 font-medium pt-1 border-t border-slate-100">
+                      ✓ All invoices look good — nothing to fix.
+                    </p>
+                  ) : (
+                    <div className="pt-2 border-t border-slate-100">
+                      <p className="font-semibold text-slate-700 mb-1">Per-invoice details</p>
+                      <div className="max-h-48 overflow-y-auto space-y-1.5">
+                        {(iter240Report.details || []).slice(0, 30).map((d, i) => (
+                          <div key={i} className="bg-slate-50 rounded p-2 space-y-0.5" data-testid={`iter240-detail-${i}`}>
+                            <div className="flex items-center justify-between font-medium">
+                              <span className="font-mono">{d.invoice_number}</span>
+                              <span className="text-slate-600">
+                                {formatPHP(d.old_grand_total)} → <span className="text-emerald-700 font-semibold">{formatPHP(d.new_grand_total)}</span>
+                              </span>
+                            </div>
+                            {d.overpaid_by > 0 && (
+                              <p className="text-[10px] text-amber-700">
+                                ⚠ Customer over-paid by {formatPHP(d.overpaid_by)} — issue manual refund
+                              </p>
+                            )}
+                            <div className="text-[10px] text-slate-500">
+                              {(d.items_fixed || []).map((it, j) => (
+                                <span key={j} className="inline-block mr-2">
+                                  {it.product_name}: {formatPHP(it.old_total)} → {formatPHP(it.new_total)}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                        {(iter240Report.details || []).length > 30 && (
+                          <p className="text-[10px] text-slate-400 italic">
+                            ... +{iter240Report.details.length - 30} more (run Apply to fix all of them at once)
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
 
       </Tabs>
+
+      {/* ── Iter 240 Apply confirm dialog ────────────────────────────── */}
+      {iter240Confirm && (
+        <Dialog open={iter240Confirm} onOpenChange={setIter240Confirm}>
+          <DialogContent className="max-w-sm" data-testid="iter240-confirm-dialog">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-slate-800">
+                <AlertTriangle size={16} className="text-amber-600" /> Apply Iter 240 Fix?
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 text-sm">
+              <p>This will permanently update <strong>{iter240Report?.affected_invoices || 0}</strong> invoice(s) — recomputing line totals, subtotal, grand total, and balance.</p>
+              <ul className="text-xs text-slate-600 list-disc pl-5 space-y-0.5">
+                <li>Inventory and customer wallets are <strong>not</strong> touched</li>
+                <li>If a customer over-paid, you'll see "needs refund" in the report</li>
+                <li>Each invoice gets stamped <code className="text-[10px]">iter240_backfill_at</code> so re-runs are safe</li>
+              </ul>
+              <div className="flex gap-2 pt-1">
+                <Button variant="outline" className="flex-1" onClick={() => setIter240Confirm(false)}>Cancel</Button>
+                <Button
+                  onClick={() => runIter240Backfill('apply')}
+                  className="flex-1 bg-amber-600 hover:bg-amber-700 text-white"
+                  disabled={iter240Loading}
+                  data-testid="iter240-confirm-apply-btn"
+                >
+                  {iter240Loading ? <RefreshCw size={13} className="animate-spin mr-1" /> : <Check size={13} className="mr-1" />}
+                  Apply Fix
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Acknowledge Dialog */}
       {ackDialog && (
