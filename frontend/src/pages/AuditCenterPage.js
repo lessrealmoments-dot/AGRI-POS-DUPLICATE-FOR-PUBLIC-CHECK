@@ -724,6 +724,11 @@ export default function AuditCenterPage() {
   const [iter240Loading, setIter240Loading] = useState(false);
   const [iter240Report, setIter240Report] = useState(null);
   const [iter240Confirm, setIter240Confirm] = useState(false);
+
+  // ── Iter 241 — Day-close ledger backfill ───────────────────────────────
+  const [iter241Loading, setIter241Loading] = useState(false);
+  const [iter241Report, setIter241Report] = useState(null);
+  const [iter241Confirm, setIter241Confirm] = useState(false);
   const [ackDialog, setAckDialog] = useState(null); // event being acknowledged
   const [ackNote, setAckNote] = useState('');
   const [ackSaving, setAckSaving] = useState(false);
@@ -809,6 +814,32 @@ export default function AuditCenterPage() {
     }
     setIter240Loading(false);
     setIter240Confirm(false);
+  };
+
+  // ── Iter 241 — close-day ledger backfill ───────────────────────────────
+  // Recreates wallet_movements + fund_transfers entries for past
+  // daily_closings rows that were closed before the live ledger logic
+  // shipped. Idempotent — safe to re-run.
+  const runIter241Backfill = async (mode) => {
+    setIter241Loading(true);
+    try {
+      const res = mode === 'apply'
+        ? await api.post(`${BACKEND_URL}/api/admin/backfill/iter241-close-ledger?apply=true`)
+        : await api.get(`${BACKEND_URL}/api/admin/backfill/iter241-close-ledger`);
+      setIter241Report(res.data);
+      if (mode === 'apply') {
+        toast.success(`Restored ${res.data.ledger_rows_created} ledger entry(ies) across ${res.data.affected_closings} day(s).`);
+      } else {
+        toast.success(res.data.affected_closings === 0
+          ? 'Clean — every closed day already has its ledger trail.'
+          : `${res.data.affected_closings} closed day(s) missing ledger — review below.`);
+      }
+    } catch (e) {
+      const msg = e.response?.data?.detail || e.message || 'Backfill failed';
+      toast.error(typeof msg === 'string' ? msg : 'Backfill failed');
+    }
+    setIter241Loading(false);
+    setIter241Confirm(false);
   };
 
   const prepareForAudit = async () => {
@@ -2538,6 +2569,104 @@ export default function AuditCenterPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* ── Data Maintenance: Iter 241 close-ledger backfill ───── */}
+          <Card className="border-2 border-cyan-200 bg-cyan-50/40 mt-3" data-testid="iter241-backfill-card">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2" style={{ fontFamily: 'Manrope' }}>
+                <Wallet size={16} className="text-cyan-600" /> Data Maintenance — Day-Close Ledger Trail
+              </CardTitle>
+              <p className="text-xs text-slate-600 leading-relaxed pt-1">
+                Recreates the missing <strong>Cashier Drawer</strong> + <strong>Physical Safe</strong> transaction history
+                for past day-closings (cashier→safe transfer + over/short variance entries).
+                Past closings before the May 2026 fix didn't write these ledger entries — money silently appeared/disappeared
+                in Fund Management. <strong>Idempotent</strong>: safe to run multiple times.
+              </p>
+            </CardHeader>
+            <CardContent className="pt-0 space-y-3">
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm" variant="outline"
+                  onClick={() => runIter241Backfill('preview')}
+                  disabled={iter241Loading}
+                  data-testid="iter241-preview-btn"
+                >
+                  {iter241Loading
+                    ? <RefreshCw size={13} className="animate-spin mr-1.5" />
+                    : <Eye size={13} className="mr-1.5" />}
+                  Preview (Dry-Run)
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => setIter241Confirm(true)}
+                  disabled={iter241Loading || !iter241Report || (iter241Report?.affected_closings || 0) === 0}
+                  className="bg-cyan-600 hover:bg-cyan-700 text-white"
+                  data-testid="iter241-apply-btn"
+                >
+                  <Check size={13} className="mr-1.5" /> Apply Fix
+                  {iter241Report?.affected_closings > 0 && (
+                    <Badge className="ml-2 bg-white/20 text-white text-[10px]">{iter241Report.affected_closings}</Badge>
+                  )}
+                </Button>
+              </div>
+
+              {iter241Report && (
+                <div className="bg-white border border-slate-200 rounded-lg p-3 space-y-2 text-xs" data-testid="iter241-report">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Mode</span>
+                    <Badge variant={iter241Report.mode === 'applied' ? 'default' : 'secondary'} className="text-[10px]">
+                      {iter241Report.mode === 'applied' ? 'APPLIED ✓' : 'DRY-RUN'}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Closed days needing ledger</span>
+                    <span className="font-semibold text-slate-800">{iter241Report.affected_closings}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Total ledger rows {iter241Report.mode === 'applied' ? 'created' : 'to create'}</span>
+                    <span className="font-mono font-semibold text-cyan-700">
+                      {iter241Report.ledger_rows_created}
+                    </span>
+                  </div>
+
+                  {iter241Report.affected_closings === 0 ? (
+                    <p className="text-emerald-700 font-medium pt-1 border-t border-slate-100">
+                      ✓ All closed days already have their ledger trail.
+                    </p>
+                  ) : (
+                    <div className="pt-2 border-t border-slate-100">
+                      <p className="font-semibold text-slate-700 mb-1">Per-day breakdown</p>
+                      <div className="max-h-48 overflow-y-auto space-y-1.5">
+                        {(iter241Report.details || []).slice(0, 30).map((d, i) => (
+                          <div key={i} className="bg-slate-50 rounded p-2 grid grid-cols-2 gap-2 text-[11px]" data-testid={`iter241-detail-${i}`}>
+                            <div>
+                              <p className="font-mono font-semibold">{d.date}</p>
+                              <p className="text-[10px] text-slate-500">branch {d.branch_id?.slice(0,8)}</p>
+                            </div>
+                            <div className="text-right">
+                              <p>To Safe: <span className="font-mono font-semibold">{formatPHP(d.cash_to_safe)}</span></p>
+                              <p>Float: <span className="font-mono">{formatPHP(d.cash_to_drawer)}</span></p>
+                              {Math.abs(d.over_short) > 0.005 && (
+                                <p className={d.over_short < 0 ? 'text-red-600' : 'text-emerald-700'}>
+                                  Variance: <span className="font-mono">{d.over_short > 0 ? '+' : ''}{formatPHP(d.over_short)}</span>
+                                </p>
+                              )}
+                              <p className="text-slate-400">+{d.ledger_entries_to_create} entries</p>
+                            </div>
+                          </div>
+                        ))}
+                        {(iter241Report.details || []).length > 30 && (
+                          <p className="text-[10px] text-slate-400 italic">
+                            ... +{iter241Report.details.length - 30} more (Apply will fix all)
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
 
@@ -2568,6 +2697,40 @@ export default function AuditCenterPage() {
                   data-testid="iter240-confirm-apply-btn"
                 >
                   {iter240Loading ? <RefreshCw size={13} className="animate-spin mr-1" /> : <Check size={13} className="mr-1" />}
+                  Apply Fix
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* ── Iter 241 Apply confirm dialog ────────────────────────────── */}
+      {iter241Confirm && (
+        <Dialog open={iter241Confirm} onOpenChange={setIter241Confirm}>
+          <DialogContent className="max-w-sm" data-testid="iter241-confirm-dialog">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-slate-800">
+                <Wallet size={16} className="text-cyan-600" /> Apply Iter 241 Fix?
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 text-sm">
+              <p>This will recreate <strong>{iter241Report?.ledger_rows_created || 0}</strong> ledger entry(ies)
+                across <strong>{iter241Report?.affected_closings || 0}</strong> closed day(s).</p>
+              <ul className="text-xs text-slate-600 list-disc pl-5 space-y-0.5">
+                <li>Wallet balances and safe lots are <strong>not</strong> changed — they're already correct</li>
+                <li>This only writes the <em>history</em> entries you'll see in Cashier Drawer + Safe Transaction History</li>
+                <li>Each entry is tagged <code className="text-[10px]">daily_close_ref</code> so re-runs do nothing</li>
+              </ul>
+              <div className="flex gap-2 pt-1">
+                <Button variant="outline" className="flex-1" onClick={() => setIter241Confirm(false)}>Cancel</Button>
+                <Button
+                  onClick={() => runIter241Backfill('apply')}
+                  className="flex-1 bg-cyan-600 hover:bg-cyan-700 text-white"
+                  disabled={iter241Loading}
+                  data-testid="iter241-confirm-apply-btn"
+                >
+                  {iter241Loading ? <RefreshCw size={13} className="animate-spin mr-1" /> : <Check size={13} className="mr-1" />}
                   Apply Fix
                 </Button>
               </div>

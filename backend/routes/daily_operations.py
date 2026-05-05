@@ -10,6 +10,103 @@ from utils import get_current_user, check_perm, now_iso, new_id, get_branch_filt
 router = APIRouter(tags=["Daily Operations"])
 
 
+# ── Iter 240 fix: write a proper audit trail when closing a day ────────
+# Before this iter: close_day just $set the cashier wallet balance and
+# inserted a safe_lots row. No `wallet_movements` and no `fund_transfers`
+# row was written, so Fund Management → Cashier Drawer / Safe history
+# saw money silently appearing/disappearing on close.
+#
+# This helper is called both by close_day (single) and batch_close_days
+# so the ledger logic stays in lock-step and idempotent (each entry is
+# tagged `daily_close_ref = closing.id`, and we never re-create when
+# replaying via the backfill script — see admin_backfill_241).
+async def _write_close_ledger_entries(
+    *, closing_id: str, branch_id: str, date: str,
+    cashier_wallet: dict, safe_wallet: Optional[dict],
+    actual_cash: float, cash_to_safe: float, cash_to_drawer: float,
+    over_short: float, variance_notes: str,
+    user: dict,
+) -> dict:
+    """Write the day-close ledger trail. Returns counts for verification.
+
+    Idempotency: each inserted doc has `daily_close_ref = closing_id` so
+    we can detect prior runs (used by the backfill).
+    """
+    inserted = {"wallet_movements": 0, "fund_transfers": 0}
+    user_name = user.get("full_name") or user.get("name") or user.get("username") or ""
+
+    if cashier_wallet:
+        # 1) Over/short variance — only when |delta| > 1 cent
+        if abs(over_short) > 0.005:
+            await db.wallet_movements.insert_one({
+                "id": new_id(),
+                "wallet_id": cashier_wallet["id"],
+                "branch_id": branch_id,
+                "type": "over_short_adjust",
+                "amount": round(over_short, 2),
+                "reference": f"Day close {date} — variance",
+                "description": variance_notes or ("Cash overage" if over_short > 0 else "Cash shortage"),
+                "user_id": user["id"],
+                "user_name": user_name,
+                "date": date,
+                "daily_close_ref": closing_id,
+                "created_at": now_iso(),
+            })
+            inserted["wallet_movements"] += 1
+
+        # 2) Cashier → Safe transfer (only when amount > 0)
+        if cash_to_safe > 0 and safe_wallet:
+            await db.fund_transfers.insert_one({
+                "id": new_id(), "branch_id": branch_id,
+                "transfer_type": "cashier_to_safe",
+                "amount": round(cash_to_safe, 2),
+                "from_wallet_id": cashier_wallet["id"],
+                "to_wallet_id": safe_wallet["id"],
+                "target_wallet": "safe",
+                "note": f"Day close {date} — vault transfer",
+                "authorized_by": user_name,
+                "user_id": user["id"],
+                "date": date,
+                "daily_close_ref": closing_id,
+                "created_at": now_iso(),
+            })
+            inserted["fund_transfers"] += 1
+
+            await db.wallet_movements.insert_one({
+                "id": new_id(),
+                "wallet_id": cashier_wallet["id"],
+                "branch_id": branch_id,
+                "type": "transfer_out",
+                "amount": -round(cash_to_safe, 2),
+                "reference": f"Day close {date} → Safe",
+                "description": "End-of-day vault transfer",
+                "user_id": user["id"],
+                "user_name": user_name,
+                "date": date,
+                "daily_close_ref": closing_id,
+                "created_at": now_iso(),
+            })
+            inserted["wallet_movements"] += 1
+
+            await db.wallet_movements.insert_one({
+                "id": new_id(),
+                "wallet_id": safe_wallet["id"],
+                "branch_id": branch_id,
+                "type": "transfer_in",
+                "amount": round(cash_to_safe, 2),
+                "reference": f"Day close {date} from cashier",
+                "description": "End-of-day cashier deposit",
+                "user_id": user["id"],
+                "user_name": user_name,
+                "date": date,
+                "daily_close_ref": closing_id,
+                "created_at": now_iso(),
+            })
+            inserted["wallet_movements"] += 1
+
+    return inserted
+
+
 
 @router.get("/daily-close/unclosed-days")
 async def get_unclosed_days(
@@ -1711,6 +1808,20 @@ async def close_day(data: dict, user=Depends(get_current_user)):
     await db.daily_closings.insert_one(close_record)
     del close_record["_id"]
 
+    # ── Iter 240: write proper ledger trail for the day-close ──────────
+    # Order matters: write ledger BEFORE updating wallet balance so the
+    # wallet_movements timestamps reflect the close moment, and so a
+    # crash here leaves a partial trail rather than a silently-mutated
+    # balance.
+    await _write_close_ledger_entries(
+        closing_id=close_record["id"], branch_id=branch_id, date=date,
+        cashier_wallet=wallet, safe_wallet=safe,
+        actual_cash=actual_cash, cash_to_safe=cash_to_safe,
+        cash_to_drawer=cash_to_drawer,
+        over_short=over_short, variance_notes=variance_notes,
+        user=user,
+    )
+
     # Overage Reserve auto-hook — pool positive over_short, track negative
     # as deficit. Idempotent via (source_id, auto_credit).
     try:
@@ -2050,6 +2161,18 @@ async def batch_close_days(data: dict, user=Depends(get_current_user)):
 
     await db.daily_closings.insert_one(close_record)
     del close_record["_id"]
+
+    # ── Iter 240: ledger trail for batch close ──────────────────────────
+    # over_short for batch close — same calc as the single close path
+    over_short_batch = round(actual_cash - close_record.get("expected_counter", 0), 2)
+    await _write_close_ledger_entries(
+        closing_id=close_record["id"], branch_id=branch_id, date=last_date,
+        cashier_wallet=wallet, safe_wallet=safe,
+        actual_cash=actual_cash, cash_to_safe=cash_to_safe,
+        cash_to_drawer=cash_to_drawer,
+        over_short=over_short_batch, variance_notes=variance_notes,
+        user=user,
+    )
 
     # Overage Reserve auto-hook (batch-close path)
     try:

@@ -1,5 +1,45 @@
 # AgriBooks PRD
 
+## Iter 241 (May 2026) — Day-Close Ledger Trail Fix (CRITICAL audit gap) ✅
+
+### Problem (reported by Jovelyn 2026-05-05)
+> "On closing wizard fund allocation, what remains in cashier and what goes
+>  to the safe? Not sure if it really transfers — I don't see it in
+>  /fund-management Cashier Drawer history and Physical Safe Transaction History."
+
+### Root cause
+`routes/daily_operations.close_day` (and `batch_close_days`) directly
+`$set` the cashier wallet balance and inserted a `safe_lots` row but
+**never wrote** `wallet_movements` or `fund_transfers`. Fund Management
+reads from those collections, so money silently appeared/disappeared on
+close — major audit gap.
+
+### Fix
+1. **`_write_close_ledger_entries` helper** in `daily_operations.py` —
+   writes 1-4 ledger entries on every close:
+   - `over_short_adjust` movement on cashier (when |variance| > 1¢)
+   - `cashier_to_safe` fund_transfer (when cash_to_safe > 0)
+   - cashier-side `transfer_out` movement
+   - safe-side `transfer_in` movement
+   - All tagged `daily_close_ref = closing.id` for idempotency
+2. Wired into both `close_day` and `batch_close_days` paths
+3. **Admin backfill** for past closings: `POST /api/admin/backfill/iter241-close-ledger?apply=true`
+   — recreates missing entries, idempotent, role-gated to admin only
+4. **Audit Center → Security Flags tab** has a new "Day-Close Ledger Trail"
+   maintenance card with Preview + Apply Fix buttons (mirrors iter240 UX)
+5. **Regression tests** in `tests/test_close_day_ledger_trail_241.py` —
+   dry-run shape + idempotency + non-admin 403 — both pass
+
+### Files changed (iter241)
+- `/app/backend/routes/daily_operations.py` — `_write_close_ledger_entries` helper + wired into close paths
+- `/app/backend/routes/admin_backfill_240.py` — `iter241-close-ledger` GET + POST
+- `/app/frontend/src/pages/AuditCenterPage.js` — second maintenance card + confirm dialog
+- `/app/backend/tests/test_close_day_ledger_trail_241.py` — new regression suite
+
+---
+
+# AgriBooks PRD
+
 ## Iter 240 (May 2026) — Offline Sync Line-Discount Bug Fix + Purchase Order UI Redesign ✅
 
 ### Problem A — Offline-sync inflates per-line totals (CRITICAL data corruption bug)
