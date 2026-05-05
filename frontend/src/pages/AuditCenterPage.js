@@ -11,7 +11,7 @@ import { Separator } from '../components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { formatDateTime, localTodayStr } from '../lib/dateFormat';
+import { formatDateTime, formatTime, localTodayStr } from '../lib/dateFormat';
 import {
   ShieldCheck, RefreshCw, AlertTriangle, Check, X, ChevronDown, ChevronUp,
   Printer, History, Plus, Package, Banknote, TrendingUp, Users, ArrowRight,
@@ -1702,7 +1702,7 @@ export default function AuditCenterPage() {
                         {auditData.activity.off_hours_transactions.map((t, i) => (
                           <div key={i} className="text-xs p-2 bg-red-50 rounded flex justify-between">
                             <span><button className="font-mono text-blue-600 hover:underline" onClick={() => openDetailModal(t.invoice_number)}>{t.invoice_number}</button> · {t.cashier_name}</span>
-                            <span>{formatPHP(t.grand_total)} · {t.created_at?.slice(11, 16)}</span>
+                            <span>{formatPHP(t.grand_total)} · {formatTime(t.created_at)}</span>
                           </div>
                         ))}
                       </div>

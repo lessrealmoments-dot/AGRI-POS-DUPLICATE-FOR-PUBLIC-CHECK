@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useAuth, api } from '../contexts/AuthContext';
 import { formatPHP, fmtDateTime, fmtDate } from '../lib/utils';
+import { formatTime } from '../lib/dateFormat';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import CalcInput from '../components/CalcInput';
@@ -2687,7 +2688,7 @@ export default function UnifiedSalesPage() {
                 const isCash = ptype === 'cash' || (ptype !== 'credit' && ptype !== 'partial' && !isDigital && !inv.customer_id);
                 const isCredit = ptype === 'credit' || ptype === 'partial';
                 const hasBalance = inv.balance > 0 && !isVoided;
-                const time = inv.created_at?.slice(11, 16) || '';
+                const time = formatTime(inv.created_at);
                 const badgeInfo = isVoided ? { label: 'VOIDED', cls: 'bg-slate-200 text-slate-500' }
                   : isSplit ? { label: `Split · ${inv.digital_platform || 'Digital'}`, cls: 'bg-indigo-100 text-indigo-700' }
                   : ptype === 'digital' ? { label: inv.digital_platform || 'Digital', cls: 'bg-blue-100 text-blue-700' }
