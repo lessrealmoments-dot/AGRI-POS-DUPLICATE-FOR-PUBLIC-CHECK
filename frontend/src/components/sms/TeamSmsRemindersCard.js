@@ -567,7 +567,7 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
                   </p>
                   {!heartbeat.healthy && heartbeat.last_poll_at && (
                     <span className="text-[10px] italic">
-                      Check gateway phone: app running? URL = agribooks.com? Internet?
+                      Check gateway phone: app running? Internet up? API URL set?
                     </span>
                   )}
                 </div>
