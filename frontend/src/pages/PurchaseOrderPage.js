@@ -974,9 +974,9 @@ export default function PurchaseOrderPage() {
           {/* Header card */}
           <Card className="border-slate-200 shadow-sm">
             <CardContent className="p-5 space-y-4">
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* Supplier */}
-                <div className="relative lg:col-span-2" ref={supplierRef}>
+              <div className="grid grid-cols-2 lg:grid-cols-12 gap-3">
+                {/* Supplier — narrower (4/12 ≈ 33%, was 50%) */}
+                <div className="relative col-span-2 lg:col-span-4" ref={supplierRef}>
                     <Label className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Supplier / Vendor <span className="text-red-500 normal-case">*</span></Label>
                     <div className="relative mt-1">
                       <Truck size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -1007,22 +1007,22 @@ export default function PurchaseOrderPage() {
                     </div>
                   )}
                 </div>
-                <div>
+                <div className="lg:col-span-2">
                   <Label className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Purchase Date</Label>
                   <Input className="h-9 mt-1" type="date" value={header.purchase_date}
                     onChange={e => setHeader(h => ({ ...h, purchase_date: e.target.value }))} />
                 </div>
 
                 {/* DR / Reference # */}
-                <div>
+                <div className="lg:col-span-2">
                   <Label className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">DR / Reference #</Label>
                   <Input className="h-9 mt-1" value={header.dr_number}
                     onChange={e => setHeader(h => ({ ...h, dr_number: e.target.value }))}
-                    placeholder="Supplier's Delivery Receipt #" />
+                    placeholder="DR #" />
                 </div>
 
                 {/* Payment Type */}
-                <div>
+                <div className="lg:col-span-2">
                   <Label className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Payment Type</Label>
                   <Select value={header.payment_type} onValueChange={v => setHeader(h => ({ ...h, payment_type: v }))}>
                     <SelectTrigger className="mt-1 h-9" data-testid="po-payment-type">
@@ -1035,9 +1035,19 @@ export default function PurchaseOrderPage() {
                   </Select>
                 </div>
 
-                {/* Terms selector — only when credit/terms */}
+                {/* PO Number — moved up to row 1 */}
+                <div className="lg:col-span-2">
+                  <Label className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">PO # <span className="text-slate-300 normal-case font-normal tracking-normal">(auto)</span></Label>
+                  <Input data-testid="po-number" className="h-9 mt-1" value={header.po_number}
+                    onChange={e => setHeader(h => ({ ...h, po_number: e.target.value }))}
+                    placeholder="Auto-generated" />
+                </div>
+              </div>
+
+              {/* Row 2 — Terms (when applicable) + Notes */}
+              <div className="grid grid-cols-2 lg:grid-cols-12 gap-3">
                 {header.payment_type === 'terms' && (
-                  <div>
+                  <div className="lg:col-span-3">
                     <Label className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Payment Terms</Label>
                     <Select value={header.terms_label}
                       onValueChange={v => {
@@ -1053,19 +1063,7 @@ export default function PurchaseOrderPage() {
                     </Select>
                   </div>
                 )}
-              </div>
-
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* PO Number */}
-                <div>
-                  <Label className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">PO Number <span className="text-slate-300 normal-case font-normal tracking-normal">(auto if blank)</span></Label>
-                  <Input data-testid="po-number" className="h-9 mt-1" value={header.po_number}
-                    onChange={e => setHeader(h => ({ ...h, po_number: e.target.value }))}
-                    placeholder="Auto-generated" />
-                </div>
-
-                {/* Notes */}
-                <div className="lg:col-span-3">
+                <div className={`col-span-2 ${header.payment_type === 'terms' ? 'lg:col-span-9' : 'lg:col-span-12'}`}>
                   <Label className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Notes</Label>
                   <Input className="h-9 mt-1" value={header.notes}
                     onChange={e => setHeader(h => ({ ...h, notes: e.target.value }))}
