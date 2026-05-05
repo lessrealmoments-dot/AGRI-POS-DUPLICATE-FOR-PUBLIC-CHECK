@@ -1,0 +1,29 @@
+{
+  "summary": "Iter243 verification: forward-date cap + date dead-lock fix on /sales-new + terminal auto-bump banner + dual-date receipt. Backend regression 5/5 pass (test_forward_date_cap_243.py). Frontend /sales-new UI verified: sale-date-input has correct min/max attributes, typing a far-future date (2027-12-31) fires the NEW error message 'Cannot encode beyond 2026-05-05. Future-dating is capped at the next open business day.' and value stays capped; no spurious 'Cannot encode before system start date' appears. Partial/empty typing is silently ignored (regex guard at UnifiedSalesPage.js:2451 works). Terminal route goes to pairing screen (cannot e2e-test banner without paired session), but code review of TerminalSales.jsx confirms the amber banner, lastCloseDate fetch, and saleDate auto-bump logic are correct. PrintEngine.js dual-date implementation verified in both full-page and thermal variants (Transaction Date always shown; 'Posted to Z-Report' only when order_date differs from created_at).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_forward_date_cap_243.py"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "UnifiedSalesPage.js handleEncodingDateChange (2446-2472): regex guard `/^\\d{4}-\\d{2}-\\d{2}$/` correctly prevents spurious errors on partial browser-emitted values. Forward-date cap uses maxAllowedDate computed via useMemo from lastCloseDate+today. Value correctly unchanged (no setHeader) on invalid input — browser input stays visually in sync because the component is controlled. Error is only cleared on a successful setHeader, which means re-typing the SAME valid date does NOT clear a stale error (no onChange fires). Minor UX nit: consider clearing dateError when user refocuses the field or when lastCloseDate/maxAllowedDate changes. Not a regression.",
+    "maxAllowedDate (419-448): uses `lastCloseDate >= today` to detect today-is-closed and bump max to today+1. Correct. Uses UTC `toISOString()` on a date constructed with `T12:00:00` — safe from DST boundary flips.",
+    "TerminalSales.jsx (98-104): useEffect refetches lastCloseDate on branch/online/syncVersion change. Good. No cleanup on unmount — React will warn on fast remounts but harmless. The banner (880-889) correctly gated on `lastCloseDate && lastCloseDate >= today` — matches web POS semantics.",
+    "TerminalSales.jsx (600-609): saleDate computed at submit time (not memoized) — correct; ensures if midnight rolls over mid-session the right date is stamped.",
+    "PrintEngine.js buildPageHeader (170-190): dual-date shown only when `fmtDate(postedToDate) !== fmtDate(date)`. Uses fmtDate to normalize both sides → robust to ISO/date-only input mismatch. Same guard applied to thermal order slip (572) and thermal charge agreement (611). ✓",
+    "sales.py forward-date cap + manager-PIN override with audit_log write is covered by 5 passing regression tests (far-future reject, next-year reject, today allow, tomorrow-when-closed allow, day-after-tomorrow reject-even-if-closed)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (5/5 pytest)", "frontend": "100% for the flows exercised (date-input cap + error wording + min/max attrs). Auto-bump when today-closed and terminal banner NOT e2e-exercised (would need seeding a daily_closings row and pairing a terminal session); code path review is clean."},
+  "test_credentials": "test_org_admin@regression.local / RegressionPass!2026",
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Today's date at test time: 2026-05-05 (no lastCloseDate on tenant). To fully exercise the today-closed path you must insert a daily_closings row `{organization_id, branch_id, date:'2026-05-05', status:'closed'}` then reload /sales-new — the Sale Date should auto-bump to 2026-05-06 and the max attr should be 2026-05-06. For the terminal banner you also need a paired terminal session (visit /settings → Connect Terminal and enter the pairing code). Receipt HTML can be exercised by completing a sale and intercepting window.open() print content, or by directly importing PrintEngine and calling orderSlipFullPage(...) / trustReceiptThermal(...) with synthetic data where inv.order_date !== inv.created_at date-portion.",
+  "rca_of_the_issue": "Original bug: native <input type=date> with min=minAllowedDate and max=maxAllowedDate would dead-lock (min>max) when today was already closed, because min was set to lastCloseDate+1 (=today+1) while max was still clamped to today. Additional spurious-error trigger: browsers emit intermediate incomplete values (e.g. '2026-0') during typing which lexically sort before floorDate and tripped the 'Cannot encode before system start date' check. Both resolved by (a) bumping maxAllowedDate to today+1 when lastCloseDate>=today, and (b) regex-guarding handleEncodingDateChange to only act on complete YYYY-MM-DD. Forward-date laundering closed by backend sales.py capping order_date <= today+1 (or lastCloseDate+1), plus manager-PIN audited override."
+}

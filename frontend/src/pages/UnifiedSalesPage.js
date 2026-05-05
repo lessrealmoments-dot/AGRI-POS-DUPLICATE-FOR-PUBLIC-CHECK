@@ -431,6 +431,22 @@ export default function UnifiedSalesPage() {
     return floorDate || undefined;
   }, [lastCloseDate, floorDate]);
 
+  // Iter 243: Max selectable date = today, OR tomorrow IF today is already
+  // closed. This prevents the native date input from dead-locking (min > max
+  // if today is closed) and exactly encodes the business rule: sales made
+  // after the mid-day close get dated to the next open business day.
+  // Forward-dating beyond +1 day is blocked (prevents stock laundering — see
+  // /app/frontend/src/lib/nextOpenDate.js header for the full rationale).
+  const maxAllowedDate = useMemo(() => {
+    const today = localToday();
+    if (lastCloseDate && lastCloseDate >= today) {
+      const d = new Date(today + 'T12:00:00');
+      d.setDate(d.getDate() + 1);
+      return d.toISOString().slice(0, 10);
+    }
+    return today;
+  }, [lastCloseDate]);
+
   // Order header collapse
   const [headerCollapsed, setHeaderCollapsed] = useState(true);
 
@@ -2428,6 +2444,13 @@ export default function UnifiedSalesPage() {
 
   // Handle date selection from unclosed days banner OR the Sale Date field
   const handleEncodingDateChange = useCallback((date) => {
+    // Iter 243: Guard against empty / partial date strings the browser emits
+    // mid-type (e.g., "2026-0", "2026-04-") which lexically sort BEFORE
+    // floorDate and used to spuriously fire "Cannot encode before system
+    // start date". Ignore anything that isn't a full YYYY-MM-DD.
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return; // don't update, don't error — just wait for a complete value
+    }
     if (floorDate && date < floorDate) {
       setDateError(`Cannot encode before system start date (${floorDate}).`);
       return;
@@ -2436,9 +2459,17 @@ export default function UnifiedSalesPage() {
       setDateError(`${date} is a closed day — the last close was ${lastCloseDate}. Please choose a date after ${lastCloseDate}.`);
       return; // reject — don't update order_date
     }
+    // Iter 243: Forward-date cap — never allow dates more than 1 day past today.
+    // Without this, a cashier could stamp `order_date = 2027-01-01`, deduct
+    // stock from inventory today, and the sale would never show on any
+    // Z-Report — "forward-dated stock laundering".
+    if (date > maxAllowedDate) {
+      setDateError(`Cannot encode beyond ${maxAllowedDate}. Future-dating is capped at the next open business day.`);
+      return;
+    }
     setDateError(null);
     setHeader(h => ({ ...h, order_date: date }));
-  }, [isDateClosed, floorDate, lastCloseDate]);
+  }, [isDateClosed, floorDate, lastCloseDate, maxAllowedDate]);
 
   // Handle manager override: retry the pending sale with override PIN
   const handleStockOverride = async (overridePin, _saleDataOverride) => {
@@ -2476,6 +2507,22 @@ export default function UnifiedSalesPage() {
           onDataLoaded={({ last_close_date, floor_date }) => {
             setLastCloseDate(last_close_date);
             if (floor_date) setFloorDate(floor_date);
+            // Iter 243: If today is already closed, auto-bump the sale date
+            // to the next open day (tomorrow) so the cashier doesn't land on
+            // a locked input. Only do this on first load — don't clobber a
+            // date the user has explicitly picked.
+            if (last_close_date) {
+              const today = localToday();
+              if (last_close_date >= today) {
+                setHeader(h => {
+                  // Only auto-bump if order_date is still today's default
+                  if (h.order_date !== today) return h;
+                  const d = new Date(today + 'T12:00:00');
+                  d.setDate(d.getDate() + 1);
+                  return { ...h, order_date: d.toISOString().slice(0, 10) };
+                });
+              }
+            }
           }}
           className="mx-1 mb-2"
         />
@@ -2840,7 +2887,7 @@ export default function UnifiedSalesPage() {
                   }`}
                   value={header.order_date}
                   min={minAllowedDate}
-                  max={localToday()}
+                  max={maxAllowedDate}
                   onChange={e => handleEncodingDateChange(e.target.value)}
                   data-testid="sale-date-input"
                 />

@@ -90,6 +90,18 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   const saleIdRef = useRef(''); // stable per checkout intent → used as idempotency key
   const processingRef = useRef(false); // guards against rapid double-click re-entry
   const [businessInfo, setBusinessInfo] = useState({});
+  // Iter 243: Track last close date so terminal auto-bumps sale date to
+  // next open day if today is already closed. Fetched from the same
+  // /daily-close/unclosed-days endpoint the web POS uses. Falls back to
+  // null on failure — we'll then use today and let backend reject.
+  const [lastCloseDate, setLastCloseDate] = useState(null);
+  useEffect(() => {
+    const bid = session?.branchId || session?.branch_id;
+    if (!bid || !isOnline) return;
+    api.get('/daily-close/unclosed-days', { params: { branch_id: bid } })
+      .then(r => setLastCloseDate(r?.data?.last_close_date || null))
+      .catch(() => {});
+  }, [session?.branchId, session?.branch_id, isOnline, api, syncVersion]);
   // Insufficient stock override
   const [stockModal, setStockModal] = useState(false);
   const [insufficientItems, setInsufficientItems] = useState([]);
@@ -586,6 +598,15 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
     const saleId = ensureSaleId();
     const envelopeId = newEnvelopeId();
     const today = localTodayStr();
+    // Iter 243: If today is already closed, auto-bump to tomorrow (next open
+    // day). Terminal cannot choose arbitrary dates — this is intentional.
+    // See /app/frontend/src/lib/nextOpenDate.js for rationale.
+    let saleDate = today;
+    if (lastCloseDate && lastCloseDate >= today) {
+      const d = new Date(today + 'T12:00:00');
+      d.setDate(d.getDate() + 1);
+      saleDate = d.toISOString().slice(0, 10);
+    }
 
     const paymentMethod = paymentType === 'cash' ? 'Cash'
       : paymentType === 'digital' ? 'Digital'
@@ -618,7 +639,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
       balance: paymentType === 'credit' ? grandTotal : 0,
       terms: paymentType === 'credit' ? 'Credit' : 'COD',
       terms_days: paymentType === 'credit' ? creditDays : 0,
-      prefix: 'KS', order_date: today, invoice_date: today,
+      prefix: 'KS', order_date: saleDate, invoice_date: saleDate,
       payment_method: paymentMethod, payment_type: paymentType,
       fund_source: 'cashier', sale_type: selectedCustomer ? 'credit' : 'walk_in',
       mode: 'quick', source: 'agrismart_terminal', terminal_id: session.terminalId,
@@ -842,8 +863,31 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
     return p?.available ?? null;
   }, [products]);
 
+  // Iter 243: If today is closed, show a persistent banner telling the cashier
+  // all subsequent sales will be dated to the next business day. Not dismissable.
+  const today = localTodayStr();
+  const todayIsClosed = Boolean(lastCloseDate && lastCloseDate >= today);
+  let nextSaleDate = today;
+  if (todayIsClosed) {
+    const d = new Date(today + 'T12:00:00');
+    d.setDate(d.getDate() + 1);
+    nextSaleDate = d.toISOString().slice(0, 10);
+  }
+
   return (
     <div className="flex flex-col h-full" data-testid="terminal-sales">
+      {todayIsClosed && (
+        <div
+          className="px-3 py-2 bg-amber-50 border-b border-amber-200 flex items-center gap-2"
+          data-testid="terminal-next-day-banner"
+        >
+          <AlertTriangle size={14} className="text-amber-600 shrink-0" />
+          <div className="text-xs leading-tight">
+            <div className="font-semibold text-amber-800">Today ({today}) is closed.</div>
+            <div className="text-amber-700">All new sales will be dated <span className="font-mono font-semibold">{nextSaleDate}</span>.</div>
+          </div>
+        </div>
+      )}
       {/* Search Bar + Scanner Toggle */}
       <div className="p-3 bg-white border-b border-slate-200">
         <div className="flex gap-2">

@@ -139,7 +139,75 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
                 status_code=403,
                 detail=f"Cannot encode sales for {order_date} — this date is before the system start date ({floor_date})."
             )
-    
+
+    # ── Forward-date cap (Iter 243) ───────────────────────────────────────────
+    # Prevents "forward-dated stock laundering": without this, a cashier could
+    # set order_date = 2027-01-01, stock would deduct from inventory today,
+    # and the sale would never appear on any Z-Report. Max allowed is:
+    #   • today + 1 day, when today itself is already closed (so after-hours
+    #     sales roll into the next business day's Z-Report — exact rule the
+    #     user asked for)
+    #   • today, otherwise
+    # An admin override path exists via `allow_forward_date_pin` for the rare
+    # legitimate case (e.g., pre-dating a post-dated check), which logs an
+    # audit_log row that a reviewer can spot later.
+    org_today = await today_local(user.get("organization_id") or "")
+    # Is today already closed for this branch?
+    today_closed = await db.daily_closings.find_one(
+        {"branch_id": branch_id, "date": org_today, "status": "closed"},
+        {"_id": 0, "date": 1},
+    )
+    max_allowed = org_today
+    if today_closed:
+        try:
+            max_allowed = (datetime.strptime(org_today, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+        except ValueError:
+            max_allowed = org_today
+
+    if order_date > max_allowed:
+        override_pin = data.get("allow_forward_date_pin", "")
+        if not override_pin:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"Cannot forward-date sale to {order_date}. "
+                    f"Maximum allowed is {max_allowed}. "
+                    f"Forward-dating beyond the next open business day is blocked to prevent "
+                    f"stock from deducting before a sale appears on any Z-Report."
+                ),
+            )
+        # Manager/owner override path — verify PIN and log to audit trail
+        from routes.verify import verify_pin_for_action
+        verifier = await verify_pin_for_action(
+            override_pin, "forward_date_override", branch_id=branch_id
+        )
+        if not verifier:
+            raise HTTPException(
+                status_code=403,
+                detail="Invalid manager PIN for forward-date override.",
+            )
+        # Audit log — surface this via Audit Center so suspicious patterns
+        # (one cashier repeatedly forward-dating) become visible.
+        try:
+            await db.audit_log.insert_one({
+                "id": new_id(),
+                "action": "forward_date_override",
+                "branch_id": branch_id,
+                "user_id": user.get("id"),
+                "user_name": user.get("full_name", user.get("username", "")),
+                "verifier_id": verifier.get("verifier_id"),
+                "verifier_name": verifier.get("verifier_name"),
+                "order_date": order_date,
+                "max_allowed": max_allowed,
+                "today": org_today,
+                "reason": data.get("forward_date_reason", ""),
+                "created_at": now_iso(),
+            })
+        except Exception:
+            # Never block the sale on audit write failure — just log to stderr.
+            import logging
+            logging.getLogger("sales").exception("Failed to write forward_date_override audit row")
+
     # Idempotency check — prevent duplicate transactions from offline sync
     idem_key = data.get("idempotency_key")
     if idem_key:
