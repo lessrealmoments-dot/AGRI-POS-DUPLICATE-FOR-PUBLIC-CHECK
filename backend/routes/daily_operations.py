@@ -536,9 +536,21 @@ async def get_daily_close_preview(
     # was later modified/voided still appears in the Z-Report, double-counting
     # the collection (bug seen with SI-SB-001029 where the same invoice
     # appeared twice — once as ₱42,295 voided, once as ₱38,995 live).
+    #
+    # Iter 242 FIX: We exclude invoices order-dated TODAY to avoid double-count
+    # with today's partial/credit sales (already in Step 1/2). BUT interest
+    # and penalty invoices can legitimately be created AND paid on the same
+    # day via the Payments page. Those payments flow cash into the cashier
+    # drawer but were previously excluded from `total_cash_ar`, causing an
+    # OVER-MONEY variance in Step 5 equal to the interest collected today.
+    # The $or clause below includes today-dated interest/penalty invoices so
+    # their payments correctly appear in AR and expected_counter.
     ar_pipeline = [
         {"$match": {"branch_id": branch_id, "status": {"$ne": "voided"},
-                    "order_date": {"$ne": date}}},
+                    "$or": [
+                        {"order_date": {"$ne": date}},
+                        {"sale_type": {"$in": ["interest_charge", "penalty_charge"]}},
+                    ]}},
         {"$unwind": "$payments"},
         {"$match": {
             "payments.date": date,
@@ -547,7 +559,7 @@ async def get_daily_close_preview(
         {"$project": {
             "_id": 0,
             "id": 1, "customer_name": 1, "invoice_number": 1,
-            "customer_id": 1,
+            "customer_id": 1, "sale_type": 1,
             "balance": 1,  # current balance after all payments
             "payment": "$payments"
         }}
@@ -557,15 +569,29 @@ async def get_daily_close_preview(
     for p in ar_payments_raw:
         pmt = p.get("payment", {})
         amount = float(pmt.get("amount", 0))
-        interest_paid = float(pmt.get("applied_to_interest", 0))
-        penalty_paid = float(pmt.get("applied_to_penalty", 0))
-        principal_paid = float(pmt.get("applied_to_principal", amount - interest_paid - penalty_paid))
+        sale_type = p.get("sale_type", "")
+        # For interest/penalty invoice payments, the whole amount IS interest/penalty.
+        # The `/customers/.../receive-payment` endpoint hardcodes applied_to_interest=0
+        # for all payments (even on interest invoices), so we classify by invoice type here.
+        if sale_type == "interest_charge":
+            interest_paid = amount
+            penalty_paid = 0.0
+            principal_paid = 0.0
+        elif sale_type == "penalty_charge":
+            interest_paid = 0.0
+            penalty_paid = amount
+            principal_paid = 0.0
+        else:
+            interest_paid = float(pmt.get("applied_to_interest", 0))
+            penalty_paid = float(pmt.get("applied_to_penalty", 0))
+            principal_paid = float(pmt.get("applied_to_principal", amount - interest_paid - penalty_paid))
         current_bal = float(p.get("balance", 0))
         ar_payments.append({
             "invoice_id": p.get("id", ""),
             "customer_id": p.get("customer_id", ""),
             "customer_name": p.get("customer_name", ""),
             "invoice_number": p.get("invoice_number", ""),
+            "sale_type": sale_type,
             "balance_before": round(current_bal + amount, 2),
             "interest_paid": round(interest_paid, 2),
             "penalty_paid": round(penalty_paid, 2),
@@ -1598,26 +1624,40 @@ async def close_day(data: dict, user=Depends(get_current_user)):
     ).to_list(500)
     partial_total = round(sum(float(inv.get("amount_paid", 0)) for inv in partial_invoices), 2)
 
+    # Iter 242 FIX: Include today-dated interest/penalty invoice payments
+    # (same bug as preview — these are legitimate same-day AR collections).
     ar_pipeline = [
-        {"$match": {"branch_id": branch_id, "status": {"$ne": "voided"}, "order_date": {"$ne": date}}},
+        {"$match": {"branch_id": branch_id, "status": {"$ne": "voided"},
+                    "$or": [
+                        {"order_date": {"$ne": date}},
+                        {"sale_type": {"$in": ["interest_charge", "penalty_charge"]}},
+                    ]}},
         {"$unwind": "$payments"},
         {"$match": {
             "payments.date": date,
             "payments.voided": {"$ne": True},
         }},
-        {"$project": {"_id": 0, "customer_name": 1, "invoice_number": 1, "balance": 1, "payment": "$payments"}}
+        {"$project": {"_id": 0, "customer_name": 1, "invoice_number": 1,
+                      "sale_type": 1, "balance": 1, "payment": "$payments"}}
     ]
     ar_raw = await db.invoices.aggregate(ar_pipeline).to_list(500)
     credit_collections = []
     for p in ar_raw:
         pmt = p.get("payment", {})
         amount = float(pmt.get("amount", 0))
-        interest_paid = float(pmt.get("applied_to_interest", 0))
-        penalty_paid = float(pmt.get("applied_to_penalty", 0))
-        principal_paid = float(pmt.get("applied_to_principal", amount - interest_paid - penalty_paid))
+        sale_type = p.get("sale_type", "")
+        if sale_type == "interest_charge":
+            interest_paid, penalty_paid, principal_paid = amount, 0.0, 0.0
+        elif sale_type == "penalty_charge":
+            interest_paid, penalty_paid, principal_paid = 0.0, amount, 0.0
+        else:
+            interest_paid = float(pmt.get("applied_to_interest", 0))
+            penalty_paid = float(pmt.get("applied_to_penalty", 0))
+            principal_paid = float(pmt.get("applied_to_principal", amount - interest_paid - penalty_paid))
         credit_collections.append({
             "customer": p.get("customer_name", ""),
             "invoice": p.get("invoice_number", ""),
+            "sale_type": sale_type,
             "balance_before": round(float(p.get("balance", 0)) + amount, 2),
             "interest_paid": round(interest_paid, 2),
             "penalty_paid": round(penalty_paid, 2),
@@ -1945,26 +1985,40 @@ async def batch_close_days(data: dict, user=Depends(get_current_user)):
     partial_total = round(sum(float(inv.get("amount_paid", 0)) for inv in partial_invoices), 2)
 
     # AR collections across all dates
+    # Iter 242 FIX: Include today-dated interest/penalty invoice payments
+    # (same bug as preview/close_day — same-day interest payments were dropped).
     ar_pipeline = [
-        {"$match": {"branch_id": branch_id, "status": {"$ne": "voided"}, "order_date": {"$nin": dates}}},
+        {"$match": {"branch_id": branch_id, "status": {"$ne": "voided"},
+                    "$or": [
+                        {"order_date": {"$nin": dates}},
+                        {"sale_type": {"$in": ["interest_charge", "penalty_charge"]}},
+                    ]}},
         {"$unwind": "$payments"},
         {"$match": {
             "payments.date": date_filter,
             "payments.voided": {"$ne": True},
         }},
-        {"$project": {"_id": 0, "customer_name": 1, "invoice_number": 1, "balance": 1, "payment": "$payments"}}
+        {"$project": {"_id": 0, "customer_name": 1, "invoice_number": 1,
+                      "sale_type": 1, "balance": 1, "payment": "$payments"}}
     ]
     ar_raw = await db.invoices.aggregate(ar_pipeline).to_list(500)
     credit_collections = []
     for p in ar_raw:
         pmt = p.get("payment", {})
         amount = float(pmt.get("amount", 0))
-        interest_paid = float(pmt.get("applied_to_interest", 0))
-        penalty_paid = float(pmt.get("applied_to_penalty", 0))
-        principal_paid = float(pmt.get("applied_to_principal", amount - interest_paid - penalty_paid))
+        sale_type = p.get("sale_type", "")
+        if sale_type == "interest_charge":
+            interest_paid, penalty_paid, principal_paid = amount, 0.0, 0.0
+        elif sale_type == "penalty_charge":
+            interest_paid, penalty_paid, principal_paid = 0.0, amount, 0.0
+        else:
+            interest_paid = float(pmt.get("applied_to_interest", 0))
+            penalty_paid = float(pmt.get("applied_to_penalty", 0))
+            principal_paid = float(pmt.get("applied_to_principal", amount - interest_paid - penalty_paid))
         credit_collections.append({
             "customer": p.get("customer_name", ""),
             "invoice": p.get("invoice_number", ""),
+            "sale_type": sale_type,
             "balance_before": round(float(p.get("balance", 0)) + amount, 2),
             "interest_paid": round(interest_paid, 2),
             "penalty_paid": round(penalty_paid, 2),
