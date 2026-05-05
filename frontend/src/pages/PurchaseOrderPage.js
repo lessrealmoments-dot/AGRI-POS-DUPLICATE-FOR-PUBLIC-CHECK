@@ -28,6 +28,7 @@ import {
   ShieldCheck, Clock, Pencil, Upload, ImageIcon, TrendingDown, TrendingUp, Printer,
   Smartphone, Lock
 } from 'lucide-react';
+import { localTodayStr } from '../lib/dateFormat';
 import { toast } from 'sonner';
 import { useUnsavedChangesGuard } from '../lib/useUnsavedChangesGuard';
 import CalcInput from '../components/CalcInput';
@@ -76,7 +77,7 @@ export default function PurchaseOrderPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const isAdmin = user?.role === 'admin';
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localTodayStr();
 
   // ── Header state ────────────────────────────────────────────────────────
   const [tab, setTab] = useState('create');

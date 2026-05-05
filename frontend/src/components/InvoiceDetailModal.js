@@ -23,6 +23,7 @@ import {
   Copy, Check, ShieldCheck, Ban, ImageIcon, Upload, Smartphone,
   Truck, CreditCard, Wallet, Pencil, RefreshCw, Printer, MessageSquare
 } from 'lucide-react';
+import { formatDateTime } from '../lib/dateFormat';
 import { toast } from 'sonner';
 import CalcInput from './CalcInput';
 
@@ -559,8 +560,8 @@ export default function InvoiceDetailModal({
                       {/* Sales rep / created info */}
                       <div className="text-xs text-slate-400 space-y-0.5 border-t pt-2">
                         {invoice.sales_rep_name && <p>Sales Rep: {invoice.sales_rep_name}</p>}
-                        <p>Created: {invoice.created_at ? new Date(invoice.created_at).toLocaleString() : '—'} by {invoice.cashier_name || '—'}</p>
-                        {invoice.edited && <p>Last edited: {invoice.last_edited_at ? new Date(invoice.last_edited_at).toLocaleString() : '—'} by {invoice.last_edited_by || '—'}</p>}
+                        <p>Created: {invoice.created_at ? formatDateTime(invoice.created_at) : '—'} by {invoice.cashier_name || '—'}</p>
+                        {invoice.edited && <p>Last edited: {invoice.last_edited_at ? formatDateTime(invoice.last_edited_at) : '—'} by {invoice.last_edited_by || '—'}</p>}
                       </div>
 
                       {/* Payment history */}
@@ -611,7 +612,7 @@ export default function InvoiceDetailModal({
                                   {sig.status === 'signed' ? '✓ Signed' : 'PIN Override'}
                                 </Badge>
                                 <span className="text-[10px] text-slate-400">
-                                  {sig.signed_at ? new Date(sig.signed_at).toLocaleString('en-PH', { dateStyle: 'short', timeStyle: 'short' }) : sig.bypassed_at ? new Date(sig.bypassed_at).toLocaleString('en-PH', { dateStyle: 'short', timeStyle: 'short' }) : ''}
+                                  {sig.signed_at ? formatDateTime(sig.signed_at) : sig.bypassed_at ? formatDateTime(sig.bypassed_at) : ''}
                                 </span>
                               </div>
                               {sig.status === 'signed' && sig.signature_url ? (
@@ -848,7 +849,7 @@ export default function InvoiceDetailModal({
                           </div>
                         )}
                         <div className="text-xs text-slate-400 space-y-1">
-                          <p>Created: {invoice.created_at ? new Date(invoice.created_at).toLocaleString() : '—'} by {invoice.created_by_name || '—'}</p>
+                          <p>Created: {invoice.created_at ? formatDateTime(invoice.created_at) : '—'} by {invoice.created_by_name || '—'}</p>
                         </div>
                       </>
                     ) : (
@@ -1031,9 +1032,9 @@ export default function InvoiceDetailModal({
 
                     {/* Footer info */}
                     <div className="text-xs text-slate-400 space-y-1">
-                      <p>Created: {invoice.created_at ? new Date(invoice.created_at).toLocaleString() : '—'} by {invoice.cashier_name || invoice.created_by_name || '—'}</p>
+                      <p>Created: {invoice.created_at ? formatDateTime(invoice.created_at) : '—'} by {invoice.cashier_name || invoice.created_by_name || '—'}</p>
                       {invoice.sales_rep_name && <p>Sales Rep: {invoice.sales_rep_name}</p>}
-                      {invoice.edited && <p>Last edited: {new Date(invoice.last_edited_at).toLocaleString()} by {invoice.last_edited_by}</p>}
+                      {invoice.edited && <p>Last edited: {formatDateTime(invoice.last_edited_at)} by {invoice.last_edited_by}</p>}
                     </div>
                     </>
                     )}
@@ -1123,7 +1124,7 @@ export default function InvoiceDetailModal({
                             <div className="flex items-center justify-between">
                               <span className="text-sm font-semibold text-slate-800">Release #{r.release_number}</span>
                               <span className="text-xs text-slate-400">
-                                {r.released_at ? new Date(r.released_at).toLocaleString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
+                                {r.released_at ? formatDateTime(r.released_at) : ''}
                               </span>
                             </div>
                             <div className="space-y-1">
@@ -1161,7 +1162,7 @@ export default function InvoiceDetailModal({
                               <div className="flex items-start justify-between mb-2">
                                 <div>
                                   <p className="font-medium text-sm">{edit.edited_by_name}</p>
-                                  <p className="text-xs text-slate-400"><Clock size={10} className="inline mr-1" />{new Date(edit.edited_at).toLocaleString()}</p>
+                                  <p className="text-xs text-slate-400"><Clock size={10} className="inline mr-1" />{formatDateTime(edit.edited_at)}</p>
                                 </div>
                                 {edit.proof_url && <Badge variant="outline" className="text-xs">Has Proof</Badge>}
                               </div>
@@ -1207,7 +1208,7 @@ export default function InvoiceDetailModal({
                                     {sig.status === 'signed' ? '✓ Signed' : sig.status === 'bypassed' ? 'PIN Override' : sig.status}
                                   </Badge>
                                   <span className="text-xs text-slate-400">
-                                    {sig.signed_at ? new Date(sig.signed_at).toLocaleString('en-PH') : sig.bypassed_at ? new Date(sig.bypassed_at).toLocaleString('en-PH') : ''}
+                                    {sig.signed_at ? formatDateTime(sig.signed_at) : sig.bypassed_at ? formatDateTime(sig.bypassed_at) : ''}
                                   </span>
                                 </div>
                                 {sig.status === 'bypassed' && (
@@ -1351,7 +1352,7 @@ export default function InvoiceDetailModal({
                                   <span className="text-[11px] text-slate-400">→ {s.phone}</span>
                                 </div>
                                 <span className="text-[10px] text-slate-400">
-                                  {s.created_at ? new Date(s.created_at).toLocaleString('en-PH') : ''}
+                                  {s.created_at ? formatDateTime(s.created_at) : ''}
                                 </span>
                               </div>
                               <div className="bg-slate-50 rounded p-2 text-[11px] text-slate-700 whitespace-pre-wrap">
@@ -1361,7 +1362,7 @@ export default function InvoiceDetailModal({
                                 <p className="text-[11px] text-red-600">Error: {s.error}</p>
                               )}
                               {s.sent_at && (
-                                <p className="text-[10px] text-emerald-700">Sent {new Date(s.sent_at).toLocaleString('en-PH')}</p>
+                                <p className="text-[10px] text-emerald-700">Sent {formatDateTime(s.sent_at)}</p>
                               )}
                             </CardContent>
                           </Card>

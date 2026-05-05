@@ -19,6 +19,7 @@ import { Label } from '../ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 import { RefreshCw, History, ShieldAlert, Undo2, Lock } from 'lucide-react';
 import { toast } from 'sonner';
+import { formatDateTime } from '../../lib/dateFormat';
 
 export default function DateMovesTab() {
   const [rows, setRows] = useState([]);
@@ -167,7 +168,7 @@ export default function DateMovesTab() {
                     </td>
                     <td className="px-3 py-2 text-slate-600 text-[12px]">{r.edited_by_name || '—'}</td>
                     <td className="px-3 py-2 text-slate-500 text-[11px]">
-                      {r.edited_at ? new Date(r.edited_at).toLocaleString() : '—'}
+                      {r.edited_at ? formatDateTime(r.edited_at) : '—'}
                     </td>
                     <td className="px-3 py-2 text-right">
                       <Button

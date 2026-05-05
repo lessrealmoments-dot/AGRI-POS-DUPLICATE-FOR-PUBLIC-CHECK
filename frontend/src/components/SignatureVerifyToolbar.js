@@ -6,6 +6,7 @@ import { Badge } from './ui/badge';
 import { ShieldCheck, Search, CheckCircle2, AlertTriangle, ExternalLink, RefreshCw, XCircle, PenLine } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../contexts/AuthContext';
+import { formatDateTime } from '../lib/dateFormat';
 
 /**
  * SignatureVerifyToolbar
@@ -51,10 +52,7 @@ export default function SignatureVerifyToolbar({ onOpenInvoice }) {
 
   const formatDate = (iso) => {
     if (!iso) return '—';
-    return new Date(iso).toLocaleString('en-PH', {
-      month: 'short', day: 'numeric', year: 'numeric',
-      hour: '2-digit', minute: '2-digit'
-    });
+    return formatDateTime(iso);
   };
 
   return (

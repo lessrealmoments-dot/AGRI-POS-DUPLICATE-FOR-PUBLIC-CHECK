@@ -4,6 +4,7 @@ import { Button } from '../components/ui/button';
 import { Card, CardContent } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { ScanBarcode, Wifi, WifiOff, CheckCircle, XCircle, Camera, CameraOff, Smartphone } from 'lucide-react';
+import { formatTime } from '../lib/dateFormat';
 
 export default function MobileScannerPage() {
   const { sessionId } = useParams();
@@ -68,10 +69,10 @@ export default function MobileScannerPage() {
         found: result.found,
         barcode: result.barcode,
         product: result.product || null,
-        time: new Date().toLocaleTimeString(),
+        time: formatTime(),
       });
     } catch {
-      setLastScan({ found: false, barcode, time: new Date().toLocaleTimeString() });
+      setLastScan({ found: false, barcode, time: formatTime() });
     }
   }, [sessionId, API_URL]);
 

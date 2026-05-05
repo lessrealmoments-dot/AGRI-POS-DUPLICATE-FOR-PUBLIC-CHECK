@@ -20,6 +20,7 @@ import CalcInput from '../components/CalcInput';
 import ViewQRDialog from '../components/ViewQRDialog';
 import ExpenseDetailModal from '../components/ExpenseDetailModal';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
+import { localTodayStr } from '../lib/dateFormat';
 
 const EXPENSE_CATEGORIES = [
   "Utilities", "Rent", "Supplies", "Transportation", "Fuel/Gas",
@@ -63,21 +64,21 @@ export default function ExpensesPage() {
 
   const [expenseForm, setExpenseForm] = useState({
     category: 'Miscellaneous', description: '', notes: '', amount: 0,
-    payment_method: 'Cash', reference_number: '', date: new Date().toISOString().slice(0, 10)
+    payment_method: 'Cash', reference_number: '', date: localTodayStr()
   });
   const [farmExpenseForm, setFarmExpenseForm] = useState({
     description: '', notes: '', amount: 0, customer_id: '',
-    payment_method: 'Cash', reference_number: '', date: new Date().toISOString().slice(0, 10),
+    payment_method: 'Cash', reference_number: '', date: localTodayStr(),
     due_date: '', terms: ''
   });
   const [cashOutForm, setCashOutForm] = useState({
     description: '', notes: '', amount: 0, customer_id: '',
-    payment_method: 'Cash', reference_number: '', date: new Date().toISOString().slice(0, 10),
+    payment_method: 'Cash', reference_number: '', date: localTodayStr(),
     due_date: '', terms: ''
   });
   const [employeeAdvanceForm, setEmployeeAdvanceForm] = useState({
     description: '', notes: '', amount: 0, employee_id: '',
-    date: new Date().toISOString().slice(0, 10),
+    date: localTodayStr(),
   });
   const [eaCaSummary, setEaCaSummary] = useState(null);
   const [eaManagerPin, setEaManagerPin] = useState('');
@@ -95,7 +96,7 @@ export default function ExpensesPage() {
   const [cashOutCustomerHighlight, setCashOutCustomerHighlight] = useState(0);
   const [cashOutCustomerListOpen, setCashOutCustomerListOpen] = useState(false);
 
-  const [encodingDate, setEncodingDate] = useState(new Date().toISOString().slice(0, 10));
+  const [encodingDate, setEncodingDate] = useState(localTodayStr());
 
   const [filters, setFilters] = useState({
     category: '', payment_method: '', date_from: '', date_to: '', search: ''
@@ -145,7 +146,7 @@ export default function ExpensesPage() {
       amount: expense.amount || 0,
       payment_method: expense.payment_method || 'Cash',
       reference_number: expense.reference_number || '',
-      date: expense.date || new Date().toISOString().slice(0, 10),
+      date: expense.date || localTodayStr(),
       employee_id: expense.employee_id || '',
       employee_name: expense.employee_name || '',
     });

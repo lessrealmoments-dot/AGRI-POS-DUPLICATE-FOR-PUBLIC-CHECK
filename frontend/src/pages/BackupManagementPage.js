@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Database, Download, RotateCcw, Clock, Shield, HardDrive, RefreshCw, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { formatDateTime } from '../lib/dateFormat';
 
 export default function BackupManagementPage() {
   const { user } = useAuth();
@@ -95,7 +96,7 @@ export default function BackupManagementPage() {
     } catch { setOrgBackups([]); }
   };
 
-  const fmtDate = (d) => d ? new Date(d).toLocaleString('en-PH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+  const fmtDate = (d) => d ? formatDateTime(d) : '—';
 
   if (loading) return <div className="flex items-center justify-center h-64 text-slate-400">Loading backup data...</div>;
 

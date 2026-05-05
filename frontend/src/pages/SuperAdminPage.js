@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { api, useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
+import { formatDate, formatDateTime, localTodayStr } from '../lib/dateFormat';
 import {
   Building2, Users, BarChart3, Shield, RefreshCw, ArrowLeft,
   CheckCircle, AlertTriangle, XCircle, ChevronDown, ChevronUp,
@@ -138,7 +139,7 @@ function RestorePanel() {
     ? backups.filter(b => b.backup_type === 'pre_delete' || b.deletion_completed_at)
     : backups;
 
-  const fmtDate = (iso) => { try { return new Date(iso).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }); } catch { return iso; } };
+  const fmtDate = (iso) => { try { return formatDateTime(iso); } catch { return iso; } };
   const fmtSize = (mb) => mb ? `${parseFloat(mb).toFixed(1)} MB` : '—';
 
   const typeLabel = (b) => {
@@ -608,7 +609,7 @@ export default function SuperAdminPage() {
                                   <p className="text-slate-400 text-xs mt-0.5">{sub.owner_email} · Plan requested: <strong className="text-slate-300 capitalize">{sub.plan_requested}</strong></p>
                                   {sub.reference_number && <p className="text-slate-500 text-xs">Ref: {sub.reference_number}</p>}
                                   {sub.notes && <p className="text-slate-500 text-xs italic">{sub.notes}</p>}
-                                  <p className="text-slate-600 text-[10px] mt-1">{new Date(sub.submitted_at).toLocaleString('en-PH')}</p>
+                                  <p className="text-slate-600 text-[10px] mt-1">{formatDateTime(sub.submitted_at)}</p>
                                   {statusGroup === 'rejected' && sub.rejection_reason && (
                                     <p className="text-red-400 text-xs mt-1">Reason: {sub.rejection_reason}</p>
                                   )}
@@ -900,7 +901,7 @@ function OrgRow({ org, expanded, branches, onToggle, onEdit, onDelete, onRefresh
                 {org.trial_ends_at && org.plan === 'trial' && (
                   <div className="flex justify-between">
                     <span className="text-slate-500">Trial ends</span>
-                    <span className="text-slate-300">{new Date(org.trial_ends_at).toLocaleDateString()}</span>
+                    <span className="text-slate-300">{formatDate(org.trial_ends_at)}</span>
                   </div>
                 )}
                 {org.plan === 'founders' ? (
@@ -916,7 +917,7 @@ function OrgRow({ org, expanded, branches, onToggle, onEdit, onDelete, onRefresh
                       Math.ceil((new Date(org.subscription_expires_at) - new Date()) / 86400000) <= 7 ? 'text-amber-400' :
                       'text-slate-300'
                     }`}>
-                      {new Date(org.subscription_expires_at).toLocaleDateString()}
+                      {formatDate(org.subscription_expires_at)}
                       {' '}
                       ({Math.ceil((new Date(org.subscription_expires_at) - new Date()) / 86400000)}d)
                     </span>
@@ -934,7 +935,7 @@ function OrgRow({ org, expanded, branches, onToggle, onEdit, onDelete, onRefresh
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Joined</span>
-                  <span className="text-slate-300">{new Date(org.created_at).toLocaleDateString()}</span>
+                  <span className="text-slate-300">{formatDate(org.created_at)}</span>
                 </div>
                 {org.admin_notes && (
                   <div className="mt-2 p-2 bg-slate-800 rounded-lg text-slate-400 text-xs">{org.admin_notes}</div>
@@ -1173,7 +1174,7 @@ function DeleteOrgModal({ org, onClose, onDeleted }) {
 
 /* ── Edit Subscription Modal ─────────────────────────────────────────────── */
 function EditSubscriptionModal({ org, onClose, onSaved }) {
-  const today = new Date().toISOString().split('T')[0];
+  const today = localTodayStr();
   const plus30 = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
 
   const [form, setForm] = useState({
@@ -1317,7 +1318,7 @@ function EditSubscriptionModal({ org, onClose, onSaved }) {
                   <Clock size={12} />
                   {daysUntilExpiry <= 0
                     ? 'This date is in the past — plan will be in grace period'
-                    : `Expires in ${daysUntilExpiry} days (${new Date(form.subscription_expires_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })})`
+                    : `Expires in ${daysUntilExpiry} days (${formatDate(form.subscription_expires_at)})`
                   }
                 </div>
               )}
@@ -1343,7 +1344,7 @@ function EditSubscriptionModal({ org, onClose, onSaved }) {
  className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-600 h-9 text-sm" />
               {org.trial_ends_at && (
                 <p className="text-slate-500 text-xs mt-1">
-                  Current trial ends: {new Date(org.trial_ends_at).toLocaleDateString()}
+                  Current trial ends: {formatDate(org.trial_ends_at)}
                 </p>
               )}
             </div>
@@ -1468,7 +1469,7 @@ function FeatureFlagsPanel() {
           <h2 className="text-white font-bold text-lg">Feature Flags</h2>
           <p className="text-slate-400 text-sm">
             Control which features are available per plan. Changes are live immediately on the pricing page.
-            {lastUpdated && <span className="text-slate-600 ml-2">Last saved: {new Date(lastUpdated).toLocaleString()}</span>}
+            {lastUpdated && <span className="text-slate-600 ml-2">Last saved: {formatDateTime(lastUpdated)}</span>}
           </p>
         </div>
         <div className="flex items-center gap-3">

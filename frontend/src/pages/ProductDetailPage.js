@@ -15,6 +15,7 @@ import {
   ArrowLeft, Package, Tags, DollarSign, Warehouse, Info, Users, History, ShoppingCart,
   Plus, Pencil, Trash2, Link2, AlertTriangle, TrendingDown, TrendingUp, Save, Activity, ScanBarcode, Printer
 } from 'lucide-react';
+import { formatDate, formatDateTime } from '../lib/dateFormat';
 import { toast } from 'sonner';
 import { BarcodeDisplay } from '../components/BarcodeDisplay';
 import CategorySelect from '../components/CategorySelect';
@@ -694,7 +695,7 @@ export default function ProductDetailPage() {
                               )}
                             </div>
                             <span className="text-[10px] text-slate-400 shrink-0">
-                              {entry.changed_at ? new Date(entry.changed_at).toLocaleString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
+                              {entry.changed_at ? formatDateTime(entry.changed_at) : ''}
                             </span>
                           </div>
                           <div className="mt-1 flex flex-wrap gap-2 items-center">
@@ -1093,7 +1094,7 @@ export default function ProductDetailPage() {
                 <TableBody>
                   {movements.map(m => (
                     <TableRow key={m.id}>
-                      <TableCell className="text-xs">{new Date(m.created_at).toLocaleDateString()}</TableCell>
+                      <TableCell className="text-xs">{formatDate(m.created_at)}</TableCell>
                       <TableCell><Badge className={`text-[10px] ${m.type === 'sale' ? 'bg-red-100 text-red-700' : m.type === 'purchase' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700'}`}>{m.type}</Badge></TableCell>
                       <TableCell className="font-mono text-xs">{m.reference_number}</TableCell>
                       <TableCell className={`text-right font-semibold ${m.quantity_change < 0 ? 'text-red-600' : 'text-emerald-600'}`}>{m.quantity_change > 0 ? '+' : ''}{m.quantity_change}</TableCell>
@@ -1146,7 +1147,7 @@ export default function ProductDetailPage() {
                 <TableBody>
                   {orders.map((o, i) => (
                     <TableRow key={i}>
-                      <TableCell className="text-xs">{new Date(o.date).toLocaleDateString()}</TableCell>
+                      <TableCell className="text-xs">{formatDate(o.date)}</TableCell>
                       <TableCell><Badge className={`text-[10px] ${o.type === 'sale' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>{o.type}</Badge></TableCell>
                       <TableCell className="font-mono text-xs">{o.reference}</TableCell>
                       <TableCell className="text-sm">{o.party}</TableCell>

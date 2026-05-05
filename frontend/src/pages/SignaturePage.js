@@ -9,6 +9,7 @@ import axios from 'axios';
 import SignaturePad from 'signature_pad';
 import { CheckCircle, AlertCircle, RotateCcw } from 'lucide-react';
 import { Button } from '../components/ui/button';
+import { formatDate, formatDateTime } from '../lib/dateFormat';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
@@ -178,7 +179,7 @@ export default function SignaturePage() {
         </div>
         <div className="flex justify-between text-sm">
           <span className="text-slate-500">Date</span>
-          <span className="text-slate-700">{ctx.date || new Date().toLocaleDateString()}</span>
+          <span className="text-slate-700">{ctx.date || formatDate()}</span>
         </div>
       </div>
 
@@ -268,7 +269,7 @@ export default function SignaturePage() {
       {/* Timestamp */}
       <div className="px-5 pb-2">
         <p className="text-[11px] text-slate-400">
-          Signed on: {new Date().toLocaleString('en-PH', { dateStyle: 'long', timeStyle: 'short' })}
+          Signed on: {formatDateTime()}
         </p>
       </div>
 

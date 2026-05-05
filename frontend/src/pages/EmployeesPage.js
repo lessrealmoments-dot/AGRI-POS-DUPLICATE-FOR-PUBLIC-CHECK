@@ -15,6 +15,7 @@ import {
   Plus, User, Building2, Phone, Mail, Search, Edit2, Trash2,
   TrendingUp, AlertTriangle, CreditCard, Calendar, ChevronRight, UserCheck
 } from 'lucide-react';
+import { localTodayStr } from '../lib/dateFormat';
 import { toast } from 'sonner';
 import CalcInput from '../components/CalcInput';
 
@@ -27,7 +28,7 @@ const EMPLOYMENT_TYPES = [
 
 const BLANK_EMP = {
   name: '', position: '', employment_type: 'regular', phone: '', email: '', address: '',
-  branch_id: '', hire_date: new Date().toISOString().slice(0, 10),
+  branch_id: '', hire_date: localTodayStr(),
   salary: 0, daily_rate: 0, monthly_ca_limit: 0,
   sss_number: '', philhealth_number: '', pagibig_number: '', tin_number: '',
   emergency_contact_name: '', emergency_contact_phone: '', notes: ''
@@ -91,7 +92,7 @@ export default function EmployeesPage() {
       name: emp.name || '', position: emp.position || '',
       employment_type: emp.employment_type || 'regular',
       phone: emp.phone || '', email: emp.email || '', address: emp.address || '',
-      branch_id: emp.branch_id || '', hire_date: emp.hire_date || new Date().toISOString().slice(0, 10),
+      branch_id: emp.branch_id || '', hire_date: emp.hire_date || localTodayStr(),
       salary: emp.salary || 0, daily_rate: emp.daily_rate || 0, monthly_ca_limit: emp.monthly_ca_limit || 0,
       sss_number: emp.sss_number || '', philhealth_number: emp.philhealth_number || '',
       pagibig_number: emp.pagibig_number || '', tin_number: emp.tin_number || '',

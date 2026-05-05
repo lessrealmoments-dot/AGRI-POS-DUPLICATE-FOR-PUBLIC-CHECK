@@ -25,6 +25,7 @@ import {
   ExternalLink, QrCode, ChevronDown, ChevronUp, XCircle,
   Banknote, Wallet, Smartphone, Lock, CreditCard
 } from 'lucide-react';
+import { localTodayStr } from '../lib/dateFormat';
 import { toast } from 'sonner';
 import UploadQRDialog from './UploadQRDialog';
 import CalcInput from './CalcInput';
@@ -101,7 +102,7 @@ export default function ReviewDetailDialog({
   const [payFundSource, setPayFundSource] = useState('cashier');
   const [payMethod, setPayMethod] = useState('Cash');
   const [payRef, setPayRef] = useState('');
-  const [payDate, setPayDate] = useState(new Date().toISOString().slice(0, 10));
+  const [payDate, setPayDate] = useState(localTodayStr());
   const [payPin, setPayPin] = useState('');
   const [payProcessing, setPayProcessing] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false); // receipt upload after payment
@@ -117,7 +118,7 @@ export default function ReviewDetailDialog({
         .then(res => {
           setDetail(res.data);
           setPayAmount((res.data.balance || 0).toFixed(2));
-          setPayDate(new Date().toISOString().slice(0, 10));
+          setPayDate(localTodayStr());
         })
         .catch(() => toast.error('Failed to load record details'))
         .finally(() => setLoading(false));

@@ -18,6 +18,7 @@ import {
   Wifi, WifiOff, RefreshCw, CheckCircle, AlertTriangle,
   CloudDownload, CloudOff,
 } from 'lucide-react';
+import { formatDate } from '../lib/dateFormat';
 import { toast } from 'sonner';
 
 const STALE_HOURS = 4;
@@ -30,7 +31,7 @@ function timeAgo(isoStr) {
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ${mins % 60}m ago`;
-  return new Date(isoStr).toLocaleDateString();
+  return formatDate(isoStr);
 }
 
 function fmtSize(kb) {

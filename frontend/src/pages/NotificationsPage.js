@@ -19,6 +19,7 @@ import {
   User, MapPin, Smartphone, FileText, ExternalLink, Lock
 } from 'lucide-react';
 
+import { formatDate } from '../lib/dateFormat';
 // ── Category config ───────────────────────────────────────────────────────────
 const CATEGORIES = [
   {
@@ -125,7 +126,7 @@ function timeAgo(isoStr) {
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
   if (days < 7) return `${days}d ago`;
-  return new Date(isoStr).toLocaleDateString();
+  return formatDate(isoStr);
 }
 
 // ── Security Alert detail inline block ───────────────────────────────────────

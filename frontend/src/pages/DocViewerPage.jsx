@@ -8,6 +8,7 @@ import {
   AlertTriangle, Printer, Image, Smartphone, Package, ChevronDown,
   ShieldCheck, RefreshCw, Search, Boxes, Banknote, Wifi, Camera, X, MapPin, ArrowLeft, RotateCcw, FileEdit
 } from 'lucide-react';
+import { formatDateTime } from '../lib/dateFormat';
 import axios from 'axios';
 import { toast } from 'sonner';
 import PrintEngine from '../lib/PrintEngine';
@@ -18,7 +19,7 @@ import CalcInput from '../components/CalcInput';
 
 const BACKEND = process.env.REACT_APP_BACKEND_URL || '';
 const php = (v) => `₱${(parseFloat(v) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const fmtDateTime = (d) => { try { return new Date(d).toLocaleString('en-PH', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return d || ''; } };
+const fmtDateTime = (d) => { try { return formatDateTime(d); } catch { return d || ''; } };
 
 // ── Shared: parse lockout error from 429 or 403 response ────────────────────
 function parsePinError(e) {

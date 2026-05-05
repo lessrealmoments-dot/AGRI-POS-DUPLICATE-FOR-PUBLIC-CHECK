@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from config import db
 from utils import (
     get_current_user, check_perm, now_iso, new_id,
-    log_movement, update_cashier_wallet
+    log_movement, update_cashier_wallet, today_local,
 )
 
 router = APIRouter(prefix="/returns", tags=["Returns"])
@@ -71,7 +71,7 @@ async def create_return(data: dict, user=Depends(get_current_user)):
     if not branch_id:
         raise HTTPException(status_code=400, detail="Branch ID required")
 
-    return_date = data.get("return_date", now_iso()[:10])
+    return_date = data.get("return_date") or await today_local(user.get("organization_id") or "")
     items = data.get("items", [])
     if not items:
         raise HTTPException(status_code=400, detail="No items in return")
@@ -449,7 +449,7 @@ async def void_return(return_id: str, data: dict, user=Depends(get_current_user)
                 await db.safe_lots.insert_one({
                     "id": new_id(), "branch_id": branch_id,
                     "wallet_id": safe_wallet["id"],
-                    "date_received": now_iso()[:10],
+                    "date_received": await today_local(user.get("organization_id") or ""),
                     "original_amount": refund_amount,
                     "remaining_amount": refund_amount,
                     "source_reference": ref_text,

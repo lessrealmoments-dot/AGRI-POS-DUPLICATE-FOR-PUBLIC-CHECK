@@ -23,7 +23,7 @@ balance_after is the running pool total after this entry.
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 from config import db
-from utils import get_current_user, check_perm, now_iso, new_id
+from utils import get_current_user, check_perm, now_iso, new_id, today_local
 
 router = APIRouter(prefix="/reserve", tags=["Overage Reserve"])
 
@@ -69,7 +69,7 @@ async def _post_entry(*, branch_id: str, branch_name: str, pool: str, entry_type
         "note": note,
         "applied_to": applied_to,
         "paired_entry_id": paired_entry_id,
-        "date": entry_date or now_iso()[:10],
+        "date": entry_date or await today_local((user or {}).get("organization_id") or ""),
         "created_at": now_iso(),
         "created_by": user["id"] if user else "system",
         "created_by_name": (user or {}).get("full_name") or (user or {}).get("username") or "System",
@@ -113,7 +113,12 @@ async def record_daily_close_variance(close_record: dict, user: Optional[dict] =
     # "balance_after" — easier to read. Sign trick: both pools grow with
     # positive amounts; only the netting/apply operations use negatives.
     amount = abs(over_short)
-    date = close_record.get("date") or now_iso()[:10]
+    org_id_for_date = ""
+    try:
+        org_id_for_date = (close_record or {}).get("organization_id") or ""
+    except Exception:
+        pass
+    date = close_record.get("date") or await today_local(org_id_for_date)
     note = (
         f"Auto-credit from daily close {date} — cash "
         f"{'over' if over_short > 0 else 'short'} by ₱{amount:,.2f}"

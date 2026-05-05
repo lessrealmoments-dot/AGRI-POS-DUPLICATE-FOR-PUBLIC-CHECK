@@ -14,7 +14,7 @@ from utils import (
     log_movement, update_cashier_wallet, update_digital_wallet, record_safe_movement,
     get_branch_filter, apply_branch_filter, ensure_branch_access,
     generate_next_number, check_idempotency, ensure_org_context,
-    mark_price_reviewed,
+    mark_price_reviewed, today_local,
 )
 
 logger = logging.getLogger("purchase_orders")
@@ -147,7 +147,7 @@ async def _apply_po_inventory(po: dict, user: dict, capital_choices: dict = None
             # Step 9: Update vendor last_price — BRANCH-SPECIFIC
             await db.product_vendors.update_one(
                 {"product_id": pid, "vendor_name": po["vendor"], "branch_id": branch_id},
-                {"$set": {"last_price": price, "last_order_date": now_iso()[:10]},
+                {"$set": {"last_price": price, "last_order_date": await today_local(user.get("organization_id") or "")},
                  "$setOnInsert": {"id": new_id(), "created_at": now_iso()}},
                 upsert=True
             )
@@ -1620,7 +1620,7 @@ async def get_unpaid_po_summary(user=Depends(get_current_user), branch_id: Optio
     if branch_id:
         query["branch_id"] = branch_id
     pos = await db.purchase_orders.find(query, {"_id": 0}).sort("due_date", 1).to_list(500)
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = await today_local(user.get("organization_id") or "")
     soon = (datetime.now(timezone.utc) + timedelta(days=7)).strftime("%Y-%m-%d")
 
     overdue, due_soon, later = [], [], []
@@ -1684,7 +1684,7 @@ async def get_payables_by_supplier(user=Depends(get_current_user), branch_id: Op
     if branch_id:
         query["branch_id"] = branch_id
     pos = await db.purchase_orders.find(query, {"_id": 0}).sort("due_date", 1).to_list(1000)
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = await today_local(user.get("organization_id") or "")
 
     by_vendor: dict = {}
     for po in pos:

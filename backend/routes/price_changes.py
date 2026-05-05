@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone
 from typing import Optional
 from config import db
-from utils import get_current_user, check_perm
+from utils import get_current_user, check_perm, today_local
 
 router = APIRouter(prefix="/price-changes", tags=["Price Changes"])
 
@@ -47,7 +47,7 @@ async def list_price_changes(
     """
     check_perm(user, "reports", "view")
 
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = await today_local(user.get("organization_id") or "")
     first_of_month = datetime.now(timezone.utc).replace(day=1).strftime("%Y-%m-%d")
     d_from = date_from or first_of_month
     d_to = date_to or today

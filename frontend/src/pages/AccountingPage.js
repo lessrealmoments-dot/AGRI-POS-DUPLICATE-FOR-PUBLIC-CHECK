@@ -22,6 +22,7 @@ import InvoiceDetailModal from '../components/InvoiceDetailModal';
 import CustomerStatementModal from '../components/CustomerStatementModal';
 import CustomerBalanceBadge, { useCustomerBalances } from '../components/CustomerBalanceBadge';
 import CalcInput from '../components/CalcInput';
+import { localTodayStr } from '../lib/dateFormat';
 
 const EXPENSE_CATEGORIES = [
   "Utilities", "Rent", "Supplies", "Transportation", "Fuel/Gas",
@@ -97,16 +98,16 @@ export default function AccountingPage() {
   // Forms
   const [expenseForm, setExpenseForm] = useState({
     category: 'Miscellaneous', description: '', notes: '', amount: 0,
-    payment_method: 'Cash', reference_number: '', date: new Date().toISOString().slice(0, 10)
+    payment_method: 'Cash', reference_number: '', date: localTodayStr()
   });
   const [farmExpenseForm, setFarmExpenseForm] = useState({
     description: '', notes: '', amount: 0, customer_id: '',
-    payment_method: 'Cash', reference_number: '', date: new Date().toISOString().slice(0, 10),
+    payment_method: 'Cash', reference_number: '', date: localTodayStr(),
     due_date: '', terms: ''
   });
   const [cashOutForm, setCashOutForm] = useState({
     description: '', notes: '', amount: 0, customer_id: '',
-    payment_method: 'Cash', reference_number: '', date: new Date().toISOString().slice(0, 10),
+    payment_method: 'Cash', reference_number: '', date: localTodayStr(),
     due_date: '', terms: ''
   });
   const [payableForm, setPayableForm] = useState({ supplier: '', description: '', amount: 0, due_date: '' });
@@ -156,7 +157,7 @@ export default function AccountingPage() {
     setEditMode(false);
     setExpenseForm({
       category: 'Miscellaneous', description: '', notes: '', amount: 0,
-      payment_method: 'Cash', reference_number: '', date: new Date().toISOString().slice(0, 10),
+      payment_method: 'Cash', reference_number: '', date: localTodayStr(),
       employee_id: '', employee_name: '',
     });
     setCaSummary(null);
@@ -173,7 +174,7 @@ export default function AccountingPage() {
       amount: expense.amount || 0,
       payment_method: expense.payment_method || 'Cash',
       reference_number: expense.reference_number || '',
-      date: expense.date || new Date().toISOString().slice(0, 10),
+      date: expense.date || localTodayStr(),
       employee_id: expense.employee_id || '',
       employee_name: expense.employee_name || '',
     });
@@ -194,7 +195,7 @@ export default function AccountingPage() {
   const openFarmExpense = () => {
     setFarmExpenseForm({
       description: '', notes: '', amount: 0, customer_id: '',
-      payment_method: 'Cash', reference_number: '', date: new Date().toISOString().slice(0, 10),
+      payment_method: 'Cash', reference_number: '', date: localTodayStr(),
       due_date: '', terms: ''
     });
     setFarmExpenseDialog(true);
@@ -203,7 +204,7 @@ export default function AccountingPage() {
   const openCashOut = () => {
     setCashOutForm({
       description: '', notes: '', amount: 0, customer_id: '',
-      payment_method: 'Cash', reference_number: '', date: new Date().toISOString().slice(0, 10),
+      payment_method: 'Cash', reference_number: '', date: localTodayStr(),
       due_date: '', terms: ''
     });
     setCashOutDialog(true);

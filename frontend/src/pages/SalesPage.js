@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
 import CustomerStatementModal from '../components/CustomerStatementModal';
 import CustomerBalanceBadge, { useCustomerBalances } from '../components/CustomerBalanceBadge';
+import { formatDate } from '../lib/dateFormat';
 
 const STATUS_FILTERS = [
   { key: 'all', label: 'All' },
@@ -296,7 +297,7 @@ export default function SalesPage() {
                       )}
                     </TableCell>
                     <TableCell className="text-xs text-slate-500 whitespace-nowrap">
-                      {s.order_date || (s.created_at ? new Date(s.created_at).toLocaleDateString() : '')}
+                      {s.order_date || (s.created_at ? formatDate(s.created_at) : '')}
                     </TableCell>
                     <TableCell>
                       <DropdownMenu>

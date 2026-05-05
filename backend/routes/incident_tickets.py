@@ -7,7 +7,7 @@ Phase 2: Structured resolution with resolution_type, accountable_party, sender c
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 from config import db
-from utils import get_current_user, check_perm, now_iso, new_id
+from utils import get_current_user, check_perm, now_iso, new_id, today_local
 
 router = APIRouter(prefix="/incident-tickets", tags=["Incident Tickets"])
 
@@ -451,8 +451,8 @@ async def resolve_ticket(ticket_id: str, data: dict, user=Depends(get_current_us
             "entry_type": "incident_adjustment",
             "entry_type_label": "Incident Resolution Adjustment",
             "branch_id": branch_id,
-            "effective_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-            "posted_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "effective_date": await today_local(user.get("organization_id") or ""),
+            "posted_date": await today_local(user.get("organization_id") or ""),
             "memo": je_memo,
             "reference_number": ticket.get("ticket_number", ""),
             "reference_type": "incident_ticket",

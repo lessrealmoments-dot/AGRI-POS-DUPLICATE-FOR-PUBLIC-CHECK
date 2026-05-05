@@ -18,7 +18,7 @@ Endpoint: GET /api/reports/z-report-pdf?date=YYYY-MM-DD&branch_id=xxx&detailed=<
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from io import BytesIO
 from fpdf import FPDF
 from config import db
@@ -99,9 +99,17 @@ class ZReportPDF(FPDF):
         self.set_y(-15)
         self.set_font("Helvetica", "I", 7)
         self.set_text_color(150, 150, 150)
+        # Generated timestamp displayed in MM/DD/YYYY hh:mm AM/PM in the
+        # org's local timezone (defaults to Asia/Manila). Iter 238 fix —
+        # previously showed `UTC` which read as 8 hours off for Manila users.
+        try:
+            from zoneinfo import ZoneInfo
+            local_dt = datetime.now(timezone.utc).astimezone(ZoneInfo(getattr(self, "_tz_name", "Asia/Manila")))
+        except Exception:
+            local_dt = datetime.now(timezone.utc) + timedelta(hours=8)
         self.cell(
             0, 10,
-            _s(f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}  |  Page {self.page_no()}/{{nb}}"),
+            _s(f"Generated: {local_dt.strftime('%m/%d/%Y %I:%M %p')}  |  Page {self.page_no()}/{{nb}}"),
             align="C",
         )
 

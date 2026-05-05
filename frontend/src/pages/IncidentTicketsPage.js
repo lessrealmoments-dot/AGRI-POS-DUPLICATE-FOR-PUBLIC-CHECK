@@ -14,6 +14,7 @@ import {
   XCircle, FileText, ArrowRight, Eye, RefreshCw, ArrowLeftRight, Check,
   ShieldCheck, Truck, PackageX, Receipt, Scale, ClipboardCheck
 } from 'lucide-react';
+import { formatDateTime } from '../lib/dateFormat';
 import { toast } from 'sonner';
 import TransferDetailModal from '../components/TransferDetailModal';
 import CalcInput from '../components/CalcInput';
@@ -290,7 +291,7 @@ export default function IncidentTicketsPage() {
         getBranchName(t.branch_id).toLowerCase().includes(search.toLowerCase()))
     : tickets;
 
-  const fmtDate = (d) => d ? new Date(d).toLocaleString('en-PH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+  const fmtDate = (d) => d ? formatDateTime(d) : '';
 
   const totalVariances = varianceData?.summary?.total_variance_transfers || 0;
   const totalCapLoss = summary.total_real_capital_loss || varianceData?.summary?.total_capital_loss || 0;

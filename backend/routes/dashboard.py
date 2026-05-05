@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 from config import db
 from utils import (
     get_current_user, get_branch_filter, apply_branch_filter,
-    get_user_branches, get_default_branch
+    get_user_branches, get_default_branch, today_local,
 )
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
@@ -83,9 +83,10 @@ async def _compute_inventory_value(branch_id: str) -> dict:
     }
 
 
-async def _compute_ar_aging(branch_filter):
+async def _compute_ar_aging(branch_filter, org_id: str = ""):
     """Compute AR aging buckets across all outstanding invoices."""
-    today = datetime.now(timezone.utc).date()
+    today_str = await today_local(org_id)
+    today = datetime.strptime(today_str, "%Y-%m-%d").date()
     match = {"status": {"$nin": ["paid", "voided"]}, "balance": {"$gt": 0}}
     match = apply_branch_filter(match, branch_filter)
     invoices = await db.invoices.find(match, {"_id": 0, "balance": 1, "order_date": 1, "customer_name": 1}).to_list(5000)
@@ -132,7 +133,7 @@ async def dashboard_stats(
     Get comprehensive dashboard statistics. Respects branch isolation.
     Returns KPIs, cash position, AR aging, today's credits, last close date.
     """
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = await today_local(user.get("organization_id") or "")
     now_dt = datetime.now(timezone.utc)
 
     branch_filter = await get_branch_filter(user, branch_id)
@@ -218,7 +219,7 @@ async def dashboard_stats(
             safe_balance = sum(lot.get("remaining_amount", 0) for lot in lots)
 
     # ── AR aging ──────────────────────────────────────────────────────────────
-    ar_aging = await _compute_ar_aging(branch_filter)
+    ar_aging = await _compute_ar_aging(branch_filter, user.get("organization_id") or "")
     top_debtors = await _get_top_debtors(branch_filter)
 
     # ── Inventory value ───────────────────────────────────────────────────────
@@ -235,7 +236,7 @@ async def dashboard_stats(
     days_since_close = None
     if last_close_date:
         try:
-            days_since_close = (datetime.now(timezone.utc).date() -
+            days_since_close = (datetime.strptime(await today_local(user.get("organization_id") or ""), "%Y-%m-%d").date() -
                                 datetime.strptime(last_close_date, "%Y-%m-%d").date()).days
         except Exception:
             pass
@@ -317,7 +318,7 @@ async def dashboard_stats(
     days_since_audit = None
     if last_audit:
         try:
-            days_since_audit = (datetime.now(timezone.utc).date() -
+            days_since_audit = (datetime.strptime(await today_local(user.get("organization_id") or ""), "%Y-%m-%d").date() -
                                 datetime.strptime(last_audit["created_at"][:10], "%Y-%m-%d").date()).days
         except Exception:
             pass
@@ -402,7 +403,7 @@ async def branch_summary(user=Depends(get_current_user)):
     if not user_branches:
         return {"branches": [], "totals": {}}
     
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = await today_local(user.get("organization_id") or "")
     summaries = []
     
     for branch_id in user_branches:
@@ -846,7 +847,7 @@ async def accounts_payable_summary(
         "receipt_review_status": 1, "grand_total": 1, "total_paid": 1,
     }).to_list(500)
 
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = await today_local(user.get("organization_id") or "")
     overdue = []
     due_this_week = []
     upcoming = []

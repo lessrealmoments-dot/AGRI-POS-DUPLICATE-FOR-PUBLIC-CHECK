@@ -10,6 +10,7 @@ import { Separator } from '../components/ui/separator';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { ScrollArea } from '../components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { formatDateTime, localTodayStr } from '../lib/dateFormat';
 import {
   Search, AlertTriangle, Percent, Receipt, Clock,
   Info, Zap, Edit3, Banknote, CreditCard, FileText, RefreshCw,
@@ -142,7 +143,7 @@ export default function PaymentsPage() {
   const [discountModes, setDiscountModes] = useState({});
 
   // Payment header
-  const [payDate, setPayDate] = useState(new Date().toISOString().slice(0, 10));
+  const [payDate, setPayDate] = useState(localTodayStr());
   const [payMethod, setPayMethod] = useState('Cash');
   const [payRef, setPayRef] = useState('');
   const [payMemo, setPayMemo] = useState('');
@@ -290,7 +291,7 @@ export default function PaymentsPage() {
     const rate = parseFloat(customer.interest_rate) || 0;
     const invRes = await loadInvoices(customer.id);
     if (rate <= 0) {
-      const today = new Date().toISOString().split('T')[0];
+      const today = localTodayStr();
       const loaded = invRes || [];
       const hasOverdue = loaded.some(inv =>
         inv.due_date && inv.due_date < today &&
@@ -562,7 +563,7 @@ export default function PaymentsPage() {
         .totals b{font-family:monospace;}
       </style></head><body onload="window.print();setTimeout(()=>window.close(),300)">
         <h1>Payment History — ${histCustomerName}</h1>
-        <div class="sub">Generated ${new Date().toLocaleString()}</div>
+        <div class="sub">Generated ${formatDateTime()}</div>
         <table>
           <thead><tr><th>Date</th><th>Invoice #</th><th>Type</th><th>Method</th><th>Reference</th><th style="text-align:right">Amount</th><th>By</th></tr></thead>
           <tbody>${rows}</tbody>
@@ -1811,7 +1812,7 @@ export default function PaymentsPage() {
               <Label className="text-xs">New Date <span className="text-red-600">*</span></Label>
               <Input type="date" value={dateEditNewDate}
                 onChange={e => setDateEditNewDate(e.target.value)}
-                max={new Date().toISOString().slice(0, 10)}
+                max={localTodayStr()}
                 className="h-9 mt-1"
                 data-testid="edit-payment-date-newdate" />
             </div>

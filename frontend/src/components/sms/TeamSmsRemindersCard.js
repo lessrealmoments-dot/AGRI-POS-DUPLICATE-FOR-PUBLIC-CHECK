@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import { Loader2, BellRing, BellOff, Clock, CheckCircle2, Send } from 'lucide-react';
+import { formatDateTime } from '../../lib/dateFormat';
 
 import { api } from '../../contexts/AuthContext';
 import { Card, CardContent } from '../ui/card';
@@ -304,7 +305,7 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
     setPausing(true);
     try {
       const r = await api.post('/sms/queue/pause-all', { hours });
-      toast.success(`⏸ SMS paused until ${new Date(r.data?.until).toLocaleString()}`);
+      toast.success(`⏸ SMS paused until ${formatDateTime(r.data?.until)}`);
       refreshPauseState();
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Pause failed');
@@ -580,7 +581,7 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
                   className="flex items-center justify-between gap-3 px-3 py-2 rounded-md bg-amber-50 border border-amber-300">
                   <p className="text-[11px] text-amber-900">
                     <span className="font-semibold">⏸ All automated SMS paused</span>
-                    {' '}until {new Date(pauseState.until).toLocaleString()}.
+                    {' '}until {formatDateTime(pauseState.until)}.
                     Manual admin composes still send.
                   </p>
                   <button
@@ -681,7 +682,7 @@ export default function TeamSmsRemindersCard({ branches = [] }) {
                         <div className="text-[10px] text-slate-500 uppercase">Global Pause</div>
                         <div className="font-semibold">
                           {auditData.global_pause?.paused
-                            ? `Yes — until ${new Date(auditData.global_pause.until).toLocaleString()}`
+                            ? `Yes — until ${formatDateTime(auditData.global_pause.until)}`
                             : 'No'}
                         </div>
                       </div>

@@ -4,7 +4,7 @@ Sync routes: Offline POS data sync.
 from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone, timedelta
 from config import db, _raw_db
-from utils import get_current_user, now_iso, new_id, log_movement, log_sale_items, update_cashier_wallet, get_active_date
+from utils import get_current_user, now_iso, new_id, log_movement, log_sale_items, update_cashier_wallet, get_active_date, today_local
 
 router = APIRouter(tags=["Sync"])
 
@@ -408,7 +408,7 @@ async def sync_offline_sales(data: dict, user=Depends(get_current_user)):
 
             items = sale.get("items", [])
             subtotal = 0
-            sale_date = sale.get("date", now_iso()[:10])
+            sale_date = sale.get("date") or await today_local(user.get("organization_id") or "")
             inv_number = sale.get("invoice_number", f"SYNC-{sale_id[:8]}")
             stock_warnings = []
 
@@ -539,7 +539,7 @@ async def sync_offline_sales(data: dict, user=Depends(get_current_user)):
                             "customer_name": invoice.get("customer_name", ""),
                             "amount": float(invoice.get("balance") or 0),
                             "credit_type": offline_bypass.get("credit_type", "by_term"),
-                            "date": invoice.get("order_date", now_iso()[:10]),
+                            "date": invoice.get("order_date") or await today_local(user.get("organization_id") or ""),
                             "branch_name": offline_bypass.get("branch_name", ""),
                             "description": "Offline credit sale (manager PIN bypass)",
                             "invoice_number": inv_number,
@@ -593,7 +593,7 @@ async def sync_offline_sales(data: dict, user=Depends(get_current_user)):
                 )
 
             # ── FIX: log to daily sales log (was missing) ────────────────────
-            log_date = sale.get("order_date", invoice.get("order_date", now_iso()[:10]))
+            log_date = sale.get("order_date") or invoice.get("order_date") or await today_local(user.get("organization_id") or "")
             enriched = []
             for item in items:
                 prod = await db.products.find_one({"id": item.get("product_id")}, {"_id": 0, "category": 1})

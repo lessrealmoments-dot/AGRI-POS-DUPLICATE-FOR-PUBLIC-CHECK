@@ -13,6 +13,7 @@ import {
   BarChart3, ChevronDown, ChevronRight, Printer,
   TrendingUp, AlertCircle, DollarSign, Calendar, RefreshCw, Filter, UserCheck, AlertTriangle, Percent, TrendingDown, Tag
 } from 'lucide-react';
+import { localTodayStr } from '../lib/dateFormat';
 import { toast } from 'sonner';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
 import CustomerStatementModal from '../components/CustomerStatementModal';
@@ -966,7 +967,7 @@ function CaSummaryReport({ branches, selectedBranchId }) {
 function DiscountAuditReport({ branches, selectedBranchId }) {
   const [branchId, setBranchId] = useState(selectedBranchId || '');
   const [dateFrom, setDateFrom] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); });
-  const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [dateTo, setDateTo] = useState(() => localTodayStr());
   const [groupBy, setGroupBy] = useState('customer');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -1393,7 +1394,7 @@ const PRICE_REASON_LABELS = {
 function PriceChangeReport({ branches, selectedBranchId }) {
   const [branchId, setBranchId] = useState(selectedBranchId || '');
   const [dateFrom, setDateFrom] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); });
-  const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [dateTo, setDateTo] = useState(() => localTodayStr());
   const [reason, setReason] = useState('all');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);

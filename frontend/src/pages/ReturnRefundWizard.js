@@ -13,6 +13,7 @@ import {
   ChevronRight, ChevronLeft, Printer, RefreshCw,
   Trash2, ShoppingBag, Banknote, FileText, ArrowDown, Upload
 } from 'lucide-react';
+import { localTodayStr } from '../lib/dateFormat';
 import { toast } from 'sonner';
 import UploadQRDialog from '../components/UploadQRDialog';
 import { useUnsavedChangesGuard } from '../lib/useUnsavedChangesGuard';
@@ -218,7 +219,7 @@ export default function ReturnRefundWizard() {
       });
       const res = await api.post(`${BACKEND_URL}/api/returns`, {
         branch_id: currentBranch.id,
-        return_date: new Date().toISOString().slice(0, 10),
+        return_date: localTodayStr(),
         customer_name: customerName || 'Walk-in',
         customer_type: customerType,
         reason,

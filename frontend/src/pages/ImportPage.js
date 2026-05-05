@@ -11,6 +11,7 @@ import {
   Upload, FileSpreadsheet, CheckCircle, XCircle, AlertTriangle,
   Download, ChevronRight, RotateCcw, Zap, Package, Warehouse, Store, Users,
 } from 'lucide-react';
+import { localTodayStr } from '../lib/dateFormat';
 import { toast } from 'sonner';
 
 // ── System field definitions per import type ─────────────────────────────────
@@ -105,7 +106,7 @@ export default function ImportPage() {
   const [overwriteIds, setOverwriteIds] = useState(new Set());
   const [previewData, setPreviewData] = useState(null);        // for branch & customer preview
   const [decisions, setDecisions] = useState({});              // {row: {action, target_id}} for fuzzy customer matches
-  const [openingBalanceDate, setOpeningBalanceDate] = useState(new Date().toISOString().slice(0, 10));
+  const [openingBalanceDate, setOpeningBalanceDate] = useState(localTodayStr());
   // Active price schemes (Retail / Wholesale / Credit / …) — drives the
   // dynamic price columns in the mapper, the preview table, and the CSV
   // template buttons. Refreshed when the user lands on the page so newly

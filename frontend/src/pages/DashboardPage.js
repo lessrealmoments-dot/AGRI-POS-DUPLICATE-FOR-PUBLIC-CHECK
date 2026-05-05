@@ -17,6 +17,7 @@ import {
   CalendarClock, ChevronDown, ChevronRight, FileCheck, GripVertical,
   RotateCcw, Smartphone, WifiOff, CloudOff
 } from 'lucide-react';
+import { localTodayStr } from '../lib/dateFormat';
 import { formatPHP } from '../lib/utils';
 import { useOnlineStatus } from '../lib/useOnlineStatus';
 import ReviewDetailDialog from '../components/ReviewDetailDialog';
@@ -105,7 +106,7 @@ function AgingBar({ aging }) {
 }
 
 function BranchCard({ branch, onSelect }) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localTodayStr();
   const lastClose = branch.last_close_date;
   const daysSinceClose = lastClose ? Math.floor((new Date(today) - new Date(lastClose)) / 86400000) : null;
   const dot = branch.status === 'good' ? 'bg-emerald-400' : branch.status === 'warning' ? 'bg-amber-400' : 'bg-red-500';
@@ -304,7 +305,7 @@ export default function DashboardPage() {
         if (selectedBranchId && selectedBranchId !== 'all') {
           try {
             const ucRes = await api.get('/daily-close/unclosed-days', { params: { branch_id: selectedBranchId } });
-            const pastDays = (ucRes.data.unclosed_days || []).filter(d => d.date < new Date().toISOString().slice(0, 10));
+            const pastDays = (ucRes.data.unclosed_days || []).filter(d => d.date < localTodayStr());
             setUnclosedDays(pastDays.length > 0 ? { days: pastDays, last_close_date: ucRes.data.last_close_date } : null);
           } catch { setUnclosedDays(null); }
         } else {
@@ -358,7 +359,7 @@ export default function DashboardPage() {
   // When offline, render a slim dashboard so managers can still use Quick
   // Launch. Stats / charts are replaced with a friendly placeholder card.
   if (!isOnline) {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localTodayStr();
     return (
       <div className="space-y-4 animate-fadeIn" data-testid="dashboard-offline">
         <div className="flex items-center justify-between flex-wrap gap-3">
@@ -407,7 +408,7 @@ export default function DashboardPage() {
     </div>
   );
 
-  const today = stats?.today || new Date().toISOString().slice(0, 10);
+  const today = stats?.today || localTodayStr();
   const dayOfWeek = stats?.day_of_week || '';
 
   // ─── OWNER CONSOLIDATED VIEW ─────────────────────────────────────────────

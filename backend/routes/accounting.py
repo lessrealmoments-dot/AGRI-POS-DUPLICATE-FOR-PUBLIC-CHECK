@@ -9,7 +9,7 @@ from utils import (
     get_current_user, check_perm, now_iso, new_id, update_cashier_wallet,
     update_digital_wallet, is_digital_payment, record_safe_movement,
     get_branch_filter, apply_branch_filter, verify_password,
-    generate_next_number, assert_branch_access,
+    generate_next_number, assert_branch_access, today_local,
 )
 from utils.security import log_failed_pin_attempt
 
@@ -133,7 +133,7 @@ async def deposit_to_wallet(wallet_id: str, data: dict, user=Depends(get_current
             "id": new_id(),
             "branch_id": wallet["branch_id"],
             "wallet_id": wallet_id,
-            "date_received": data.get("date", now_iso()[:10]),
+            "date_received": data.get("date") or await today_local(user.get("organization_id") or ""),
             "original_amount": amount,
             "remaining_amount": amount,
             "source_reference": data.get("reference", "Manual deposit"),
@@ -272,7 +272,7 @@ async def create_fund_transfer(data: dict, user=Depends(get_current_user)):
 
     # Resolve effective date — frontend may override (backdate to an open day).
     # Default: today in UTC (kept for backward compatibility).
-    effective_date = (data.get("date") or "").strip() or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    effective_date = (data.get("date") or "").strip() or await today_local(user.get("organization_id") or "")
     # Reject backdating onto a closed day — fund movements must live on an open day.
     closed_day = await db.daily_closings.find_one(
         {"branch_id": branch_id, "date": effective_date, "status": "closed"},
@@ -349,7 +349,7 @@ async def create_fund_transfer(data: dict, user=Depends(get_current_user)):
         if safe_w:
             await db.safe_lots.insert_one({
                 "id": new_id(), "branch_id": branch_id, "wallet_id": safe_w["id"],
-                "date_received": now_iso()[:10],
+                "date_received": await today_local(user.get("organization_id") or ""),
                 "original_amount": amount, "remaining_amount": amount,
                 "source_reference": ref_text,
                 "created_by": user["id"], "created_at": now_iso(),
@@ -426,7 +426,7 @@ async def create_fund_transfer(data: dict, user=Depends(get_current_user)):
             if safe_w:
                 await db.safe_lots.insert_one({
                     "id": new_id(), "branch_id": branch_id, "wallet_id": safe_w["id"],
-                    "date_received": now_iso()[:10],
+                    "date_received": await today_local(user.get("organization_id") or ""),
                     "original_amount": amount, "remaining_amount": amount,
                     "source_reference": ref_text_cap,
                     "created_by": user["id"], "created_at": now_iso(),
@@ -661,7 +661,7 @@ async def create_expense(data: dict, user=Depends(get_current_user)):
         "payment_method": payment_method,
         "fund_source": fund_source,
         "reference_number": data.get("reference_number", ""),
-        "date": data.get("date", now_iso()[:10]),
+        "date": data.get("date") or await today_local(user.get("organization_id") or ""),
         # Employee CA fields
         "employee_id": data.get("employee_id", ""),
         "employee_name": data.get("employee_name", ""),
@@ -790,7 +790,7 @@ async def update_expense(expense_id: str, data: dict, user=Depends(get_current_u
                 await db.safe_lots.insert_one({
                     "id": new_id(), "branch_id": expense["branch_id"],
                     "wallet_id": safe_wallet["id"],
-                    "date_received": now_iso()[:10],
+                    "date_received": await today_local(user.get("organization_id") or ""),
                     "original_amount": refund, "remaining_amount": refund,
                     "source_reference": ref, "created_by": user["id"], "created_at": now_iso(),
                 })
@@ -846,7 +846,7 @@ async def delete_expense(expense_id: str, data: dict = None, user=Depends(get_cu
                 await db.safe_lots.insert_one({
                     "id": new_id(), "branch_id": branch_id,
                     "wallet_id": safe_wallet["id"],
-                    "date_received": now_iso()[:10],
+                    "date_received": await today_local(user.get("organization_id") or ""),
                     "original_amount": amount,
                     "remaining_amount": amount,
                     "source_reference": ref_text,
@@ -905,7 +905,7 @@ async def create_farm_expense_with_invoice(data: dict, user=Depends(get_current_
         "payment_method": payment_method,
         "fund_source": fund_source,
         "reference_number": data.get("reference_number", ""),
-        "date": data.get("date", now_iso()[:10]),
+        "date": data.get("date") or await today_local(user.get("organization_id") or ""),
         "customer_id": customer_id,
         "customer_name": customer.get("name", ""),
         "linked_invoice_id": None,
@@ -929,9 +929,9 @@ async def create_farm_expense_with_invoice(data: dict, user=Depends(get_current_
         "customer_id": customer_id,
         "customer_name": customer.get("name", ""),
         "branch_id": branch_id,
-        "order_date": data.get("date", now_iso()[:10]),
-        "invoice_date": data.get("date", now_iso()[:10]),
-        "due_date": data.get("date", now_iso()[:10]),
+        "order_date": data.get("date") or await today_local(user.get("organization_id") or ""),
+        "invoice_date": data.get("date") or await today_local(user.get("organization_id") or ""),
+        "due_date": data.get("date") or await today_local(user.get("organization_id") or ""),
         "items": [{
             "product_id": "",
             "product_name": f"Farm Service: {data.get('description', 'Farm Expense')}",
@@ -1046,7 +1046,7 @@ async def create_customer_cashout(data: dict, user=Depends(get_current_user)):
         "amount": amount,
         "payment_method": payment_method,
         "fund_source": fund_source,
-        "date": data.get("date", now_iso()[:10]),
+        "date": data.get("date") or await today_local(user.get("organization_id") or ""),
         "customer_id": customer_id,
         "customer_name": customer.get("name", ""),
         "created_by": user["id"],
@@ -1069,9 +1069,9 @@ async def create_customer_cashout(data: dict, user=Depends(get_current_user)):
         "customer_id": customer_id,
         "customer_name": customer.get("name", ""),
         "branch_id": branch_id,
-        "order_date": data.get("date", now_iso()[:10]),
-        "invoice_date": data.get("date", now_iso()[:10]),
-        "due_date": data.get("date", now_iso()[:10]),
+        "order_date": data.get("date") or await today_local(user.get("organization_id") or ""),
+        "invoice_date": data.get("date") or await today_local(user.get("organization_id") or ""),
+        "due_date": data.get("date") or await today_local(user.get("organization_id") or ""),
         "items": [{
             "product_id": "",
             "product_name": "Cash Advance",
@@ -1151,7 +1151,7 @@ async def create_employee_advance(data: dict, user=Depends(get_current_user)):
         "amount": amount,
         "payment_method": payment_method,
         "fund_source": fund_source,
-        "date": data.get("date", now_iso()[:10]),
+        "date": data.get("date") or await today_local(user.get("organization_id") or ""),
         "employee_id": employee_id,
         "employee_name": employee.get("name", ""),
         "created_by": user["id"],
@@ -1252,7 +1252,7 @@ async def pay_receivable(rec_id: str, data: dict, user=Depends(get_current_user)
     payment_record = {
         "id": new_id(),
         "amount": amount,
-        "date": data.get("date", now_iso()[:10]),
+        "date": data.get("date") or await today_local(user.get("organization_id") or ""),
         "method": method,
         "reference": data.get("reference", ""),
         "fund_source": fund_source,
@@ -1390,7 +1390,7 @@ async def pay_payable(pay_id: str, data: dict, user=Depends(get_current_user)):
     new_status = "paid" if new_balance <= 0 else "partial"
     await db.payables.update_one({"id": pay_id}, {
         "$set": {"paid": new_paid, "balance": new_balance, "status": new_status,
-                 "last_payment_date": now_iso()[:10]}
+                 "last_payment_date": await today_local(user.get("organization_id") or "")}
     })
 
     # Update linked PO payment status
@@ -1403,7 +1403,7 @@ async def pay_payable(pay_id: str, data: dict, user=Depends(get_current_user)):
             po_new_balance = max(0, round(po_grand - po_new_paid, 2))
             po_pay_status = "paid" if po_new_balance <= 0 else "partial"
             payment_record = {
-                "id": new_id(), "amount": amount, "date": now_iso()[:10],
+                "id": new_id(), "amount": amount, "date": await today_local(user.get("organization_id") or ""),
                 "method": payment_method_detail, "fund_source": fund_source,
                 "check_number": check_number, "reference": note,
                 "recorded_by": user.get("full_name", user["username"]),
@@ -1427,7 +1427,7 @@ async def pay_payable(pay_id: str, data: dict, user=Depends(get_current_user)):
         "payment_method": payment_method_detail,
         "fund_source": fund_source,
         "reference_number": check_number or pay.get("po_id", ""),
-        "date": now_iso()[:10],
+        "date": await today_local(user.get("organization_id") or ""),
         "po_id": po_id,
         "payable_id": pay_id,
         "vendor": pay.get("supplier", ""),
@@ -1494,7 +1494,7 @@ async def generate_interest_invoice(customer_id: str, data: dict, user=Depends(g
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
 
-    as_of_str = data.get("as_of_date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+    as_of_str = data.get("as_of_date") or await today_local(user.get("organization_id") or "")
     comp_date = datetime.strptime(as_of_str, "%Y-%m-%d")
     grace_period = int(customer.get("grace_period", 7))
     rate_override = data.get("rate_override")
@@ -1831,7 +1831,7 @@ async def generate_penalty_invoice(customer_id: str, data: dict, user=Depends(ge
         raise HTTPException(status_code=404, detail="Customer not found")
 
     penalty_rate = float(data.get("penalty_rate", 5))
-    as_of_str = data.get("as_of_date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+    as_of_str = data.get("as_of_date") or await today_local(user.get("organization_id") or "")
     comp_date = datetime.strptime(as_of_str, "%Y-%m-%d")
     grace_period = int(customer.get("grace_period", 7))
 
@@ -1953,7 +1953,7 @@ async def receive_customer_payment(customer_id: str, data: dict, user=Depends(ge
     digital = is_digital_payment(method)
     fund_source = "digital" if digital else "cashier"
     reference = data.get("reference", "")
-    pay_date = data.get("date", now_iso()[:10])
+    pay_date = data.get("date") or await today_local(user.get("organization_id") or "")
     branch_id = data.get("branch_id", "")
     total_applied, total_discounted, applied_invoices = 0, 0, []
 
@@ -2110,7 +2110,7 @@ async def get_global_payment_history(
     """Global payment history across all customers for traceability.
     Returns all payment records (cash, gcash, interest, discount) in the date range."""
     check_perm(user, "accounting", "view")
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = await today_local(user.get("organization_id") or "")
     dfrom = date_from or today
     dto = date_to or today
 
@@ -2543,7 +2543,7 @@ async def preview_customer_charges(customer_id: str, as_of_date: Optional[str] =
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
 
-    comp_date_str = as_of_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    comp_date_str = as_of_date or await today_local(user.get("organization_id") or "")
     comp_date = datetime.strptime(comp_date_str, "%Y-%m-%d")
     grace_period = int(customer.get("grace_period", 7))
     default_rate = float(rate_override) if rate_override is not None else float(customer.get("interest_rate", 0))
@@ -2653,7 +2653,7 @@ async def get_customer_statement(
         "customer": customer,
         "transactions": transactions,
         "closing_balance": running,
-        "statement_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        "statement_date": await today_local(user.get("organization_id") or ""),
         "date_from": date_from,
         "date_to": date_to,
     }
@@ -2715,7 +2715,7 @@ async def reverse_customer_cashout(expense_id: str, data: dict, user=Depends(get
             await db.safe_lots.insert_one({
                 "id": new_id(), "branch_id": branch_id,
                 "wallet_id": safe_wallet["id"],
-                "date_received": now_iso()[:10],
+                "date_received": await today_local(user.get("organization_id") or ""),
                 "original_amount": amount, "remaining_amount": amount,
                 "source_reference": ref_text,
                 "created_by": user["id"], "created_at": now_iso(),
@@ -2786,7 +2786,7 @@ async def reverse_employee_advance(expense_id: str, data: dict, user=Depends(get
             await db.safe_lots.insert_one({
                 "id": new_id(), "branch_id": branch_id,
                 "wallet_id": safe_wallet["id"],
-                "date_received": now_iso()[:10],
+                "date_received": await today_local(user.get("organization_id") or ""),
                 "original_amount": amount, "remaining_amount": amount,
                 "source_reference": ref_text,
                 "created_by": user["id"], "created_at": now_iso(),

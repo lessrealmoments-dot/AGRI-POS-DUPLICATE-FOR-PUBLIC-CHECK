@@ -25,6 +25,7 @@ import {
   TrendingUp, TrendingDown, Clock, ArrowRight, Eye, XCircle, Pencil, Upload, Check,
   ClipboardCheck, FileText, Smartphone, Lock, Pause, FolderOpen, Trash, Tag, Shield
 } from 'lucide-react';
+import { localTodayStr } from '../lib/dateFormat';
 import PrintEngine from '../lib/PrintEngine';
 import { toast } from 'sonner';
 import { useUnsavedChangesGuard } from '../lib/useUnsavedChangesGuard';
@@ -417,7 +418,7 @@ export default function BranchTransferPage() {
         branch_id: currentBranch?.id || user?.branch_id || '',
         supply_branch_id: reqTargetBranch,
         show_retail: reqShowRetail,
-        purchase_date: new Date().toISOString().slice(0, 10),
+        purchase_date: localTodayStr(),
         notes: reqNotes,
       });
       toast.success(`Stock request sent to ${targetBranch?.name}! They will be notified.`);

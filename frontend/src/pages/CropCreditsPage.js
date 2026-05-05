@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { api, useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
+import { formatDate, localTodayStr } from '../lib/dateFormat';
 import {
   Sprout, Plus, Search, Calendar, TrendingUp,
   AlertTriangle, CheckCircle2, Clock, RotateCcw,
@@ -27,7 +28,7 @@ import CalcInput from '../components/CalcInput';
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
 const formatPHP = (n) => `₱${parseFloat(n || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const fmt_date = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+const fmt_date = (d) => d ? formatDate(d + 'T00:00:00') : '—';
 
 const STATUS_CONFIG = {
   active:   { label: 'Active',   cls: 'bg-emerald-100 text-emerald-700 border-emerald-200', icon: <CheckCircle2 size={11} /> },
@@ -320,7 +321,7 @@ function CreateCropCreditModal({ open, onClose, onCreated }) {
             customer_name: selectedCustomer.name,
             amount: payload.initial_amount,
             credit_type: 'charged_to_crop',
-            date: new Date().toISOString().split('T')[0],
+            date: localTodayStr(),
           },
           linked_record_type: 'crop_credit',
           linked_record_id: res.data.id,
@@ -463,7 +464,7 @@ function CreateCropCreditModal({ open, onClose, onCreated }) {
           customer_name: selectedCustomer?.name || '',
           amount: parseFloat(form.initial_amount) || 0,
           credit_type: 'charged_to_crop',
-          date: new Date().toISOString().split('T')[0],
+          date: localTodayStr(),
           description: form.description,
         }}
         onSigned={handleCreate}
@@ -591,7 +592,7 @@ function AddCreditModal({ open, onClose, credit, onAdded }) {
       const res = await api.post(`/crop-credits/${credit.id}/add-credit`, {
         amount: parseFloat(amount),
         description: description || 'Credit added to season',
-        date: new Date().toISOString().split('T')[0],
+        date: localTodayStr(),
       });
       toast.success(`₱${parseFloat(amount).toLocaleString()} added to crop credit`);
       onAdded(res.data);
@@ -643,7 +644,7 @@ function CreditDetailPanel({ credit, onUpdated }) {
   const [accruing, setAccruing] = useState(false);
   const [invoiceModal, setInvoiceModal] = useState({ open: false, number: null });
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = localTodayStr();
   const seasonEnd = credit.season_end_date || '';
   const daysLeft = seasonEnd
     ? Math.floor((new Date(seasonEnd) - new Date(today)) / (1000 * 60 * 60 * 24))
@@ -953,7 +954,7 @@ export default function CropCreditsPage() {
               </div>
             )}
             {filtered.map(c => {
-              const today = new Date().toISOString().split('T')[0];
+              const today = localTodayStr();
               const daysLeft = c.season_end_date
                 ? Math.floor((new Date(c.season_end_date) - new Date(today)) / (1000 * 60 * 60 * 24))
                 : null;

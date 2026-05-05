@@ -10,6 +10,7 @@ import {
   AlertTriangle, RotateCcw, Package, CheckCircle2,
   RefreshCw, Printer, ShieldCheck,
 } from 'lucide-react';
+import { localTodayStr } from '../lib/dateFormat';
 import { toast } from 'sonner';
 import CalcInput from './CalcInput';
 
@@ -111,7 +112,7 @@ export default function TerminalReturnRefundModal({
     try {
       const payload = {
         branch_id: invoice.branch_id,
-        return_date: new Date().toISOString().split('T')[0],
+        return_date: localTodayStr(),
         customer_name: invoice.customer_name || 'Walk-in',
         customer_type: invoice.customer_id ? 'credit' : 'walkin',
         reason,

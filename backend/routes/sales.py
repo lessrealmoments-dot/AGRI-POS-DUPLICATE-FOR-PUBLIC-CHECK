@@ -9,7 +9,7 @@ from utils import (
     log_movement, log_sale_items, update_cashier_wallet,
     update_digital_wallet, is_digital_payment, get_branch_cost,
     generate_next_number, check_idempotency, ensure_org_context,
-    assert_branch_access,
+    assert_branch_access, today_local,
 )
 
 router = APIRouter(tags=["Sales"])
@@ -44,7 +44,7 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
     # EXCEPT: credit / partial sales can be late-encoded with manager PIN +
     # reason — those flow into the NEXT open day's Z-report as a clearly-
     # tagged carryover line (the closed Z-report itself stays untouched).
-    order_date = data.get("order_date", now_iso()[:10])
+    order_date = data.get("order_date") or await today_local(user.get("organization_id") or "")
     late_encode = data.get("late_encode") or {}
     closed_day = await db.daily_closings.find_one(
         {"branch_id": branch_id, "date": order_date, "status": "closed"},
@@ -617,7 +617,7 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
     
     # Compute due date
     terms_days = int(data.get("terms_days", 0))
-    order_date = data.get("order_date", now_iso()[:10])
+    order_date = data.get("order_date") or await today_local(user.get("organization_id") or "")
     if terms_days > 0:
         od = datetime.strptime(order_date, "%Y-%m-%d")
         due_date = (od + timedelta(days=terms_days)).strftime("%Y-%m-%d")
@@ -870,7 +870,7 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
     
     # Log to sequential sales log — reuse products_map (no extra DB calls)
     # Use the same order_date the invoice uses so sales_log matches
-    log_date = data.get("order_date", now_iso()[:10])
+    log_date = data.get("order_date") or await today_local(user.get("organization_id") or "")
     for item in sale_items:
         product = products_map.get(item["product_id"])
         item["category"] = product.get("category", "General") if product else "General"

@@ -13,6 +13,7 @@ import {
   Banknote, Building2, X,
   Zap, Shield, Lock, Upload, FileText
 } from 'lucide-react';
+import { localTodayStr } from '../lib/dateFormat';
 import { toast } from 'sonner';
 import UploadQRDialog from '../components/UploadQRDialog';
 import ReviewDetailDialog from '../components/ReviewDetailDialog';
@@ -30,7 +31,7 @@ function round2(n) { return Math.round(n * 100) / 100; }
 
 export default function PaySupplierPage() {
   const { currentBranch } = useAuth();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localTodayStr();
 
   // Supplier list + selection
   const [suppliers, setSuppliers] = useState([]);

@@ -14,6 +14,7 @@ import {
   ClipboardList, Plus, Camera, CheckCircle, XCircle, Printer,
   AlertTriangle, ArrowRight, FileText, Calendar, User, ChevronLeft
 } from 'lucide-react';
+import { formatDate, formatDateTime } from '../lib/dateFormat';
 import { toast } from 'sonner';
 import CalcInput from '../components/CalcInput';
 
@@ -321,7 +322,7 @@ export default function CountSheetsPage() {
                         <Badge className={`${style.bg} ${style.text} border-0`}>{style.label}</Badge>
                       </TableCell>
                       <TableCell className="text-sm text-slate-500">
-                        {sheet.started_at ? new Date(sheet.started_at).toLocaleDateString() : '--'}
+                        {sheet.started_at ? formatDate(sheet.started_at) : '--'}
                       </TableCell>
                       <TableCell>{sheet.summary?.total_items || '--'}</TableCell>
                       <TableCell>
@@ -436,7 +437,7 @@ export default function CountSheetsPage() {
               </Badge>
             </div>
             <p className="text-sm text-slate-500 mt-1">
-              {selectedSheet?.branch_name} &middot; Created {selectedSheet?.created_at ? new Date(selectedSheet.created_at).toLocaleString() : ''}
+              {selectedSheet?.branch_name} &middot; Created {selectedSheet?.created_at ? formatDateTime(selectedSheet.created_at) : ''}
             </p>
           </div>
         </div>
@@ -484,7 +485,7 @@ export default function CountSheetsPage() {
           </div>
           <div className="text-right">
             <p className="font-mono font-bold">{selectedSheet?.count_sheet_number}</p>
-            <p className="text-sm">Date: {selectedSheet?.started_at ? new Date(selectedSheet.started_at).toLocaleDateString() : ''}</p>
+            <p className="text-sm">Date: {selectedSheet?.started_at ? formatDate(selectedSheet.started_at) : ''}</p>
           </div>
         </div>
       </div>
@@ -747,7 +748,7 @@ export default function CountSheetsPage() {
                 <div>
                   <div className="font-medium text-emerald-800">Adjustments Applied</div>
                   <div className="text-sm text-emerald-600">
-                    Inventory was adjusted on {new Date(selectedSheet.adjustment_applied_at).toLocaleString()}
+                    Inventory was adjusted on {formatDateTime(selectedSheet.adjustment_applied_at)}
                   </div>
                 </div>
               </div>

@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timezone
-from utils import get_current_user
+from utils import get_current_user, today_local
 import os
 
 router = APIRouter()
@@ -283,7 +283,7 @@ async def correct_incomplete_stock(
             "payment_method": "Cash",
             "fund_source": "cashier",
             "reference_number": invoice.get("invoice_number", ""),
-            "date": now_iso()[:10],
+            "date": await today_local(user.get("organization_id") or ""),
             "invoice_id": invoice_id,
             "correction_id": correction_id,
             "created_by": user.get("id"),

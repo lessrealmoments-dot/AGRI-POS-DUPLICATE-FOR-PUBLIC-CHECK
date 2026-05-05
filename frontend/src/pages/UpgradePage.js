@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth, api } from '../contexts/AuthContext';
 import axios from 'axios';
 import { toast } from 'sonner';
+import { formatDate } from '../lib/dateFormat';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -212,7 +213,7 @@ export default function UpgradePage() {
               <p className="text-amber-800 text-sm font-medium">
                 You're currently on the <strong>{user.subscription.effective_plan?.toUpperCase()}</strong> plan
                 {user.subscription.plan === 'trial' && (
-                  <span className="ml-1">(Trial ends: {new Date(user.subscription.trial_ends_at).toLocaleDateString()})</span>
+                  <span className="ml-1">(Trial ends: {formatDate(user.subscription.trial_ends_at)})</span>
                 )}
               </p>
               <p className="text-amber-600 text-xs mt-0.5">

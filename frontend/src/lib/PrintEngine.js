@@ -1,3 +1,4 @@
+import { formatDate, formatDateTime } from '../lib/dateFormat';
 /**
  * PrintEngine v2 — Professional receipt/invoice generator
  * Generates print-ready HTML for thermal (58mm) and full-page (8.5×11) documents.
@@ -19,13 +20,13 @@ function formatPHP(v) {
 
 function fmtDate(d) {
   if (!d) return '';
-  try { return new Date(d).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }); }
+  try { return formatDate(d); }
   catch { return d; }
 }
 
 function fmtDateTime(d) {
   if (!d) return '';
-  try { return new Date(d).toLocaleString('en-PH', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+  try { return formatDateTime(d); }
   catch { return d; }
 }
 

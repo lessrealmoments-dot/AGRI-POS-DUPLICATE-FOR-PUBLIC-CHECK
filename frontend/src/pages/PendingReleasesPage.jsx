@@ -14,10 +14,11 @@ import {
   Package, RefreshCw, ExternalLink, AlertTriangle, Search,
   CheckCircle2, Lock, ShieldCheck, Boxes, ChevronDown
 } from 'lucide-react';
+import { formatDate, formatDateTime } from '../lib/dateFormat';
 import CalcInput from '../components/CalcInput';
 
-const fmtDate = (d) => { try { return new Date(d).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }); } catch { return d || ''; } };
-const fmtDateTime = (d) => { try { return new Date(d).toLocaleString('en-PH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return d || ''; } };
+const fmtDate = (d) => { try { return formatDate(d); } catch { return d || ''; } };
+const fmtDateTime = (d) => { try { return formatDateTime(d); } catch { return d || ''; } };
 
 function daysSince(dateStr) {
   try { return Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000); }

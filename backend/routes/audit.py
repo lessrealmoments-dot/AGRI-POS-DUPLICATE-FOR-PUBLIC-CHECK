@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 from datetime import datetime, timezone, timedelta
 from config import db
-from utils import get_current_user, check_perm, now_iso, new_id
+from utils import get_current_user, check_perm, now_iso, new_id, today_local
 
 router = APIRouter(prefix="/audit", tags=["Audit"])
 
@@ -74,7 +74,7 @@ async def create_audit_session(data: dict, user=Depends(get_current_user)):
         raise HTTPException(status_code=400, detail="Branch required")
 
     period_from = data.get("period_from", datetime.now(timezone.utc).strftime("%Y-%m-01"))
-    period_to = data.get("period_to", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+    period_to = data.get("period_to") or await today_local(user.get("organization_id") or "")
 
     branch_doc = await db.branches.find_one({"id": branch_id}, {"_id": 0, "name": 1}) if branch_id else None
     branch_name = branch_doc.get("name", branch_id) if branch_doc else "All Branches"
@@ -219,9 +219,9 @@ async def compute_audit(
     Returns structured data for each section with discrepancies computed.
     Full audit requires two completed count sheets (baseline + current).
     """
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = await today_local(user.get("organization_id") or "")
     if not period_from:
-        period_from = datetime.now(timezone.utc).strftime("%Y-%m-01")
+        period_from = today[:8] + "01"
     if not period_to:
         period_to = today
 
@@ -242,10 +242,11 @@ async def compute_audit(
     result["sales"] = await _compute_sales(b_id, period_from, period_to)
 
     # ── Section 4: AR Audit ──────────────────────────────────────────────────
-    result["ar"] = await _compute_ar(b_id, period_from, period_to)
+    org_id = user.get("organization_id") or ""
+    result["ar"] = await _compute_ar(b_id, period_from, period_to, org_id)
 
     # ── Section 5: Payables Audit ────────────────────────────────────────────
-    result["payables"] = await _compute_payables(b_id, period_from, period_to)
+    result["payables"] = await _compute_payables(b_id, period_from, period_to, org_id)
 
     # ── Section 6: Branch Transfers ──────────────────────────────────────────
     result["transfers"] = await _compute_transfers(b_id, period_from, period_to)
@@ -350,7 +351,7 @@ async def audit_pulse(
     optimised for the Dashboard "Audit Pulse" widget. Returns only what the
     widget needs — no section drill-downs, no per-invoice detail.
     """
-    today = datetime.now(timezone.utc).date()
+    today = datetime.strptime(await today_local(user.get("organization_id") or ""), "%Y-%m-%d").date()
     # Clamp days: must be ≥1, capped at 365 to prevent runaway compute windows.
     days = max(1, min(int(days), 365))
     period_from = (today - timedelta(days=days - 1)).strftime("%Y-%m-%d")
@@ -457,7 +458,7 @@ async def list_security_flags(
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
 
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = await today_local(user.get("organization_id") or "")
     from_dt = (period_from or "2020-01-01") + "T00:00:00"
     to_dt   = (period_to   or today)        + "T23:59:59"
 
@@ -987,9 +988,9 @@ async def _compute_sales(branch_id: str, date_from: str, date_to: str) -> dict:
     }
 
 
-async def _compute_ar(branch_id: str, date_from: str, date_to: str) -> dict:
+async def _compute_ar(branch_id: str, date_from: str, date_to: str, org_id: str = "") -> dict:
     """AR audit: aging, collections efficiency."""
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = await today_local(org_id)
     open_inv = await db.invoices.find(
         {"branch_id": branch_id, "balance": {"$gt": 0}, "status": {"$nin": ["voided", "paid"]},
          "customer_id": {"$ne": None}},
@@ -1038,8 +1039,8 @@ async def _compute_ar(branch_id: str, date_from: str, date_to: str) -> dict:
     }
 
 
-async def _compute_payables(branch_id: str, date_from: str, date_to: str) -> dict:
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+async def _compute_payables(branch_id: str, date_from: str, date_to: str, org_id: str = "") -> dict:
+    today = await today_local(org_id)
     unpaid = await db.purchase_orders.find(
         {"branch_id": branch_id, "payment_status": {"$in": ["unpaid", "partial"]}, "status": {"$ne": "cancelled"}},
         {"_id": 0, "id": 1, "po_number": 1, "vendor": 1, "balance": 1, "grand_total": 1, "subtotal": 1,
@@ -1352,7 +1353,7 @@ async def get_offline_package(
             }
         else:
             # Fallback: current month
-            today = datetime.now(timezone.utc)
+            today = datetime.strptime(await today_local(user.get("organization_id") or ""), "%Y-%m-%d")
             period_from = period_from or today.strftime("%Y-%m-01")
             period_to = period_to or today.strftime("%Y-%m-%d")
             cs_refs = None

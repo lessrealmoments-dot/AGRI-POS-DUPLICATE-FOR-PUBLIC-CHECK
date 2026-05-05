@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from typing import Optional
 from datetime import datetime, timezone, timedelta
 from config import db
-from utils import get_current_user, check_perm, get_branch_filter, apply_branch_filter
+from utils import get_current_user, check_perm, get_branch_filter, apply_branch_filter, today_local
 
 router = APIRouter(tags=["Reports"])
 
@@ -32,7 +32,7 @@ async def ar_aging_report(
 
     invoices = await db.invoices.find(query, {"_id": 0}).to_list(2000)
 
-    today = datetime.now(timezone.utc).date()
+    today = datetime.strptime(await today_local(user.get("organization_id") or ""), "%Y-%m-%d").date()
 
     # Per-customer map: { customer_id: { name, buckets, invoices } }
     customers = {}
@@ -116,7 +116,7 @@ async def sales_report(
     """
     check_perm(user, "reports", "view")
 
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = await today_local(user.get("organization_id") or "")
     if not date_from:
         # Default: first day of current month
         date_from = datetime.now(timezone.utc).strftime("%Y-%m-01")
@@ -220,7 +220,7 @@ async def expense_report(
     """
     check_perm(user, "reports", "view")
 
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = await today_local(user.get("organization_id") or "")
     if not date_from:
         date_from = datetime.now(timezone.utc).strftime("%Y-%m-01")
     if not date_to:
@@ -288,7 +288,7 @@ async def discount_audit_report(
     """
     check_perm(user, "reports", "view")
 
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = await today_local(user.get("organization_id") or "")
     first_of_month = datetime.now(timezone.utc).replace(day=1).strftime("%Y-%m-%d")
     d_from = date_from or first_of_month
     d_to = date_to or today
@@ -381,7 +381,7 @@ async def product_profit_report(
     """
     check_perm(user, "reports", "view_profit")
 
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = await today_local(user.get("organization_id") or "")
     if not date_from:
         date_from = datetime.now(timezone.utc).strftime("%Y-%m-01")
     if not date_to:

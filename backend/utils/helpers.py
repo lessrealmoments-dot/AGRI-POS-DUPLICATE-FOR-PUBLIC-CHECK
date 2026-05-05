@@ -7,8 +7,108 @@ from config import db, _raw_db, get_org_context, set_org_context
 
 
 def now_iso():
-    """Return current UTC timestamp in ISO format."""
+    """Return current UTC timestamp in ISO format.
+
+    Used for all `created_at`, `updated_at`, `voided_at`, `recorded_at`, etc.
+    These are TRANSPORT timestamps — Mongo string-comparison ordering relies
+    on ISO-8601 + UTC. NEVER change to local time. For DISPLAY, the frontend
+    converts via formatDateTime (MM/DD/YYYY · hh:mm AM/PM). For FILTERING by
+    a calendar day, use `today_local(org_id)` instead.
+    """
     return datetime.now(timezone.utc).isoformat()
+
+
+# ── Timezone-aware "today" helpers (Iter 238) ────────────────────────────────
+# Background: every call to `datetime.now(timezone.utc).strftime("%Y-%m-%d")`
+# was producing the UTC date, NOT the org's local date. From 12 AM to 8 AM
+# Manila that meant `today` = yesterday-Manila, which corrupted "today's
+# sales", silenced same-day reminder triggers, mis-stamped order_date
+# defaults, and caused the user's 8 AM sales to display "00:00".
+#
+# These helpers resolve the org's timezone (defaults to Asia/Manila when no
+# context) and return the LOCAL day or LOCAL time.
+#
+# IMPORTANT: do NOT use these for `created_at` / `updated_at` / `voided_at`
+# style timestamps. Those MUST stay UTC ISO (transport layer). Only use
+# these where you previously wrote `.strftime("%Y-%m-%d")` for "today" or
+# `strftime("%H:%M:%S")` for a wall-clock time field.
+
+def _local_now_for(org_id: str = "") -> datetime:
+    """Return a timezone-aware datetime in the org's local zone.
+    Synchronous so it's safe inside list-comprehensions and sync callsites.
+    Falls back to Asia/Manila when no org context."""
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        return datetime.now(timezone.utc) + timedelta(hours=8)
+    tz_name = "Asia/Manila"
+    if org_id:
+        try:
+            # Cheap synchronous read via _raw_db's underlying pymongo handle
+            # is not available here — async resolver lives in close_reminder.
+            # For sync sites we accept the Asia/Manila default; async sites
+            # use `today_local` / `now_local_iso` below which call the proper
+            # async resolver.
+            pass
+        except Exception:
+            pass
+    try:
+        return datetime.now(ZoneInfo(tz_name))
+    except Exception:
+        return datetime.now(timezone.utc) + timedelta(hours=8)
+
+
+async def today_local(org_id: str = "") -> str:
+    """Return TODAY as `YYYY-MM-DD` in the organization's local timezone.
+
+    Replaces every `datetime.now(timezone.utc).strftime("%Y-%m-%d")` that
+    was being used as a calendar-day boundary. The UTC version was
+    yesterday-Manila for ~8 hours per day. Falls back to Asia/Manila when
+    org_id is empty (super-admin / scheduler contexts)."""
+    from routes.close_reminder import _resolve_org_timezone, _local_now_in
+    tz = await _resolve_org_timezone(org_id) if org_id else "Asia/Manila"
+    return _local_now_in(tz).strftime("%Y-%m-%d")
+
+
+async def now_local_iso(org_id: str = "") -> str:
+    """Return current time in org TZ as ISO-8601 with offset
+    (e.g. `2026-05-05T08:30:00+08:00`).
+
+    Used for fields meant to display wall-clock time directly without
+    needing front-end TZ conversion."""
+    from routes.close_reminder import _resolve_org_timezone, _local_now_in
+    tz = await _resolve_org_timezone(org_id) if org_id else "Asia/Manila"
+    return _local_now_in(tz).isoformat()
+
+
+async def now_local_time_str(org_id: str = "") -> str:
+    """Return current wall-clock time as `HH:MM:SS` in org TZ.
+    Used for the `sales_log.time` display column."""
+    from routes.close_reminder import _resolve_org_timezone, _local_now_in
+    tz = await _resolve_org_timezone(org_id) if org_id else "Asia/Manila"
+    return _local_now_in(tz).strftime("%H:%M:%S")
+
+
+def utc_iso_to_local_time_str(iso_str: str, tz_name: str = "Asia/Manila") -> str:
+    """Convert a UTC ISO timestamp to `HH:MM:SS` in the given local TZ.
+    Used by the one-shot sales_log time-backfill migration."""
+    if not iso_str:
+        return ""
+    try:
+        from zoneinfo import ZoneInfo
+        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(ZoneInfo(tz_name)).strftime("%H:%M:%S")
+    except Exception:
+        # Last-resort offset fallback
+        try:
+            dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return (dt + timedelta(hours=8)).strftime("%H:%M:%S")
+        except Exception:
+            return ""
 
 
 def new_id():
@@ -96,7 +196,15 @@ async def log_sale_items(branch_id, date, items, invoice_number, customer_name, 
     )
     seq = last["sequence"] if last else 0
     running = last["running_total"] if last else 0
-    
+
+    # Resolve org timezone ONCE per batch so the time string matches the
+    # local wall-clock the cashier actually saw on the screen — not UTC.
+    # (Iter 238 fix: previously stored `datetime.now(timezone.utc).strftime`
+    # which produced "00:00:00" for an 8 AM Manila sale.)
+    org_id = get_org_context() or ""
+    local_time_str = await now_local_time_str(org_id)
+    timestamp_local = await now_local_iso(org_id)
+
     for item in items:
         seq += 1
         lt = float(item.get("total", item.get("quantity", 0) * item.get("rate", item.get("price", 0))))
@@ -106,8 +214,9 @@ async def log_sale_items(branch_id, date, items, invoice_number, customer_name, 
             "branch_id": branch_id,
             "date": date,
             "sequence": seq,
-            "time": datetime.now(timezone.utc).strftime("%H:%M:%S"),
-            "timestamp": now_iso(),
+            "time": local_time_str,
+            "timestamp": timestamp_local,
+            "timestamp_utc": now_iso(),
             "product_name": item.get("product_name", ""),
             "product_id": item.get("product_id", ""),
             "quantity": float(item.get("quantity", 0)),
@@ -137,14 +246,24 @@ async def log_sale_items(branch_id, date, items, invoice_number, customer_name, 
 
 
 async def get_active_date(branch_id):
-    """Return today's date unless closed, then return next day."""
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    """Return today's date unless closed, then return next day.
+    Uses the org's local TZ so the day boundary lines up with the cashier's
+    wall clock — not UTC. (Iter 238 fix.)"""
+    # Resolve via the branch's organization_id (sync sites may not have
+    # _current_org_id set, so we read it off the branch row).
+    br = await _raw_db.branches.find_one(
+        {"id": branch_id}, {"_id": 0, "organization_id": 1}
+    )
+    org_id = (br or {}).get("organization_id") or get_org_context() or ""
+    today = await today_local(org_id)
     closed = await db.daily_closings.find_one(
         {"branch_id": branch_id, "date": today, "status": "closed"},
         {"_id": 0}
     )
     if closed:
-        next_day = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
+        from routes.close_reminder import _resolve_org_timezone, _local_now_in
+        tz = await _resolve_org_timezone(org_id) if org_id else "Asia/Manila"
+        next_day = (_local_now_in(tz) + timedelta(days=1)).strftime("%Y-%m-%d")
         return next_day
     return today
 

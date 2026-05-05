@@ -9,10 +9,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Badge } from './ui/badge';
 import { Printer, FileText } from 'lucide-react';
 import { toast } from 'sonner';
+import { localTodayStr } from '../lib/dateFormat';
 
 export default function CustomerStatementModal({ open, onOpenChange, customer }) {
   const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState(new Date().toISOString().slice(0, 10));
+  const [dateTo, setDateTo] = useState(localTodayStr());
   const [statement, setStatement] = useState(null);
   const [loading, setLoading] = useState(false);
   const [businessInfo, setBusinessInfo] = useState({});

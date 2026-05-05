@@ -1,5 +1,58 @@
 # AgriBooks PRD
 
+## Iter 238 (May 2026) — Time/Date Timezone Audit + Standardized Display ✅
+
+**Problem**: User reported sales made at 8 AM Manila showing `00:00` time on the Daily Log. Full audit revealed **66+ places** in the backend computing "today" via `datetime.now(timezone.utc).strftime("%Y-%m-%d")` — which produced UTC dates instead of Manila local dates. From 12 AM to 8 AM Manila, every "today" query was off by one day. Frontend had **125+ inconsistent `toLocaleString()` calls** producing varied date formats across pages.
+
+### Backend fixes (smoking gun + 8 systemic)
+1. **`log_sale_items` `time` field** — now records `HH:MM:SS` in org-local TZ (Asia/Manila) instead of UTC. Was the root cause of "00:00 at 8 AM" symptom.
+2. **`get_active_date(branch_id)`** — resolves the active business day via the branch's org timezone, not UTC.
+3. **66+ "today" derivations** — every `datetime.now(timezone.utc).strftime("%Y-%m-%d")` replaced with `await today_local(user.get("organization_id"))` across `dashboard.py`, `reports.py`, `audit.py`, `accounting.py`, `daily_operations.py`, `invoices.py`, `purchase_orders.py`, `incident_tickets.py`, `price_changes.py`, `sales.py`, `returns.py`, `employees.py`, `qr_actions.py`, `overage_reserve.py`, `sync.py`, `invoice_corrections.py`, `sms_hooks.py`.
+4. **Default `order_date` / `date_received` / `pay_date` / etc.** — every `now_iso()[:10]` server-side default replaced with `await today_local(...)`. Sales made between 12 AM and 8 AM Manila no longer get UTC-dated to yesterday.
+5. **SMS reminder scheduler** (`main.py:_daily_sms_reminders`) — now computes `today` per-org so each tenant's 15/7-day reminder window matches their LOCAL calendar, not UTC.
+6. **Z-Report PDF "Generated" footer** — converts UTC to org-local TZ and renders as `MM/DD/YYYY hh:mm AM/PM` (was `YYYY-MM-DD HH:MM UTC`).
+7. **Z-Report PDF default date** — uses `today_local(org_id)` instead of UTC.
+8. **`dashboard._compute_ar_aging`, `audit._compute_ar`, `audit._compute_payables`** — now take `org_id` parameter and use `today_local` for the day-arithmetic baseline.
+9. **`audit.compute_audit` period defaults** — `period_to` defaults to `today_local(org_id)`; `period_from` derives from same.
+
+### New helper module (`utils/helpers.py`)
+- `today_local(org_id)` → `YYYY-MM-DD` in org TZ
+- `now_local_iso(org_id)` → `2026-05-05T08:30:00+08:00`
+- `now_local_time_str(org_id)` → `HH:MM:SS` in org TZ
+- `utc_iso_to_local_time_str(iso, tz)` → conversion helper used by the backfill migration
+
+### Frontend display standardization
+- **NEW: `/app/frontend/src/lib/dateFormat.js`** — single source of truth with:
+  - `formatDate(input)` → **MM/DD/YYYY**
+  - `formatTime(input)` → **hh:mm AM/PM**
+  - `formatDateTime(input)` → **MM/DD/YYYY · hh:mm AM/PM**
+  - `formatTimeFull(input)` → with seconds
+  - `formatDateLong(input)` → `May 5, 2026`
+  - `localTodayStr()` → org-TZ-aware `YYYY-MM-DD` (replaces `new Date().toISOString().slice(0, 10)`)
+  - `format24To12("00:00:00")` → `"12:00 AM"` — used to render legacy DB-stored 24h times
+- **Bulk swept 51 frontend files**: 27 files for `toLocaleString/Date/Time` → `formatDateTime/Date/Time`, 24 files for `new Date().toISOString().slice(0,10)` → `localTodayStr()`.
+- **`DailyLogPage.js:1154`** specifically: `{e.time}` → `{format24To12(e.time)}` so legacy DB rows still render as `08:00 AM` (looking up the new `time_tz_used` field).
+
+### Historical data backfill
+- **NEW: `/app/backend/scripts/backfill_sales_log_time_tz_238.py`** — idempotent one-shot migration that converts every `sales_log.time` UTC `HH:MM:SS` to org-local. Preserves the original UTC value as `time_utc_legacy` for auditability and stamps `time_tz_migrated=True`. **Ran successfully in dev: 595/597 rows migrated, 2 skipped (no timestamp).**
+
+### What was deliberately NOT touched (to protect financial integrity)
+- All `created_at` / `updated_at` / `voided_at` / `recorded_at` fields **stay UTC ISO** — they're transport timestamps for ordering and comparison. Frontend converts on display via `formatDateTime`.
+- All historical `date` strings on `daily_closings`, `invoices`, `sales`, `journal_entries` are **left as-is** — moving sales between Z-Reports retroactively would corrupt closed-day cash counts and audit trails.
+- All money/stock formulas (`running_total`, `quantity`, `total`, wallet balances, `over_short`, AR/AP balances) **untouched**.
+
+### Testing
+- `tests/test_timezone_helpers_238.py` — **8/8 PASS** (UTC↔Manila conversion, midnight boundary, default fallback, ISO offset format, HH:MM:SS format).
+- Combined regression suite: **40/40 PASS** (Iter 232, 237, 238 all green).
+- Verified zero new regressions: pre-existing 3 `TestEndpointRegistration` and 4 `TestPOCancel/Edit` failures fail identically on stashed clean code (unrelated, manager-PIN/test-fixture issues).
+
+### Files touched
+- Backend: `utils/helpers.py`, `utils/__init__.py`, `routes/{accounting,audit,dashboard,daily_operations,employees,incident_tickets,invoice_corrections,invoices,overage_reserve,price_changes,purchase_orders,qr_actions,reports,returns,sales,sms_hooks,sync,zreport_pdf}.py`, `main.py`.
+- Frontend: 51 files (one-line replacements via centralized helper).
+- New: `frontend/src/lib/dateFormat.js`, `backend/scripts/backfill_sales_log_time_tz_238.py`, `backend/tests/test_timezone_helpers_238.py`.
+
+
+
 ## Iter 237 (May 2026) — SMS Emergency Controls + Quiet-Hours Dispatch Gate + Gateway Heartbeat ✅
 
 **Problem**: User reported receiving SMS 3 days old (from 5/2/26) at 1 AM, 2 AM, 5 AM local time on 5/5/26, including messages from a branch that was already muted. "Emergency Stop" button felt ineffective. Even after wiping the backend queue, SMS kept coming — gateway logs revealed the Android app was looping locally on 7 stuck rows because its API URL pointed to `agri-books.com` (NXDOMAIN), so `mark-sent` ACKs all failed and rows replayed forever. Full code audit identified 6 root-cause bugs PLUS the missing observability layer that allowed the gateway disconnection to go unnoticed for days.

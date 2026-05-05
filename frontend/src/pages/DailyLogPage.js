@@ -22,6 +22,7 @@ import { toast } from 'sonner';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
 import CustomerStatementModal from '../components/CustomerStatementModal';
 import CalcInput from '../components/CalcInput';
+import { format24To12, formatDate, formatDateTime, formatTime, localTodayStr } from '../lib/dateFormat';
 
 // ── Small helper components ───────────────────────────────────────────────────
 function SectionCard({ title, children, accent = 'slate', note }) {
@@ -217,7 +218,7 @@ function ClosingAdjustmentsPanel({ closing, isAdmin, onAdjusted }) {
                 </div>
                 <p className="text-xs text-slate-600 mt-0.5">{r.reason}</p>
                 <p className="text-[10px] text-slate-400 mt-0.5">
-                  by {r.created_by_name} · {new Date(r.created_at).toLocaleString()}
+                  by {r.created_by_name} · {formatDateTime(r.created_at)}
                   {r.voided && r.voided_reason && (
                     <> · voided by {r.voided_by_name}: "{r.voided_reason}"</>
                   )}
@@ -250,7 +251,7 @@ function ZReport({ data, branchName, onPrint, onDownloadPdf }) {
         <Card className="border-emerald-200 bg-emerald-50 flex-1 mr-3"><CardContent className="p-3">
           <p className="font-bold text-emerald-800">
             <CheckCircle size={14} className="inline mr-1" />
-            Day closed by {data.closed_by_name} · {new Date(data.closed_at).toLocaleString()}
+            Day closed by {data.closed_by_name} · {formatDateTime(data.closed_at)}
           </p>
         </CardContent></Card>
         <div className="flex gap-2 shrink-0">
@@ -776,7 +777,7 @@ function ZReportDetailed({ preview, closing, branchName, onPrint, onDownloadPdf 
 
 export default function DailyLogPage() {
   const { currentBranch, branches, hasPerm, user } = useAuth();
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(localTodayStr());
   const [tab, setTab] = useState('log');
   const [logEntries, setLogEntries] = useState([]);
   const [cashEntries, setCashEntries] = useState([]);

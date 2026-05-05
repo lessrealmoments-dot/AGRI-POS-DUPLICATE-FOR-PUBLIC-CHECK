@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 from datetime import datetime, timezone, timedelta
 from config import db
-from utils import get_current_user, check_perm, now_iso, new_id, get_branch_filter, apply_branch_filter, assert_branch_access
+from utils import get_current_user, check_perm, now_iso, new_id, get_branch_filter, apply_branch_filter, assert_branch_access, today_local
 
 router = APIRouter(tags=["Daily Operations"])
 
@@ -26,7 +26,7 @@ async def get_unclosed_days(
     if not branch_id:
         raise HTTPException(status_code=400, detail="branch_id required")
 
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = await today_local(user.get("organization_id") or "")
 
     # Find last closed day for this branch
     last_close = await db.daily_closings.find_one(

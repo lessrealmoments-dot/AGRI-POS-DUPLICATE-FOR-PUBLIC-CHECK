@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { Download, Upload, Smartphone, MessageSquare, CheckCircle, Clock, RefreshCw, Trash2, ChevronDown, ChevronUp, Info } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
+import { formatDateLong } from '../lib/dateFormat';
 
 const APPS_STATIC = {
   'agrisms-gateway': {
@@ -80,7 +81,7 @@ function formatBytes(bytes) {
 
 function formatDate(iso) {
   if (!iso) return '—';
-  try { return new Date(iso).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }); }
+  try { return formatDateLong(iso); }
   catch { return iso; }
 }
 

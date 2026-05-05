@@ -18,6 +18,7 @@ import { TotpVerifyDialog } from '../components/TotpVerifyDialog';
 import CategorySelect from '../components/CategorySelect';
 import StockInjectionDialog from '../components/StockInjectionDialog';
 import CalcInput from '../components/CalcInput';
+import { localTodayStr } from '../lib/dateFormat';
 
 export default function ProductsPage() {
   const navigate = useNavigate();
@@ -319,7 +320,7 @@ export default function ProductsPage() {
       const url = URL.createObjectURL(res.data);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `agribooks_products_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.download = `agribooks_products_${localTodayStr()}.csv`;
       document.body.appendChild(a);
       a.click();
       a.remove();

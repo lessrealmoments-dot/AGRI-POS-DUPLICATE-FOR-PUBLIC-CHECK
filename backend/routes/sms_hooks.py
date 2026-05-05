@@ -5,7 +5,7 @@ Uses _raw_db (unscoped) for lookups to bypass tenant ContextVar mutations.
 organization_id is resolved explicitly and passed to queue_sms for proper isolation.
 """
 from config import _raw_db as raw_db, logger
-from utils import now_iso, new_id
+from utils import now_iso, new_id, today_local
 
 
 async def _get_cc_phones(org_id: str, branch_id: str, roles: set) -> dict:
@@ -265,7 +265,7 @@ async def on_charge_applied(customer_id: str, charge_type: str, charge_amount: f
                 "phone": manager_phone, "message": mgr_msg,
                 "status": "pending", "trigger": "auto",
                 "trigger_ref": f"charge:{customer_id}:{charge_type}",
-                "dedup_key": f"charge_mgr:{customer_id}:{charge_type}:{now_iso()[:10]}",
+                "dedup_key": f"charge_mgr:{customer_id}:{charge_type}:{await today_local(org_id)}",
                 "branch_id": branch_id, "branch_name": await get_branch_name(branch_id),
                 "created_at": now_iso(),
                 "sent_at": None, "failed_at": None, "error": None, "retry_count": 0,

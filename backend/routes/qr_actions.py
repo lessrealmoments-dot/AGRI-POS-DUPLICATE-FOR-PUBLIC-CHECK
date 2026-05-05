@@ -16,7 +16,7 @@ Supported actions:
 from fastapi import APIRouter, HTTPException, Request
 from datetime import datetime, timezone, timedelta
 from config import db, _raw_db, set_org_context
-from utils import now_iso, new_id, is_digital_payment, update_cashier_wallet, update_digital_wallet, log_movement
+from utils import now_iso, new_id, is_digital_payment, update_cashier_wallet, update_digital_wallet, log_movement, today_local
 from utils.security import (
     check_qr_lockout, log_failed_qr_pin_attempt, log_successful_qr_pin_attempt,
 )
@@ -621,7 +621,7 @@ async def receive_payment(code: str, data: dict, request: Request):
     payment = {
         "id":                    new_id(),
         "amount":                amount,
-        "date":                  now_iso()[:10],
+        "date":                  await today_local(invoice.get("organization_id") or ""),
         "method":                method,
         "fund_source":           "digital" if is_digital_payment(method) else "cashier",
         "reference":             reference,
@@ -656,7 +656,7 @@ async def receive_payment(code: str, data: dict, request: Request):
     debit_account  = "Digital Receipts" if is_digital_payment(method) else "Cash on Hand"
     je = {
         "id":          new_id(),
-        "date":        now_iso()[:10],
+        "date":        await today_local(invoice.get("organization_id") or ""),
         "description": f"QR Payment — {invoice.get('invoice_number', '')} | {invoice.get('customer_name', 'Walk-in')} | {method}",
         "lines": [
             {"account": debit_account,       "debit": amount, "credit": 0},

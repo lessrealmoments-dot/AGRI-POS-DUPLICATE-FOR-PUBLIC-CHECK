@@ -24,6 +24,7 @@ import {
   Banknote, Lock, Smartphone, Building2, RefreshCw, ArrowRight,
   ArrowRightLeft, Shield, EyeOff, History, AlertTriangle, CalendarDays
 } from 'lucide-react';
+import { localTodayStr } from '../lib/dateFormat';
 import { toast } from 'sonner';
 import { formatPHP, fmtDateTime } from '../lib/utils';
 
@@ -354,7 +355,7 @@ export default function FundManagementPage() {
                       className="h-6 px-1.5 text-[10px] text-indigo-600 hover:text-indigo-700 gap-0.5"
                       onClick={() => {
                         setDateEditTransfer(t);
-                        setDateEditNewDate(t.date || new Date().toISOString().slice(0, 10));
+                        setDateEditNewDate(t.date || localTodayStr());
                         setDateEditPin('');
                         setDateEditReason('');
                       }}
@@ -407,7 +408,7 @@ export default function FundManagementPage() {
                 <label className="text-xs text-slate-600 font-medium">New Date *</label>
                 <input type="date" value={dateEditNewDate}
                   onChange={e => setDateEditNewDate(e.target.value)}
-                  max={new Date().toISOString().slice(0, 10)}
+                  max={localTodayStr()}
                   className="mt-1 w-full h-9 px-3 rounded-md border border-slate-200 text-sm"
                   data-testid="edit-transfer-date-newdate" />
               </div>

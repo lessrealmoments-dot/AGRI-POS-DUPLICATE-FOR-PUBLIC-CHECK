@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { ScrollArea } from '../components/ui/scroll-area';
 import { Separator } from '../components/ui/separator';
+import { formatDate, localTodayStr } from '../lib/dateFormat';
 import {
   CheckCircle2, Circle, ChevronRight, ChevronLeft, Receipt, CreditCard,
   Banknote, ReceiptText, Calculator, Wallet, Lock, Sun, Plus, RefreshCw,
@@ -154,7 +155,7 @@ export default function CloseWizardPage() {
   const [findPayGenerating, setFindPayGenerating] = useState(null);
   const [findPayProcessing, setFindPayProcessing] = useState(false);
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = localTodayStr();
 
   // Load unclosed days on mount
   const loadUnclosedDays = useCallback(async () => {
@@ -823,7 +824,7 @@ export default function CloseWizardPage() {
                 const isActive = !inGroupMode && date === day.date;
                 const isTicked = batchDates.includes(day.date);
                 const isInGroupHighlight = inGroupMode && isTicked;
-                const dayLabel = new Date(day.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                const dayLabel = formatDate(day.date + 'T12:00:00');
                 return (
                   <div
                     key={day.date}
@@ -2132,7 +2133,7 @@ export default function CloseWizardPage() {
                   <div className="px-4 py-2 bg-slate-100 text-xs font-bold uppercase tracking-wider text-slate-600">Per-Day Breakdown</div>
                   <div className="divide-y divide-slate-100">
                     {Object.entries(batchPreview.daily_breakdown).sort(([a],[b]) => a.localeCompare(b)).map(([d, info]) => {
-                      const dayLabel = new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                      const dayLabel = formatDate(d + 'T12:00:00');
                       return (
                         <div key={d} className="px-4 py-2 text-sm flex items-center justify-between">
                           <div>

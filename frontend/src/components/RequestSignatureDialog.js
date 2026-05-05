@@ -20,6 +20,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { ScrollArea } from './ui/scroll-area';
 import { CheckCircle2, AlertTriangle, Smartphone, ShieldAlert, RefreshCw, Printer, Clock, X, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
+import { localTodayStr } from '../lib/dateFormat';
 
 const POLL_MS = 2000;
 const BACKEND = process.env.REACT_APP_BACKEND_URL || '';
@@ -84,7 +85,7 @@ export default function RequestSignatureDialog({
         customer_name: invoice.customer_name || 'Walk-in',
         amount: parseFloat(invoice.balance || 0),
         credit_type,
-        date: invoice.order_date || new Date().toISOString().slice(0, 10),
+        date: invoice.order_date || localTodayStr(),
         branch_name: invoice.branch_name || '',
         description,
         invoice_number: invoice.invoice_number || '',

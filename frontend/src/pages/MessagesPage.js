@@ -17,6 +17,7 @@ import {
   ChevronDown, ChevronUp, Phone, FileText, UserPlus, Activity, Wifi,
   BellRing
 } from 'lucide-react';
+import { formatDate, formatTime } from '../lib/dateFormat';
 import { toast } from 'sonner';
 import CalcInput from '../components/CalcInput';
 
@@ -743,7 +744,7 @@ export default function MessagesPage() {
                           </p>
                         </div>
                         <span className="text-[9px] text-slate-300 shrink-0 mt-0.5">
-                          {c.last_time ? new Date(c.last_time).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' }) : ''}
+                          {c.last_time ? formatDate(c.last_time) : ''}
                         </span>
                       </div>
                     </button>
@@ -845,7 +846,7 @@ export default function MessagesPage() {
                           <p className="whitespace-pre-wrap">{msg.message}</p>
                           <p className={`text-[9px] mt-1 ${isOut ? 'text-white/60' : 'text-slate-400'}`}>
                             {msg.sent_by_name && <span className="mr-1">{msg.sent_by_name} ·</span>}
-                            {msg.created_at ? new Date(msg.created_at).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' }) : ''}
+                            {msg.created_at ? formatTime(msg.created_at) : ''}
                             {isOut && msg.status && <span className="ml-1 opacity-60">· {msg.status}</span>}
                           </p>
                         </div>

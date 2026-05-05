@@ -17,6 +17,7 @@ import {
   ShieldCheck, Upload, Pencil, Check, AlertTriangle,
   RefreshCw, Trash2, DollarSign, Wallet, FileText, User, Calendar, Tag, Printer
 } from 'lucide-react';
+import { formatDateTime } from '../lib/dateFormat';
 import { toast } from 'sonner';
 import PrintEngine from '../lib/PrintEngine';
 import CalcInput from './CalcInput';
@@ -286,8 +287,8 @@ export default function ExpenseDetailModal({ open, onOpenChange, expenseId, onUp
 
                   {/* Created/updated info */}
                   <div className="text-xs text-slate-400 space-y-0.5 border-t pt-2">
-                    <p>Created: {expense.created_at ? new Date(expense.created_at).toLocaleString() : '—'} by {expense.created_by_name || '—'}</p>
-                    {expense.updated_by_name && <p>Updated: {expense.updated_at ? new Date(expense.updated_at).toLocaleString() : '—'} by {expense.updated_by_name}</p>}
+                    <p>Created: {expense.created_at ? formatDateTime(expense.created_at) : '—'} by {expense.created_by_name || '—'}</p>
+                    {expense.updated_by_name && <p>Updated: {expense.updated_at ? formatDateTime(expense.updated_at) : '—'} by {expense.updated_by_name}</p>}
                   </div>
 
                   {/* Delete/Void button */}

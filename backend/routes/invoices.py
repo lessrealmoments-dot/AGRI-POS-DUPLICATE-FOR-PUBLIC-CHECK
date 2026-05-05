@@ -12,7 +12,7 @@ from utils import (
     log_movement, log_sale_items, update_cashier_wallet,
     update_digital_wallet, is_digital_payment,
     get_branch_filter, apply_branch_filter, ensure_branch_access,
-    generate_next_number, check_idempotency,
+    generate_next_number, check_idempotency, today_local,
 )
 
 router = APIRouter(tags=["Invoices"])
@@ -198,7 +198,7 @@ async def record_invoice_payment(inv_id: str, data: dict, user=Depends(get_curre
     payment = {
         "id": new_id(),
         "amount": amount,
-        "date": data.get("date", now_iso()[:10]),
+        "date": data.get("date") or await today_local(user.get("organization_id") or ""),
         "method": data.get("method", "Cash"),
         "fund_source": fund_source,
         "reference": data.get("reference", ""),
@@ -226,7 +226,7 @@ async def record_invoice_payment(inv_id: str, data: dict, user=Depends(get_curre
                 "id": new_id(),
                 "branch_id": branch_id,
                 "wallet_id": wallet["id"],
-                "date_received": data.get("date", now_iso()[:10]),
+                "date_received": data.get("date") or await today_local(user.get("organization_id") or ""),
                 "original_amount": amount,
                 "remaining_amount": amount,
                 "source_reference": f"Payment from {inv.get('customer_name', '')} - {inv['invoice_number']}",
@@ -616,7 +616,7 @@ async def edit_invoice(invoice_id: str, data: dict, user=Depends(get_current_use
             journal_entry = {
                 "id": new_id(),
                 "branch_id": inv_branch,
-                "date": now_iso()[:10],
+                "date": await today_local(user.get("organization_id") or ""),
                 "description": f"Adjustment for edited {invoice.get(id_field, '')} (closed day {inv_date}): {reason}",
                 "entries": [
                     {"account": "Sales Adjustment", "debit": max(0, diff), "credit": max(0, -diff)},
@@ -880,7 +880,7 @@ async def get_invoices_by_date(
     Used by the Sales History tab for quick cashier review.
     Returns running totals alongside the list.
     """
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = await today_local(user.get("organization_id") or "")
     target_date = date or today
 
     query: dict = {}

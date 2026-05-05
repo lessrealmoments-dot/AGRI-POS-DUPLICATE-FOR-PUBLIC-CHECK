@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { AlertTriangle, RefreshCw, Check, Clock, ChevronDown, X, TrendingUp, TrendingDown, Lock } from 'lucide-react';
 import { toast } from 'sonner';
 import CalcInput from './CalcInput';
+import { formatDateTime, formatTime } from '../lib/dateFormat';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const SCAN_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
@@ -655,7 +656,7 @@ export default function PriceScanManager() {
                           {a.vendor && <span className="ml-2">· Vendor: <strong>{a.vendor}</strong></span>}
                           {a.from_branch && <span className="ml-2">· From: {a.from_branch}</span>}
                           <span className="ml-2 text-slate-400">·</span>
-                          <span className="ml-2">{new Date(a.changed_at).toLocaleString()}</span>
+                          <span className="ml-2">{formatDateTime(a.changed_at)}</span>
                           {a.changed_by_name && <span className="ml-2">· {a.changed_by_name}</span>}
                         </p>
                       </div>
@@ -684,7 +685,7 @@ export default function PriceScanManager() {
               )}
               {skipUntil && skipUntil > Date.now() && tab === 'below_cost' && (
                 <span className="ml-2 text-amber-600">
-                  Next popup: {new Date(skipUntil).toLocaleTimeString()}
+                  Next popup: {formatTime(skipUntil)}
                 </span>
               )}
             </p>

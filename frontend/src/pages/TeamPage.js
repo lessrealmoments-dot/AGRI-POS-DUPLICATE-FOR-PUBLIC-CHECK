@@ -17,6 +17,7 @@ import {
   X, Check, Eye, ShoppingCart, Package, Warehouse, DollarSign, FileText,
   Truck, UserCog, BarChart3, AlertTriangle, Layers, Copy
 } from 'lucide-react';
+import { formatDate } from '../lib/dateFormat';
 import { toast } from 'sonner';
 
 const ROLES = [
@@ -501,7 +502,7 @@ export default function TeamPage() {
                               </p>
                               {expandedUser === u.id && (
                                 <div className="mt-2 pt-2 border-t border-slate-100 space-y-1 text-xs text-slate-500" onClick={e => e.stopPropagation()}>
-                                  <p>Created: {u.created_at ? new Date(u.created_at).toLocaleDateString() : 'N/A'}</p>
+                                  <p>Created: {u.created_at ? formatDate(u.created_at) : 'N/A'}</p>
                                   {u.pin_set_by_name && <p>PIN set by: {u.pin_set_by_name}</p>}
                                   {u.permission_preset && <p>Permission preset: <Badge className="text-[9px] bg-slate-100 text-slate-600">{u.permission_preset}</Badge></p>}
                                   {u.is_auditor && <p className="text-amber-600">Has auditor access</p>}

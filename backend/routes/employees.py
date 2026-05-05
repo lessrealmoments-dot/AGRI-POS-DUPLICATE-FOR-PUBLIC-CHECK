@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 from datetime import datetime, timezone
 from config import db
-from utils import get_current_user, check_perm, now_iso, new_id
+from utils import get_current_user, check_perm, now_iso, new_id, today_local
 
 router = APIRouter(prefix="/employees", tags=["Employees"])
 
@@ -33,7 +33,7 @@ async def create_employee(data: dict, user=Depends(get_current_user)):
         "email": data.get("email", ""),
         "address": data.get("address", ""),
         "branch_id": data.get("branch_id", ""),
-        "hire_date": data.get("hire_date", now_iso()[:10]),
+        "hire_date": data.get("hire_date") or await today_local(user.get("organization_id") or ""),
         "salary": float(data.get("salary", 0)),
         "daily_rate": float(data.get("daily_rate", 0)),
         "monthly_ca_limit": float(data.get("monthly_ca_limit", 0)),  # 0 = no limit

@@ -12,6 +12,7 @@ import {
   getProducts, getCustomers, getPriceSchemes,
   addPendingSale, getPendingSaleCount, getInventoryItem, getBranchPrice,
 } from '../../lib/offlineDB';
+import { localTodayStr } from '../../lib/dateFormat';
 import { newEnvelopeId } from '../../lib/syncManager';
 import CropCreditTypeDialog from '../../components/CropCreditTypeDialog';
 import { invalidateBalanceCache } from '../../components/CustomerBalanceBadge';
@@ -584,7 +585,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
 
     const saleId = ensureSaleId();
     const envelopeId = newEnvelopeId();
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localTodayStr();
 
     const paymentMethod = paymentType === 'cash' ? 'Cash'
       : paymentType === 'digital' ? 'Digital'
@@ -1428,7 +1429,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
                       // Legal sequence: signature → invoice → print. No invoice exists
                       // until the signature/bypass session is sealed by the customer.
                       if (requiresSignature && !pendingSigSession?.id) {
-                        const today = new Date().toISOString().slice(0, 10);
+                        const today = localTodayStr();
                         setTerminalSig({
                           open: true,
                           preCommit: true,

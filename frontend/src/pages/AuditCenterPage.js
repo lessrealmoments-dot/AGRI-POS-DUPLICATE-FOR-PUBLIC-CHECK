@@ -11,6 +11,7 @@ import { Separator } from '../components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { formatDateTime, localTodayStr } from '../lib/dateFormat';
 import {
   ShieldCheck, RefreshCw, AlertTriangle, Check, X, ChevronDown, ChevronUp,
   Printer, History, Plus, Package, Banknote, TrendingUp, Users, ArrowRight,
@@ -648,7 +649,7 @@ export default function AuditCenterPage() {
   const { currentBranch, branches, user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const navigate = useNavigate();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localTodayStr();
   const firstOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
 
   const [tab, setTab] = useState(() => {
@@ -828,7 +829,7 @@ export default function AuditCenterPage() {
         auto_detected: pkg.auto_detected,
         count_sheet_refs: pkg.count_sheet_refs,
         ...pkg.totals,
-        cached_at: new Date().toLocaleString(),
+        cached_at: formatDateTime(),
       });
       toast.success('Audit package prepared!');
     } catch (err) {
@@ -1020,7 +1021,7 @@ export default function AuditCenterPage() {
             <td>Expenses: ${auditData.unverified?.expenses_count} (no receipt: ${auditData.unverified?.expenses_no_receipt}) · POs: ${auditData.unverified?.po_count} (no receipt: ${auditData.unverified?.po_no_receipt})</td></tr>` : ''}
       </tbody>
     </table>
-    <p style="font-size:10px;color:#888">Generated: ${new Date().toLocaleString()} — AgriBooks Business Management</p>
+    <p style="font-size:10px;color:#888">Generated: ${formatDateTime()} — AgriBooks Business Management</p>
     </body></html>`);
     win.document.close();
     win.print();
@@ -2379,7 +2380,7 @@ export default function AuditCenterPage() {
                           </p>
                           <div className="flex items-center gap-3 mt-1.5 text-[10px] text-slate-400">
                             <span className="flex items-center gap-1">
-                              <Clock size={10} /> {new Date(event.created_at).toLocaleString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                              <Clock size={10} /> {formatDateTime(event.created_at)}
                             </span>
                             <span>· {({ transaction_verify: 'Transaction Verify', fund_transfer: 'Fund Transfer', admin_action: 'Admin Action' })[event.attempt_type] || event.attempt_type}</span>
                             {event.total_attempts_in_window > 0 && (

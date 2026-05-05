@@ -16,6 +16,7 @@ import {
   BookOpen, Plus, Search, AlertTriangle, Check, RefreshCw, Ban,
   FileText, Calendar, Shield, HelpCircle, ArrowRight
 } from 'lucide-react';
+import { localTodayStr } from '../lib/dateFormat';
 import { toast } from 'sonner';
 import { useUnsavedChangesGuard } from '../lib/useUnsavedChangesGuard';
 import CalcInput from '../components/CalcInput';
@@ -83,7 +84,7 @@ const TEMPLATES = {
 
 export default function JournalEntriesPage() {
   const { currentBranch, user } = useAuth();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localTodayStr();
 
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);

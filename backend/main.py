@@ -821,17 +821,19 @@ async def startup():
         from routes.sms import queue_sms
         from routes.sms_hooks import get_company_name, get_branch_name
         from config import set_org_context
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        today_dt = datetime.strptime(today, "%Y-%m-%d")
-        day_15 = (today_dt + timedelta(days=15)).strftime("%Y-%m-%d")
-        day_7 = (today_dt + timedelta(days=7)).strftime("%Y-%m-%d")
+        from utils import today_local
 
-        # Iterate per active organization
+        # Iterate per active organization (compute `today` per-org so each
+        # tenant's reminder day matches their LOCAL calendar, not UTC).
         orgs = await _raw_db.organizations.find({"active": True}, {"_id": 0, "id": 1}).to_list(500)
         total_queued = 0
 
         for org in orgs:
             org_id = org["id"]
+            today = await today_local(org_id)
+            today_dt = datetime.strptime(today, "%Y-%m-%d")
+            day_15 = (today_dt + timedelta(days=15)).strftime("%Y-%m-%d")
+            day_7 = (today_dt + timedelta(days=7)).strftime("%Y-%m-%d")
             try:
                 set_org_context(org_id)
                 company_name = await get_company_name(org_id)
