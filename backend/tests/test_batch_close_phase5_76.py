@@ -16,7 +16,7 @@ import pytest
 import requests
 import os
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://audit-pulse-10.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://shift-handoff-2.preview.emergentagent.com').rstrip('/')
 
 # IPIL BRANCH with diverse test data
 IPIL_BRANCH_ID = "d4a041e7-4918-490e-afb8-54ae90cec7fb"

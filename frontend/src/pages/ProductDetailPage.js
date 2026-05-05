@@ -22,6 +22,7 @@ import CategorySelect from '../components/CategorySelect';
 import GlobalPriceBadge from '../components/GlobalPriceBadge';
 import CapitalSourceBadge from '../components/CapitalSourceBadge';
 import CalcInput from '../components/CalcInput';
+import InvoiceDetailModal from '../components/InvoiceDetailModal';
 
 export default function ProductDetailPage() {
   const { id } = useParams();
@@ -30,6 +31,7 @@ export default function ProductDetailPage() {
   const canEditCost = hasPerm('products', 'edit_cost');
   const [detail, setDetail] = useState(null);
   const [movements, setMovements] = useState([]);
+  const [selectedReceipt, setSelectedReceipt] = useState(null);
   const [orders, setOrders] = useState([]);
   const [capitalHistory, setCapitalHistory] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1096,7 +1098,20 @@ export default function ProductDetailPage() {
                     <TableRow key={m.id}>
                       <TableCell className="text-xs">{formatDate(m.created_at)}</TableCell>
                       <TableCell><Badge className={`text-[10px] ${m.type === 'sale' ? 'bg-red-100 text-red-700' : m.type === 'purchase' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700'}`}>{m.type}</Badge></TableCell>
-                      <TableCell className="font-mono text-xs">{m.reference_number}</TableCell>
+                      <TableCell className="font-mono text-xs">
+                        {m.type === 'sale' && m.reference_number ? (
+                          <button
+                            onClick={() => setSelectedReceipt(m.reference_number)}
+                            className="text-blue-600 hover:text-blue-800 hover:underline font-mono"
+                            data-testid={`open-receipt-${m.reference_number}`}
+                            title="View receipt"
+                          >
+                            {m.reference_number}
+                          </button>
+                        ) : (
+                          m.reference_number
+                        )}
+                      </TableCell>
                       <TableCell className={`text-right font-semibold ${m.quantity_change < 0 ? 'text-red-600' : 'text-emerald-600'}`}>{m.quantity_change > 0 ? '+' : ''}{m.quantity_change}</TableCell>
                       <TableCell className="text-right">{formatPHP(m.price_at_time)}</TableCell>
                       <TableCell className="text-xs text-slate-500">{m.user_name}</TableCell>
@@ -1240,6 +1255,14 @@ export default function ProductDetailPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Receipt Detail Modal — Movement History click-through */}
+      <InvoiceDetailModal
+        invoiceNumber={selectedReceipt}
+        open={!!selectedReceipt}
+        onClose={() => setSelectedReceipt(null)}
+        onChanged={() => fetchMovements()}
+      />
     </div>
   );
 }

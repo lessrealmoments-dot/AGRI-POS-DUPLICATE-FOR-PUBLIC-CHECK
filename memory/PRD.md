@@ -1,5 +1,26 @@
 # AgriBooks PRD
 
+## Iter 244 (Feb 2026) — Product Movement History: Clickable Receipts + Refund/Void/Reopen ✅
+
+### What changed
+On **Product Detail → Movement History**, the "Ref" column now renders `reference_number` as a clickable link for any `sale` type movement. Clicking opens a new reusable **`InvoiceDetailModal`** that shows the full receipt (items, totals, customer, status, cashier, interest accrued) and offers three actions when the sale is not already voided:
+- **Refund** → navigates to `/returns?invoice=<number>` (handled by `ReturnRefundWizard` via `useSearchParams` — invoice number is pre-filled in step 1).
+- **Void** → opens a reason + manager-PIN confirm dialog, calls `POST /api/invoices/{id}/void`, refreshes movements.
+- **Void & Re-open** → voids then navigates to `/sales-new` carrying the snapshot via `sessionStorage.reopen_sale_snapshot`; `UnifiedSalesPage` consumes it on mount (once customers load) and pre-fills a new sale draft with the original date preserved for interest calculations.
+
+### Files
+- `/app/frontend/src/components/InvoiceDetailModal.jsx` (NEW — shared receipt modal)
+- `/app/frontend/src/pages/ProductDetailPage.js` (clickable `reference_number` + modal render)
+- `/app/frontend/src/pages/ReturnRefundWizard.js` (accepts `?invoice=` query param)
+- `/app/frontend/src/pages/UnifiedSalesPage.js` (consumes `sessionStorage.reopen_sale_snapshot` on mount)
+
+### Verified
+- Movement History receipt click → modal opens → invoice data loaded (`/invoices/by-number/` OK).
+- `/returns?invoice=TEST-INV-12345` pre-fills invoice number in step 1.
+
+---
+
+
 ## Iter 243.4 (May 2026) — Z-Report: Net Sales + Employee Advances + Before/After Allocation ✅
 
 ### What changed

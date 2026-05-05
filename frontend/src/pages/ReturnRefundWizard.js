@@ -1,4 +1,5 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth, api } from '../contexts/AuthContext';
 import { formatPHP } from '../lib/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -72,6 +73,7 @@ function StepIndicator({ current }) {
 
 export default function ReturnRefundWizard() {
   const { currentBranch, user } = useAuth();
+  const [searchParams] = useSearchParams();
   const [step, setStep] = useState(1);
   const [saving, setSaving] = useState(false);
   const [completed, setCompleted] = useState(null);
@@ -83,6 +85,12 @@ export default function ReturnRefundWizard() {
   const [reason, setReason] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [notes, setNotes] = useState('');
+
+  // Pre-fill invoice number when navigated from another page (e.g. Movement History)
+  useEffect(() => {
+    const inv = searchParams.get('invoice');
+    if (inv) setInvoiceNumber(inv);
+  }, [searchParams]);
 
   // Step 2 — products
   const [returnItems, setReturnItems] = useState([]);

@@ -1047,6 +1047,24 @@ export default function UnifiedSalesPage() {
     toast.success('Sale re-opened — original date preserved for interest calculation');
   };
 
+  // Consume a handoff snapshot from sessionStorage (Void & Reopen from Movement History)
+  const consumedReopenRef = useRef(false);
+  useEffect(() => {
+    if (consumedReopenRef.current) return;
+    if (!customers || !customers.length) return;
+    let snap = null;
+    try {
+      const raw = sessionStorage.getItem('reopen_sale_snapshot');
+      if (!raw) return;
+      snap = JSON.parse(raw);
+      sessionStorage.removeItem('reopen_sale_snapshot');
+    } catch { return; }
+    if (snap && typeof snap === 'object') {
+      consumedReopenRef.current = true;
+      reopenAsSale(snap);
+    }
+  }, [customers]); // eslint-disable-line
+
   // ── Mode switching with item transfer ────────────────────────────────────
   const switchMode = (newMode) => {
     if (newMode === mode) return;
