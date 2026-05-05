@@ -1,5 +1,76 @@
 # AgriBooks PRD
 
+## Iter 240 (May 2026) — Offline Sync Line-Discount Bug Fix + Purchase Order UI Redesign ✅
+
+### Problem A — Offline-sync inflates per-line totals (CRITICAL data corruption bug)
+Reported by Jovelyn (sibugayagrivetsupply) via invoice **SI-SB-OFF-000001**:
+> ALMIX BOX retail ₱510, per-line discount ₱20. Sales screen showed total ₱490 ✓
+> Saved invoice (Sale Detail dialog) showed total ₱510 ✗
+
+**Root cause**: `routes/sync.py:418` (offline sync replay handler) recomputed
+`line_total = qty * rate` ignoring `discount_amount`, then OVERWROTE the
+frontend-correct `item.total`. Effects per affected `synced_from_offline=true`
+invoice with per-line discounts: inflated `item.total`, `subtotal`,
+`grand_total`, and `balance` (phantom AR). Customer wallets were unaffected
+because they paid the correct amount; the inflation was server-side only.
+
+Online (non-OFF) sales were never affected — they go through `routes/sales.py`
+which had the correct math.
+
+### Fixes shipped
+1. **`routes/sync.py`** — line totals now correctly subtract per-line discounts
+   (both `amount` and `percent` types), mirroring the online-sale math.
+2. **Regression suite** — `tests/test_offline_sync_line_discount_240.py` covers
+   amount + percent discount paths. Both pass.
+3. **Backfill — admin endpoint** — `POST /api/admin/backfill/iter240?apply=1`
+   (admin-role gated, org-scoped). DRY-RUN first via `GET /api/admin/backfill/iter240`.
+   Fixes both `invoices.items` AND `sales_log.line_total` in one pass.
+4. **Backfill — CLI script** — `scripts/backfill_offline_sync_line_discount_240.py`
+   for direct DB access.
+5. **Live-prod patch for SI-SB-OFF-000001** — applied via existing
+   `PUT /api/invoices/{id}/edit` endpoint which auto-recomputes totals.
+   Result: `subtotal 18598.50 → 18578.50`, `balance 20.00 → 0`, `status: paid`.
+   Note: sales_log entries for that one ALMIX line still show 510 until
+   admin endpoint is deployed + run.
+
+### Problem B — Purchase Order UI redesign + Park feature
+User requested PO page to match the polished Detailed Sale UI plus a
+Park / Draft Sale function similar to the Sales page.
+
+### What shipped
+1. **`routes/parked_purchase_orders.py`** — new endpoints mirroring
+   `parked_sales.py`. Branch-shared, 24h TTL, max 20 parks per branch,
+   PIN-gated discard for other-user parks.
+2. **`lib/parkedPOSync.js`** — frontend helper (network-only, no
+   IndexedDB; POs are deliberate, online-only actions).
+3. **`PurchaseOrderPage.js` UI rebuild**:
+   - Sales-style hero bar with segmented "New PO / PO List" pill toggle
+   - Online indicator pill, Park button, Parked button (badge with count),
+     Pay Supplier, Refresh
+   - Header card with proper 12-col grid (Supplier 4/12, Date 2, DR 2,
+     Payment Type 2, PO# 2 — Notes spans full width on row 2)
+   - Excel-style line items table with sticky header (Detailed Sale parity)
+   - Notes (2/3) + Totals (1/3) panel with optional Freight/VAT chips,
+     receipt upload, and 3 action buttons
+   - Modernized PO List filter chips + table styling
+4. **Two new dialogs**:
+   - `park-po-prompt-dialog` — optional label, summary, attached receipt
+   - `parked-pos-dialog` — list with vendor badge, item count, total, age,
+     Resume + Discard (with PIN prompt for other-user parks)
+
+### Files
+- `/app/backend/routes/sync.py` — line-discount math fixed
+- `/app/backend/routes/parked_purchase_orders.py` — new
+- `/app/backend/routes/admin_backfill_240.py` — new (admin-gated)
+- `/app/backend/scripts/backfill_offline_sync_line_discount_240.py` — new
+- `/app/backend/tests/test_offline_sync_line_discount_240.py` — new
+- `/app/frontend/src/lib/parkedPOSync.js` — new
+- `/app/frontend/src/pages/PurchaseOrderPage.js` — major UI rewrite
+
+---
+
+# AgriBooks PRD
+
 ## Iter 238 (May 2026) — Time/Date Timezone Audit + Standardized Display ✅
 
 **Problem**: User reported sales made at 8 AM Manila showing `00:00` time on the Daily Log. Full audit revealed **66+ places** in the backend computing "today" via `datetime.now(timezone.utc).strftime("%Y-%m-%d")` — which produced UTC dates instead of Manila local dates. From 12 AM to 8 AM Manila, every "today" query was off by one day. Frontend had **125+ inconsistent `toLocaleString()` calls** producing varied date formats across pages.

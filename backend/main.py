@@ -59,6 +59,7 @@ from routes.overage_reserve import router as overage_reserve_router
 from routes.parked_sales import router as parked_sales_router
 from routes.parked_branch_transfers import router as parked_branch_transfers_router
 from routes.parked_purchase_orders import router as parked_purchase_orders_router
+from routes.admin_backfill_240 import router as admin_backfill_240_router
 from routes.close_reminder import start_scheduler_on_startup as _start_close_reminder
 
 # =============================================================================
@@ -230,6 +231,7 @@ api_router.include_router(overage_reserve_router)
 api_router.include_router(parked_sales_router)
 api_router.include_router(parked_branch_transfers_router)
 api_router.include_router(parked_purchase_orders_router)
+api_router.include_router(admin_backfill_240_router)
 
 # =============================================================================
 # WEBSOCKET ROUTES (must be on app directly with /api prefix)
