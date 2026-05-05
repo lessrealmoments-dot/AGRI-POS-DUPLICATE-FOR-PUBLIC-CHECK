@@ -492,25 +492,6 @@ function ZReportDetailed({ preview, closing, branchName, onPrint, onDownloadPdf 
           <Separator />
           <div className="flex justify-between font-semibold"><span className="text-green-700">= Total Cash In</span><span className="font-mono text-green-700">{formatPHP(preview.total_cash_in || 0)}</span></div>
           <div className="flex justify-between"><span className="text-red-600">- Cashier Expenses</span><span className="font-mono text-red-600">{formatPHP(preview.total_cashier_expenses ?? preview.total_expenses ?? 0)}</span></div>
-          {/* Iter 243.4 — Employee cash advance running totals. Surfaces hidden
-              risk: an employee can rack up advances buried in routine expenses,
-              and the owner only finds out at salary day. Show today's amount AND
-              the outstanding balance so the owner sees the full position. */}
-          {(preview.employee_advances_today || []).length > 0 && (
-            <div className="text-xs pl-3 space-y-0.5" data-testid="z-employee-advances">
-              {(preview.employee_advances_today || []).map((emp, i) => (
-                <div key={i} className="flex justify-between">
-                  <span className="text-amber-600">↳ {emp.employee_name} advance today</span>
-                  <span className="font-mono text-amber-700">
-                    {formatPHP(emp.today_amount)}
-                    {emp.outstanding_balance != null && (
-                      <span className="text-amber-500 ml-1">(running: {formatPHP(emp.outstanding_balance)})</span>
-                    )}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
           {(preview.total_safe_expenses || 0) > 0 && (
             <div className="flex justify-between text-xs"><span className="text-red-400 pl-3">Safe expenses (not from drawer)</span><span className="font-mono text-red-400">{formatPHP(preview.total_safe_expenses || 0)}</span></div>
           )}
@@ -805,6 +786,30 @@ function ZReportDetailed({ preview, closing, branchName, onPrint, onDownloadPdf 
               </div>
             ))}
           </div>
+          {/* Iter 243.4 — Employee Cash Advance running totals. Lives INSIDE
+              the Cashier Expenses card (where the advances actually flow from)
+              instead of the reconciliation summary. Owners want to see at a
+              glance: who took how much today, and what's their total
+              outstanding — so cash-advance creep can't hide. */}
+          {(preview.employee_advances_today || []).length > 0 && (
+            <div className="border-t-2 border-red-200 bg-red-50/40 px-4 py-2.5 space-y-1" data-testid="z-employee-advances">
+              <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-red-700 mb-1">
+                <span>Employee Advance Running Totals</span>
+                <span className="text-[10px] font-normal text-red-500 normal-case tracking-normal">today / outstanding</span>
+              </div>
+              {(preview.employee_advances_today || []).map((emp, i) => (
+                <div key={i} className="flex items-center justify-between text-xs">
+                  <span className="font-medium text-slate-700">↳ {emp.employee_name}</span>
+                  <span className="font-mono text-red-600">
+                    {formatPHP(emp.today_amount)}
+                    {emp.outstanding_balance != null && (
+                      <span className="text-amber-700 font-semibold ml-2">/ {formatPHP(emp.outstanding_balance)}</span>
+                    )}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
