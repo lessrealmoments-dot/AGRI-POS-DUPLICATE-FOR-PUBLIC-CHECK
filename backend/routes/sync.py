@@ -415,7 +415,23 @@ async def sync_offline_sales(data: dict, user=Depends(get_current_user)):
             for item in items:
                 qty = float(item.get("quantity", 0))
                 rate = float(item.get("rate", item.get("price", 0)))
-                line_total = round(qty * rate, 2)
+                # ── Iter 240 fix: respect per-line discounts ──────────────
+                # Previously: line_total = qty * rate (ignoring discount).
+                # That overwrote the correct discounted `total` the
+                # frontend sent and persisted an inflated value on the
+                # saved invoice (e.g. retail 510, discount 20 → was
+                # stored as 510 instead of 490). Mirrors the same math
+                # routes/sales.py uses on the online path.
+                disc_type = item.get("discount_type", "amount")
+                disc_val = float(item.get("discount_value", 0))
+                if disc_type == "percent":
+                    disc_amt = round(qty * rate * disc_val / 100, 2)
+                else:
+                    disc_amt = round(qty * disc_val, 2)
+                line_total = round(qty * rate - disc_amt, 2)
+                item["discount_type"] = disc_type
+                item["discount_value"] = disc_val
+                item["discount_amount"] = disc_amt
                 item["total"] = line_total
                 subtotal += line_total
 
