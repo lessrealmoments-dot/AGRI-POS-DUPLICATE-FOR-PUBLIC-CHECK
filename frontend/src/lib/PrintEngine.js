@@ -167,7 +167,7 @@ const fullPageCSS = `
 `;
 
 // ── Build page header ───────────────────────────────────────────────────────
-function buildPageHeader(biz, docType, docNumber, date, extraLines = [], postedToDate = null) {
+function buildPageHeader(biz, docType, docNumber, date, extraLines = []) {
   let companyHtml = `<div class="biz-name">${biz.business_name || 'AgriBooks'}</div>`;
   if (biz.address) companyHtml += `<div class="biz-detail">${biz.address}</div>`;
   if (biz.phone) companyHtml += `<div class="biz-detail">${biz.phone}</div>`;
@@ -175,13 +175,11 @@ function buildPageHeader(biz, docType, docNumber, date, extraLines = [], postedT
 
   let metaHtml = `<div class="doc-type">${docType}</div>`;
   metaHtml += `<div class="doc-number">${docNumber}</div>`;
-  metaHtml += `<div class="doc-date">Transaction Date: ${fmtDate(date)}</div>`;
-  // Iter 243: Dual-date receipt. When the transaction date differs from the
-  // date it was posted to (e.g., sold after a mid-day close), print BOTH so
-  // the OR shows the real issuance moment AND the Z-Report cycle it rolls into.
-  if (postedToDate && fmtDate(postedToDate) !== fmtDate(date)) {
-    metaHtml += `<div class="doc-date" style="font-size:10px;opacity:0.7">Posted to Z-Report: ${fmtDate(postedToDate)}</div>`;
-  }
+  // Iter 243.3: ONE date on the receipt — the actual transaction moment.
+  // The Z-Report posting date is recoverable via the QR code / Audit Center,
+  // so we keep the customer-facing receipt clean (matches BIR expectations
+  // for a single OR issuance date).
+  metaHtml += `<div class="doc-date">${fmtDate(date)}</div>`;
   for (const line of extraLines) {
     metaHtml += `<div class="doc-date">${line}</div>`;
   }
@@ -222,7 +220,7 @@ function orderSlipFullPage(data, biz, docCode) {
   let html = buildPageHeader(biz, 'Order Slip', inv.invoice_number || '', inv.created_at || inv.order_date, [
     inv.cashier_name ? `Cashier: ${inv.cashier_name}` : '',
     inv.release_mode === 'full' ? 'Status: FULLY RELEASED' : inv.release_mode === 'partial' ? 'Status: PARTIAL RELEASE' : '',
-  ].filter(Boolean), inv.order_date);
+  ].filter(Boolean));
 
   // Customer info box (only if not walk-in)
   if (inv.customer_name && inv.customer_name !== 'Walk-in') {
@@ -297,7 +295,7 @@ function trustReceiptFullPage(data, biz, docCode) {
     inv.terms && inv.terms !== 'COD' ? `Terms: ${inv.terms}` : '',
     inv.due_date ? `Due: ${fmtDate(inv.due_date)}` : '',
     inv.release_mode === 'full' ? 'Status: FULLY RELEASED' : inv.release_mode === 'partial' ? 'Status: PARTIAL RELEASE' : '',
-  ].filter(Boolean), inv.order_date);
+  ].filter(Boolean));
 
   html += `<div class="info-row">`;
   html += `<div class="info-box"><div class="box-label">Customer</div><div class="box-value">${inv.customer_name || ''}</div>`;
@@ -567,11 +565,6 @@ function orderSlipThermal(data, biz, docCode) {
   html += `<div class="doc-title">ORDER SLIP</div>`;
   html += `<div class="meta-row"><span class="label">No:</span><span>${inv.invoice_number || ''}</span></div>`;
   html += `<div class="meta-row"><span class="label">Date:</span><span>${fmtDateMaybeTime(inv.created_at || inv.order_date)}</span></div>`;
-  // Iter 243: dual-date — show posted-to date only when different from the
-  // physical transaction date (e.g., after-hours sale after mid-day close).
-  if (inv.order_date && fmtDate(inv.order_date) !== fmtDate(inv.created_at || inv.order_date)) {
-    html += `<div class="meta-row" style="font-size:10px;opacity:0.75"><span class="label">Posted:</span><span>${fmtDate(inv.order_date)}</span></div>`;
-  }
   if (inv.customer_name && inv.customer_name !== 'Walk-in') html += `<div class="meta-row"><span class="label">Customer:</span><span>${inv.customer_name}</span></div>`;
   html += `<div class="meta-row"><span class="label">Cashier:</span><span>${inv.cashier_name || ''}</span></div>`;
   // Stock release status
@@ -607,10 +600,6 @@ function trustReceiptThermal(data, biz, docCode) {
   html += `<div class="doc-title">CHARGE AGREEMENT</div>`;
   html += `<div class="meta-row"><span class="label">No:</span><span>${inv.invoice_number || ''}</span></div>`;
   html += `<div class="meta-row"><span class="label">Date:</span><span>${fmtDateMaybeTime(inv.created_at || inv.order_date)}</span></div>`;
-  // Iter 243: dual-date — posted-to only when it differs from txn date
-  if (inv.order_date && fmtDate(inv.order_date) !== fmtDate(inv.created_at || inv.order_date)) {
-    html += `<div class="meta-row" style="font-size:10px;opacity:0.75"><span class="label">Posted:</span><span>${fmtDate(inv.order_date)}</span></div>`;
-  }
   html += `<div class="meta-row"><span class="label">Customer:</span><span>${inv.customer_name || ''}</span></div>`;
   if (inv.due_date) html += `<div class="meta-row"><span class="label">Due:</span><span>${fmtDate(inv.due_date)}</span></div>`;
   // Stock release status

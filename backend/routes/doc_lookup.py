@@ -170,6 +170,18 @@ async def lookup_document(data: dict):
     if not pin:
         raise HTTPException(status_code=400, detail="PIN required")
 
+    # Iter 243.2 — set tenant context FIRST (before any PIN check / log writes).
+    # This endpoint is called WITHOUT JWT, so the fail-closed tenant proxy on
+    # `db.system_settings`, `db.users`, `db.pin_attempt_log` would otherwise:
+    #   • return zero users → no PIN can ever match
+    #   • refuse to insert the failed-attempt log row → RuntimeError → 500
+    # The fix matches what /qr-actions/{code}/* already does — resolve the
+    # doc code (which derives org_id and calls set_org_context) before any
+    # downstream collection access.
+    doc_ref = await _resolve_doc_code_with_context(code)
+    doc_type = doc_ref["doc_type"]
+    doc_id = doc_ref["doc_id"]
+
     # Brute-force lockout (same policy as QR actions)
     from utils.security import check_qr_lockout, log_failed_qr_pin_attempt, log_successful_qr_pin_attempt
     lockout = await check_qr_lockout(code)
@@ -179,7 +191,7 @@ async def lookup_document(data: dict):
             detail=f"Too many failed attempts. Try again in {lockout['retry_after']} seconds.",
         )
 
-    # Verify PIN
+    # Verify PIN (now sees users in this org via tenant context above)
     from routes.verify import _resolve_pin
     verifier = await _resolve_pin(pin)
     if not verifier:
@@ -191,12 +203,6 @@ async def lookup_document(data: dict):
         raise HTTPException(status_code=403, detail=detail)
 
     await log_successful_qr_pin_attempt(code, "doc_lookup", "lookup", verifier.get("verifier_name", ""))
-
-    # Find document code AND set tenant context (public endpoint — no JWT).
-    doc_ref = await _resolve_doc_code_with_context(code)
-
-    doc_type = doc_ref["doc_type"]
-    doc_id = doc_ref["doc_id"]
 
     # Fetch document based on type
     if doc_type == "invoice":
