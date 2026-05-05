@@ -1,6 +1,66 @@
 # AgriBooks PRD
 
-## Iter 243 (May 2026) — Date Dead-Lock + Forward-Date Cap + Dual-Date Receipt ✅
+## Iter 243.4 (May 2026) — Z-Report: Net Sales + Employee Advances + Before/After Allocation ✅
+
+### What changed
+- **Net Sales (gross profit) row** added to the Z-Report Detailed view, right under Cash Sales. Shows `gross - cogs` based on each sale line's `cost_price` snapshot. Also rendered on the Z-Report PDF as its own footer row.
+- **Employee cash advance running totals** added under Cashier Expenses. For every employee who took an advance today, shows today's amount AND the outstanding `advance_balance` so the owner sees the full position at a glance.
+- **Z-Report PDF footer now shows BEFORE → AFTER** for both Drawer and Safe:
+  - `Drawer at Close: ₱110,267.25 → ₱56,400.00`
+  - `Safe: ₱228,000.00 → ₱282,000.00`
+- **Detailed Z-Report viewer** also gets a "After Allocation" panel showing `Cash to Safe`, `Drawer Carried Forward`, `Final Drawer`, `Final Safe` so on-screen and printed reports match.
+- **Backend**: `_compute_net_sales_today()` and `_compute_employee_advances_today()` helpers in `daily_operations.py` — used by both `/daily-close-preview` and the stored `daily_closings` record so historical Z-Reports stay stable even when employee balances change later.
+
+### Files
+- `/app/backend/routes/daily_operations.py` (new helpers + wired into preview + close_record)
+- `/app/backend/routes/zreport_pdf.py` (footer redesign)
+- `/app/frontend/src/pages/DailyLogPage.js` (Z-Report detailed view)
+- `/app/backend/tests/test_zreport_net_sales_advances_243_4.py` (2 tests, all PASS)
+
+---
+
+## Iter 243.3 (May 2026) — Receipt: single Transaction Date ✅
+Reverted iter243's dual-date on receipts. Now prints ONLY the actual transaction date (`created_at`). The Z-Report posting bucket (`order_date`) is recoverable via QR scan / Audit Center.
+
+---
+
+## Iter 243.2 (May 2026) — `/api/doc/lookup` 500 → 403 ✅
+
+### Problem
+> "I tried putting the pin to process return and payment it told me to contact the admin" → "An unexpected server error occurred."
+
+### Root cause
+`/api/doc/lookup` (PUBLIC, no JWT) called `_resolve_pin()` and
+`log_failed_qr_pin_attempt()` BEFORE setting tenant context. Tenant proxy
+fail-closed → zero users found AND `pin_attempt_log.insert_one` raised
+`RuntimeError("refusing to insert without organization_id")` → caught by
+global handler → generic 500.
+
+### Fix
+Reordered: `_resolve_doc_code_with_context(code)` runs first (sets org
+context), then lockout check, PIN check, log writes. Matches what
+`/api/qr-actions/{code}/*` already does. 4 regression tests, all PASS.
+
+---
+
+## Iter 243.1 (May 2026) — Late-Encode unblocked ✅
+
+### Problem
+After iter243 the date input on `/sales-new` only allowed a single date
+(min == max == today+1 when today closed). Late-encode for forgotten credit
+sales was unreachable.
+
+### Fix
+- `min` expanded to today − 7 days (matches backend's late-encode window)
+- `handleEncodingDateChange` no longer rejects closed past dates — backend
+  catches them and the `LateEncodeDialog` auto-opens for credit/partial
+  sales. Cash sales on closed days still 403 (correct).
+- Amber hint "Past closed day — credit/partial requires manager PIN" shows
+  when picking a closed past date.
+
+---
+
+## Iter 243 (May 2026) — Date Dead-Lock + Forward-Date Cap ✅
 
 ### Problem (reported by Jovelyn 2026-05-05)
 > "Cannot encode before system start date (2026-04-30)" fires spuriously on

@@ -10,6 +10,111 @@ from utils import get_current_user, check_perm, now_iso, new_id, get_branch_filt
 router = APIRouter(tags=["Daily Operations"])
 
 
+# ── Iter 243.4 — Net Sales (gross profit) for today ─────────────────────
+# Owners want to see the actual margin earned today, not just gross sales.
+# We sum (selling_price − cost_price) × quantity across every sold line item
+# in non-voided, non-cash-out invoices for the branch+date.
+#
+# Cost basis: each sale line stores `cost_price` at the time of sale (a
+# branch-aware capital snapshot — see sales.py:663). Never recomputed later,
+# so historic Z-Reports stay stable even when product capitals are updated.
+async def _compute_net_sales_today(branch_id: str, date: str) -> dict:
+    """Return {gross_sales, cogs, net_sales, line_count} for today."""
+    # Filter: same-day invoices, NOT voided, NOT cashout/farm (those aren't sales).
+    invoices = await db.invoices.find(
+        {
+            "branch_id": branch_id,
+            "order_date": date,
+            "status": {"$ne": "voided"},
+            "sale_type": {"$nin": ["cash_advance", "farm_expense", "interest_charge", "penalty_charge"]},
+        },
+        {"_id": 0, "items": 1, "overall_discount": 1},
+    ).to_list(2000)
+    gross = 0.0
+    cogs = 0.0
+    line_count = 0
+    for inv in invoices:
+        for line in (inv.get("items") or []):
+            qty = float(line.get("quantity", 0))
+            rate = float(line.get("rate") or line.get("unit_price") or line.get("price") or 0)
+            disc = float(line.get("discount_amount", 0))
+            cost = float(line.get("cost_price", 0))
+            line_revenue = qty * rate - disc
+            line_cogs = qty * cost
+            gross += line_revenue
+            cogs += line_cogs
+            line_count += 1
+        # Subtract the receipt-level overall discount from gross revenue
+        gross -= float(inv.get("overall_discount", 0))
+    return {
+        "gross_sales": round(gross, 2),
+        "cogs": round(cogs, 2),
+        "net_sales": round(gross - cogs, 2),
+        "line_count": line_count,
+    }
+
+
+# ── Iter 243.4 — Employee cash advance running totals ───────────────────
+# Owners want to see how much each employee has TAKEN today AND their CURRENT
+# outstanding balance, right under cashier expenses in the Z-Report. This
+# surfaces a hidden risk: an employee can rack up advances that show as
+# routine "Employee Advance" expenses, without anyone seeing the total.
+async def _compute_employee_advances_today(branch_id: str, date: str) -> list:
+    """Return list of {employee_id, employee_name, today_amount, outstanding_balance}
+    for any employee who took an advance today.
+    """
+    advances_today = await db.expenses.find(
+        {
+            "branch_id": branch_id,
+            "date": date,
+            "category": "Employee Advance",
+        },
+        {"_id": 0, "employee_id": 1, "employee_name": 1, "amount": 1, "vendor_name": 1, "description": 1},
+    ).to_list(200)
+    if not advances_today:
+        return []
+    # Aggregate today's advances per employee
+    by_emp: dict = {}
+    for adv in advances_today:
+        emp_id = adv.get("employee_id") or ""
+        if not emp_id:
+            # Some legacy rows store the name only — group by the display name.
+            emp_id = f"_name:{adv.get('vendor_name') or adv.get('employee_name') or 'Unknown'}"
+        rec = by_emp.setdefault(emp_id, {
+            "employee_id": adv.get("employee_id") or "",
+            "employee_name": adv.get("employee_name") or adv.get("vendor_name") or "",
+            "today_amount": 0.0,
+        })
+        rec["today_amount"] += float(adv.get("amount", 0))
+    # Look up running balance for each employee with a real id
+    real_ids = [v["employee_id"] for v in by_emp.values() if v["employee_id"]]
+    balances: dict = {}
+    if real_ids:
+        emps = await db.employees.find(
+            {"id": {"$in": real_ids}},
+            {"_id": 0, "id": 1, "name": 1, "advance_balance": 1},
+        ).to_list(200)
+        for e in emps:
+            balances[e["id"]] = {
+                "name": e.get("name", ""),
+                "balance": float(e.get("advance_balance", 0)),
+            }
+    out = []
+    for v in by_emp.values():
+        bal_info = balances.get(v["employee_id"]) if v["employee_id"] else None
+        out.append({
+            "employee_id": v["employee_id"],
+            "employee_name": (bal_info["name"] if bal_info else v["employee_name"]) or "Unknown",
+            "today_amount": round(v["today_amount"], 2),
+            # Outstanding balance INCLUDES today's advances since `advance_balance`
+            # is updated when the advance is recorded.
+            "outstanding_balance": round(bal_info["balance"], 2) if bal_info else None,
+        })
+    # Sort largest-balance first (or largest-today if no balance)
+    out.sort(key=lambda r: -(r["outstanding_balance"] or r["today_amount"]))
+    return out
+
+
 # ── Iter 240 fix: write a proper audit trail when closing a day ────────
 # Before this iter: close_day just $set the cashier wallet balance and
 # inserted a safe_lots row. No `wallet_movements` and no `fund_transfers`
@@ -793,6 +898,10 @@ async def get_daily_close_preview(
         "safe_to_cashier": safe_to_cashier,
         "cashier_to_safe": cashier_to_safe,
         "net_fund_transfers": net_fund_transfers,
+        # ── Iter 243.4: Net sales (gross profit) ─────────────────────────────
+        "net_sales_today": await _compute_net_sales_today(branch_id, date),
+        # ── Iter 243.4: Employee advance running totals ───────────────────────
+        "employee_advances_today": await _compute_employee_advances_today(branch_id, date),
         # ── Pending stock releases (informational warning) ─────────────────
         "pending_stock_releases": await _get_pending_releases_summary(branch_id),
         # ── Negative stock warning ───────────────────────────────────────────
@@ -1815,6 +1924,11 @@ async def close_day(data: dict, user=Depends(get_current_user)):
         "safe_to_cashier": safe_to_cashier,
         "cashier_to_safe": cashier_to_safe,
         "net_fund_transfers": net_fund_transfers,
+        # Iter 243.4 — store net sales + employee advances on the close record
+        # so the Z-Report PDF and the Z-Report Archive show the same numbers
+        # months later, even after employee advance balances change.
+        "net_sales_today": await _compute_net_sales_today(branch_id, date),
+        "employee_advances_today": await _compute_employee_advances_today(branch_id, date),
         # Digital payments today (separate from cashier reconciliation)
         "total_digital_today": total_digital_today,
         "digital_by_platform": digital_by_platform,

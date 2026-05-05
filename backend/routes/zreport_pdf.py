@@ -746,12 +746,32 @@ async def generate_z_report_pdf(
     )
     expected_drawer = float(closing.get("expected_counter", 0) if closing else 0)
     safe_bal = float(closing.get("safe_balance", 0) if closing else 0)
+    # Iter 243.4 — show BEFORE and AFTER allocation so the printed footer
+    # reflects what's actually in the drawer & safe at the moment of closing,
+    # not the pre-allocation snapshot. Owners were getting confused because
+    # `expected_drawer` (pre-Step-6) was being read as "current drawer".
+    cash_to_safe = float(closing.get("cash_to_safe", 0) if closing else 0)
+    cash_to_drawer = float(closing.get("cash_to_drawer", 0) if closing else 0)
+    final_drawer = cash_to_drawer if cash_to_drawer > 0 else expected_drawer
+    final_safe = safe_bal + cash_to_safe
     pdf.cell(
         0, 7,
-        _s(f"  Total Gross Sales: {php(gross)}   |   Cash In Drawer: {php(expected_drawer)}   |   Safe: {php(safe_bal)}"),
+        _s(f"  Gross Sales: {php(gross)}   |   Drawer at Close: {php(expected_drawer)} -> {php(final_drawer)}   |   Safe: {php(safe_bal)} -> {php(final_safe)}"),
         fill=True,
     )
-    pdf.ln(10)
+    pdf.ln(7)
+    # Net sales (gross profit) line — separate row so it doesn't crowd the cash bar
+    net_sales_data = closing.get("net_sales_today") or {} if closing else {}
+    if net_sales_data:
+        pdf.set_fill_color(34, 100, 60)
+        pdf.cell(
+            0, 6,
+            _s(f"  Net Sales: {php(net_sales_data.get('net_sales', 0))}   (COGS {php(net_sales_data.get('cogs', 0))})"),
+            fill=True,
+        )
+        pdf.ln(8)
+    else:
+        pdf.ln(3)
 
     if closing:
         pdf.set_text_color(100, 100, 100)

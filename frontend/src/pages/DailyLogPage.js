@@ -456,6 +456,14 @@ function ZReportDetailed({ preview, closing, branchName, onPrint, onDownloadPdf 
         <div className="p-4 space-y-1.5 text-sm">
           <div className="flex justify-between"><span className="text-slate-500">Opening Float</span><span className="font-mono">{formatPHP(preview.starting_float || 0)}</span></div>
           <div className="flex justify-between"><span className="text-emerald-600">+ Cash Sales</span><span className="font-mono font-semibold text-emerald-700">{formatPHP(preview.total_cash_sales || 0)}</span></div>
+          {/* Iter 243.4 — Net sales (gross profit) right under cash sales so
+              owners can appreciate margin earned today without leaving the report. */}
+          {preview.net_sales_today && (preview.net_sales_today.gross_sales || 0) > 0 && (
+            <div className="flex justify-between text-xs pl-3" data-testid="z-net-sales-row">
+              <span className="text-emerald-500">↳ Net Sales (after COGS {formatPHP(preview.net_sales_today.cogs || 0)})</span>
+              <span className="font-mono font-semibold text-emerald-600">{formatPHP(preview.net_sales_today.net_sales || 0)}</span>
+            </div>
+          )}
           {(preview.total_split_cash || 0) > 0 && (
             <div className="flex justify-between"><span className="text-teal-600">+ Split Cash Portion</span><span className="font-mono text-teal-700">{formatPHP(preview.total_split_cash || 0)}</span></div>
           )}
@@ -484,6 +492,25 @@ function ZReportDetailed({ preview, closing, branchName, onPrint, onDownloadPdf 
           <Separator />
           <div className="flex justify-between font-semibold"><span className="text-green-700">= Total Cash In</span><span className="font-mono text-green-700">{formatPHP(preview.total_cash_in || 0)}</span></div>
           <div className="flex justify-between"><span className="text-red-600">- Cashier Expenses</span><span className="font-mono text-red-600">{formatPHP(preview.total_cashier_expenses ?? preview.total_expenses ?? 0)}</span></div>
+          {/* Iter 243.4 — Employee cash advance running totals. Surfaces hidden
+              risk: an employee can rack up advances buried in routine expenses,
+              and the owner only finds out at salary day. Show today's amount AND
+              the outstanding balance so the owner sees the full position. */}
+          {(preview.employee_advances_today || []).length > 0 && (
+            <div className="text-xs pl-3 space-y-0.5" data-testid="z-employee-advances">
+              {(preview.employee_advances_today || []).map((emp, i) => (
+                <div key={i} className="flex justify-between">
+                  <span className="text-amber-600">↳ {emp.employee_name} advance today</span>
+                  <span className="font-mono text-amber-700">
+                    {formatPHP(emp.today_amount)}
+                    {emp.outstanding_balance != null && (
+                      <span className="text-amber-500 ml-1">(running: {formatPHP(emp.outstanding_balance)})</span>
+                    )}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
           {(preview.total_safe_expenses || 0) > 0 && (
             <div className="flex justify-between text-xs"><span className="text-red-400 pl-3">Safe expenses (not from drawer)</span><span className="font-mono text-red-400">{formatPHP(preview.total_safe_expenses || 0)}</span></div>
           )}
@@ -495,6 +522,36 @@ function ZReportDetailed({ preview, closing, branchName, onPrint, onDownloadPdf 
               <span>Over / Short</span>
               <span className="font-mono">{(closing.over_short || 0) > 0 ? '+' : ''}{formatPHP(closing.over_short || 0)}</span>
             </div>
+          )}
+          {/* Iter 243.4 — show BEFORE → AFTER allocation so the report reflects
+              what actually ended up in the drawer & safe at close, not the
+              pre-Step-6 snapshot. Only render for already-closed days where
+              cash_to_safe / cash_to_drawer have been entered. */}
+          {closing && ((closing.cash_to_safe || 0) > 0 || (closing.cash_to_drawer || 0) > 0) && (
+            <>
+              <Separator className="my-2" />
+              <div className="bg-emerald-50 -mx-4 px-4 py-2 space-y-1 mt-1" data-testid="z-post-allocation">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700 mb-1">After Allocation</div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-orange-600">→ Cash to Safe</span>
+                  <span className="font-mono text-orange-700">{formatPHP(closing.cash_to_safe || 0)}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-emerald-600">→ Drawer Carried Forward</span>
+                  <span className="font-mono text-emerald-700">{formatPHP(closing.cash_to_drawer || 0)}</span>
+                </div>
+                <Separator className="my-1" />
+                <div className="flex justify-between text-sm font-semibold">
+                  <span>Final Drawer</span>
+                  <span className="font-mono">{formatPHP(closing.cash_to_drawer || 0)}</span>
+                </div>
+                <div className="flex justify-between text-sm font-semibold">
+                  <span>Final Safe</span>
+                  <span className="font-mono">{formatPHP((closing.safe_balance || 0) + (closing.cash_to_safe || 0))}</span>
+                  <span className="text-[10px] text-slate-400 ml-2">({formatPHP(closing.safe_balance || 0)} + {formatPHP(closing.cash_to_safe || 0)})</span>
+                </div>
+              </div>
+            </>
           )}
         </div>
       </div>
