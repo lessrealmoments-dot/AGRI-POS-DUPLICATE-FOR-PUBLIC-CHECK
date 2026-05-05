@@ -1,5 +1,101 @@
 # AgriBooks PRD
 
+## Iter 243 (May 2026) — Date Dead-Lock + Forward-Date Cap + Dual-Date Receipt ✅
+
+### Problem (reported by Jovelyn 2026-05-05)
+> "Cannot encode before system start date (2026-04-30)" fires spuriously on
+> /sales-new when trying to encode on today or the next date. We don't have
+> this problem before. Also asked: terminal must auto-bump to next open day
+> when today is closed; receipt should print BOTH transaction date and
+> posted-to date.
+
+### Root cause
+After the iter241 day-close ledger fix made closings commit cleanly, the UI
+began reliably seeing `lastCloseDate === today`. The native `<input type=date>`
+on /sales-new had `min=lastCloseDate+1` and `max=today` → **min > max** when
+today is closed → the browser emits an empty-string `onChange` → the client
+floor-date guard fires `'' < floorDate` (string compare) → spurious error.
+
+Separately, the system never enforced a forward-date cap, leaving open a
+"forward-dated stock laundering" attack surface (cashier sets order_date
+next year, stock deducts today, sale never appears on any Z-Report).
+
+### Fix
+1. **`maxAllowedDate` useMemo** — today, OR today+1 if today is already closed.
+   Date input `max` now uses this. Eliminates min>max dead-lock.
+2. **Empty/partial string guard in `handleEncodingDateChange`** — regex
+   `/^\d{4}-\d{2}-\d{2}$/` filters intermediate browser-emitted values.
+3. **Auto-bump on banner load** — when `last_close_date >= today`,
+   `header.order_date` jumps to tomorrow automatically.
+4. **Stale-error clear** — `dateError` resets when `lastCloseDate`/`floorDate`
+   change, so old errors don't persist after the source data updates.
+5. **Terminal auto-bump + persistent banner** — TerminalSales fetches
+   `lastCloseDate`, computes saleDate at submit time, shows non-dismissable
+   amber banner: *"Today is closed. All new sales will be dated 5/6"*.
+6. **Backend forward-date cap** — `sales.py` rejects `order_date > max_allowed`
+   (today, or today+1 if today closed) with 403. Manager-PIN override
+   (`allow_forward_date_pin`) writes a `forward_date_override` row to
+   `audit_log` for after-the-fact review.
+7. **Dual-date receipts** — `PrintEngine.buildPageHeader` accepts a
+   `postedToDate`. Both full-page (Order Slip, Charge Agreement) and thermal
+   variants now print `Transaction Date: <created_at>` always, plus a
+   smaller `Posted to Z-Report: <order_date>` line ONLY when the dates
+   differ. Clean receipts stay clean.
+
+### Files changed (iter243)
+- `/app/frontend/src/pages/UnifiedSalesPage.js` — maxAllowedDate, regex guard,
+  auto-bump on banner load, stale-error effect, Input max prop
+- `/app/frontend/src/pages/terminal/TerminalSales.jsx` — lastCloseDate state,
+  saleDate compute, persistent banner
+- `/app/frontend/src/lib/nextOpenDate.js` — shared helper documenting the rule
+- `/app/frontend/src/lib/PrintEngine.js` — dual-date support (buildPageHeader
+  + Order Slip + Charge Agreement, full-page + thermal)
+- `/app/backend/routes/sales.py` — forward-date cap with manager-PIN override
+  + audit_log write
+- `/app/backend/tests/test_forward_date_cap_243.py` — 5 regression tests, all PASS
+
+### Standing rules going forward
+- **Sale dates**: always pass through `getNextOpenDate(lastCloseDate)` on the
+  client, capped at `today+1` (or `lastCloseDate+1`).
+- **Backend trust boundary**: same cap enforced in `sales.py`. Override path
+  must always write `audit_log` so suspicious patterns surface in the future
+  Audit Pulse widget.
+- **Receipts**: `created_at` is the legal Transaction Date (BIR-friendly);
+  `order_date` is the Z-Report posting bucket. Print both when they differ.
+
+---
+
+## Iter 242 (May 2026) — Same-Day Interest Payment in Close Wizard ✅
+
+### Problem
+Step 5 (Actual Count) showed OVER-MONEY variance equal to interest collected
+that day. Step 3 displayed the interest payment correctly, but Step 5's
+`expected_counter` excluded it.
+
+### Root cause
+`daily_operations.py` AR aggregations filtered out `order_date == date` to
+prevent double-counting today's credit/partial sales — but that also dropped
+interest/penalty invoices generated AND paid on the same date (a normal
+`/payments` flow). Cash hit the cashier drawer via `update_cashier_wallet`,
+but `total_cash_ar` excluded it.
+
+### Fix (3 aggregation sites: preview, close_day, batch_close)
+- Widened pipeline: include today-dated invoices when
+  `sale_type ∈ {interest_charge, penalty_charge}`.
+- Classify the payment as `interest_paid`/`penalty_paid` by invoice
+  `sale_type` (since `/customers/.../receive-payment` hardcodes
+  `applied_to_interest=0` on payment records).
+
+### Files changed (iter242)
+- `/app/backend/routes/daily_operations.py` — three AR aggregations
+- `/app/backend/tests/test_close_wizard_same_day_interest_242.py` — passing
+
+### Verification
+New test + 16 prior preview tests all pass. Step 3 shows payments on the
+correct date; Step 5 + Z-Report math tie out.
+
+---
+
 ## Iter 241 (May 2026) — Day-Close Ledger Trail Fix (CRITICAL audit gap) ✅
 
 ### Problem (reported by Jovelyn 2026-05-05)

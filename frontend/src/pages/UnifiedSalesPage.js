@@ -2435,6 +2435,14 @@ export default function UnifiedSalesPage() {
     setHeader(h => ({ ...h, terms: label, terms_days: t?.days || 0 }));
   };
 
+  // Iter 243 polish: clear stale date errors when the underlying valid range
+  // changes (e.g., a fresh /unclosed-days fetch updates lastCloseDate). Without
+  // this, a user who triggered an error on the old min/max would keep seeing
+  // it until they typed a new valid date.
+  useEffect(() => {
+    setDateError(null);
+  }, [lastCloseDate, floorDate]);
+
   // Returns true if the given date is blocked (on/before last closed day OR before floor date)
   const isDateClosed = useCallback((date) => {
     if (floorDate && date < floorDate) return true;
