@@ -17,10 +17,11 @@ import { Separator } from '../components/ui/separator';
 import {
   Printer, Wifi, WifiOff, Clock, CheckCircle2, XCircle, AlertTriangle,
   RefreshCw, Send, Ban, Building2, User, Calendar, ChevronDown, ChevronRight,
-  Loader2, RotateCcw, History, Settings2, Info,
+  Loader2, RotateCcw, History, Settings2, Info, CloudUpload, FileText, Image,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatDistanceToNow } from 'date-fns';
+import UploadPrintJobModal from '../components/UploadPrintJobModal';
 
 const STATUS_CONFIG = {
   pending:   { label: 'Pending',   color: 'bg-amber-100 text-amber-700',   icon: Clock },
@@ -178,8 +179,21 @@ function JobRow({ job, onResend, onCancel }) {
           </button>
         </td>
         <td className="py-2.5 px-2">
-          <p className="text-xs font-semibold text-slate-800 truncate max-w-[180px]">{job.document_name}</p>
-          <p className="text-[10px] text-slate-400">{DOC_TYPE_LABELS[job.document_type] || job.document_type}</p>
+          <div className="flex items-center gap-1.5">
+            {job.source_type === 'external'
+              ? <FileText size={11} className="text-blue-500 shrink-0" title="External document" />
+              : <Printer size={11} className="text-slate-400 shrink-0" title="AgriBooks document" />
+            }
+            <div>
+              <p className="text-xs font-semibold text-slate-800 truncate max-w-[180px]">{job.document_name}</p>
+              <p className="text-[10px] text-slate-400">
+                {DOC_TYPE_LABELS[job.document_type] || job.document_type}
+                {job.source_type === 'external' && (
+                  <span className="ml-1 text-blue-500 font-medium">· External</span>
+                )}
+              </p>
+            </div>
+          </div>
         </td>
         <td className="py-2.5 px-2 text-xs text-slate-600 truncate max-w-[100px]">
           {job.terminal_name || '—'}
@@ -225,6 +239,13 @@ function JobRow({ job, onResend, onCancel }) {
               <div><span className="font-medium text-slate-400">Created by: </span>{job.created_by_name || '—'}</div>
               <div><span className="font-medium text-slate-400">Sent at: </span>{job.sent_at ? new Date(job.sent_at).toLocaleString() : '—'}</div>
               <div><span className="font-medium text-slate-400">Printed at: </span>{job.printed_at ? new Date(job.printed_at).toLocaleString() : '—'}</div>
+              {job.source_type === 'external' && job.file_name && (
+                <div className="col-span-2 flex items-center gap-1.5 text-blue-700">
+                  <FileText size={11} />
+                  <span className="font-medium text-slate-400">File: </span>{job.file_name}
+                  {job.description && <span className="ml-2 text-slate-500 italic">— {job.description}</span>}
+                </div>
+              )}
               {job.error_message && (
                 <div className="col-span-2 text-red-600">
                   <span className="font-medium">Error: </span>{job.error_message}
@@ -246,6 +267,7 @@ export default function PrintQueuePage() {
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterTerminal, setFilterTerminal] = useState('all');
   const [tab, setTab]                 = useState('queue'); // queue | history | terminals
+  const [uploadOpen, setUploadOpen]   = useState(false);
   const pollRef = useRef(null);
 
   const fetchTerminals = useCallback(async () => {
@@ -322,16 +344,27 @@ export default function PrintQueuePage() {
             Remote Branch Printing Terminal — {onlineCount} of {terminals.length} terminals online
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleRefresh}
-          className="flex items-center gap-1.5"
-          data-testid="refresh-print-center"
-        >
-          <RefreshCw size={13} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            className="bg-emerald-700 hover:bg-emerald-800 text-white flex items-center gap-1.5"
+            onClick={() => setUploadOpen(true)}
+            data-testid="upload-print-job-btn"
+          >
+            <CloudUpload size={13} />
+            Upload Document
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefresh}
+            className="flex items-center gap-1.5"
+            data-testid="refresh-print-center"
+          >
+            <RefreshCw size={13} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Terminals Grid */}
@@ -474,6 +507,14 @@ export default function PrintQueuePage() {
           Jobs older than 15 days are purged from history. Terminals inactive for 30 days are auto-purged (staff can log in again).</p>
         </div>
       </div>
+
+      <UploadPrintJobModal
+        open={uploadOpen}
+        onOpenChange={(v) => {
+          setUploadOpen(v);
+          if (!v) { fetchTerminals(); fetchJobs(); } // refresh after closing
+        }}
+      />
     </div>
   );
 }

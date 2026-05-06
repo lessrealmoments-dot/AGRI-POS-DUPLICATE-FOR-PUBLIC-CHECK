@@ -1,6 +1,31 @@
 # AgriBooks PRD
 
-## Iter 245b — Remote Print on PO, Sales Final Phase & Terminal (Feb 2026) ✅
+## Iter 246 — External Document Upload to Print (Feb 2026) ✅
+
+### What was built
+Extended the Remote Branch Printing Terminal to support external document uploads (PDFs, images).
+
+### Features
+1. `POST /api/print/upload-job` — multipart upload: validates file type (PDF/image ≤20MB), uploads to Cloudflare R2, creates print job with `source_type: "external"`, `file_url` (24hr presigned), `file_type`, `file_name`
+2. `GET /api/print/jobs/{id}/file-url` — returns a fresh 24hr presigned URL (for EXE when URL expires)
+3. `UploadPrintJobModal.js` — drag-drop UI with file picker, title, description, branch selector, terminal selector, print mode hint, upload progress bar
+4. `PrintQueuePage.js` updated — "Upload Document" button, source_type icon/badge on all job rows, file info in expanded details
+5. `cursor_handoff_print_terminal_exe.md` rewritten — now covers both HTML and external file printing (PDF via Sumatra PDF, images via PIL/win32print), `file_url` refresh, EXE architecture
+
+### Files
+- `backend/routes/print_jobs.py` — 2 new endpoints, `external_document` type
+- `frontend/src/components/UploadPrintJobModal.js` — new
+- `frontend/src/pages/PrintQueuePage.js` — upload button + source_type badges
+- `app/memory/cursor_handoff_print_terminal_exe.md` — rewritten with external doc support
+
+### Tested (backend)
+- Upload endpoint: file → R2 → print job with correct fields ✅
+- Job appears in `/api/print/jobs` with `source_type: "external"` ✅
+- Org scoping fix: super-admin can use terminal lookup without org filter ✅
+
+---
+
+
 
 - Added "Send to Branch Printer" button to `ReferenceNumberPrompt` (sales completion modal — alongside Full Page + 58mm)
 - Added "Remote Print" button to `PurchaseOrderPage` action toolbar (alongside Print Full + Print 58mm)

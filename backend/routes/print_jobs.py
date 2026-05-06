@@ -3,16 +3,21 @@ Remote Branch Printing Terminal — Print Job Management
 =======================================================
 Handles: Job creation, status tracking, real-time WebSocket push,
          polling fallback, terminal mode (auto/manual), 15-day history,
-         and 30-day auto-purge of inactive terminals.
+         30-day auto-purge of inactive terminals, and external document
+         upload-to-print (PDF / images via Cloudflare R2).
 
 EXE Integration Contract:
   POST /api/print/terminal/credential-pair  → Login (existing terminal.py)
   WS   /api/terminal/ws/terminal/{id}       → Real-time push (existing terminal_ws.py)
   GET  /api/print/jobs/pending              → Polling fallback (new)
   PUT  /api/print/jobs/{id}/status          → Mark printed/failed (new)
+  GET  /api/print/jobs/{id}/file-url        → Fresh presigned URL for external docs (new)
+  POST /api/print/upload-job                → Upload external doc + create print job (new)
 """
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File, Form
+from typing import Optional
 from datetime import datetime, timezone, timedelta
+import os
 from config import _raw_db
 from utils import get_current_user, now_iso, new_id
 
@@ -21,16 +26,31 @@ router = APIRouter(prefix="/print", tags=["Print Jobs"])
 HISTORY_DAYS = 15
 PURGE_DAYS = 30
 
+# Max upload size for external print documents: 20 MB
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+
+ALLOWED_MIME_TYPES = {
+    "application/pdf":   "pdf",
+    "image/jpeg":        "image",
+    "image/jpg":         "image",
+    "image/png":         "image",
+    "image/tiff":        "image",
+    "image/webp":        "image",
+    "image/gif":         "image",
+    "image/bmp":         "image",
+}
+
 DOCUMENT_TYPE_LABELS = {
-    "sales_receipt":    "Sales Receipt",
-    "purchase_order":   "Purchase Order",
-    "z_report":         "Z-Report",
-    "advance_z_report": "Advance Z-Report",
-    "branch_transfer":  "Branch Transfer",
-    "expense_receipt":  "Expense Receipt",
-    "return_receipt":   "Return/Refund Receipt",
-    "statement":        "Customer Statement",
-    "barcode_sheet":    "Barcode Sheet",
+    "sales_receipt":       "Sales Receipt",
+    "purchase_order":      "Purchase Order",
+    "z_report":            "Z-Report",
+    "advance_z_report":    "Advance Z-Report",
+    "branch_transfer":     "Branch Transfer",
+    "expense_receipt":     "Expense Receipt",
+    "return_receipt":      "Return/Refund Receipt",
+    "statement":           "Customer Statement",
+    "barcode_sheet":       "Barcode Sheet",
+    "external_document":   "External Document",
 }
 
 
@@ -81,10 +101,10 @@ async def create_print_job(data: dict, user=Depends(get_current_user)):
         raise HTTPException(status_code=400, detail="html_content required")
 
     # Validate terminal belongs to org
-    terminal = await _raw_db.terminal_sessions.find_one(
-        {"terminal_id": terminal_id, "organization_id": org_id},
-        {"_id": 0}
-    )
+    t_query = {"terminal_id": terminal_id}
+    if org_id:
+        t_query["organization_id"] = org_id
+    terminal = await _raw_db.terminal_sessions.find_one(t_query, {"_id": 0})
     if not terminal:
         raise HTTPException(status_code=404, detail="Terminal not found or not assigned to your organisation")
 
@@ -422,6 +442,195 @@ async def get_terminals_for_branch(branch_id: str, user=Depends(get_current_user
     # Sort: online first
     sessions.sort(key=lambda s: (0 if s["is_online"] else 1))
     return sessions
+
+
+# ── Upload External Document → Print Job ─────────────────────────────────────
+
+@router.post("/upload-job")
+async def upload_external_print_job(
+    file:        UploadFile = File(...),
+    terminal_id: str        = Form(...),
+    branch_id:   str        = Form(""),
+    title:       str        = Form(...),
+    description: str        = Form(""),
+    print_mode:  str        = Form("manual"),
+    user=Depends(get_current_user),
+):
+    """
+    Upload an external document (PDF / image) and send it as a print job
+    to a selected branch terminal.
+
+    Flow:
+      1. Validate file type + size (≤ 20 MB)
+      2. Upload to Cloudflare R2 under print_jobs/{org_id}/{job_id}/{filename}
+      3. Generate a 24-hour presigned download URL
+      4. Create print job with source_type="external"
+      5. Push to terminal via WebSocket if online; otherwise stays "pending"
+    """
+    from routes.terminal_ws import terminal_ws_manager
+
+    org_id = user.get("organization_id")
+
+    # ── Validate content type ──────────────────────────────────────────────
+    content_type = file.content_type or ""
+    file_format  = ALLOWED_MIME_TYPES.get(content_type)
+    if not file_format:
+        # Try extension fallback
+        ext = (file.filename or "").rsplit(".", 1)[-1].lower()
+        ext_map = {"pdf": "pdf", "jpg": "image", "jpeg": "image",
+                   "png": "image", "tiff": "image", "tif": "image",
+                   "webp": "image", "gif": "image", "bmp": "image"}
+        file_format = ext_map.get(ext)
+        if not file_format:
+            raise HTTPException(
+                status_code=415,
+                detail="Unsupported file type. Allowed: PDF, JPG, PNG, TIFF, WEBP, GIF, BMP"
+            )
+
+    # ── Read file + size check ─────────────────────────────────────────────
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum size is {MAX_UPLOAD_BYTES // (1024*1024)} MB"
+        )
+
+    # ── Validate terminal ──────────────────────────────────────────────────
+    terminal_query = {"terminal_id": terminal_id}
+    if org_id:
+        terminal_query["organization_id"] = org_id
+    terminal = await _raw_db.terminal_sessions.find_one(terminal_query, {"_id": 0})
+    if not terminal:
+        raise HTTPException(status_code=404, detail="Terminal not found")
+
+    # ── Upload to R2 ──────────────────────────────────────────────────────
+    job_id    = new_id()
+    safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in (file.filename or "document"))
+    filename  = f"{job_id}_{safe_name}"
+
+    file_key  = ""
+    file_url  = ""
+
+    try:
+        from utils.r2_storage import upload_file as r2_upload, get_presigned_url
+        result   = await r2_upload(
+            org_id      = org_id,
+            record_type = "print_jobs",
+            record_id   = job_id,
+            filename    = filename,
+            content     = content,
+            content_type= content_type or ("application/pdf" if file_format == "pdf" else "image/jpeg"),
+        )
+        file_key = result["key"]
+        file_url = await get_presigned_url(file_key, expires_in=86400)  # 24 hr
+    except Exception as r2_err:
+        # R2 not configured or failed — reject with helpful message
+        raise HTTPException(
+            status_code=503,
+            detail=f"File storage unavailable. Configure R2 credentials to enable external document printing. ({r2_err})"
+        )
+
+    # ── Build document name ────────────────────────────────────────────────
+    document_name = title.strip() or safe_name
+
+    # ── Create print job ──────────────────────────────────────────────────
+    job = {
+        "id":               job_id,
+        "organization_id":  org_id,
+        "branch_id":        branch_id or terminal.get("branch_id", ""),
+        "branch_name":      terminal.get("branch_name", ""),
+        "terminal_id":      terminal_id,
+        "terminal_name":    terminal.get("user_name", terminal.get("code", "Terminal")),
+        "document_type":    "external_document",
+        "document_name":    document_name,
+        "document_id":      "",
+        "reference_number": "",
+        "html_content":     "",
+        "source_type":      "external",
+        "file_key":         file_key,
+        "file_url":         file_url,
+        "file_type":        file_format,
+        "file_name":        file.filename or safe_name,
+        "description":      description.strip(),
+        "metadata": {
+            "original_filename": file.filename,
+            "file_size_bytes":   len(content),
+            "uploaded_by":       user.get("full_name", user.get("username", "")),
+        },
+        "priority":         "normal",
+        "print_mode_hint":  print_mode,  # suggestion to terminal; terminal's own setting takes precedence
+        "status":           "pending",
+        "created_at":       now_iso(),
+        "created_by":       user.get("id", ""),
+        "created_by_name":  user.get("full_name", user.get("username", "")),
+        "sent_at":          None,
+        "printed_at":       None,
+        "failed_at":        None,
+        "cancelled_at":     None,
+        "error_message":    None,
+    }
+    await _raw_db.print_jobs.insert_one(job)
+
+    # ── Push via WebSocket if terminal is online ───────────────────────────
+    is_connected = terminal_id in terminal_ws_manager.get_connected_terminal_ids()
+    if is_connected:
+        await terminal_ws_manager.notify_terminal(terminal_id, "print_job", {
+            "job_id":        job_id,
+            "document_type": "external_document",
+            "document_name": document_name,
+            "source_type":   "external",
+            "file_url":      file_url,
+            "file_type":     file_format,
+            "file_name":     file.filename or safe_name,
+            "description":   description,
+            "priority":      "normal",
+            "created_at":    job["created_at"],
+        })
+        await _raw_db.print_jobs.update_one(
+            {"id": job_id},
+            {"$set": {"status": "sent", "sent_at": now_iso()}}
+        )
+        return {"job_id": job_id, "status": "sent",
+                "message": "Document sent to terminal",
+                "document_name": document_name}
+
+    return {"job_id": job_id, "status": "pending",
+            "message": "Terminal is offline. Document will be delivered when it reconnects.",
+            "document_name": document_name}
+
+
+# ── Fresh Presigned URL for External Doc ─────────────────────────────────────
+
+@router.get("/jobs/{job_id}/file-url")
+async def get_job_file_url(job_id: str, user=Depends(get_current_user)):
+    """
+    Return a fresh 24-hour presigned download URL for an external print job file.
+    Called by the EXE before printing if the stored URL may have expired.
+    """
+    org_id = user.get("organization_id")
+    job_query = {"id": job_id}
+    if org_id:
+        job_query["organization_id"] = org_id
+    job    = await _raw_db.print_jobs.find_one(
+        job_query, {"_id": 0, "file_key": 1, "source_type": 1}
+    )
+    if not job:
+        raise HTTPException(status_code=404, detail="Print job not found")
+    if job.get("source_type") != "external":
+        raise HTTPException(status_code=400, detail="This job does not have an attached file")
+    if not job.get("file_key"):
+        raise HTTPException(status_code=400, detail="No file key stored for this job")
+
+    try:
+        from utils.r2_storage import get_presigned_url
+        url = await get_presigned_url(job["file_key"], expires_in=86400)
+        # Update stored URL with fresh one
+        await _raw_db.print_jobs.update_one(
+            {"id": job_id}, {"$set": {"file_url": url}}
+        )
+        return {"job_id": job_id, "file_url": url, "expires_in": 86400}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Could not refresh file URL: {e}")
 
 
 # ── Auto-Purge Background Task ────────────────────────────────────────────────
