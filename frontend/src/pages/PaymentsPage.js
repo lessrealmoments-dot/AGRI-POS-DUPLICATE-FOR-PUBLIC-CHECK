@@ -20,6 +20,7 @@ import {
 import { toast } from 'sonner';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
 import LateEncodeDialog from '../components/LateEncodeDialog';
+import { useDayPlusOne } from '../hooks/useDayPlusOne';
 import { invalidateBalanceCache } from '../components/CustomerBalanceBadge';
 import CalcInput from '../components/CalcInput';
 
@@ -147,6 +148,11 @@ export default function PaymentsPage() {
   const [payDate, setPayDate] = useState(localTodayStr());
   const [lateEncodeOpen, setLateEncodeOpen] = useState(false);
   const [lateEncodeRetry, setLateEncodeRetry] = useState(null);
+  const { todayClosed: payTodayClosed, defaultDate: payDefaultDate, maxDate: payMaxDate } = useDayPlusOne(currentBranch?.id);
+  // Auto-bump the default Receive Payment date to tomorrow when today is closed.
+  useEffect(() => {
+    if (payTodayClosed) setPayDate(prev => (prev === localTodayStr() ? payDefaultDate : prev));
+  }, [payTodayClosed, payDefaultDate]);
   const [payMethod, setPayMethod] = useState('Cash');
   const [payRef, setPayRef] = useState('');
   const [payMemo, setPayMemo] = useState('');
@@ -1270,7 +1276,7 @@ export default function PaymentsPage() {
             </div>
             <div className="flex items-center gap-1.5">
               <Label className="text-[10px] text-slate-400 uppercase">Date</Label>
-              <Input type="date" value={payDate} onChange={e => setPayDate(e.target.value)} className="h-9 w-36" data-testid="payment-date" />
+              <Input type="date" value={payDate} onChange={e => setPayDate(e.target.value)} max={payMaxDate} className="h-9 w-36" data-testid="payment-date" />
             </div>
             <div className="flex items-center gap-1.5">
               <Label className="text-[10px] text-slate-400 uppercase">Ref #</Label>

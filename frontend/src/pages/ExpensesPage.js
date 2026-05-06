@@ -17,6 +17,7 @@ import ReceiptUploadInline from '../components/ReceiptUploadInline';
 import VerificationBadge from '../components/VerificationBadge';
 import VerifyPinDialog from '../components/VerifyPinDialog';
 import LateEncodeDialog from '../components/LateEncodeDialog';
+import { useDayPlusOne } from '../hooks/useDayPlusOne';
 import CalcInput from '../components/CalcInput';
 import ViewQRDialog from '../components/ViewQRDialog';
 import ExpenseDetailModal from '../components/ExpenseDetailModal';
@@ -101,6 +102,16 @@ export default function ExpensesPage() {
   const [encodingDate, setEncodingDate] = useState(localTodayStr());
   const [lateEncodeOpen, setLateEncodeOpen] = useState(false);
   const [submitRetry, setSubmitRetry] = useState(null);
+  const { todayClosed: expTodayClosed, defaultDate: expDefaultDate, maxDate: expMaxDate } = useDayPlusOne(currentBranch?.id);
+  // Auto-bump all 4 expense form dates to tomorrow when today is closed.
+  useEffect(() => {
+    if (!expTodayClosed) return;
+    const t = localTodayStr();
+    setExpenseForm(f => (f.date === t ? { ...f, date: expDefaultDate } : f));
+    setFarmExpenseForm(f => (f.date === t ? { ...f, date: expDefaultDate } : f));
+    setCashOutForm(f => (f.date === t ? { ...f, date: expDefaultDate } : f));
+    setEmployeeAdvanceForm(f => (f.date === t ? { ...f, date: expDefaultDate } : f));
+  }, [expTodayClosed, expDefaultDate]);
 
   const [filters, setFilters] = useState({
     category: '', payment_method: '', date_from: '', date_to: '', search: ''
@@ -661,7 +672,7 @@ export default function ExpensesPage() {
               </div>
               <div>
                 <Label className="text-xs text-slate-500">Date</Label>
-                <Input type="date" className="h-10" value={expenseForm.date} onChange={e => setExpenseForm({ ...expenseForm, date: e.target.value })} />
+                <Input type="date" className="h-10" value={expenseForm.date} max={expMaxDate} onChange={e => setExpenseForm({ ...expenseForm, date: e.target.value })} />
               </div>
             </div>
             <div>
@@ -917,7 +928,7 @@ export default function ExpensesPage() {
               </div>
               <div>
                 <Label className="text-xs text-slate-500">Date</Label>
-                <Input type="date" className="h-10" value={farmExpenseForm.date}
+                <Input type="date" className="h-10" value={farmExpenseForm.date} max={expMaxDate}
                   onChange={e => setFarmExpenseForm({ ...farmExpenseForm, date: e.target.value })} />
               </div>
             </div>
@@ -1094,7 +1105,7 @@ export default function ExpensesPage() {
               </div>
               <div>
                 <Label className="text-xs text-slate-500">Date</Label>
-                <Input type="date" className="h-10" value={cashOutForm.date}
+                <Input type="date" className="h-10" value={cashOutForm.date} max={expMaxDate}
                   onChange={e => setCashOutForm({ ...cashOutForm, date: e.target.value })} />
               </div>
             </div>
@@ -1204,7 +1215,7 @@ export default function ExpensesPage() {
               </div>
               <div>
                 <Label className="text-xs text-slate-500">Date</Label>
-                <Input type="date" className="h-10" value={employeeAdvanceForm.date}
+                <Input type="date" className="h-10" value={employeeAdvanceForm.date} max={expMaxDate}
                   onChange={e => setEmployeeAdvanceForm({ ...employeeAdvanceForm, date: e.target.value })} />
               </div>
             </div>

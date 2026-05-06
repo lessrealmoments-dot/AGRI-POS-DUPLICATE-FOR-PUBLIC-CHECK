@@ -1,5 +1,23 @@
 # AgriBooks Changelog
 
+## Feb 2026 — `today+1` auto-bump rolled out to all date pickers (Iter 251)
+
+Following the Fund Transfer fix, applied the same "if today is closed, default and `max` jump to tomorrow" UX to every other date-bearing page so users are never stuck.
+
+**New shared hook**: `/app/frontend/src/hooks/useDayPlusOne.js` — takes `branchId`, returns `{ todayClosed, defaultDate, maxDate, today, tomorrow }`. Calls `/api/invoices/check-date-closed` once per branch change and is used as the canonical UX driver.
+
+**Wired into**:
+- `PurchaseOrderPage.js` → header `purchase_date` field
+- `PaySupplierPage.js` → `payDate` field
+- `ExpensesPage.js` → all 4 date inputs (Expense, Farm Expense, Customer Cash-Out, Employee Advance)
+- `PaymentsPage.js` → `payDate` field
+- `FundTransferDialog.js` → already in place from iter 250
+
+Behaviour now identical across Sales, PO, Pay Supplier, Expenses, Receive Payment, Fund Transfer: when today is closed, the date input opens to **tomorrow** and `max=tomorrow`. When today is open, defaults to **today**, `max=today`. Users still have full backdate freedom (within 7-day late-encode cap) by typing or clicking back.
+
+---
+
+
 ## Feb 2026 — Fund Transfer "today closed" unblock (Iter 250)
 
 **Problem**: `Safe → Bank` fund transfer (and the 3 other fund-transfer types) couldn't be recorded if the branch's "today" was already closed. Frontend date picker had `max={today}` (no tomorrow allowed) and defaulted to today; backend rejected closed-day with no escape. User was fully blocked.

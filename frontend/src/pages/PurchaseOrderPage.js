@@ -6,6 +6,7 @@ import ReceiptGallery from '../components/ReceiptGallery';
 import VerificationBadge from '../components/VerificationBadge';
 import VerifyPinDialog from '../components/VerifyPinDialog';
 import LateEncodeDialog from '../components/LateEncodeDialog';
+import { useDayPlusOne } from '../hooks/useDayPlusOne';
 import ViewQRDialog from '../components/ViewQRDialog';
 import { formatPHP, fmtDateTime, fmtDate } from '../lib/utils';
 import PrintEngine from '../lib/PrintEngine';
@@ -84,6 +85,7 @@ export default function PurchaseOrderPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const isAdmin = user?.role === 'admin';
   const today = localTodayStr();
+  const { todayClosed, defaultDate: defaultPoDate, maxDate: maxPoDate } = useDayPlusOne(currentBranch?.id);
 
   // ── Header state ────────────────────────────────────────────────────────
   const [tab, setTab] = useState('create');
@@ -226,6 +228,15 @@ export default function PurchaseOrderPage() {
   // ── Business info for printing ─────────────────────────────────────────
   const [bizInfo, setBizInfo] = useState({});
   useEffect(() => { api.get('/settings/business-info').then(r => setBizInfo(r.data)).catch(() => {}); }, []);
+
+  // Auto-bump the default purchase date to tomorrow when today is closed
+  // for this branch — matches Sales/Fund Transfer behavior, lets the user
+  // create a new PO without being stuck on a closed Z-Report.
+  useEffect(() => {
+    if (todayClosed) {
+      setHeader(h => (h.purchase_date === today ? { ...h, purchase_date: defaultPoDate } : h));
+    }
+  }, [todayClosed, defaultPoDate, today]);
 
   // ── Send to Cloud Print ────────────────────────────────────────────────
   const [sendToPrintOpen, setSendToPrintOpen] = useState(false);
@@ -1101,6 +1112,7 @@ export default function PurchaseOrderPage() {
                 <div className="lg:col-span-2">
                   <Label className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Purchase Date</Label>
                   <Input className="h-9 mt-1" type="date" value={header.purchase_date}
+                    max={maxPoDate}
                     onChange={e => setHeader(h => ({ ...h, purchase_date: e.target.value }))} />
                 </div>
 

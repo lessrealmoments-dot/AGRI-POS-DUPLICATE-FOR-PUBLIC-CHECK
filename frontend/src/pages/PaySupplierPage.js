@@ -17,6 +17,7 @@ import { localTodayStr } from '../lib/dateFormat';
 import { toast } from 'sonner';
 import UploadQRDialog from '../components/UploadQRDialog';
 import LateEncodeDialog from '../components/LateEncodeDialog';
+import { useDayPlusOne } from '../hooks/useDayPlusOne';
 import ReviewDetailDialog from '../components/ReviewDetailDialog';
 import CalcInput from '../components/CalcInput';
 
@@ -60,6 +61,12 @@ export default function PaySupplierPage() {
   const [payMemo, setPayMemo] = useState('');
   const [fundSource, setFundSource] = useState('cashier');
   const [payPin, setPayPin] = useState('');
+  const { todayClosed: paySupTodayClosed, defaultDate: paySupDefaultDate, maxDate: paySupMaxDate } = useDayPlusOne(currentBranch?.id);
+  // When today is closed, bump the default to tomorrow so user can record
+  // pay-supplier without being stuck on a closed Z-Report.
+  useEffect(() => {
+    if (paySupTodayClosed) setPayDate(prev => (prev === today ? paySupDefaultDate : prev));
+  }, [paySupTodayClosed, paySupDefaultDate, today]);
 
   // payMethod is derived — no separate picker
   const payMethod = FUND_METHOD_MAP[fundSource] || 'Cash';
@@ -422,7 +429,7 @@ export default function PaySupplierPage() {
                 <Separator orientation="vertical" className="h-7 hidden sm:block" />
                 <div className="flex items-center gap-1.5">
                   <Label className="text-[10px] text-slate-400 uppercase">Date</Label>
-                  <Input type="date" value={payDate} onChange={e => setPayDate(e.target.value)} className="h-9 w-36" />
+                  <Input type="date" value={payDate} onChange={e => setPayDate(e.target.value)} max={paySupMaxDate} className="h-9 w-36" />
                 </div>
                 <div className="flex items-center gap-1.5">
                   <Label className="text-[10px] text-slate-400 uppercase">{fundSource === 'bank' ? 'Check # / Ref' : 'Ref #'}</Label>
