@@ -1,0 +1,42 @@
+{
+  "summary": "Re-tested after main agent fix to queue_sms() per-key auto-seed (sms.py:912-935). All 7/7 backend pytests pass WITHOUT manual template upsert. Verified branch_stock_request template was deleted (org had 34 other templates), then on first POST /api/purchase-orders branch_request the backend log shows 'queue_sms auto-seeded missing template key=branch_stock_request for org=...' and the template is re-inserted into sms_templates. SMS queue rows are created with /doc/<code> link in body. Frontend Tab→add-row UX in /branch-transfers Request tab fully works with the documented data-testids (req-product-search-{row.id}, req-qty-{row.id}, req-row-{row.id}). Multi-row Tab works, Tab on non-last qty correctly does NOT add a row. MessagesPage Settings card 'Branch Stock Request — Recipients' renders with all 4 toggles. The CRITICAL bug from iter 245 is FIXED.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_branch_stock_request_sms_245.py",
+    "/app/test_reports/pytest/pytest_branch_stock_request_246.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "sms.py:912-935 fix is correct — per-key upsert with $setOnInsert ensures idempotency and only seeds the requested missing key. Logs an INFO line for observability. Good.",
+    "Minor (carryover from iter 245, not blocking): purchase_orders.py view_link composition still relies on REACT_APP_FRONTEND_URL or APP_PUBLIC_URL env vars; if both missing, the SMS body falls back to a relative '/doc/<code>' which won't be clickable in SMS clients. Confirm production env has APP_PUBLIC_URL set."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (7/7) without any manual workaround",
+    "frontend": "100% — Tab UX + Settings card + toggles all verified"
+  },
+  "test_credentials": {
+    "org_admin": "test_org_admin@regression.local / RegressionPass!2026",
+    "manager_403": "test_org_manager@regression.local / RegressionMgrPass!2026"
+  },
+  "seed_data_creation": "Pre-test step: deleted existing sms_templates row where key='branch_stock_request' and org=a32ebf88-cf9f-4f81-b93c-043bf151af5c so the auto-seed code path could be exercised. Auto-seed correctly re-inserted it on first POST. Tests also create + clean up TEST_BranchRequest PO and its sms_queue rows.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iter 245 critical bug (auto-seed of new DEFAULT_TEMPLATES keys for existing orgs) is FIXED in sms.py:912-935 via per-key $setOnInsert upsert. Backend test suite at /app/backend/tests/test_branch_stock_request_sms_245.py passes 7/7 cleanly. Frontend Tab UX in /branch-transfers Request tab uses data-testids req-product-search-{row.id}, req-qty-{row.id}, req-row-{row.id}, req-add-row — query with prefix selectors like [data-testid^='req-product-search-']. The branch dropdown is the first combobox on the Request tab; need to select a branch first before product rows render. Multi-row Tab cycle: Enter on search picks first match → focuses qty → Tab on last-row qty creates new row and focuses its search. Tab on non-last qty correctly does NOT add a row.",
+  "rca_of_issue": {
+    "verified_fix": {
+      "file": "/app/backend/routes/sms.py:912-935",
+      "fix": "queue_sms() now does per-key $setOnInsert upsert from DEFAULT_TEMPLATES when the requested template key is missing for the org. Logs INFO 'queue_sms auto-seeded missing template key=...' on success.",
+      "verification_log": "INFO line 'queue_sms auto-seeded missing template key=branch_stock_request for org=a32ebf88-cf9f-4f81-b93c-043bf151af5c' observed in backend logs after deleting the row and POSTing branch_request PO. No 'template_missing' warning appeared.",
+      "regression_status": "All 7 pytests (defaults GET, PUT persists, invalid trigger 400, manager 403, SMS queue rows, /doc link in body, public view metadata) pass."
+    }
+  }
+}

@@ -903,31 +903,36 @@ async def queue_sms(
     org_filter = {"organization_id": organization_id} if organization_id else {}
 
     # Check template — org-scoped first, fallback to global default.
-    # SELF-HEALING: if no template exists for this org at all (org never opened
-    # Settings → Messages), seed DEFAULT_TEMPLATES for the org transparently
-    # so SMS hooks don't silently fail for new tenants.
+    # SELF-HEALING: if the requested template key is missing for this org, seed
+    # JUST THAT KEY from DEFAULT_TEMPLATES. This handles two cases:
+    #   (a) brand new tenant — never opened Settings → Messages
+    #   (b) new template key shipped in a later release — existing tenants
+    #       already have other templates seeded, so a "count == 0" gate fails
+    #       to backfill the new key (resulting in silent template_missing).
     template = None
     if organization_id:
         template = await _raw_db.sms_templates.find_one({"key": template_key, "organization_id": organization_id}, {"_id": 0})
         if not template:
-            org_template_count = await _raw_db.sms_templates.count_documents({"organization_id": organization_id})
-            if org_template_count == 0:
-                # Org has zero templates — seed defaults silently
-                seed_docs = [
-                    {**t, "id": new_id(), "organization_id": organization_id,
-                     "default_body": t["body"],
-                     "created_at": now_iso(), "updated_at": now_iso()}
-                    for t in DEFAULT_TEMPLATES
-                ]
-                if seed_docs:
-                    try:
-                        await _raw_db.sms_templates.insert_many(seed_docs)
-                        sms_log.info(f"queue_sms auto-seeded {len(seed_docs)} default templates for org={organization_id}")
-                        template = await _raw_db.sms_templates.find_one(
-                            {"key": template_key, "organization_id": organization_id}, {"_id": 0}
-                        )
-                    except Exception as seed_err:
-                        sms_log.error(f"queue_sms auto-seed failed for org={organization_id}: {seed_err}")
+            # Try to seed just the requested key from DEFAULT_TEMPLATES (per-key upsert)
+            default = next((t for t in DEFAULT_TEMPLATES if t["key"] == template_key), None)
+            if default:
+                try:
+                    seed_doc = {
+                        **default, "id": new_id(), "organization_id": organization_id,
+                        "default_body": default["body"],
+                        "created_at": now_iso(), "updated_at": now_iso(),
+                    }
+                    await _raw_db.sms_templates.update_one(
+                        {"key": template_key, "organization_id": organization_id},
+                        {"$setOnInsert": seed_doc},
+                        upsert=True,
+                    )
+                    sms_log.info(f"queue_sms auto-seeded missing template key={template_key} for org={organization_id}")
+                    template = await _raw_db.sms_templates.find_one(
+                        {"key": template_key, "organization_id": organization_id}, {"_id": 0}
+                    )
+                except Exception as seed_err:
+                    sms_log.error(f"queue_sms auto-seed failed for key={template_key} org={organization_id}: {seed_err}")
     if not template:
         template = await _raw_db.sms_templates.find_one({"key": template_key, "organization_id": {"$exists": False}}, {"_id": 0})
     if not template:
