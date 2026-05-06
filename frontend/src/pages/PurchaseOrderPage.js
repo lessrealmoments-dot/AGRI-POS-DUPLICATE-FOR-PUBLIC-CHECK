@@ -5,6 +5,7 @@ import UploadQRDialog from '../components/UploadQRDialog';
 import ReceiptGallery from '../components/ReceiptGallery';
 import VerificationBadge from '../components/VerificationBadge';
 import VerifyPinDialog from '../components/VerifyPinDialog';
+import LateEncodeDialog from '../components/LateEncodeDialog';
 import ViewQRDialog from '../components/ViewQRDialog';
 import { formatPHP, fmtDateTime, fmtDate } from '../lib/utils';
 import PrintEngine from '../lib/PrintEngine';
@@ -526,7 +527,11 @@ export default function PurchaseOrderPage() {
     setTermsDialog(true);
   };
 
-  const handleReceiveOnTerms = async () => {
+  // Late-Encode shared state (terms-only, when user picks closed date)
+  const [lateEncodeOpen, setLateEncodeOpen] = useState(false);
+  const [lateEncodeRetry, setLateEncodeRetry] = useState(null);
+
+  const handleReceiveOnTerms = async (lateEncodePayload = null) => {
     const valid = validate(); if (!valid) return;
     setSaving(true);
     try {
@@ -535,17 +540,29 @@ export default function PurchaseOrderPage() {
         terms_days: termsForm.terms_days,
         terms_label: termsForm.terms_label,
         due_date: termsForm.due_date,
+        ...(lateEncodePayload ? { late_encode: lateEncodePayload } : {}),
       }));
-      toast.success(`PO ${res.data.po_number} created — inventory updated, payable created (due ${termsForm.due_date || 'on receipt'})`);
+      toast.success(
+        lateEncodePayload
+          ? `PO ${res.data.po_number} created (late-encoded — will appear on next open Z-Report)`
+          : `PO ${res.data.po_number} created — inventory updated, payable created (due ${termsForm.due_date || 'on receipt'})`
+      );
       setRefPrompt({ open: true, number: res.data.po_number, vendor: header.vendor });
-      setTermsDialog(false); resetForm(); fetchOrders(); setTab('list');
+      setTermsDialog(false); setLateEncodeOpen(false); setLateEncodeRetry(null);
+      resetForm(); fetchOrders(); setTab('list');
     } catch (e) {
       const detail = e.response?.data?.detail;
       const msg = typeof detail === 'string' ? detail
         : detail?.message ? detail.message
         : e.response?.data ? JSON.stringify(e.response.data).slice(0, 200)
         : e.message || 'Error creating PO — check your connection and try again';
-      toast.error(msg);
+      // Closed-day → open Late-Encode dialog
+      if (typeof msg === 'string' && /already closed|late.{0,3}encode/i.test(msg)) {
+        setLateEncodeRetry({ kind: 'terms' });
+        setLateEncodeOpen(true);
+      } else {
+        toast.error(msg);
+      }
     }
     setSaving(false);
   };
@@ -1972,6 +1989,21 @@ export default function PurchaseOrderPage() {
       />
 
       {/* ── VERIFY PIN DIALOG ─────────────────────────────────────────── */}
+      <LateEncodeDialog
+        open={lateEncodeOpen}
+        onClose={() => { setLateEncodeOpen(false); setLateEncodeRetry(null); }}
+        orderDate={header.purchase_date}
+        moduleLabel="purchase order"
+        paymentRestrictionLabel="terms (Receive on Terms)"
+        allowedPaymentTypes={['terms']}
+        paymentType={lateEncodeRetry?.kind || 'terms'}
+        onConfirm={({ reason, pin }) => {
+          if (lateEncodeRetry?.kind === 'terms') {
+            handleReceiveOnTerms({ reason, pin });
+          }
+        }}
+      />
+
       <VerifyPinDialog
         open={verifyDialogOpen}
         onClose={() => setVerifyDialogOpen(false)}

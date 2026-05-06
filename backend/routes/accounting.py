@@ -753,6 +753,26 @@ async def create_expense(data: dict, user=Depends(get_current_user)):
         fund_source, data.get("fund_source_pin", ""), branch_id
     )
 
+    # ── Date guard (closed-day + forward-cap + late-encode) ─────────────────
+    requested_date = data.get("date") or await today_local(user.get("organization_id") or "")
+    from utils.closed_day_guard import resolve_business_date
+    late_encode = data.get("late_encode") or {}
+    date_resolution = await resolve_business_date(
+        branch_id, requested_date,
+        user=user,
+        organization_id=user.get("organization_id") or "",
+        forward_override_pin=data.get("allow_forward_date_pin", ""),
+        late_encode_pin=late_encode.get("pin", ""),
+        late_encode_reason=late_encode.get("reason", ""),
+        label="expense",
+        allow_late_encode=True,
+        max_days_back=7,
+    )
+    intended_date = date_resolution["intended_date"]
+    effective_date = date_resolution["effective_date"]
+    is_late_encoded = date_resolution["late_encoded"]
+    carryover_label = date_resolution["carryover_label"]
+
     expense = {
         "id": new_id(),
         "branch_id": branch_id,
@@ -763,7 +783,10 @@ async def create_expense(data: dict, user=Depends(get_current_user)):
         "payment_method": payment_method,
         "fund_source": fund_source,
         "reference_number": data.get("reference_number", ""),
-        "date": data.get("date") or await today_local(user.get("organization_id") or ""),
+        "date": effective_date,
+        "intended_date": intended_date,
+        "late_encoded": is_late_encoded,
+        "late_encode_label": carryover_label,
         # Employee CA fields
         "employee_id": data.get("employee_id", ""),
         "employee_name": data.get("employee_name", ""),
@@ -2038,6 +2061,31 @@ async def receive_customer_payment(customer_id: str, data: dict, user=Depends(ge
     reference = data.get("reference", "")
     pay_date = data.get("date") or await today_local(user.get("organization_id") or "")
     branch_id = data.get("branch_id", "")
+
+    # ── Date guard (closed-day + forward-cap + late-encode) ─────────────────
+    if branch_id:
+        from utils.closed_day_guard import resolve_business_date
+        late_encode = data.get("late_encode") or {}
+        date_resolution = await resolve_business_date(
+            branch_id, pay_date,
+            user=user,
+            organization_id=user.get("organization_id") or "",
+            forward_override_pin=data.get("allow_forward_date_pin", ""),
+            late_encode_pin=late_encode.get("pin", ""),
+            late_encode_reason=late_encode.get("reason", ""),
+            label="customer payment",
+            allow_late_encode=True,
+            max_days_back=7,
+        )
+        intended_pay_date = date_resolution["intended_date"]
+        pay_date = date_resolution["effective_date"]
+        pay_late_encoded = date_resolution["late_encoded"]
+        pay_carryover_label = date_resolution["carryover_label"]
+    else:
+        intended_pay_date = pay_date
+        pay_late_encoded = False
+        pay_carryover_label = ""
+
     total_applied, total_discounted, applied_invoices = 0, 0, []
 
     for alloc in allocations:
@@ -2069,6 +2117,9 @@ async def receive_customer_payment(customer_id: str, data: dict, user=Depends(ge
                 "id": new_id(), "amount": actual_discount, "date": pay_date, "method": "Discount",
                 "reference": f"Discount on {inv.get('sale_type', 'charge')}",
                 "fund_source": "discount",
+                "intended_date": intended_pay_date,
+                "late_encoded": pay_late_encoded,
+                "late_encode_label": pay_carryover_label,
                 "applied_to_interest": 0, "applied_to_principal": actual_discount,
                 "recorded_by": user.get("full_name", user["username"]), "recorded_at": now_iso(),
             }
@@ -2080,6 +2131,9 @@ async def receive_customer_payment(customer_id: str, data: dict, user=Depends(ge
             payment_record = {
                 "id": new_id(), "amount": actual_apply, "date": pay_date, "method": method,
                 "reference": reference, "fund_source": fund_source,
+                "intended_date": intended_pay_date,
+                "late_encoded": pay_late_encoded,
+                "late_encode_label": pay_carryover_label,
                 "applied_to_interest": 0, "applied_to_principal": actual_apply,
                 "recorded_by": user.get("full_name", user["username"]), "recorded_at": now_iso(),
             }

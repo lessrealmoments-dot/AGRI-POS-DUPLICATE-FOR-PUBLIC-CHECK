@@ -306,6 +306,12 @@ def render_normal(pdf: ZReportPDF, closing: dict):
             desc = str(e.get("description") or e.get("employee_name") or "")[:50]
             label = f"[{cat}] {desc}" if cat else desc
             pdf.row(label, php(e.get("amount", 0)), color=(220, 38, 38))
+            # Late-encoded carryover note (printed in italics if backdated)
+            if e.get("late_encoded") and e.get("late_encode_label"):
+                pdf.set_font("Helvetica", "I", 7)
+                pdf.set_text_color(217, 119, 6)
+                pdf.cell(0, 3.5, f"   {e['late_encode_label']}", new_x="LMARGIN", new_y="NEXT")
+                pdf.set_text_color(0, 0, 0)
             if e.get("category") == "Employee Advance" and "monthly_ca_total" in e:
                 emp = e.get("employee_name", "Employee")
                 mt = php(e.get("monthly_ca_total", 0))

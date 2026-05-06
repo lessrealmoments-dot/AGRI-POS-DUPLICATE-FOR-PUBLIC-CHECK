@@ -16,6 +16,7 @@ import UploadQRDialog from '../components/UploadQRDialog';
 import ReceiptUploadInline from '../components/ReceiptUploadInline';
 import VerificationBadge from '../components/VerificationBadge';
 import VerifyPinDialog from '../components/VerifyPinDialog';
+import LateEncodeDialog from '../components/LateEncodeDialog';
 import CalcInput from '../components/CalcInput';
 import ViewQRDialog from '../components/ViewQRDialog';
 import ExpenseDetailModal from '../components/ExpenseDetailModal';
@@ -98,6 +99,8 @@ export default function ExpensesPage() {
   const [cashOutCustomerListOpen, setCashOutCustomerListOpen] = useState(false);
 
   const [encodingDate, setEncodingDate] = useState(localTodayStr());
+  const [lateEncodeOpen, setLateEncodeOpen] = useState(false);
+  const [submitRetry, setSubmitRetry] = useState(null);
 
   const [filters, setFilters] = useState({
     category: '', payment_method: '', date_from: '', date_to: '', search: ''
@@ -298,30 +301,44 @@ export default function ExpensesPage() {
       }
     }
     setSubmitting(true);
-    try {
-      const payload = { ...expenseForm, branch_id: currentBranch?.id };
-      if (approvedBy) payload.manager_approved_by = approvedBy;
-      if (expenseReceiptData?.sessionId) {
-        payload.upload_session_ids = [expenseReceiptData.sessionId];
+    const submit = async (lateEncodePayload = null) => {
+      try {
+        const payload = { ...expenseForm, branch_id: currentBranch?.id };
+        if (approvedBy) payload.manager_approved_by = approvedBy;
+        if (expenseReceiptData?.sessionId) {
+          payload.upload_session_ids = [expenseReceiptData.sessionId];
+        }
+        if (lateEncodePayload) payload.late_encode = lateEncodePayload;
+        if (editMode && expenseForm.id) {
+          await api.put(`/expenses/${expenseForm.id}`, payload);
+          toast.success('Expense updated');
+        } else {
+          await api.post('/expenses', payload);
+          toast.success(
+            lateEncodePayload
+              ? 'Expense recorded (late-encoded — appears on next open Z-Report)'
+              : 'Expense recorded'
+          );
+        }
+        setExpenseDialog(false);
+        setCaSummary(null);
+        setExpenseReceiptData(null);
+        setLateEncodeOpen(false);
+        fetchAll();
+      } catch (e) {
+        const detail = e.response?.data?.detail;
+        const msg = typeof detail === 'string' ? detail : detail?.message || 'Error saving expense';
+        if (/already closed|late.{0,3}encode/i.test(msg) && !lateEncodePayload) {
+          setLateEncodeOpen(true);
+        } else {
+          toast.error(msg);
+        }
+      } finally {
+        setSubmitting(false);
       }
-      if (editMode && expenseForm.id) {
-        await api.put(`/expenses/${expenseForm.id}`, payload);
-        toast.success('Expense updated');
-      } else {
-        await api.post('/expenses', payload);
-        toast.success('Expense recorded');
-      }
-      setExpenseDialog(false);
-      setCaSummary(null);
-      setExpenseReceiptData(null);
-      fetchAll();
-    } catch (e) {
-      const detail = e.response?.data?.detail;
-      const msg = typeof detail === 'string' ? detail : detail?.message || 'Error saving expense';
-      toast.error(msg);
-    } finally {
-      setSubmitting(false);
-    }
+    };
+    setSubmitRetry(() => submit);
+    submit(null);
   };
 
   const handleCaManagerPin = async () => {
@@ -1276,6 +1293,14 @@ export default function ExpensesPage() {
         onOpenChange={(open) => { setInvoiceModalOpen(open); if (!open) setSelectedInvoiceNumber(null); }}
         invoiceNumber={selectedInvoiceNumber}
         onUpdated={fetchAll}
+      />
+      <LateEncodeDialog
+        open={lateEncodeOpen}
+        onClose={() => setLateEncodeOpen(false)}
+        orderDate={expenseForm.date}
+        moduleLabel="expense"
+        paymentRestrictionLabel={null}
+        onConfirm={({ reason, pin }) => { if (submitRetry) submitRetry({ reason, pin }); }}
       />
     </div>
   );

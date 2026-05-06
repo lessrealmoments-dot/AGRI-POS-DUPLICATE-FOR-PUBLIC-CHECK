@@ -1,18 +1,25 @@
 /**
  * LateEncodeDialog
  *
- * Appears when the cashier tries to save a credit / partial sale dated to a
- * day that's already closed. Collects the required reason + manager PIN,
- * then resolves to a `late_encode` payload that the backend expects on the
- * POST /api/sales body.
+ * Appears when a user tries to save an entry dated to a closed business day.
+ * Collects a reason + manager PIN, then resolves to a `late_encode` payload
+ * that the backend `closed_day_guard.resolve_business_date()` helper expects.
+ *
+ * Usage (sales — original default):
+ *   <LateEncodeDialog ... paymentType="credit" />
+ *
+ * Usage (generic — PO, expenses, payments, etc.):
+ *   <LateEncodeDialog
+ *     moduleLabel="expense"
+ *     paymentRestrictionLabel={null}      // no payment-type restriction
+ *     onConfirm={({ reason, pin }) => post({ late_encode: { reason, pin }})}
+ *   />
  *
  * Guardrails surfaced in the UI (server enforces them anyway):
- *   - Only enabled for credit / partial payments
  *   - 7-day backdate cap
  *   - Reason ≥ 10 chars
  *   - Manager/admin PIN
- *   - Warning copy makes clear this will show on the NEXT open Z-report,
- *     not amend the closed one
+ *   - Cross-month block
  */
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -32,7 +39,12 @@ const daysBetween = (targetDate) => {
   } catch { return 0; }
 };
 
-export default function LateEncodeDialog({ open, onClose, orderDate, paymentType, onConfirm, warmPin }) {
+export default function LateEncodeDialog({
+  open, onClose, orderDate, paymentType, onConfirm, warmPin,
+  moduleLabel = 'sale',
+  paymentRestrictionLabel,    // Pass null to skip restriction; default = sales-style
+  allowedPaymentTypes,        // Optional explicit list. Sales defaults to credit/partial.
+}) {
   const [reason, setReason] = useState('');
   const [pin, setPin] = useState('');
   const [busy, setBusy] = useState(false);
@@ -50,9 +62,19 @@ export default function LateEncodeDialog({ open, onClose, orderDate, paymentType
     } catch { return false; }
   }, [orderDate]);
 
+  // Payment-type restriction defaults match Sales (credit/partial only).
+  // Pass paymentRestrictionLabel={null} to disable for non-sales modules.
+  const isSalesModule = moduleLabel === 'sale' && paymentRestrictionLabel === undefined;
+  const effectiveAllowed = allowedPaymentTypes
+    || (isSalesModule ? ['credit', 'partial'] : null);
+  const restrictionLabel = paymentRestrictionLabel === undefined
+    ? (isSalesModule ? 'credit / partial' : null)
+    : paymentRestrictionLabel;
+  const paymentTypeOk = !effectiveAllowed
+    || effectiveAllowed.includes((paymentType || '').toLowerCase());
+
   const valid = reason.trim().length >= 10 && pin.length >= 4
     && daysBack > 0 && daysBack <= 7 && !crossMonth;
-  const isCreditOrPartial = ['credit', 'partial'].includes((paymentType || '').toLowerCase());
 
   const submit = () => {
     if (!valid || busy) return;
@@ -70,7 +92,7 @@ export default function LateEncodeDialog({ open, onClose, orderDate, paymentType
             Encode for Past Closed Date
           </DialogTitle>
           <DialogDescription>
-            This day is already closed. For forgotten <b>credit / partial</b> sales,
+            This day is already closed. For forgotten {restrictionLabel ? <b>{restrictionLabel}</b> : <b>{moduleLabel}</b>} entries,
             you can still encode it with an audit trail.
           </DialogDescription>
         </DialogHeader>
@@ -79,17 +101,17 @@ export default function LateEncodeDialog({ open, onClose, orderDate, paymentType
           <div className="flex gap-2 items-start">
             <AlertTriangle size={13} className="shrink-0 mt-0.5" />
             <div>
-              <p className="font-semibold">This sale WILL NOT modify the closed Z-report.</p>
-              <p className="mt-0.5">It will appear on the <b>next open day's Z-report</b> in a dedicated
-              "Late-Encoded Credits" section. The customer's AR aging will correctly start from the original
-              sale date ({orderDate}).</p>
+              <p className="font-semibold">This {moduleLabel} WILL NOT modify the closed Z-report.</p>
+              <p className="mt-0.5">It will appear on the <b>next open day's Z-report</b> tagged as a
+              late-encoded carryover. The original date ({orderDate}) is preserved on the document
+              for audit.</p>
             </div>
           </div>
         </div>
 
-        {!isCreditOrPartial && (
+        {restrictionLabel && !paymentTypeOk && (
           <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-800">
-            Only <b>credit</b> or <b>partial</b> payments can be late-encoded. Cash and digital
+            Only <b>{restrictionLabel}</b> can be late-encoded. Cash / direct fund movements
             cannot be backdated to a closed day.
           </div>
         )}
@@ -113,7 +135,7 @@ export default function LateEncodeDialog({ open, onClose, orderDate, paymentType
             <Input
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder="e.g. Forgot to encode Juan's fertilizer credit last Monday"
+              placeholder={`e.g. Forgot to encode ${moduleLabel} last Monday`}
               className="mt-1 text-sm"
               data-testid="late-encode-reason"
             />
@@ -136,7 +158,7 @@ export default function LateEncodeDialog({ open, onClose, orderDate, paymentType
           <Button
             className="flex-1 bg-[#1A4D2E] hover:bg-[#14532d] text-white"
             onClick={submit}
-            disabled={!valid || !isCreditOrPartial || busy}
+            disabled={!valid || (restrictionLabel && !paymentTypeOk) || busy}
             data-testid="late-encode-confirm"
           >
             {busy ? 'Encoding…' : 'Confirm Late Encode'}

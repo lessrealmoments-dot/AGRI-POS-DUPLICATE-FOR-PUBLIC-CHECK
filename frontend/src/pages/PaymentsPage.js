@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
+import LateEncodeDialog from '../components/LateEncodeDialog';
 import { invalidateBalanceCache } from '../components/CustomerBalanceBadge';
 import CalcInput from '../components/CalcInput';
 
@@ -144,6 +145,8 @@ export default function PaymentsPage() {
 
   // Payment header
   const [payDate, setPayDate] = useState(localTodayStr());
+  const [lateEncodeOpen, setLateEncodeOpen] = useState(false);
+  const [lateEncodeRetry, setLateEncodeRetry] = useState(null);
   const [payMethod, setPayMethod] = useState('Cash');
   const [payRef, setPayRef] = useState('');
   const [payMemo, setPayMemo] = useState('');
@@ -462,7 +465,7 @@ export default function PaymentsPage() {
 
   // ── Apply Payment ──
   // Interest must be generated manually before applying (auto-generate removed).
-  const handleApplyPayment = async (pinOverride) => {
+  const handleApplyPayment = async (pinOverride, lateEncodePayload = null) => {
     // Defensive: when bound directly to a button, React passes a SyntheticEvent
     // here. Strip anything that's not a real PIN string so we don't poison the
     // payload (was causing axios JSON.stringify to throw on circular refs → silent fail).
@@ -497,18 +500,26 @@ export default function PaymentsPage() {
         branch_id: currentBranch?.id, memo: payMemo,
       };
       if (pinStr) payload.discount_pin = pinStr;
+      if (lateEncodePayload) payload.late_encode = lateEncodePayload;
 
       const res = await api.post(`/customers/${selectedCustomer.id}/receive-payment`, payload);
       const parts = [`${formatPHP(res.data.total_applied)} applied`];
       if (res.data.total_discounted > 0) parts.push(`${formatPHP(res.data.total_discounted)} discounted`);
       parts.push(`to ${res.data.applied_invoices.length} invoice(s)`);
-      toast.success(parts.join(' ') + ` — deposited to ${res.data.deposited_to}`);
+      toast.success(
+        parts.join(' ') + (
+          lateEncodePayload
+            ? ` — late-encoded (next open Z-Report)`
+            : ` — deposited to ${res.data.deposited_to}`
+        )
+      );
       setRowAmounts({});
       setRowDiscounts({});
       setDiscountModes({});
       setPayRef('');
       setPayMemo('');
       setPaymentAmtInput('');
+      setLateEncodeOpen(false);
       await loadInvoices(selectedCustomer.id);
       await loadChargesPreview(selectedCustomer.id);
       invalidateBalanceCache();
@@ -517,7 +528,15 @@ export default function PaymentsPage() {
         params: { include_zero: showAll, ...(currentBranch?.id ? { branch_id: currentBranch.id } : {}) }
       }).then(r => r.data || []).catch(() => [])).find(c => c.id === selectedCustomer.id);
       if (refreshed) setSelectedCustomer(refreshed);
-    } catch (e) { toast.error(e.response?.data?.detail || 'Payment failed'); }
+    } catch (e) {
+      const msg = e.response?.data?.detail || 'Payment failed';
+      if (typeof msg === 'string' && /already closed|late.{0,3}encode/i.test(msg) && !lateEncodePayload) {
+        setLateEncodeRetry(() => (le) => handleApplyPayment(pinStr, le));
+        setLateEncodeOpen(true);
+      } else {
+        toast.error(msg);
+      }
+    }
     setProcessing(false);
   };
 
@@ -2058,6 +2077,15 @@ export default function PaymentsPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <LateEncodeDialog
+        open={lateEncodeOpen}
+        onClose={() => setLateEncodeOpen(false)}
+        orderDate={payDate}
+        moduleLabel="customer payment"
+        paymentRestrictionLabel={null}
+        onConfirm={({ reason, pin }) => { if (lateEncodeRetry) lateEncodeRetry({ reason, pin }); }}
+      />
     </div>
   );
 }

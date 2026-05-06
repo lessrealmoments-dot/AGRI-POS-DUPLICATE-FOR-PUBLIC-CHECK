@@ -1501,11 +1501,35 @@ async def _apply_receipt(order, items, shortages, excesses, from_branch_id, to_b
             "new_retail_price": new_price,
         })
 
+    # ── Date guard: if destination branch's "today" is closed, auto-roll
+    # to the next open day for the receipt's effective_date. Inventory
+    # plus/minus is not date-bound (final total matters), so we don't
+    # block receiving — only stamp the right effective_date for any
+    # downstream Z-Report/journal lookups.
+    from utils.closed_day_guard import _is_closed, _next_open_day  # type: ignore
+    receive_intended = now_iso()[:10]
+    receive_effective = receive_intended
+    receive_late_encoded = False
+    receive_carryover_label = ""
+    to_branch = order.get("to_branch_id", "")
+    if to_branch and await _is_closed(to_branch, receive_intended):
+        receive_effective = await _next_open_day(
+            to_branch, receive_intended, order.get("organization_id") or ""
+        )
+        receive_late_encoded = True
+        receive_carryover_label = (
+            f"[LATE ENCODE] Branch Transfer Receipt — original date {receive_intended} (closed)"
+        )
+
     await db.branch_transfer_orders.update_one(
         {"id": transfer_id},
         {"$set": {
             "status": "received",
             "received_at": now_iso(),
+            "received_date": receive_effective,
+            "received_intended_date": receive_intended,
+            "receive_late_encoded": receive_late_encoded,
+            "receive_late_encode_label": receive_carryover_label,
             "received_by": user["id"],
             "received_by_name": user.get("full_name", user["username"]),
             "receive_notes": notes,

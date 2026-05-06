@@ -243,6 +243,9 @@ PIN_POLICY_ACTIONS = [
     {"key": "customer_merge",         "label": "Merge Duplicate Customers",       "module": "Customers",         "defaults": ["admin_pin", "manager_pin", "totp"]},
     # Branch Transfer — approve pending (manager-submitted) transfer + retail-set
     {"key": "transfer_approve",       "label": "Approve Pending Branch Transfer", "module": "Branch Transfers",  "defaults": ["admin_pin", "manager_pin", "totp"]},
+    # Date / Closed-day overrides — used by every late-encode and forward-date escape hatch
+    {"key": "late_encode",            "label": "Late-Encode (backdate to closed day)", "module": "Daily Operations", "defaults": ["admin_pin", "manager_pin", "totp"]},
+    {"key": "forward_date_override",  "label": "Forward-Date Override",           "module": "Daily Operations",  "defaults": ["admin_pin", "manager_pin", "totp"]},
 ]
 
 # Build quick lookup: action_key → default methods

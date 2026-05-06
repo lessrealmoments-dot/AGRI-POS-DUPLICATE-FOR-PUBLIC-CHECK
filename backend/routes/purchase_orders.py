@@ -444,6 +444,43 @@ async def create_purchase_order(data: dict, user=Depends(get_current_user)):
 
     # ── Compute line-item totals ───────────────────────────────────────────
     purchase_date = data.get("purchase_date", now_iso()[:10])
+
+    # ── Date guard: forward-cap + closed-day handling ─────────────────────
+    # • Cash POs: hard-block backdating to a closed day (wallet must move on
+    #   an open day). Late-encode is allowed for terms POs only (no fund
+    #   movement on the closed day — only AR/payable creation).
+    # • Forward-date cap: today (or today+1 if today closed). Admin override
+    #   PIN supported.
+    if po_type in ("cash", "terms") and branch_id:
+        from utils.closed_day_guard import resolve_business_date
+        late_encode = data.get("late_encode") or {}
+        date_resolution = await resolve_business_date(
+            branch_id, purchase_date,
+            user=user,
+            organization_id=user.get("organization_id") or "",
+            forward_override_pin=data.get("allow_forward_date_pin", ""),
+            late_encode_pin=late_encode.get("pin", ""),
+            late_encode_reason=late_encode.get("reason", ""),
+            label=f"PO ({po_type})",
+            allow_late_encode=(po_type == "terms"),
+            allow_payment_types=["terms"] if po_type == "terms" else None,
+            payment_type=po_type,
+            max_days_back=7,
+        )
+        # Late-encoded terms POs: keep purchase_date = intended (so reports
+        # show the original date), but stamp effective_date for the payable's
+        # journal/Z-report carryover.
+        intended_date = date_resolution["intended_date"]
+        effective_date = date_resolution["effective_date"]
+        is_late_encoded = date_resolution["late_encoded"]
+        carryover_label = date_resolution["carryover_label"]
+        purchase_date = intended_date
+    else:
+        intended_date = purchase_date
+        effective_date = purchase_date
+        is_late_encoded = False
+        carryover_label = ""
+
     items_raw = data.get("items", [])
     items = []
     line_subtotal = 0.0
@@ -538,6 +575,13 @@ async def create_purchase_order(data: dict, user=Depends(get_current_user)):
         "due_date": due_date,
         "terms_days": terms_days,
         "terms_label": data.get("terms_label", ""),
+        # Late-encode metadata (terms-only when day was closed). Surfaces
+        # on next-day Z-Report as a carryover line.
+        "intended_date": intended_date,
+        "effective_date": effective_date,
+        "late_encoded": is_late_encoded,
+        "late_encode_label": carryover_label,
+        "late_encode_reason": (data.get("late_encode") or {}).get("reason", "") if is_late_encoded else "",
         "received_date": now_iso() if po_type in ("cash", "terms") else None,
         "notes": data.get("notes", ""),
         # Branch request fields
@@ -814,6 +858,10 @@ async def create_purchase_order(data: dict, user=Depends(get_current_user)):
             "terms_days": terms_days,
             "terms_label": data.get("terms_label", ""),
             "status": "pending",
+            "intended_date": intended_date,
+            "effective_date": effective_date,
+            "late_encoded": is_late_encoded,
+            "late_encode_label": carryover_label,
             "created_at": now_iso(),
         })
 
@@ -1681,6 +1729,29 @@ async def pay_purchase_order(po_id: str, data: dict, user=Depends(get_current_us
     if amount > stored_balance + 0.01:  # 1-cent tolerance for float drift
         raise HTTPException(status_code=400, detail=f"Payment ₱{amount:.2f} exceeds outstanding balance ₱{stored_balance:.2f}")
 
+    # ── Date guard (closed-day + forward-cap + late-encode) ─────────────────
+    requested_pay_date = data.get("payment_date") or now_iso()[:10]
+    from utils.closed_day_guard import resolve_business_date
+    late_encode = data.get("late_encode") or {}
+    pay_date_resolution = await resolve_business_date(
+        branch_id, requested_pay_date,
+        user=user,
+        organization_id=po.get("organization_id") or user.get("organization_id") or "",
+        forward_override_pin=data.get("allow_forward_date_pin", ""),
+        late_encode_pin=late_encode.get("pin", ""),
+        late_encode_reason=late_encode.get("reason", ""),
+        label="Supplier Payment",
+        allow_late_encode=True,
+        max_days_back=7,
+    )
+    intended_pay_date = pay_date_resolution["intended_date"]
+    effective_pay_date = pay_date_resolution["effective_date"]
+    pay_late_encoded = pay_date_resolution["late_encoded"]
+    pay_carryover_label = pay_date_resolution["carryover_label"]
+    # Mutate data so the rest of the handler picks up the resolved dates.
+    data["payment_date"] = effective_pay_date
+    data["intended_payment_date"] = intended_pay_date
+
     # ── Build reference text ──────────────────────────────────────────────────
     ref_parts = [f"PO Payment {po['po_number']} - {po.get('vendor', '')}"]
     if data.get("check_number"):
@@ -1776,6 +1847,9 @@ async def pay_purchase_order(po_id: str, data: dict, user=Depends(get_current_us
     payment_record = {
         "id": new_id(), "amount": round(amount, 2),
         "date": data.get("payment_date", now_iso()[:10]),
+        "intended_date": intended_pay_date,
+        "late_encoded": pay_late_encoded,
+        "late_encode_label": pay_carryover_label,
         "check_number": data.get("check_number", ""),
         "check_date": data.get("check_date", ""),
         "method": data.get("method", "Cash"),
@@ -1817,6 +1891,9 @@ async def pay_purchase_order(po_id: str, data: dict, user=Depends(get_current_us
         "payment_method": data.get("method", "Cash"),
         "reference_number": data.get("check_number") or data.get("reference", ""),
         "date": data.get("payment_date", now_iso()[:10]),
+        "intended_date": intended_pay_date,
+        "late_encoded": pay_late_encoded,
+        "late_encode_label": pay_carryover_label,
         "fund_source": fund_source,
         "po_id": po_id, "po_number": po["po_number"], "vendor": po.get("vendor", ""),
         "created_by": verifier["verifier_id"],

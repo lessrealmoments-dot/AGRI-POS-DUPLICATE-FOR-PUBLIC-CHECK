@@ -16,6 +16,7 @@ import {
 import { localTodayStr } from '../lib/dateFormat';
 import { toast } from 'sonner';
 import UploadQRDialog from '../components/UploadQRDialog';
+import LateEncodeDialog from '../components/LateEncodeDialog';
 import ReviewDetailDialog from '../components/ReviewDetailDialog';
 import CalcInput from '../components/CalcInput';
 
@@ -226,7 +227,9 @@ export default function PaySupplierPage() {
 
   // ── Submit payment ────────────────────────────────────────────────────────
 
-  const handlePayment = async () => {
+  const [lateEncodeOpen, setLateEncodeOpen] = useState(false);
+
+  const handlePayment = async (lateEncodePayload = null) => {
     const allocations = Object.entries(checkedPos)
       .filter(([, amt]) => parseFloat(amt) > 0)
       .map(([po_id, amt]) => ({ po_id, amount: parseFloat(amt) }));
@@ -236,7 +239,7 @@ export default function PaySupplierPage() {
     if (!currentBranch?.id) { toast.error('Select a specific branch first'); return; }
 
     setProcessing(true);
-    let totalPaid = 0, errors = [], paidPoIds = [];
+    let totalPaid = 0, errors = [], paidPoIds = [], closedDayHit = false;
 
     for (const alloc of allocations) {
       try {
@@ -244,6 +247,7 @@ export default function PaySupplierPage() {
           amount: alloc.amount, fund_source: fundSource,
           method: payMethod, reference: payRef,
           payment_date: payDate, pin: payPin,
+          ...(lateEncodePayload ? { late_encode: lateEncodePayload } : {}),
         });
         totalPaid += alloc.amount;
         paidPoIds.push(alloc.po_id);
@@ -252,14 +256,28 @@ export default function PaySupplierPage() {
         if (typeof detail === 'object' && detail?.type === 'insufficient_funds') {
           toast.error(detail.message); setProcessing(false); return;
         }
-        errors.push(typeof detail === 'string' ? detail : 'Payment failed');
+        const msg = typeof detail === 'string' ? detail : 'Payment failed';
+        if (/already closed|late.{0,3}encode/i.test(msg) && !lateEncodePayload) {
+          closedDayHit = true; break;
+        }
+        errors.push(msg);
       }
     }
 
+    setProcessing(false);
+
+    if (closedDayHit) {
+      setLateEncodeOpen(true);
+      return; // Wait for dialog confirm to retry
+    }
     if (errors.length) {
       toast.error(`${errors.length} payment(s) failed: ${errors[0]}`);
     } else {
-      toast.success(`₱${totalPaid.toFixed(2)} paid to ${selected.vendor} from ${walletLabels[fundSource]}`);
+      toast.success(
+        lateEncodePayload
+          ? `₱${totalPaid.toFixed(2)} paid (late-encoded — appears on next open Z-Report)`
+          : `₱${totalPaid.toFixed(2)} paid to ${selected.vendor} from ${walletLabels[fundSource]}`
+      );
       const batchPos = allocations
         .filter(a => paidPoIds.includes(a.po_id))
         .map(a => ({ po_id: a.po_id, po_number: selected.pos.find(p => p.id === a.po_id)?.po_number || a.po_id, amount: a.amount, uploaded: false }));
@@ -272,13 +290,13 @@ export default function PaySupplierPage() {
     setPayRef('');
     setPayMemo('');
     setPayPin('');
+    setLateEncodeOpen(false);
     await loadSuppliers();
     await loadWallets();
     const refreshed = (await api.get('/purchase-orders/payables-by-supplier', {
       params: currentBranch ? { branch_id: currentBranch.id } : {}
     }).then(r => r.data || []).catch(() => [])).find(s => s.vendor === selected.vendor);
     setSelected(refreshed || null);
-    setProcessing(false);
   };
 
   // ── Filtered lists ────────────────────────────────────────────────────────
@@ -860,6 +878,15 @@ export default function PaySupplierPage() {
         recordType="purchase_order" recordId={batchCurrentPoId} />
 
       <ReviewDetailDialog open={invoiceModalOpen} onOpenChange={setInvoiceModalOpen} poNumber={selectedPoNumber} onUpdated={loadSuppliers} showReviewAction={false} showPayAction={false} />
+
+      <LateEncodeDialog
+        open={lateEncodeOpen}
+        onClose={() => setLateEncodeOpen(false)}
+        orderDate={payDate}
+        moduleLabel="supplier payment"
+        paymentRestrictionLabel={null}
+        onConfirm={({ reason, pin }) => handlePayment({ reason, pin })}
+      />
     </div>
   );
 }
