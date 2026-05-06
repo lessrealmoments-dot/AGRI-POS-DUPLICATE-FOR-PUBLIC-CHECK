@@ -4,7 +4,7 @@ import base64
 import requests
 import pytest
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://shift-handoff-2.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://receipt-modal-hub.preview.emergentagent.com").rstrip("/")
 ADMIN_EMAIL = "janmarkeahig@gmail.com"
 ADMIN_PASS = "Aa@58798546521325"
 MANAGER_PIN = "521325"

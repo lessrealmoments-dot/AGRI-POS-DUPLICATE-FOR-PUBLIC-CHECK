@@ -71,6 +71,7 @@ import TerminalPage from './pages/terminal/TerminalPage';
 import DocViewerPage from './pages/DocViewerPage';
 import CropCreditsPage from './pages/CropCreditsPage';
 import SignaturePage from './pages/SignaturePage';
+import PrintQueuePage from './pages/PrintQueuePage';
 
 // Legacy pages removed (POSPage, SalesOrderPage) — replaced by UnifiedSalesPage
 
@@ -269,6 +270,7 @@ function AppRoutes() {
       <Route path="/barcode-manage" element={<ProtectedRoute><BarcodeManagePage /></ProtectedRoute>} />
       <Route path="/find-transaction" element={<ProtectedRoute><TransactionSearchPage /></ProtectedRoute>} />
       <Route path="/crop-credits" element={<ProtectedRoute><CropCreditsPage /></ProtectedRoute>} />
+      <Route path="/print-center" element={<ProtectedRoute><PrintQueuePage /></ProtectedRoute>} />
       <Route path="/scanner/:sessionId" element={<MobileScannerPage />} />
       {/* Public upload page — no auth, token-based */}
       <Route path="/upload/:token" element={<UploadPage />} />

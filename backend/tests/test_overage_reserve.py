@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _org_test_helpers import ensure_org_admin_token, _db, TEST_ORG_MANAGER_PIN, TEST_ORG_ADMIN_PIN  # noqa
 
-API = os.environ.get("API_URL", "https://shift-handoff-2.preview.emergentagent.com").rstrip("/") + "/api"
+API = os.environ.get("API_URL", "https://receipt-modal-hub.preview.emergentagent.com").rstrip("/") + "/api"
 
 
 # ─── Module-scoped fixtures ───────────────────────────────────────────────

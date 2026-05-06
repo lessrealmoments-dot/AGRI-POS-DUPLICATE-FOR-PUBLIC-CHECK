@@ -40,8 +40,47 @@ async def ws_pairing(websocket: WebSocket, code: str):
 
 @router.websocket("/ws/terminal/{terminal_id}")
 async def ws_terminal(websocket: WebSocket, terminal_id: str):
-    """Connected terminal receives real-time events (PO assignments, transfers, etc.)."""
-    await terminal_ws_manager.connect_terminal(terminal_id, websocket)
+    """Connected terminal receives real-time events (PO assignments, transfers, print jobs, etc.)."""
+    # Look up branch_id for this terminal so the branch map stays accurate
+    session = await _raw_db.terminal_sessions.find_one(
+        {"terminal_id": terminal_id, "status": "active"},
+        {"_id": 0, "branch_id": 1}
+    )
+    branch_id = session.get("branch_id", "") if session else ""
+
+    await terminal_ws_manager.connect_terminal(terminal_id, websocket, branch_id=branch_id)
+
+    # Deliver any pending print jobs that were queued while terminal was offline
+    try:
+        from config import _raw_db as _db
+        pending = await _db.print_jobs.find(
+            {"terminal_id": terminal_id, "status": "pending"},
+            {"_id": 0}
+        ).sort("created_at", 1).to_list(50)
+
+        for job in pending:
+            try:
+                await websocket.send_json({"type": "print_job", "data": {
+                    "job_id":           job["id"],
+                    "document_type":    job.get("document_type"),
+                    "document_name":    job.get("document_name"),
+                    "document_id":      job.get("document_id"),
+                    "reference_number": job.get("reference_number"),
+                    "html_content":     job.get("html_content"),
+                    "metadata":         job.get("metadata", {}),
+                    "priority":         job.get("priority", "normal"),
+                    "created_at":       job.get("created_at"),
+                }})
+                from utils import now_iso as _now
+                await _db.print_jobs.update_one(
+                    {"id": job["id"]},
+                    {"$set": {"status": "sent", "sent_at": _now()}}
+                )
+            except Exception:
+                break  # WebSocket closed mid-delivery
+    except Exception:
+        pass
+
     try:
         while True:
             await websocket.receive_text()

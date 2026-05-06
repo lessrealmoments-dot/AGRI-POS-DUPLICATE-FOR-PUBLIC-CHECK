@@ -61,6 +61,7 @@ from routes.parked_branch_transfers import router as parked_branch_transfers_rou
 from routes.parked_purchase_orders import router as parked_purchase_orders_router
 from routes.admin_backfill_240 import router as admin_backfill_240_router
 from routes.close_reminder import start_scheduler_on_startup as _start_close_reminder
+from routes.print_jobs import router as print_jobs_router
 
 # =============================================================================
 # APP SETUP
@@ -232,6 +233,9 @@ api_router.include_router(parked_sales_router)
 api_router.include_router(parked_branch_transfers_router)
 api_router.include_router(parked_purchase_orders_router)
 api_router.include_router(admin_backfill_240_router)
+
+# Remote Branch Print Terminal
+api_router.include_router(print_jobs_router)
 
 # =============================================================================
 # WEBSOCKET ROUTES (must be on app directly with /api prefix)
@@ -1137,11 +1141,20 @@ async def startup():
     # Interest accrual via scheduler removed — interest is now managed exclusively
     # through /payments Generate Interest (creates INT-XXXXX invoices).
     from routes.crop_credits import run_harvest_reminders
-
     _scheduler.add_job(
         run_harvest_reminders,
         CronTrigger(hour=7, minute=0),
         id="crop_harvest_reminders",
+        replace_existing=True,
+    )
+
+    # ── Daily print terminal auto-purge (30-day inactive → purged) ──────────
+    from routes.print_jobs import purge_inactive_terminals as _purge_print_terminals
+
+    _scheduler.add_job(
+        _purge_print_terminals,
+        CronTrigger(hour=3, minute=0),   # 3 AM daily, low-traffic window
+        id="print_terminal_purge",
         replace_existing=True,
     )
 

@@ -18,11 +18,12 @@ import ViewQRDialog from './ViewQRDialog';
 import VerificationBadge from './VerificationBadge';
 import VerifyPinDialog from './VerifyPinDialog';
 import PrintEngine from '../lib/PrintEngine';
+import SendToPrintModal from './SendToPrintModal';
 import {
   FileText, Edit3, History, Save, X, AlertTriangle, Package,
   User, Calendar, DollarSign, Trash2, Clock, CheckCircle2,
   Copy, Check, ShieldCheck, Ban, ImageIcon, Upload, Smartphone,
-  Truck, CreditCard, Wallet, Pencil, RefreshCw, Printer, MessageSquare, RotateCcw
+  Truck, CreditCard, Wallet, Pencil, RefreshCw, Printer, MessageSquare, RotateCcw, Send
 } from 'lucide-react';
 import { formatDateTime } from '../lib/dateFormat';
 import { toast } from 'sonner';
@@ -70,6 +71,9 @@ export default function InvoiceDetailModal({
   // QR dialogs
   const [uploadQROpen, setUploadQROpen] = useState(false);
   const [viewQROpen, setViewQROpen] = useState(false);
+
+  // Send to Print
+  const [sendToPrintOpen, setSendToPrintOpen] = useState(false);
 
   // Active section
   const [section, setSection] = useState('detail'); // detail | receipts | payments | history | signature
@@ -302,6 +306,21 @@ export default function InvoiceDetailModal({
     PrintEngine.print({ type: docType, data: printData, format, businessInfo, docCode });
   };
 
+  // ── Generate HTML for Remote Print ────────────────────────────────────
+  const getRemotePrintHtml = () => {
+    if (!invoice) return '';
+    const docType = PrintEngine.getDocType(invoice);
+    const docCode = invoice.doc_code || '';
+    return PrintEngine.generateHtml({ type: docType, data: invoice, format: 'full_page', businessInfo, docCode });
+  };
+
+  const getRemotePrintDocType = () => {
+    if (!invoice) return 'sales_receipt';
+    if (isPO) return 'purchase_order';
+    if (isExpense) return 'expense_receipt';
+    return 'sales_receipt';
+  };
+
   // ── Compact edit helpers ──────────────────────────────────────────────
   const openCompactEdit = () => {
     setEditData({
@@ -460,6 +479,10 @@ export default function InvoiceDetailModal({
                   <Button size="sm" variant="outline" className="h-7 text-xs whitespace-nowrap"
                     onClick={() => setUploadQROpen(true)} data-testid="sale-upload-receipt-btn">
                     <Upload size={12} className="mr-1" /> Upload
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-xs whitespace-nowrap text-emerald-700 border-emerald-200 hover:bg-emerald-50"
+                    onClick={() => setSendToPrintOpen(true)} data-testid="sale-send-to-print-btn">
+                    <Send size={12} className="mr-1" /> Remote Print
                   </Button>
                   {!invoice.verified && !isVoided && (
                     <Button size="sm" variant="outline" className="h-7 text-xs text-[#1A4D2E] border-[#1A4D2E]/30 hover:bg-[#1A4D2E]/5"
@@ -710,6 +733,24 @@ export default function InvoiceDetailModal({
         />
         {/* View QR Dialog */}
         <ViewQRDialog open={viewQROpen} onClose={() => setViewQROpen(false)} recordType="invoice" recordId={invoice?.id} />
+        {/* Send to Print Modal — compact mode */}
+        {invoice && (
+          <SendToPrintModal
+            open={sendToPrintOpen}
+            onOpenChange={setSendToPrintOpen}
+            documentType={getRemotePrintDocType()}
+            documentName={
+              isPO ? `Purchase Order #${invoice.po_number || invoice.invoice_number || ''}` :
+              isExpense ? `Expense Receipt #${invoice.invoice_number || ''}` :
+              `Sales Receipt #${invoice.invoice_number || invoice.id?.slice(0,8) || ''}`
+            }
+            documentId={invoice.id}
+            referenceNumber={invoice.invoice_number || invoice.po_number || ''}
+            branchId={invoice.branch_id || ''}
+            htmlContent={getRemotePrintHtml()}
+            metadata={{ invoice_id: invoice.id, customer_name: invoice.customer_name }}
+          />
+        )}
         {/* Verify PIN Dialog */}
         <VerifyPinDialog
           open={verifyDialogOpen}
@@ -1515,6 +1556,25 @@ export default function InvoiceDetailModal({
         recordType={recordType}
         recordId={recordId}
       />
+
+      {/* Send to Print Modal */}
+      {invoice && (
+        <SendToPrintModal
+          open={sendToPrintOpen}
+          onOpenChange={setSendToPrintOpen}
+          documentType={getRemotePrintDocType()}
+          documentName={
+            isPO ? `Purchase Order #${invoice.po_number || invoice.invoice_number || ''}` :
+            isExpense ? `Expense Receipt #${invoice.invoice_number || ''}` :
+            `Sales Receipt #${invoice.invoice_number || invoice.id?.slice(0,8) || ''}`
+          }
+          documentId={invoice.id}
+          referenceNumber={invoice.invoice_number || invoice.po_number || ''}
+          branchId={invoice.branch_id || ''}
+          htmlContent={getRemotePrintHtml()}
+          metadata={{ invoice_id: invoice.id, customer_name: invoice.customer_name }}
+        />
+      )}
     </>
   );
 }

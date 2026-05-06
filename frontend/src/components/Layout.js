@@ -10,7 +10,7 @@ import { Separator } from './ui/separator';
 import {
   LayoutDashboard, Building2, Package, Warehouse, ShoppingCart,
   Users, Tags, Receipt, Calculator, Settings, Menu, X,
-  ChevronDown, LogOut, User, Store, Truck, Shield, ClipboardList, UserCog, Briefcase, Upload, Lock, ArrowRight, BarChart3, RotateCcw, ShieldCheck, WifiOff, FileText, AlertTriangle, HardDrive, ScanBarcode, Search, BookOpen, FolderOpen, MessageSquare, Smartphone, Sprout, TrendingUp
+  ChevronDown, LogOut, User, Store, Truck, Shield, ClipboardList, UserCog, Briefcase, Upload, Lock, ArrowRight, BarChart3, RotateCcw, ShieldCheck, WifiOff, FileText, AlertTriangle, HardDrive, ScanBarcode, Search, BookOpen, FolderOpen, MessageSquare, Smartphone, Sprout, TrendingUp, Printer
 } from 'lucide-react';
 import OfflineIndicator from './OfflineIndicator';
 import NotificationBell from './NotificationBell';
@@ -93,6 +93,12 @@ const NAV_SECTIONS = [
       { path: '/downloads',       label: 'App Downloads', icon: Smartphone, perm: null, adminOnly: true },
       { path: '/backups',         label: 'Backups',      icon: HardDrive, perm: 'settings.edit' },
       { path: '/settings',        label: 'Settings',     icon: Settings },
+    ],
+  },
+  {
+    label: 'Print Center',
+    items: [
+      { path: '/print-center', label: 'Print Queue', icon: Printer, perm: null, adminOnly: true },
     ],
   },
 ];

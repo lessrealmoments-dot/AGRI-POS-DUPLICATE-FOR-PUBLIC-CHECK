@@ -136,6 +136,11 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
   // Document Upload overlay state
   const [docUploadOpen, setDocUploadOpen] = useState(false);
 
+  // Print Terminal state
+  const [printMode, setPrintMode] = useState('manual'); // 'auto' | 'manual'
+  const [printQueue, setPrintQueue] = useState([]); // pending print jobs in manual mode
+  const [printQueueOpen, setPrintQueueOpen] = useState(false);
+
   // Android back button / browser back navigation handler
   const backExitRef = useRef(false);
   const backExitTimerRef = useRef(null);
@@ -465,6 +470,13 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
               setNotifications(prev => [...prev, { type: 'transfer', ...msg.data, time: Date.now() }]);
               if (transferRefreshRef.current) transferRefreshRef.current();
               break;
+            case 'print_job':
+              handleIncomingPrintJob(msg.data);
+              break;
+            case 'print_mode_changed':
+              setPrintMode(msg.data.mode || 'manual');
+              toast(`Print mode: ${msg.data.mode === 'auto' ? 'Auto Print' : 'Manual'}`, { duration: 2000 });
+              break;
             default:
               break;
           }
@@ -723,6 +735,76 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
     onLogout();
   };
 
+  // ── Print Job Handler ─────────────────────────────────────────────────────
+  const markJobStatus = async (jobId, status, errorMessage = '') => {
+    try {
+      await axios.put(`${BACKEND_URL}/api/print/jobs/${jobId}/status`, { status, error_message: errorMessage }, {
+        headers: { Authorization: `Bearer ${tokenRef.current}` }
+      });
+    } catch { /* fire and forget */ }
+  };
+
+  const handleIncomingPrintJob = (jobData) => {
+    if (!jobData?.job_id) return;
+
+    if (printMode === 'auto' || jobData.priority === 'urgent') {
+      // Auto mode: trigger print immediately
+      toast.success(`Printing: ${jobData.document_name || 'Document'}`, { duration: 3000 });
+      triggerPrint(jobData);
+    } else {
+      // Manual mode: add to queue
+      setPrintQueue(prev => {
+        // Avoid duplicates
+        if (prev.find(j => j.job_id === jobData.job_id)) return prev;
+        return [jobData, ...prev];
+      });
+      setPrintQueueOpen(true);
+      toast(`New print job: ${jobData.document_name || 'Document'}`, {
+        duration: 5000,
+        action: { label: 'Print Now', onClick: () => { triggerPrint(jobData); } }
+      });
+    }
+  };
+
+  const triggerPrint = (jobData) => {
+    if (!jobData?.html_content) {
+      markJobStatus(jobData.job_id, 'failed', 'No HTML content');
+      return;
+    }
+    try {
+      const win = window.open('', '_blank', 'width=900,height=700');
+      if (!win) {
+        toast.error('Please allow popups to print');
+        markJobStatus(jobData.job_id, 'failed', 'Popup blocked');
+        return;
+      }
+      // Inject auto-print script into the HTML
+      const htmlWithPrint = jobData.html_content.replace(
+        '</body>',
+        `<script>(function(){var p=false;function go(){if(p)return;p=true;window.print();setTimeout(function(){window.close();},2000);}var imgs=document.images;if(!imgs.length){go();return;}var r=imgs.length;for(var i=0;i<imgs.length;i++){if(imgs[i].complete){r--;if(!r)go();}else{imgs[i].onload=imgs[i].onerror=function(){r--;if(!r)go();};}}setTimeout(go,5000);})()</script></body>`
+      );
+      win.document.write(htmlWithPrint);
+      win.document.close();
+      win.focus();
+      // Mark as printed after a delay
+      setTimeout(() => markJobStatus(jobData.job_id, 'printed'), 4000);
+      // Remove from queue
+      setPrintQueue(prev => prev.filter(j => j.job_id !== jobData.job_id));
+    } catch (err) {
+      markJobStatus(jobData.job_id, 'failed', err.message || 'Print error');
+    }
+  };
+
+  // Load print mode from session on startup
+  useEffect(() => {
+    if (!session.token) return;
+    axios.get(`${BACKEND_URL}/api/print/terminal/session`, {
+      headers: { Authorization: `Bearer ${session.token}` }
+    }).then(res => {
+      if (res.data?.print_mode) setPrintMode(res.data.print_mode);
+    }).catch(() => {});
+  }, [session.token]);
+
   // Notification badge count (unread)
   const unreadCount = notifications.filter(n => Date.now() - n.time < 60000).length;
 
@@ -896,6 +978,24 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
                 </div>
                 <span className="text-sm font-medium">Upload Doc</span>
               </button>
+              <button onClick={() => { setModeMenuOpen(false); setPrintQueueOpen(true); }}
+                className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 text-slate-700"
+                data-testid="mode-print-queue">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-emerald-50 text-emerald-600 relative">
+                  <Printer size={16} />
+                  {printQueue.length > 0 && (
+                    <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-white text-[9px] flex items-center justify-center font-bold">
+                      {printQueue.length}
+                    </span>
+                  )}
+                </div>
+                <span className="text-sm font-medium flex-1">Print Queue</span>
+                {printQueue.length > 0 && (
+                  <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">
+                    {printQueue.length}
+                  </span>
+                )}
+              </button>
             </div>
             <div className="border-t border-slate-100">
               <button onClick={() => { setModeMenuOpen(false); setSettingsOpen(true); }}
@@ -985,13 +1085,39 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
               </button>
             </div>
             <div className="p-4 border-t border-slate-100 space-y-2">
+              {/* Print Mode Toggle */}
+              <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
+                <div>
+                  <p className="text-xs text-slate-500 font-medium">Print Mode</p>
+                  <p className="text-sm font-semibold text-slate-800 capitalize">{printMode}</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    {printMode === 'auto' ? 'Prints immediately on arrival' : 'Manual — click Print Now'}
+                  </p>
+                </div>
+                <button
+                  onClick={async () => {
+                    const newMode = printMode === 'auto' ? 'manual' : 'auto';
+                    try {
+                      const sessRes = await axios.get(`${BACKEND_URL}/api/print/terminal/session`, { headers: { Authorization: `Bearer ${tokenRef.current}` } });
+                      await axios.post(`${BACKEND_URL}/api/print/terminal/set-mode`, { terminal_id: sessRes.data.terminal_id, mode: newMode }, { headers: { Authorization: `Bearer ${tokenRef.current}` } });
+                      setPrintMode(newMode);
+                      toast.success(`Print mode: ${newMode}`);
+                    } catch { toast.error('Failed to change print mode'); }
+                  }}
+                  data-testid="toggle-print-mode-btn"
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${printMode === 'auto' ? 'bg-emerald-600 text-white border-emerald-700' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
+                >
+                  <Printer size={12} className="inline mr-1" />
+                  {printMode === 'auto' ? 'Auto' : 'Manual'}
+                </button>
+              </div>
+
               <button onClick={() => { setSettingsOpen(false); handleLogout(); }}
                 className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-red-50 text-red-600 hover:bg-red-100 transition-colors text-sm font-medium"
                 data-testid="unlink-terminal-btn">
                 <Unlink size={16} />
                 Unlink Terminal
-              </button>
-              <button onClick={() => setSettingsOpen(false)}
+              </button>              <button onClick={() => setSettingsOpen(false)}
                 className="w-full py-2.5 text-sm text-slate-500 hover:text-slate-700 transition-colors">
                 Close
               </button>
@@ -1127,6 +1253,65 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
           branchId={session.branchId}
           onClose={() => setDocUploadOpen(false)}
         />
+      )}
+
+      {/* Print Queue Overlay */}
+      {printQueueOpen && (
+        <div className="fixed inset-0 z-50 flex flex-col justify-end" data-testid="print-queue-overlay">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setPrintQueueOpen(false)} />
+          <div className="relative bg-white rounded-t-3xl overflow-hidden max-h-[70vh]" style={{ boxShadow: '0 -4px 24px rgba(0,0,0,0.13)' }}>
+            <div className="flex justify-center pt-3 pb-1">
+              <div className="w-10 h-1 rounded-full bg-slate-300" />
+            </div>
+            <div className="px-5 pb-2 flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-slate-900" style={{ fontFamily: 'Manrope' }}>
+                  <Printer size={15} className="inline mr-1.5 text-emerald-600" />
+                  Print Queue
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">Mode: <b className="capitalize">{printMode}</b></p>
+              </div>
+              <button onClick={() => setPrintQueueOpen(false)} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500">
+                <X size={15} />
+              </button>
+            </div>
+            <div className="overflow-y-auto px-5 pb-6 space-y-2">
+              {printQueue.length === 0 ? (
+                <div className="text-center py-8 text-slate-400">
+                  <Printer size={28} className="mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">No pending print jobs</p>
+                </div>
+              ) : (
+                printQueue.map(job => (
+                  <div key={job.job_id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200" data-testid={`print-queue-item-${job.job_id}`}>
+                    <div className="w-9 h-9 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                      <Printer size={16} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-slate-800 truncate">{job.document_name || 'Document'}</p>
+                      <p className="text-[10px] text-slate-400">{job.document_type?.replace(/_/g, ' ')}</p>
+                    </div>
+                    <div className="flex gap-1.5 shrink-0">
+                      <button
+                        onClick={() => { triggerPrint(job); setPrintQueueOpen(false); }}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 active:scale-95 transition-all"
+                        data-testid={`print-now-${job.job_id}`}
+                      >
+                        <Printer size={11} className="inline mr-1" />Print
+                      </button>
+                      <button
+                        onClick={() => { markJobStatus(job.job_id, 'cancelled'); setPrintQueue(prev => prev.filter(j => j.job_id !== job.job_id)); }}
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-200 text-slate-500 text-xs hover:bg-red-50 hover:text-red-600 transition-colors"
+                      >
+                        <X size={11} />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
