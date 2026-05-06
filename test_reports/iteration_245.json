@@ -1,0 +1,62 @@
+{
+  "summary": "Tested Branch Stock Request SMS recipients feature (iter 245). 7/7 backend pytest cases pass once a critical seed bug is worked around. Frontend Settings card and toggles render correctly. Found 1 CRITICAL backend bug: branch_stock_request SMS template never auto-seeds for existing orgs (auto-seed only fires when org has zero templates), so production tenants will silently drop the SMS until manually seeded. All other backend flows (recipients GET/PUT, permission gating, invalid trigger 400, public /doc/<code> view with is_branch_request) verified working.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "queue_sms() / DEFAULT_TEMPLATES auto-seed",
+        "issue": "The new 'branch_stock_request' SMS template is added to DEFAULT_TEMPLATES (sms.py:498), but queue_sms() only auto-seeds DEFAULT_TEMPLATES when the org has ZERO templates (sms.py:914). Every existing tenant already has prior templates seeded, so the new key never gets inserted — queue_sms hits 'template_missing' and silently drops the SMS. Reproduction: with the regression test org (34 existing templates), POST /api/purchase-orders po_type=branch_request → backend log shows 'queue_sms skipped — template_missing | template=branch_stock_request' → no rows in db.sms_queue. After manual upsert of the template into sms_templates, the same flow correctly queues the SMS for all admin recipients with /doc/<code> in the body. Fix: change auto-seed to insert any MISSING DEFAULT_TEMPLATES keys (per-key upsert) instead of bulk-insert only-when-empty, OR run a one-time startup migration that upserts DEFAULT_TEMPLATES for every org.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "BranchTransferPage → Request Stock → Tab to add row",
+        "issue": "Could not deterministically verify Tab-on-last-row-qty auto-add behavior in the headless run. After typing 'a' in product search and pressing Enter, the qty input was not located by its expected data-testid in time. The Request tab itself loads, search dropdown opens with results, and Enter is wired (per code review). Recommend main agent run a manual smoke: open /branch-transfers → Request → search a product → Enter → type qty → Tab — should add a new empty row and focus its search field.",
+        "affected_selectors": ["[data-testid^=\"req-row-search-\"]", "[data-testid^=\"req-row-qty-\"]"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_branch_stock_request_sms_245.py",
+    "/app/test_reports/pytest/pytest_branch_stock_request_245.xml"
+  ],
+  "action_items": [
+    "CRITICAL: Make queue_sms auto-seed missing DEFAULT_TEMPLATES per-key (or add a startup migration). Without this, every existing tenant never receives branch_stock_request SMS — they get 'template_missing' silently in logs.",
+    "Add data-testid='req-row-search-{idx}' and 'req-row-qty-{idx}' to BranchTransferPage Request rows so the Tab UX is automatable. Currently selectors in code reference are not reliably testable headlessly.",
+    "Manual verification needed: Tab-on-qty auto-add-row UX in /branch-transfers Request tab"
+  ],
+  "critical_code_review_comments": [
+    "sms.py:912-930 self-heal logic bails out early if the org already has any templates. New default templates added in future code releases will never reach existing orgs. Replace with: for each DEFAULT_TEMPLATES key not present in org, upsert it.",
+    "purchase_orders.py:117 — view_link falls back to '/branch-transfers?tab=history&subtab=requests' (relative path) if both doc_code and APP_PUBLIC_URL are empty. Recipients receiving such an SMS would see a non-clickable relative URL. Consider hard-failing or omitting the 'View:' line when no public URL is available.",
+    "purchase_orders.py:109-111 — relies on REACT_APP_FRONTEND_URL or APP_PUBLIC_URL env vars for the public link host. These keys are not in /app/backend/.env historically — confirm they are set in production, otherwise links default to relative '/doc/<code>' which won't render in SMS clients.",
+    "doc_lookup.py route prefix is '/doc' (not '/doc-lookup') — request review_request mentioned '/api/doc-lookup/view/{doc_code}' which is incorrect. Actual public endpoint is '/api/doc/view/{code}'."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_branch_stock_request_sms_245.py"
+  ],
+  "success_rate": {
+    "backend": "100% (7/7) — but only after manually seeding the missing template; without that workaround, 3/7 fail",
+    "frontend": "Settings card 100% verified; Tab-add-row UX not deterministically verified"
+  },
+  "test_credentials": {
+    "org_admin": "test_org_admin@regression.local / RegressionPass!2026",
+    "manager_403": "test_org_manager@regression.local / RegressionMgrPass!2026"
+  },
+  "seed_data_creation": "Manually upserted branch_stock_request template into sms_templates for org a32ebf88-cf9f-4f81-b93c-043bf151af5c so SMS-queue tests could pass. This is a workaround for the critical bug above. Tests also create + clean up TEST_BranchRequest PO and its sms_queue rows.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend tests at /app/backend/tests/test_branch_stock_request_sms_245.py. The critical issue is the auto-seed gap in sms.py — until main agent fixes that, 3 SMS tests will fail on any org that previously had templates. The /doc/{code} public route prefix is /api/doc/view/{code} (not /doc-lookup/view). Frontend Settings card 'Branch Stock Request — Recipients' renders correctly with all 4 toggles (data-testid stock-req-recipients-card and toggle-stock-req-include_admins / include_supply_manager / include_supply_auditor / include_all_supply_users — all confirmed). Tab-on-qty auto-add-row UX in /branch-transfers Request tab requires manual verification — could not locate qty input by data-testid in headless run.",
+  "rca_of_issue": {
+    "branch_stock_request_template_not_seeded": {
+      "file": "/app/backend/routes/sms.py:912-930",
+      "root_cause": "queue_sms() auto-seeds DEFAULT_TEMPLATES only when the org has 0 templates (count_documents == 0). When new template keys are added to DEFAULT_TEMPLATES in subsequent releases, existing orgs (which already have other templates) never receive them.",
+      "reproduction": "1) Use any org that already has ≥1 sms_templates row. 2) POST /api/purchase-orders with po_type=branch_request and a valid supply_branch_id. 3) Backend log shows: 'queue_sms skipped — template_missing | template=branch_stock_request'. 4) GET /api/sms/queue?template_key=branch_stock_request returns []. The notifications.insert_one (in-app) still works because that code path is independent.",
+      "mitigation": "Replace the count-based gate with per-key upsert: iterate DEFAULT_TEMPLATES, and for each missing key in the org, insert it. Optionally add a startup migration in server.py that does the same on app boot for every org."
+    }
+  }
+}

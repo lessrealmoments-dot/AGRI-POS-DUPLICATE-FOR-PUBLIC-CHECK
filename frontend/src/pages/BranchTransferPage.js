@@ -1659,6 +1659,7 @@ export default function BranchTransferPage() {
                 </div>
                 {reqRows.map((row) => {
                   const targetBranchObj = branches.find(b => b.id === reqTargetBranch);
+                  const isLastReqRow = reqRows[reqRows.length - 1]?.id === row.id;
                   return (
                   <div key={row.id} className="grid grid-cols-[1fr_100px_60px_40px] gap-2 items-start" data-testid={`req-row-${row.id}`}>
                     <div className="relative">
@@ -1666,6 +1667,17 @@ export default function BranchTransferPage() {
                         className="h-9 text-sm"
                         value={row.search}
                         onChange={e => handleReqSearch(row.id, e.target.value)}
+                        onKeyDown={e => {
+                          // Enter → pick first match & focus the qty input
+                          if (e.key === 'Enter' && (row.matches?.length || 0) > 0) {
+                            e.preventDefault();
+                            selectReqProduct(row.id, row.matches[0]);
+                            setTimeout(() => {
+                              const q = document.querySelector(`[data-testid="req-qty-${row.id}"]`);
+                              if (q) q.focus();
+                            }, 50);
+                          }
+                        }}
                         placeholder="Search product..."
                         data-testid={`req-product-search-${row.id}`}
                         ref={el => { reqDropdownRefs.current[row.id] = el; }}
@@ -1713,6 +1725,18 @@ export default function BranchTransferPage() {
                     <CalcInput className="h-9 text-sm text-center"
  value={row.qty}
  onChange={(v) => updateReqRow(row.id, { qty: v })}
+ onKeyDown={e => {
+   // Tab on the last row (with product + qty) → auto-add a new row
+   if (e.key === 'Tab' && !e.shiftKey && isLastReqRow && row.product && parseFloat(row.qty) > 0) {
+     e.preventDefault();
+     const nr = newReqRow();
+     setReqRows(rs => [...rs, nr]);
+     setTimeout(() => {
+       const next = document.querySelector(`[data-testid="req-product-search-${nr.id}"]`);
+       if (next) next.focus();
+     }, 50);
+   }
+ }}
  placeholder="0"
  data-testid={`req-qty-${row.id}`} />
                     <span className="h-9 flex items-center text-xs text-slate-500 px-1">{row.product?.unit || '—'}</span>

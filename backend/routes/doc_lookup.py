@@ -373,10 +373,22 @@ async def view_document_open(code: str):
         branch = await db.branches.find_one({"id": doc.get("branch_id", "")}, {"_id": 0, "name": 1})
         branch_name = branch.get("name", "") if branch else ""
         po_status = doc.get("status", "")
+        po_type = doc.get("po_type", "")
         available_actions = []
         if po_status in ("ordered", "draft", "in_progress"):
             available_actions.append("po_receive")
         # received = view only
+
+        # ── Branch stock request: enrich with supply/request branch info ───
+        supply_branch_name = ""
+        requesting_branch_name = branch_name
+        is_branch_request = po_type == "branch_request"
+        if is_branch_request:
+            supply_branch_id = doc.get("supply_branch_id", "")
+            if supply_branch_id:
+                sb = await db.branches.find_one({"id": supply_branch_id}, {"_id": 0, "name": 1})
+                supply_branch_name = sb.get("name", "") if sb else ""
+
         return {
             "doc_type": "purchase_order",
             "doc_id": doc_id,
@@ -385,7 +397,14 @@ async def view_document_open(code: str):
             "supplier_name": doc.get("vendor", ""),
             "branch_id": doc.get("branch_id", ""),
             "branch_name": branch_name,
-            "items": [{"name": i.get("product_name") or i.get("description", ""), "qty": i.get("quantity", 0), "price": i.get("rate") or i.get("unit_price") or i.get("price", 0), "total": i.get("total", 0)} for i in (doc.get("items") or [])],
+            "po_type": po_type,
+            "is_branch_request": is_branch_request,
+            "supply_branch_name": supply_branch_name,
+            "requesting_branch_name": requesting_branch_name,
+            "fulfillment_started_at": doc.get("fulfillment_started_at", ""),
+            "fulfillment_started_by": doc.get("fulfillment_started_by", ""),
+            "notes": doc.get("notes", ""),
+            "items": [{"name": i.get("product_name") or i.get("description", ""), "qty": i.get("quantity", 0), "price": i.get("rate") or i.get("unit_price") or i.get("price", 0), "total": i.get("total", 0), "unit": i.get("unit", "")} for i in (doc.get("items") or [])],
             "grand_total": doc.get("grand_total", 0),
             "status": (doc.get("status") or "").replace("_", " ").title(),
             "raw_status": po_status,

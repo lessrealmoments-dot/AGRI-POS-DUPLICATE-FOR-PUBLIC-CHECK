@@ -22,6 +22,137 @@ logger = logging.getLogger("purchase_orders")
 router = APIRouter(prefix="/purchase-orders", tags=["Purchase Orders"])
 
 
+# ── SMS helper for branch stock requests ────────────────────────────────────
+async def _notify_stock_request_recipients(
+    po: dict,
+    items: list,
+    requesting_branch_name: str,
+    supply_branch_id: str,
+    supply_branch_name: str,
+    doc_code: str = "",
+):
+    """Fire SMS to the recipients configured for the `branch_stock_request` trigger.
+
+    Defaults: org admins + supply-branch managers (matches existing pattern used by
+    `_notify_admins_pending_approval`). Configurable in Settings → Messages.
+    """
+    import os
+    from routes.sms import queue_sms
+
+    org_id = po.get("organization_id") or ""
+    if not org_id:
+        return
+
+    cfg = await db.sms_recipient_config.find_one(
+        {"trigger_key": "branch_stock_request"}, {"_id": 0}
+    ) or {}
+    include_admins = cfg.get("include_admins", True)
+    include_supply_manager = cfg.get("include_supply_manager", True)
+    include_supply_auditor = cfg.get("include_supply_auditor", False)
+    include_all_supply_users = cfg.get("include_all_supply_users", False)
+
+    recipients = []  # list of dicts: id, name, phone
+    seen_ids = set()
+
+    def _add(u):
+        uid = u.get("id")
+        if not uid or uid in seen_ids:
+            return
+        phone = (u.get("phone") or u.get("phone_number") or "").strip()
+        if not phone:
+            return
+        seen_ids.add(uid)
+        recipients.append({
+            "id": uid,
+            "name": u.get("full_name") or u.get("username", "Team"),
+            "phone": phone,
+        })
+
+    proj = {"_id": 0, "id": 1, "full_name": 1, "username": 1, "phone": 1, "phone_number": 1, "role": 1, "branch_id": 1}
+
+    if include_admins:
+        admins = await db.users.find(
+            {"organization_id": org_id, "role": "admin", "active": True}, proj
+        ).to_list(50)
+        for u in admins:
+            _add(u)
+
+    if include_all_supply_users:
+        all_users = await db.users.find(
+            {"organization_id": org_id, "branch_id": supply_branch_id, "active": True}, proj
+        ).to_list(50)
+        for u in all_users:
+            _add(u)
+    else:
+        if include_supply_manager:
+            mgrs = await db.users.find(
+                {"organization_id": org_id, "branch_id": supply_branch_id,
+                 "role": "manager", "active": True}, proj
+            ).to_list(50)
+            for u in mgrs:
+                _add(u)
+        if include_supply_auditor:
+            auds = await db.users.find(
+                {"organization_id": org_id, "branch_id": supply_branch_id,
+                 "role": "auditor", "active": True}, proj
+            ).to_list(50)
+            for u in auds:
+                _add(u)
+
+    if not recipients:
+        return
+
+    # Build the public view link (uses the doc_code that was auto-generated for this PO)
+    org = await db.organizations.find_one({"id": org_id}, {"_id": 0})
+    app_url = (
+        (org or {}).get("app_url")
+        or os.environ.get("REACT_APP_FRONTEND_URL", "")
+        or os.environ.get("APP_PUBLIC_URL", "")
+    ).rstrip("/")
+    if doc_code and app_url:
+        view_link = f"{app_url}/doc/{doc_code}"
+    elif doc_code:
+        view_link = f"/doc/{doc_code}"
+    else:
+        view_link = f"{app_url}/branch-transfers?tab=history&subtab=requests" if app_url else "/branch-transfers"
+
+    items_summary = ", ".join(
+        f"{i.get('product_name','')} ×{i.get('quantity',0)}"
+        for i in items[:3]
+    )
+    if len(items) > 3:
+        items_summary += f" +{len(items)-3} more"
+
+    company = (org or {}).get("name", "AgriBooks") if org else "AgriBooks"
+
+    for rcp in recipients:
+        try:
+            await queue_sms(
+                template_key="branch_stock_request",
+                customer_id=rcp["id"],
+                customer_name=rcp["name"],
+                phone=rcp["phone"],
+                variables={
+                    "recipient_name": rcp["name"],
+                    "requesting_branch": requesting_branch_name,
+                    "supply_branch": supply_branch_name,
+                    "po_number": po.get("po_number", ""),
+                    "items_count": str(len(items)),
+                    "items_summary": items_summary,
+                    "view_link": view_link,
+                    "company_name": company,
+                },
+                organization_id=org_id,
+                branch_id=supply_branch_id,
+                branch_name=supply_branch_name,
+                trigger="auto",
+                trigger_ref=po.get("id", ""),
+                dedup_key=f"branch_stock_request:{po.get('id','')}:{rcp['id']}",
+            )
+        except Exception as e:
+            logger.warning(f"queue_sms failed for {rcp.get('phone')}: {e}")
+
+
 # ── Shared inventory-receive helper ──────────────────────────────────────────
 async def _apply_po_inventory(po: dict, user: dict, capital_choices: dict = None):
     """
@@ -418,6 +549,8 @@ async def create_purchase_order(data: dict, user=Depends(get_current_user)):
         supply_branch_id = data.get("supply_branch_id", "")
         requesting_branch = await db.branches.find_one({"id": branch_id}, {"_id": 0, "name": 1})
         req_name = requesting_branch.get("name", branch_id) if requesting_branch else branch_id
+        supply_branch = await db.branches.find_one({"id": supply_branch_id}, {"_id": 0, "name": 1})
+        supply_name = supply_branch.get("name", supply_branch_id) if supply_branch else supply_branch_id
         supply_users = await db.users.find(
             {"branch_id": supply_branch_id, "active": True}, {"_id": 0, "id": 1}
         ).to_list(50)
@@ -444,6 +577,21 @@ async def create_purchase_order(data: dict, user=Depends(get_current_user)):
             "read_by": [],
             "created_at": now_iso(),
         })
+
+        # Fire SMS to configured recipients (admins / supply-branch managers / auditors)
+        try:
+            await _notify_stock_request_recipients(
+                po=po,
+                items=items,
+                requesting_branch_name=req_name,
+                supply_branch_id=supply_branch_id,
+                supply_branch_name=supply_name,
+                doc_code=po.get("doc_code", ""),
+            )
+        except Exception as sms_err:
+            logger.warning(
+                f"branch_stock_request SMS failed for {po.get('po_number','')}: {sms_err}"
+            )
 
     # ── Cash: validate fund + deduct + expense (BEFORE upload linking) ────
     if po_type == "cash" and grand_total > 0:

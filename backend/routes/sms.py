@@ -494,6 +494,21 @@ DEFAULT_TEMPLATES = [
         "trigger": "auto",
         "active": True,
     },
+    {
+        "key": "branch_stock_request",
+        "name": "Branch Stock Request (to Recipients)",
+        "body": (
+            "Hi <recipient_name>, <requesting_branch> requested stocks from "
+            "<supply_branch> (PO <po_number>, <items_count> item/s). "
+            "Top items: <items_summary>. "
+            "View: <view_link>"
+        ),
+        "placeholders": ["recipient_name", "requesting_branch", "supply_branch",
+                         "po_number", "items_count", "items_summary",
+                         "view_link", "company_name"],
+        "trigger": "auto",
+        "active": True,
+    },
     # ── Crop Credit Notifications ────────────────────────────────────────────
     {
         "key": "crop_season_started",
@@ -1101,6 +1116,49 @@ async def update_sms_setting(trigger_key: str, data: dict, user=Depends(get_curr
         upsert=True,
     )
     return {"trigger_key": trigger_key, "enabled": enabled}
+
+
+# ── Per-trigger recipient role configuration ────────────────────────────────
+# Determines WHICH user roles receive the SMS for a given trigger.
+# Currently used by `branch_stock_request`. Stored in `db.sms_recipient_config`.
+DEFAULT_RECIPIENT_CONFIG = {
+    "branch_stock_request": {
+        "include_admins": True,           # All org admins
+        "include_supply_manager": True,   # Manager(s) of supply branch
+        "include_supply_auditor": False,  # Auditor(s) of supply branch
+        "include_all_supply_users": False,# Every active user of supply branch
+    }
+}
+
+
+@router.get("/recipients/{trigger_key}")
+async def get_recipient_config(trigger_key: str, user=Depends(get_current_user)):
+    """Fetch role-based recipient settings for a trigger (e.g. branch_stock_request)."""
+    doc = await db.sms_recipient_config.find_one({"trigger_key": trigger_key}, {"_id": 0})
+    defaults = DEFAULT_RECIPIENT_CONFIG.get(trigger_key, {})
+    if not doc:
+        return {"trigger_key": trigger_key, **defaults}
+    # Merge defaults with stored values so newly-added flags don't break old configs
+    return {"trigger_key": trigger_key, **defaults, **{k: v for k, v in doc.items() if k != "trigger_key"}}
+
+
+@router.put("/recipients/{trigger_key}")
+async def update_recipient_config(trigger_key: str, data: dict, user=Depends(get_current_user)):
+    """Update role-based recipient settings for a trigger."""
+    check_perm(user, "settings", "edit")
+    if trigger_key not in DEFAULT_RECIPIENT_CONFIG:
+        raise HTTPException(status_code=400, detail=f"Trigger '{trigger_key}' has no recipient config")
+    allowed = set(DEFAULT_RECIPIENT_CONFIG[trigger_key].keys())
+    update = {k: bool(v) for k, v in (data or {}).items() if k in allowed}
+    update["updated_at"] = now_iso()
+    await db.sms_recipient_config.update_one(
+        {"trigger_key": trigger_key},
+        {"$set": update, "$setOnInsert": {"id": new_id(), "trigger_key": trigger_key}},
+        upsert=True,
+    )
+    doc = await db.sms_recipient_config.find_one({"trigger_key": trigger_key}, {"_id": 0})
+    defaults = DEFAULT_RECIPIENT_CONFIG[trigger_key]
+    return {"trigger_key": trigger_key, **defaults, **{k: v for k, v in doc.items() if k != "trigger_key"}}
 
 
 # ── Queue ───────────────────────────────────────────────────────────────────

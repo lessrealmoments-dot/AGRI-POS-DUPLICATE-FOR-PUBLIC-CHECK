@@ -1493,7 +1493,11 @@ export default function DocViewerPage() {
         <div className="bg-white rounded-xl shadow-sm border overflow-hidden" data-testid="doc-basic-view">
           <div className="bg-[#1A4D2E] px-5 py-4">
             <p className="text-emerald-200 text-xs uppercase tracking-wider font-medium">
-              {basic.doc_type === 'invoice' ? 'Sales Receipt' : basic.doc_type === 'purchase_order' ? 'Purchase Order' : 'Branch Transfer'}
+              {basic.doc_type === 'invoice'
+                ? 'Sales Receipt'
+                : basic.doc_type === 'purchase_order'
+                  ? (basic.is_branch_request ? 'Stock Request' : 'Purchase Order')
+                  : 'Branch Transfer'}
             </p>
             <h1 className="text-white text-xl font-bold mt-0.5" data-testid="doc-number">{basic.number}</h1>
             <div className="flex items-center justify-between mt-1">
@@ -1510,8 +1514,15 @@ export default function DocViewerPage() {
               <div>
                 {basic.doc_type === 'invoice' && <p className="text-sm text-slate-500">Customer: <span className="font-semibold text-slate-800">{basic.customer_name}</span></p>}
                 {basic.doc_type === 'invoice' && basic.branch_name && <p className="text-xs text-slate-400 mt-0.5">Branch: <span className="font-medium text-slate-600">{basic.branch_name}</span></p>}
-                {basic.doc_type === 'purchase_order' && <p className="text-sm text-slate-500">Supplier: <span className="font-semibold text-slate-800">{basic.supplier_name}</span></p>}
-                {basic.doc_type === 'purchase_order' && basic.branch_name && <p className="text-xs text-slate-400 mt-0.5">Branch: <span className="font-medium text-slate-600">{basic.branch_name}</span></p>}
+                {basic.doc_type === 'purchase_order' && !basic.is_branch_request && <p className="text-sm text-slate-500">Supplier: <span className="font-semibold text-slate-800">{basic.supplier_name}</span></p>}
+                {basic.doc_type === 'purchase_order' && !basic.is_branch_request && basic.branch_name && <p className="text-xs text-slate-400 mt-0.5">Branch: <span className="font-medium text-slate-600">{basic.branch_name}</span></p>}
+                {basic.doc_type === 'purchase_order' && basic.is_branch_request && (
+                  <div className="flex items-center gap-2 text-sm" data-testid="stock-request-route">
+                    <span className="font-semibold text-slate-800">{basic.requesting_branch_name || basic.branch_name}</span>
+                    <span className="text-[10px] text-slate-400 uppercase tracking-wider">requests from</span>
+                    <span className="font-semibold text-slate-800">{basic.supply_branch_name || '—'}</span>
+                  </div>
+                )}
                 {basic.doc_type === 'branch_transfer' && (
                   <div className="flex items-center gap-2 text-sm">
                     <span className="font-semibold text-slate-800">{basic.from_branch}</span>
@@ -1522,6 +1533,14 @@ export default function DocViewerPage() {
               </div>
               <Badge className={`text-sm px-3 py-1 ${sColor}`} data-testid="doc-status">{basic.status}</Badge>
             </div>
+            {basic.doc_type === 'purchase_order' && basic.is_branch_request && basic.notes && (
+              <p className="text-xs text-slate-500 mt-2 italic" data-testid="stock-request-notes">📝 {basic.notes}</p>
+            )}
+            {basic.doc_type === 'purchase_order' && basic.is_branch_request && basic.fulfillment_started_at && (
+              <p className="text-[11px] text-blue-600 mt-1" data-testid="stock-request-fulfillment">
+                Being fulfilled by <strong>{basic.fulfillment_started_by}</strong> · log in to the app to view the generated transfer.
+              </p>
+            )}
           </div>
           <div className="divide-y divide-slate-50">
             {basic.items.map((item, i) => (
@@ -1841,8 +1860,8 @@ export default function DocViewerPage() {
                   </>
                 )}
                 
-                {/* Purchase Order Actions */}
-                {basic.doc_type === 'purchase_order' && ['Draft', 'Ordered', 'In Progress'].includes(basic.status) && (
+                {/* Purchase Order Actions (cash POs only — not for branch stock requests) */}
+                {basic.doc_type === 'purchase_order' && !basic.is_branch_request && ['Draft', 'Ordered', 'In Progress'].includes(basic.status) && (
                   <>
                     <p className="text-sm text-slate-600 mb-2"><Package size={14} className="inline mr-1.5 text-blue-500" />Pull this PO to your terminal for product checking</p>
                     <Input type="password" value={terminalPin} onChange={e => { setTerminalPin(e.target.value); setTerminalError(''); }} onKeyDown={e => e.key === 'Enter' && handleTerminalPull()} placeholder="Enter PIN to pull" className="h-11 text-center font-mono tracking-widest" autoComplete="new-password" data-testid="terminal-pin-input" />
@@ -1851,6 +1870,25 @@ export default function DocViewerPage() {
                       {terminalLoading ? <RefreshCw size={14} className="animate-spin mr-2" /> : <Package size={14} className="mr-2" />}Pull PO to Terminal
                     </Button>
                   </>
+                )}
+
+                {/* Branch Stock Request — view-only notice + login prompt */}
+                {basic.doc_type === 'purchase_order' && basic.is_branch_request && (
+                  <div className="space-y-2" data-testid="stock-request-actions">
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                      <p className="text-sm text-amber-800 font-medium">📦 Stock Request</p>
+                      <p className="text-xs text-amber-700 mt-1">
+                        This is a view-only summary of a branch stock request.
+                        To fulfill (generate the Branch Transfer), open the app and go to
+                        <span className="font-semibold"> Branch Transfer → History → Requests</span>.
+                      </p>
+                    </div>
+                    <Button className="w-full h-10 bg-[#1A4D2E] hover:bg-emerald-700 text-white font-semibold"
+                      onClick={() => navigate('/branch-transfers?tab=history&subtab=requests')}
+                      data-testid="open-stock-request-btn">
+                      Open in Branch Transfer
+                    </Button>
+                  </div>
                 )}
                 
                 {/* Branch Transfer Actions */}
@@ -1867,7 +1905,8 @@ export default function DocViewerPage() {
                 
                 {/* No actions available */}
                 {basic.doc_type !== 'invoice' &&
-                 !(basic.doc_type === 'purchase_order' && ['Draft', 'Ordered', 'In Progress'].includes(basic.status)) &&
+                 !(basic.doc_type === 'purchase_order' && !basic.is_branch_request && ['Draft', 'Ordered', 'In Progress'].includes(basic.status)) &&
+                 !(basic.doc_type === 'purchase_order' && basic.is_branch_request) &&
                  !(basic.doc_type === 'branch_transfer' && basic.raw_status === 'sent') && (
                   <p className="text-sm text-slate-400 text-center py-2">No terminal actions available for this document's current status</p>
                 )}

@@ -152,6 +152,14 @@ export default function MessagesPage() {
     owner_phone: '', manager_phone: '', admin_phone: '', auditor_phone: '', branch_phones: {}
   });
   const [savingRecipients, setSavingRecipients] = useState(false);
+  // Stock-request recipient role config (which user roles get the SMS)
+  const [stockReqRecipients, setStockReqRecipients] = useState({
+    include_admins: true,
+    include_supply_manager: true,
+    include_supply_auditor: false,
+    include_all_supply_users: false,
+  });
+  const [savingStockReq, setSavingStockReq] = useState(false);
   const [sampleOpen, setSampleOpen] = useState(false);
   const [sendingSample, setSendingSample] = useState(false);
   // Tracks per-row "Test" button state — keyed by `${role}:${branchId||''}`
@@ -202,6 +210,15 @@ export default function MessagesPage() {
       setSmsSettings(res.data || []);
       const rec = await api.get('/settings/collection-recipients');
       setCollectionRecipients(rec.data || { owner_phone: '', manager_phone: '', admin_phone: '', auditor_phone: '', branch_phones: {} });
+      try {
+        const sr = await api.get('/sms/recipients/branch_stock_request');
+        setStockReqRecipients({
+          include_admins: !!sr.data?.include_admins,
+          include_supply_manager: !!sr.data?.include_supply_manager,
+          include_supply_auditor: !!sr.data?.include_supply_auditor,
+          include_all_supply_users: !!sr.data?.include_all_supply_users,
+        });
+      } catch { /* keep defaults */ }
     } catch { /* ignore */ }
   }, []);
 
@@ -556,6 +573,21 @@ export default function MessagesPage() {
     await api.put(`/sms/settings/${key}`, { enabled });
     toast.success(`${key.replace(/_/g, ' ')} ${enabled ? 'enabled' : 'disabled'}`);
     loadSettings();
+  };
+
+  // Stock-request recipient toggle (which user roles get SMS for branch_stock_request)
+  const toggleStockReqRecipient = async (field) => {
+    const next = { ...stockReqRecipients, [field]: !stockReqRecipients[field] };
+    setStockReqRecipients(next);  // optimistic
+    setSavingStockReq(true);
+    try {
+      await api.put('/sms/recipients/branch_stock_request', next);
+      toast.success('Recipients updated');
+    } catch {
+      toast.error('Failed to update recipients');
+      setStockReqRecipients(stockReqRecipients);  // revert
+    }
+    setSavingStockReq(false);
   };
 
   const clearGatewayLogs = async () => {
@@ -1616,6 +1648,45 @@ export default function MessagesPage() {
                       className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${s.enabled ? 'bg-[#1A4D2E]' : 'bg-slate-300'}`}
                       data-testid={`toggle-setting-${s.trigger_key}`}>
                       <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${s.enabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Branch Stock Request — Recipient Role Config */}
+          <Card className="border-emerald-200" data-testid="stock-req-recipients-card">
+            <CardContent className="p-5 space-y-4">
+              <div>
+                <h2 className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                  Branch Stock Request — Recipients
+                </h2>
+                <p className="text-xs text-slate-400 mt-1">
+                  Choose who receives the SMS when a branch sends a stock request.
+                  The SMS includes a public view-only link to the request.
+                  In-app notifications still go to all supply-branch users + admins regardless of these toggles.
+                </p>
+              </div>
+
+              <div className="divide-y divide-slate-100">
+                {[
+                  { key: 'include_admins', label: 'Org Admins', hint: 'All admins of the organization (recommended)' },
+                  { key: 'include_supply_manager', label: 'Manager — Supply Branch', hint: 'Manager(s) assigned to the receiving branch' },
+                  { key: 'include_supply_auditor', label: 'Auditor — Supply Branch', hint: 'Auditor(s) assigned to the receiving branch' },
+                  { key: 'include_all_supply_users', label: 'All Supply-Branch Users', hint: 'Every active user of the supply branch (overrides Manager/Auditor above)' },
+                ].map(({ key, label, hint }) => (
+                  <div key={key} className="flex items-center justify-between py-3" data-testid={`stock-req-recipient-row-${key}`}>
+                    <div className="pr-4">
+                      <p className="text-sm font-medium text-slate-700">{label}</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">{hint}</p>
+                    </div>
+                    <button onClick={() => toggleStockReqRecipient(key)}
+                      disabled={savingStockReq}
+                      className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${stockReqRecipients[key] ? 'bg-emerald-600' : 'bg-slate-300'} disabled:opacity-50`}
+                      data-testid={`toggle-stock-req-${key}`}>
+                      <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${stockReqRecipients[key] ? 'translate-x-5' : 'translate-x-0.5'}`} />
                     </button>
                   </div>
                 ))}
