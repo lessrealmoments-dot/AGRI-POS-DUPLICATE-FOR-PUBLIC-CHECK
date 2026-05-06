@@ -1,24 +1,29 @@
 # AgriBooks PRD
-
-## Iter 244 (Feb 2026) — Product Movement History: Clickable Receipts + Refund/Void/Reopen ✅
+## Iter 244 (Feb 2026) — Unified Invoice Detail Modal: Refund / Void / Void & Re-open ✅
 
 ### What changed
-On **Product Detail → Movement History**, the "Ref" column now renders `reference_number` as a clickable link for any `sale` type movement. Clicking opens a new reusable **`InvoiceDetailModal`** that shows the full receipt (items, totals, customer, status, cashier, interest accrued) and offers three actions when the sale is not already voided:
-- **Refund** → navigates to `/returns?invoice=<number>` (handled by `ReturnRefundWizard` via `useSearchParams` — invoice number is pre-filled in step 1).
-- **Void** → opens a reason + manager-PIN confirm dialog, calls `POST /api/invoices/{id}/void`, refreshes movements.
-- **Void & Re-open** → voids then navigates to `/sales-new` carrying the snapshot via `sessionStorage.reopen_sale_snapshot`; `UnifiedSalesPage` consumes it on mount (once customers load) and pre-fills a new sale draft with the original date preserved for interest calculations.
+Consolidated the receipt-action buttons into the single canonical `InvoiceDetailModal.js` (~1,500 lines, used by Dashboard, Customers, Payments, Reports, Daily Log, Audit Center, Accounting, Expenses, Internal Invoices, Pending Releases, Transaction Search, Crop Credits, Close Wizard, QuickSearch, Signature Toolbar, and now Product Detail → Movement History). Both the **compact** and **full** layouts now show the same three actions on any non-voided invoice:
+- **Refund** → closes modal, navigates to `/returns?invoice=<number>` (ReturnRefundWizard reads `useSearchParams` and pre-fills the invoice field in step 1).
+- **Void** → reason + manager-PIN dialog, calls `POST /api/invoices/{id}/void` (accepts both `pin` and `manager_pin` server-side).
+- **Void & Re-open** → same void flow, then stashes the returned `snapshot` in `sessionStorage.reopen_sale_snapshot` and navigates to `/sales-new`; `UnifiedSalesPage` consumes it on mount (once customers are loaded) and pre-fills a new sale draft with the original invoice_date preserved for interest continuity.
+
+### Movement History click-through
+Product Detail → Movement History now renders `reference_number` as a clickable link for `type === 'sale'` rows. Click opens the unified modal in compact mode.
 
 ### Files
-- `/app/frontend/src/components/InvoiceDetailModal.jsx` (NEW — shared receipt modal)
-- `/app/frontend/src/pages/ProductDetailPage.js` (clickable `reference_number` + modal render)
-- `/app/frontend/src/pages/ReturnRefundWizard.js` (accepts `?invoice=` query param)
+- `/app/frontend/src/components/InvoiceDetailModal.js` (unified: added `handleRefund`, `openVoidDialog(alsoReopen)`, reopen snapshot flow; buttons wired into both compact and full layouts; void dialog label adapts to reopen mode)
+- `/app/frontend/src/pages/ProductDetailPage.js` (clickable `reference_number` + unified modal usage with `compact` prop)
+- `/app/frontend/src/pages/ReturnRefundWizard.js` (reads `?invoice=` query param)
 - `/app/frontend/src/pages/UnifiedSalesPage.js` (consumes `sessionStorage.reopen_sale_snapshot` on mount)
+- `/app/frontend/src/components/InvoiceDetailModal.jsx` — DELETED (superseded by the unified `.js`)
 
 ### Verified
-- Movement History receipt click → modal opens → invoice data loaded (`/invoices/by-number/` OK).
-- `/returns?invoice=TEST-INV-12345` pre-fills invoice number in step 1.
+- `/products/<id>` → Movement History → click sale ref → unified modal renders with all three buttons (`sale-refund-btn`, `sale-void-btn`, `sale-void-reopen-btn`).
+- `/returns?invoice=TEST-INV-12345` pre-fills the invoice input.
+- `/daily-log` and `/sales-new` still load cleanly with the updated modal.
 
 ---
+
 
 
 ## Iter 243.4 (May 2026) — Z-Report: Net Sales + Employee Advances + Before/After Allocation ✅

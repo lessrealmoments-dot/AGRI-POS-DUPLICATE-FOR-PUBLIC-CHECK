@@ -1258,10 +1258,11 @@ export default function ProductDetailPage() {
 
       {/* Receipt Detail Modal — Movement History click-through */}
       <InvoiceDetailModal
-        invoiceNumber={selectedReceipt}
+        compact
         open={!!selectedReceipt}
-        onClose={() => setSelectedReceipt(null)}
-        onChanged={() => fetchMovements()}
+        onOpenChange={(o) => { if (!o) setSelectedReceipt(null); }}
+        invoiceNumber={selectedReceipt}
+        onUpdated={() => fetchMovements()}
       />
     </div>
   );

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api, useAuth } from '../contexts/AuthContext';
 import { formatPHP, fmtDateTime, fmtDate } from '../lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
@@ -21,7 +22,7 @@ import {
   FileText, Edit3, History, Save, X, AlertTriangle, Package,
   User, Calendar, DollarSign, Trash2, Clock, CheckCircle2,
   Copy, Check, ShieldCheck, Ban, ImageIcon, Upload, Smartphone,
-  Truck, CreditCard, Wallet, Pencil, RefreshCw, Printer, MessageSquare
+  Truck, CreditCard, Wallet, Pencil, RefreshCw, Printer, MessageSquare, RotateCcw
 } from 'lucide-react';
 import { formatDateTime } from '../lib/dateFormat';
 import { toast } from 'sonner';
@@ -35,6 +36,7 @@ export default function InvoiceDetailModal({
   const resolvedInvoiceId = invoiceId || saleId;
 
   const { hasPerm, user, currentBranch } = useAuth();
+  const navigate = useNavigate();
   const [invoice, setInvoice] = useState(null);
   const [loading, setLoading] = useState(true);
   const [editMode, setEditMode] = useState(false);
@@ -53,6 +55,7 @@ export default function InvoiceDetailModal({
   const [voidOpen, setVoidOpen] = useState(false);
   const [voidReason, setVoidReason] = useState('');
   const [voidPin, setVoidPin] = useState('');
+  const [reopenAfterVoid, setReopenAfterVoid] = useState(false);
   const [verifyOpen, setVerifyOpen] = useState(false);
   const [verifyPin, setVerifyPin] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
@@ -217,6 +220,7 @@ export default function InvoiceDetailModal({
     if (!voidReason || !voidPin) { toast.error('Reason and PIN required'); return; }
     setActionLoading(true);
     try {
+      let voidRes = null;
       if (isPO) {
         await api.delete(`/purchase-orders/${invoice.id}`);
         toast.success('PO cancelled');
@@ -224,13 +228,38 @@ export default function InvoiceDetailModal({
         await api.delete(`/expenses/${invoice.id}`);
         toast.success('Expense deleted');
       } else {
-        await api.post(`/invoices/${invoice.id}/void`, { reason: voidReason, pin: voidPin });
+        voidRes = await api.post(`/invoices/${invoice.id}/void`, { reason: voidReason, manager_pin: voidPin });
         toast.success('Invoice voided');
       }
       setVoidOpen(false); setVoidReason(''); setVoidPin('');
+
+      if (reopenAfterVoid && voidRes?.data?.snapshot) {
+        try { sessionStorage.setItem('reopen_sale_snapshot', JSON.stringify(voidRes.data.snapshot)); } catch { /* ignore */ }
+        onOpenChange?.(false);
+        onUpdated?.();
+        navigate('/sales-new');
+        setActionLoading(false);
+        setReopenAfterVoid(false);
+        return;
+      }
+      setReopenAfterVoid(false);
       loadInvoice(); onUpdated?.();
     } catch (e) { toast.error(e.response?.data?.detail || 'Action failed'); }
     setActionLoading(false);
+  };
+
+  // ── Refund: navigate to /returns with the invoice prefilled ───────────
+  const handleRefund = () => {
+    if (!invoice) return;
+    const invNum = invoice.invoice_number || invoice.sale_number || '';
+    onOpenChange?.(false);
+    navigate(`/returns?invoice=${encodeURIComponent(invNum)}`);
+  };
+
+  const openVoidDialog = (alsoReopen) => {
+    setReopenAfterVoid(!!alsoReopen);
+    setVoidReason(''); setVoidPin('');
+    setVoidOpen(true);
   };
 
   const copyNumber = async () => {
@@ -321,9 +350,20 @@ export default function InvoiceDetailModal({
     if (!voidReason || !voidPin) { toast.error('Reason and PIN required'); return; }
     setActionLoading(true);
     try {
-      await api.post(`/invoices/${invoice.id}/void`, { reason: voidReason, manager_pin: voidPin });
+      const res = await api.post(`/invoices/${invoice.id}/void`, { reason: voidReason, manager_pin: voidPin });
       toast.success('Sale voided');
       setVoidOpen(false); setVoidReason(''); setVoidPin('');
+
+      if (reopenAfterVoid && res?.data?.snapshot) {
+        try { sessionStorage.setItem('reopen_sale_snapshot', JSON.stringify(res.data.snapshot)); } catch { /* ignore */ }
+        onOpenChange?.(false);
+        onUpdated?.();
+        navigate('/sales-new');
+        setActionLoading(false);
+        setReopenAfterVoid(false);
+        return;
+      }
+      setReopenAfterVoid(false);
       loadInvoice(); onUpdated?.();
     } catch (e) { toast.error(e.response?.data?.detail || 'Failed to void'); }
     setActionLoading(false);
@@ -637,11 +677,19 @@ export default function InvoiceDetailModal({
                         </div>
                       )}
 
-                      {/* Void button */}
+                      {/* Action buttons: Refund / Void / Void & Re-open */}
                       {canVoid && (
-                        <Button variant="destructive" className="w-full" onClick={() => setVoidOpen(true)} data-testid="sale-void-btn">
-                          <Ban size={14} className="mr-2" /> Void Sale
-                        </Button>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <Button variant="outline" className="w-full text-amber-700 border-amber-200 hover:bg-amber-50" onClick={handleRefund} data-testid="sale-refund-btn">
+                            <RotateCcw size={14} className="mr-2" /> Refund
+                          </Button>
+                          <Button variant="destructive" className="w-full" onClick={() => openVoidDialog(false)} data-testid="sale-void-btn">
+                            <Ban size={14} className="mr-2" /> Void
+                          </Button>
+                          <Button variant="outline" className="w-full text-red-700 border-red-200 hover:bg-red-50" onClick={() => openVoidDialog(true)} data-testid="sale-void-reopen-btn">
+                            <RefreshCw size={14} className="mr-2" /> Void &amp; Re-open
+                          </Button>
+                        </div>
                       )}
                     </>
                   )}
@@ -676,19 +724,26 @@ export default function InvoiceDetailModal({
           }}
         />
         {/* Void dialog */}
-        <Dialog open={voidOpen} onOpenChange={setVoidOpen}>
+        <Dialog open={voidOpen} onOpenChange={(o) => { setVoidOpen(o); if (!o) setReopenAfterVoid(false); }}>
           <DialogContent className="sm:max-w-sm" data-testid="sale-void-dialog">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 text-red-600"><Ban size={18} /> Void Sale</DialogTitle>
+              <DialogTitle className="flex items-center gap-2 text-red-600">
+                {reopenAfterVoid ? <><RefreshCw size={18} /> Void &amp; Re-open Sale</> : <><Ban size={18} /> Void Sale</>}
+              </DialogTitle>
             </DialogHeader>
             <div className="space-y-3 py-2">
+              {reopenAfterVoid && (
+                <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+                  After voiding you'll be taken to a new sale draft pre-filled with these items.
+                </div>
+              )}
               <Input placeholder="Reason for voiding" value={voidReason} onChange={e => setVoidReason(e.target.value)} data-testid="void-reason-input" />
               <Input type="password" autoComplete="new-password" placeholder="Manager/Admin PIN" value={voidPin} onChange={e => setVoidPin(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && voidReason && voidPin) handleCompactVoid(); }} data-testid="void-pin-input" />
               <div className="flex gap-2">
-                <Button variant="outline" className="flex-1" onClick={() => { setVoidOpen(false); setVoidReason(''); setVoidPin(''); }}>Cancel</Button>
+                <Button variant="outline" className="flex-1" onClick={() => { setVoidOpen(false); setVoidReason(''); setVoidPin(''); setReopenAfterVoid(false); }}>Cancel</Button>
                 <Button variant="destructive" className="flex-1" onClick={handleCompactVoid} disabled={!voidReason || !voidPin || actionLoading} data-testid="void-confirm-btn">
-                  {actionLoading ? 'Processing...' : 'Void Sale'}
+                  {actionLoading ? 'Processing...' : (reopenAfterVoid ? 'Void & Re-open' : 'Void Sale')}
                 </Button>
               </div>
             </div>
@@ -754,10 +809,22 @@ export default function InvoiceDetailModal({
                         <ShieldCheck size={14} className="mr-1" /> Verify
                       </Button>
                     )}
+                    {canVoid && isInvoice && (
+                      <Button variant="outline" size="sm" className="text-amber-700 border-amber-200 hover:bg-amber-50"
+                        onClick={handleRefund} data-testid="refund-btn">
+                        <RotateCcw size={14} className="mr-1" /> Refund
+                      </Button>
+                    )}
                     {canVoid && (
                       <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50"
-                        onClick={() => setVoidOpen(true)} data-testid="void-btn">
+                        onClick={() => openVoidDialog(false)} data-testid="void-btn">
                         <Ban size={14} className="mr-1" /> {isPO ? 'Cancel' : 'Void'}
+                      </Button>
+                    )}
+                    {canVoid && isInvoice && (
+                      <Button variant="outline" size="sm" className="text-red-700 border-red-200 hover:bg-red-50"
+                        onClick={() => openVoidDialog(true)} data-testid="void-reopen-btn">
+                        <RefreshCw size={14} className="mr-1" /> Void &amp; Re-open
                       </Button>
                     )}
                     {canDeleteExpense && (
@@ -1409,17 +1476,24 @@ export default function InvoiceDetailModal({
       </Dialog>
 
       {/* Void dialog */}
-      <Dialog open={voidOpen} onOpenChange={setVoidOpen}>
+      <Dialog open={voidOpen} onOpenChange={(o) => { setVoidOpen(o); if (!o) setReopenAfterVoid(false); }}>
         <DialogContent className="sm:max-w-sm" data-testid="void-dialog">
-          <DialogHeader><DialogTitle className="flex items-center gap-2 text-red-600"><Ban size={18} /> {isExpense ? 'Delete Expense' : isPO ? 'Cancel PO' : 'Void Invoice'}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="flex items-center gap-2 text-red-600">
+            {reopenAfterVoid ? <><RefreshCw size={18} /> Void &amp; Re-open Invoice</> : <><Ban size={18} /> {isExpense ? 'Delete Expense' : isPO ? 'Cancel PO' : 'Void Invoice'}</>}
+          </DialogTitle></DialogHeader>
           <div className="space-y-3 py-2">
+            {reopenAfterVoid && (
+              <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+                After voiding you'll be taken to a new sale draft pre-filled with these items.
+              </div>
+            )}
             <Input placeholder="Reason" value={voidReason} onChange={e => setVoidReason(e.target.value)} data-testid="void-reason-input" />
             <Input type="password" placeholder="Manager/Admin PIN" value={voidPin} onChange={e => setVoidPin(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && voidReason && voidPin) handleVoid(); }} data-testid="void-pin-input" />
             <div className="flex gap-2">
-              <Button variant="outline" className="flex-1" onClick={() => { setVoidOpen(false); setVoidReason(''); setVoidPin(''); }}>Cancel</Button>
+              <Button variant="outline" className="flex-1" onClick={() => { setVoidOpen(false); setVoidReason(''); setVoidPin(''); setReopenAfterVoid(false); }}>Cancel</Button>
               <Button variant="destructive" className="flex-1" onClick={handleVoid} disabled={!voidReason || !voidPin || actionLoading} data-testid="void-confirm-btn">
-                {actionLoading ? 'Processing...' : (isExpense ? 'Delete' : isPO ? 'Cancel PO' : 'Void')}
+                {actionLoading ? 'Processing...' : (reopenAfterVoid ? 'Void & Re-open' : isExpense ? 'Delete' : isPO ? 'Cancel PO' : 'Void')}
               </Button>
             </div>
           </div>
