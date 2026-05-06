@@ -1,5 +1,37 @@
 # AgriBooks PRD
 
+## Iter 255 — Closed-Day Enforcement Universally (Feb 2026) ✅
+
+### Problem
+Sales had robust closed-day + late-encode + forward-cap protection. PO, Pay Supplier, Expenses, Receive Payment had NONE — users could pick any past/future date and silently bypass every Z-Report. Branch-transfer receive on a closed destination silently dropped off books.
+
+### Decisions (from user)
+1. Full rollout across PO + Pay Supplier + Expenses + Receive Payment + Branch-Transfer-receive
+2. Manager PIN for late-encode (option A)
+3. Inline UI prompt; PO late-encode allowed for **terms only** (cash POs hard-block)
+4. Explicit `[LATE ENCODE] <kind> — original date YYYY-MM-DD (closed)` carryover label on next-day Z-Report
+5. Branch-transfer receive auto-rolls silently when destination closed (inventory plus/minus is not date-bound)
+
+### Built
+- **NEW `/app/backend/utils/closed_day_guard.py`** — `assert_open_day`, `enforce_max_date`, `resolve_late_encode`, `resolve_business_date` (single source of truth, audit-aware).
+- **Backend wired** into `purchase_orders.py` (create + pay + adjust-payment), `accounting.py` (expenses + receive-payment), `branch_transfers.py` (receive auto-roll with audit log).
+- **`zreport_pdf.py`**: italic amber `[LATE ENCODE]` caption on expense rows.
+- **`verify.py`**: registered `late_encode` and `forward_date_override` policies.
+- **Frontend `LateEncodeDialog`** generalized; mounted into PurchaseOrderPage / PaySupplierPage / ExpensesPage / PaymentsPage with submit-retry pattern.
+
+### Files
+- `/app/backend/utils/closed_day_guard.py` (NEW)
+- `/app/backend/routes/purchase_orders.py`, `accounting.py`, `branch_transfers.py`, `verify.py`, `zreport_pdf.py`
+- `/app/frontend/src/components/LateEncodeDialog.js`
+- `/app/frontend/src/pages/PurchaseOrderPage.js`, `PaySupplierPage.js`, `ExpensesPage.js`, `PaymentsPage.js`
+- `/app/backend/tests/test_closed_day_late_encode_249.py` (regression)
+
+### Verified
+16/16 backend tests pass (iter 249). Forward-cap + closed-day-reject + late-encode-accept + 7-day-cap + cross-month-block + branch-transfer auto-roll + audit_log writes all green. Frontend smoke OK (LateEncodeDialog testids verified).
+
+---
+
+
 ## Iter 254 — Z-Report PDF Branding (Feb 2026) ✅
 
 ### Problem

@@ -1520,6 +1520,24 @@ async def _apply_receipt(order, items, shortages, excesses, from_branch_id, to_b
         receive_carryover_label = (
             f"[LATE ENCODE] Branch Transfer Receipt — original date {receive_intended} (closed)"
         )
+        # Silent auto-rolls still write to audit_log so the Audit Center can
+        # surface them — the user didn't have to do anything to trigger this.
+        try:
+            await db.audit_log.insert_one({
+                "id": new_id(),
+                "action": "branch_transfer_receive_auto_roll",
+                "branch_id": to_branch,
+                "user_id": user.get("id"),
+                "user_name": user.get("full_name", user.get("username", "")),
+                "transfer_id": transfer_id,
+                "transfer_number": order.get("transfer_number") or order.get("po_number", ""),
+                "intended_date": receive_intended,
+                "effective_date": receive_effective,
+                "reason": "Destination branch's day was closed at receipt — auto-rolled to next open day.",
+                "created_at": now_iso(),
+            })
+        except Exception:
+            pass
 
     await db.branch_transfer_orders.update_one(
         {"id": transfer_id},

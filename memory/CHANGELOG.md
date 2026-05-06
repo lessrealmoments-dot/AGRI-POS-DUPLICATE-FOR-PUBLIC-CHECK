@@ -1,5 +1,24 @@
 # AgriBooks Changelog
 
+## Feb 2026 — Closed-Day Enforcement & Late-Encode Rollout (Iter 249)
+
+**Audit findings**: Sales already had a robust closed-day + late-encode + forward-date pattern. PO/PaySupplier/Expenses/ReceivePayment had **none** — user could pick any past or future date and bypass every Z-Report. Branch-transfer receive on a closed destination branch silently dropped off the books. Fund Transfers were the only other module that already blocked closed days.
+
+**Shipped**:
+- **`/app/backend/utils/closed_day_guard.py`** (NEW, ~380 lines) — single source of truth with `assert_open_day`, `enforce_max_date`, `resolve_late_encode`, `resolve_business_date`. All 7-day cap + cross-month + audit-log behaviors mirror Sales.
+- **PO Create**: terms-only late-encode allowed; cash POs hard-block closed days. Forward-date cap with admin override.
+- **Pay Supplier**, **Expenses**, **Receive Customer Payment**: full closed-day + late-encode + forward-cap.
+- **Branch Transfer Receive**: silently auto-rolls to next-open day if destination is closed (inventory still moves immediately — the order doc gets `received_intended_date`, `received_date` (effective), `receive_late_encoded=true`, and an `audit_log` entry).
+- **`zreport_pdf.py`**: late-encoded expense rows print an italic amber `[LATE ENCODE] expense — original date YYYY-MM-DD (closed)` caption underneath, so reviewers see the carryover at a glance.
+- **`verify.py`**: added `late_encode` and `forward_date_override` policies (admin/manager/TOTP defaults).
+- **Frontend `LateEncodeDialog`** generalized with `moduleLabel` + `paymentRestrictionLabel` + `allowedPaymentTypes` props (backwards-compatible with Sales).
+- **Frontend pages** (`PurchaseOrderPage`, `PaySupplierPage`, `ExpensesPage`, `PaymentsPage`): submit handlers retry with `late_encode={pin, reason}` payload after server returns "already closed" 403; PO terms-only restriction enforced in dialog UI.
+
+**Validated**: 16/16 pytest backend cases pass (forward-date cap, closed-day reject + accept-with-PIN, 7-day cap, cross-month block, branch-transfer auto-roll, audit log writes). New regression suite: `tests/test_closed_day_late_encode_249.py`. Frontend smoke OK (LateEncodeDialog testids verified).
+
+---
+
+
 ## Feb 2026 — Z-Report PDF: Company + Branch + Date in name & header (Iter 249)
 
 **Problem**: Z-Report PDFs (download + print from `/daily-ops` archive) and from Close Wizard had a generic filename `ZReport_<Branch>_<Date>.pdf` and an "AgriBooks Z-Report" hard-coded title, with no company name anywhere — so multi-tenant clients couldn't tell which client/business a downloaded PDF belonged to.
