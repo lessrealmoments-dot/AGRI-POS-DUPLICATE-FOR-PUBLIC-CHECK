@@ -1,5 +1,23 @@
 # AgriBooks PRD
 
+## Iter 252 — Request Stock UX: SmartProductSearch parity with /sales-new (Feb 2026) ✅
+
+### Problem
+Request Stock form's product picker was a basic anchored dropdown — no keyboard nav, no smart positioning, no fuzzy fallback. User wanted parity with `/sales-new` Detailed Sales.
+
+### What was built
+- `SmartProductSearch.js` extended with optional `mode='request'` + `alsoBranchId` + `placeholder` props. Same keyboard nav, scroll-into-center, auto-flip dropdown, fuzzy + offline IndexedDB fallback. Compact request-mode row layout (name/SKU + Supply/You stock badges).
+- Request Stock form refactored to use it. Each row is `<SmartProductSearch>` (empty) or a green summary card with X (filled). Product select fills row + auto-grows next empty row + focuses qty (mirrors `UnifiedSalesPage.handleProductSelect`). Trash X marked `tabIndex={-1}` so Tab from qty hops to next row's search.
+
+### Files
+- `frontend/src/components/SmartProductSearch.js` — added `mode`, `alsoBranchId`, `placeholder` props; request-mode render branch
+- `frontend/src/pages/BranchTransferPage.js` — Request Stock rows + `selectReqProduct` + `reqQtyRefs` map
+
+### Verified
+Testing agent iter 247: 10/10 UX checks pass (typeahead, ↑/↓ nav, Enter+focus, qty auto-focus, auto-grow, X-clear, dropdown flip-up/down, fuzzy "No exact match for X" chip, multi-row keyboard-only flow). The Tab-order minor was fixed in same iter.
+
+---
+
 ## Iter 251 — Branch Stock Request: SMS + Tab UX + Configurable Recipients (Feb 2026) ✅
 
 ### Problem

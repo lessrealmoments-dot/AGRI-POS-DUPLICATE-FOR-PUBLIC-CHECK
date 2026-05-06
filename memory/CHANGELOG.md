@@ -1,5 +1,19 @@
 # AgriBooks Changelog
 
+## May 2026 — Request Stock UX upgrade: SmartProductSearch (Iter 247)
+
+**User scenario**: The Request Stock form had a basic typeahead — no keyboard navigation, no smart bubble positioning, no fuzzy fallback. User asked for parity with `/sales-new` Detailed Sales: ↑/↓ arrow keys, Enter-to-select-and-jump-to-next-field, dropdown that auto-flips above/below the input depending on viewport space, highlighted match always visible (centered), and smart search behaviors (fuzzy + offline cache fallback).
+
+**What changed:**
+- `SmartProductSearch.js` (the same component powering /sales-new Detailed Sales) now accepts optional `mode='request'`, `alsoBranchId`, and `placeholder` props. In request mode, the dropdown rows are compact 2-line cards (name/SKU + Supply-branch stock + Your-branch stock), and the API call adds `also_branch_id` + `limit=8`. Default 'sales' mode is unchanged.
+- `BranchTransferPage.js` Request Stock form rows refactored: each row is either a `<SmartProductSearch>` (when `row.product` is null) or a green-tinted product summary card with X-to-clear (when filled). On product select, the row is filled, the next empty row auto-grows, and qty input auto-focuses (mirrors `UnifiedSalesPage.handleProductSelect`).
+- Removed: per-row `search`/`matches` state, custom `handleReqSearch`, the legacy `AnchoredDropdown` usage in this form (component itself still serves the main transfer flow).
+- Tab order tightened: trash X on each row uses `tabIndex={-1}` so Tab from qty hops directly to the next row's search input.
+
+**Validated by testing agent (iter 247, 10/10 passes):** typeahead, ArrowDown/ArrowUp navigation, Enter-to-select, qty auto-focus, auto-grow, X-to-clear, smart bubble flip-up/flip-down, fuzzy fallback chip with "No exact match for X — showing closest matches", multi-row keyboard-only flow.
+
+---
+
 ## May 2026 — Branch Stock Request: SMS Notifications + Tab UX + Configurable Recipients (Iter 246)
 
 **User scenarios prompting this change:**

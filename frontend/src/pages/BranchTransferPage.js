@@ -1708,7 +1708,7 @@ export default function BranchTransferPage() {
                       disabled={!row.product}
                       data-testid={`req-qty-${row.id}`} />
                     <span className="h-9 flex items-center text-xs text-slate-500 px-1">{row.product?.unit || '—'}</span>
-                    <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-slate-400 hover:text-red-500"
+                    <Button variant="ghost" size="sm" tabIndex={-1} className="h-9 w-9 p-0 text-slate-400 hover:text-red-500"
                       onClick={() => removeReqRow(row.id)} disabled={reqRows.length <= 1}>
                       <X size={14} />
                     </Button>
