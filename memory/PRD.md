@@ -1,6 +1,42 @@
 # AgriBooks PRD
 
-## Iter 244 — SMS Audit Full-Fix Batch (Feb 2026) ✅
+## Iter 245 — Remote Branch Printing Terminal (Feb 2026) ✅
+
+### What was built
+A complete Remote Branch Printing Terminal system so users can send print jobs from anywhere to branch computers.
+
+### Features
+1. **Backend Print Jobs API** (`/api/print/*`) — create jobs, list with 15-day history, status tracking (pending/sent/printed/failed/cancelled), resend, polling fallback, terminal mode management, for-branch terminal picker, auto-purge (30-day inactive terminals)
+2. **WebSocket push upgraded** — `terminal_ws.py` now tracks branch→terminal map; delivers pending jobs on WS connect; handles `print_job` and `print_mode_changed` events
+3. **Print Center admin page** (`/print-center`) — terminal grid with online/offline status, pending job count, auto/manual mode toggle, job queue, 15-day history with filter
+4. **SendToPrintModal** — Option C routing: auto-selects terminal for branch, picker if multiple, allows offline terminals (jobs queued)
+5. **InvoiceDetailModal** — "Remote Print" button added to action toolbar (both compact and full-width render paths)
+6. **Print mode in TerminalShell** — handles `print_job` WebSocket messages, auto-print vs manual queue, Print Queue overlay, mode toggle in Settings panel, startup mode load
+7. **Cursor AI handoff prompt** — complete spec for Windows EXE at `/app/memory/cursor_handoff_print_terminal_exe.md`
+
+### Document naming
+- "Sales Receipt #INV-XXXX", "Purchase Order #PO-XXXX", "Z-Report – Branch – Date", "Branch Transfer #BT-XXXX", "Expense Receipt #EXP-XXXX"
+
+### Files
+- `backend/routes/print_jobs.py` (new — full print job API)
+- `backend/routes/terminal_ws.py` (branch map, notify_branch_terminals)
+- `backend/routes/terminal.py` (WS connect delivers pending jobs)
+- `backend/main.py` (print_jobs router registered, purge scheduler)
+- `frontend/src/pages/PrintQueuePage.js` (new — admin print center)
+- `frontend/src/components/SendToPrintModal.js` (new — send to print dialog)
+- `frontend/src/components/InvoiceDetailModal.js` (Remote Print button, both paths)
+- `frontend/src/components/Layout.js` (Print Center sidebar section)
+- `frontend/src/App.js` (/print-center route)
+- `frontend/src/pages/terminal/TerminalShell.jsx` (print job handling + mode + queue)
+- `app/memory/cursor_handoff_print_terminal_exe.md` (Windows EXE build guide)
+
+### Tested
+- 39/39 backend pytest cases passed
+- Frontend: 3 bugs found and fixed by testing agent (babel plugin null-dereference, compact modal path missing SendToPrintModal, PrintEngine.getHtml→generateHtml)
+
+---
+
+
 
 Continuation of the audit. After shipping the 6 quick wins, this round closed the deferred items.
 
