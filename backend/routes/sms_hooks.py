@@ -146,37 +146,43 @@ async def on_credit_sale_created(invoice: dict):
         cc = await _get_cc_phones(org_id, branch_id, {"manager"})
         manager_phone = cc.get("manager", "")
         if manager_phone:
-            # Iter 244 audit fix: use the same live aggregation as the
-            # customer-facing SMS so the manager sees the current total
-            # (previously read stale `customer.balance` from the pre-insert
-            # snapshot, which excluded the new invoice).
-            mgr_msg = (
-                f"[New Credit] {customer.get('name','')} — "
-                f"P{invoice.get('balance', 0):,.2f} on {invoice.get('order_date','')}. "
-                f"Invoice: {invoice.get('invoice_number','')}. "
-                f"Due: {invoice.get('due_date','N/A')}. "
-                f"Total balance: P{live_total:,.2f}."
-            )
-            await raw_db.sms_queue.insert_one({
-                "id": new_id(), "organization_id": org_id,
-                "template_key": "credit_new_staff",
-                "customer_id": customer_id,
+            # Iter 244: use the editable `credit_new_staff` template so owners
+            # can customise the manager-CC wording from /messages.
+            staff_vars = {
                 "customer_name": customer.get("name", invoice.get("customer_name", "")),
-                "phone": manager_phone, "message": mgr_msg,
-                "status": "pending", "trigger": "auto",
-                "trigger_ref": invoice.get("id", ""),
-                "dedup_key": f"credit_new_mgr:{invoice.get('id', '')}",
-                "branch_id": branch_id, "branch_name": branch_name,
-                "created_at": now_iso(),
-                "sent_at": None, "failed_at": None, "error": None, "retry_count": 0,
-            })
+                "amount": f"{invoice.get('balance', 0):,.2f}",
+                "date": invoice.get("order_date", ""),
+                "invoice_number": invoice.get("invoice_number", ""),
+                "due_date": invoice.get("due_date", "N/A") or "N/A",
+                "total_balance": f"{live_total:,.2f}",
+            }
+            await queue_sms(
+                template_key="credit_new_staff",
+                customer_id=customer_id,
+                customer_name=customer.get("name", invoice.get("customer_name", "")),
+                phone=manager_phone,
+                variables=staff_vars,
+                organization_id=org_id,
+                branch_id=branch_id,
+                branch_name=branch_name,
+                trigger="auto",
+                trigger_ref=invoice.get("id", ""),
+                dedup_key=f"credit_new_mgr:{invoice.get('id', '')}",
+            )
     except Exception as e:
         logger.error(f"SMS hook on_credit_sale_created failed: {e}")
 
 
 async def on_payment_received(customer_id: str, amount_paid: float, remaining_balance: float,
-                               branch_id: str = "", next_due_info: str = ""):
-    """Called after a customer payment is applied."""
+                               branch_id: str = "", next_due_info: str = "",
+                               invoice_number: str = ""):
+    """Called after a customer payment is applied.
+
+    Iter 244: optional `invoice_number` context lets us tell the customer
+    which invoice was paid down ("applied to INV-2025-0041") — improves
+    clarity for customers juggling multiple credit slips. Empty when the
+    payment spans multiple invoices.
+    """
     try:
         from routes.sms import queue_sms
         customer = await raw_db.customers.find_one({"id": customer_id}, {"_id": 0})
@@ -188,9 +194,11 @@ async def on_payment_received(customer_id: str, amount_paid: float, remaining_ba
 
         org_id = await _resolve_org_id(branch_id)
         company_name = await get_company_name(org_id)
+        applied_to = f" (applied to {invoice_number})" if invoice_number else ""
         variables = {
             "customer_name": customer.get("name", ""),
             "amount_paid": f"{amount_paid:,.2f}",
+            "applied_to": applied_to,
             "remaining_balance": f"{remaining_balance:,.2f}",
             "next_due_info": next_due_info,
             "company_name": company_name,
@@ -215,8 +223,14 @@ async def on_payment_received(customer_id: str, amount_paid: float, remaining_ba
 
 
 async def on_charge_applied(customer_id: str, charge_type: str, charge_amount: float,
-                             total_balance: float, branch_id: str = ""):
-    """Called after interest or penalty is generated."""
+                             total_balance: float, branch_id: str = "",
+                             source_invoice: str = "", period: str = ""):
+    """Called after interest or penalty is generated.
+
+    Iter 244: optional `source_invoice` + `period` give the customer a
+    concrete reference (e.g. "for INV-2025-0041, covering Jan 15 - Feb 15")
+    so disputes are constructive instead of "what charge?".
+    """
     try:
         from routes.sms import queue_sms
         customer = await raw_db.customers.find_one({"id": customer_id}, {"_id": 0})
@@ -228,9 +242,13 @@ async def on_charge_applied(customer_id: str, charge_type: str, charge_amount: f
 
         org_id = await _resolve_org_id(branch_id)
         company_name = await get_company_name(org_id)
+        src_inv_text = f" for {source_invoice}" if source_invoice else ""
+        period_text = f" ({period})" if period else ""
         variables = {
             "charge_type": charge_type,
             "charge_amount": f"{charge_amount:,.2f}",
+            "source_invoice": src_inv_text,
+            "period": period_text,
             "customer_name": customer.get("name", ""),
             "total_balance": f"{total_balance:,.2f}",
             "company_name": company_name,
@@ -251,29 +269,30 @@ async def on_charge_applied(customer_id: str, charge_type: str, charge_amount: f
                 trigger_ref=f"charge:{customer_id}:{charge_type}:{phone}",
             )
 
-        # CC: manager — branch-specific; closes the loop; confirms charge was applied and customer notified
+        # CC: manager — Iter 244: use editable `charge_applied_staff` template
         cc = await _get_cc_phones(org_id, branch_id, {"manager"})
         manager_phone = cc.get("manager", "")
         if manager_phone:
-            mgr_msg = (
-                f"[{charge_type} Applied] {customer.get('name','')} — "
-                f"P{charge_amount:,.2f} charged. "
-                f"New total balance: P{total_balance:,.2f}. "
-                f"Customer has been notified via SMS."
-            )
-            await raw_db.sms_queue.insert_one({
-                "id": new_id(), "organization_id": org_id,
-                "template_key": "charge_applied_staff",
-                "customer_id": customer_id,
+            staff_vars = {
+                "charge_type": charge_type,
                 "customer_name": customer.get("name", ""),
-                "phone": manager_phone, "message": mgr_msg,
-                "status": "pending", "trigger": "auto",
-                "trigger_ref": f"charge:{customer_id}:{charge_type}",
-                "dedup_key": f"charge_mgr:{customer_id}:{charge_type}:{await today_local(org_id)}",
-                "branch_id": branch_id, "branch_name": await get_branch_name(branch_id),
-                "created_at": now_iso(),
-                "sent_at": None, "failed_at": None, "error": None, "retry_count": 0,
-            })
+                "charge_amount": f"{charge_amount:,.2f}",
+                "source_invoice": src_inv_text,
+                "total_balance": f"{total_balance:,.2f}",
+            }
+            await queue_sms(
+                template_key="charge_applied_staff",
+                customer_id=customer_id,
+                customer_name=customer.get("name", ""),
+                phone=manager_phone,
+                variables=staff_vars,
+                organization_id=org_id,
+                branch_id=branch_id,
+                branch_name=await get_branch_name(branch_id),
+                trigger="auto",
+                trigger_ref=f"charge:{customer_id}:{charge_type}",
+                dedup_key=f"charge_mgr:{customer_id}:{charge_type}:{await today_local(org_id)}",
+            )
     except Exception as e:
         logger.error(f"SMS hook on_charge_applied failed: {e}")
 
@@ -318,28 +337,29 @@ async def on_crop_season_started(crop_credit: dict, total_balance: float):
                 dedup_key=f"crop_season_started:{crop_credit.get('id', '')}:{phone}",
             )
 
-        # CC: notify owner — new season is a significant financial commitment (global — all branches)
+        # CC: notify owner — Iter 244: use editable `crop_season_started_owner` template
         cc = await _get_cc_phones(org_id, branch_id, {"owner"})
         owner_phone = cc.get("owner", "")
         if owner_phone:
-            owner_msg = (
-                f"[New Crop Season] {customer.get('name','')} — "
-                f"planting {crop_credit.get('planting_date','')} | "
-                f"due {crop_credit.get('season_end_date','')}. "
-                f"Balance: P{total_balance:,.2f}."
+            owner_vars = {
+                "customer_name": customer.get("name", ""),
+                "planting_date": crop_credit.get("planting_date", ""),
+                "harvest_date": crop_credit.get("season_end_date", ""),
+                "total_balance": f"{total_balance:,.2f}",
+            }
+            await queue_sms(
+                template_key="crop_season_started_owner",
+                customer_id=customer_id,
+                customer_name=customer.get("name", ""),
+                phone=owner_phone,
+                variables=owner_vars,
+                organization_id=org_id,
+                branch_id=branch_id,
+                branch_name=await get_branch_name(branch_id),
+                trigger="auto",
+                trigger_ref=crop_credit.get("id", ""),
+                dedup_key=f"crop_season_started_owner:{crop_credit.get('id', '')}",
             )
-            await raw_db.sms_queue.insert_one({
-                "id": new_id(), "organization_id": org_id,
-                "template_key": "crop_season_started_owner",
-                "customer_id": customer_id, "customer_name": customer.get("name", ""),
-                "phone": owner_phone, "message": owner_msg,
-                "status": "pending", "trigger": "auto",
-                "trigger_ref": crop_credit.get("id", ""),
-                "dedup_key": f"crop_season_started_owner:{crop_credit.get('id', '')}",
-                "branch_id": branch_id, "branch_name": await get_branch_name(branch_id),
-                "created_at": now_iso(),
-                "sent_at": None, "failed_at": None, "error": None, "retry_count": 0,
-            })
     except Exception as e:
         logger.error(f"SMS hook on_crop_season_started failed: {e}")
 
@@ -385,3 +405,125 @@ async def on_crop_credit_added(crop_credit: dict, amount: float, invoice_number:
             )
     except Exception as e:
         logger.error(f"SMS hook on_crop_credit_added failed: {e}")
+
+
+
+async def on_invoice_voided(invoice: dict, reason: str = "", voided_by: str = ""):
+    """Iter 244 — notify customer when their sale is voided.
+
+    Closes the loop on what previously had no customer-facing signal:
+    inventory, AR balance and cashflow are all reversed, but the customer
+    who got a `credit_new` earlier had no way to know the obligation was
+    cancelled until they walked back into the store.
+    """
+    try:
+        from routes.sms import queue_sms
+        customer_id = invoice.get("customer_id", "")
+        if not customer_id:
+            return  # walk-in / cash sale — no SMS to send
+        customer = await raw_db.customers.find_one({"id": customer_id}, {"_id": 0})
+        if not customer:
+            return
+        phones = customer.get("phones") or ([customer["phone"]] if customer.get("phone") else [])
+        if not phones:
+            return
+
+        branch_id = invoice.get("branch_id", "")
+        org_id = await _resolve_org_id(branch_id)
+        company_name = await get_company_name(org_id)
+        balance_before = float(invoice.get("balance", 0) or 0)
+        balance_note = (
+            f"Inalis na sa balance ang P{balance_before:,.2f}. "
+            if balance_before > 0 else ""
+        )
+
+        variables = {
+            "customer_name": customer.get("name", invoice.get("customer_name", "")),
+            "invoice_number": invoice.get("invoice_number", ""),
+            "grand_total": f"{float(invoice.get('grand_total', 0) or 0):,.2f}",
+            "company_name": company_name,
+            "date": await today_local(org_id) or invoice.get("order_date", ""),
+            "balance_note": balance_note,
+            "reason": reason or "—",
+        }
+        for phone in phones:
+            if not phone:
+                continue
+            await queue_sms(
+                template_key="sale_voided",
+                customer_id=customer_id,
+                customer_name=customer.get("name", ""),
+                phone=phone,
+                variables=variables,
+                organization_id=org_id,
+                branch_id=branch_id,
+                branch_name=await get_branch_name(branch_id),
+                trigger="auto",
+                trigger_ref=invoice.get("id", ""),
+                dedup_key=f"sale_voided:{invoice.get('id', '')}:{phone}",
+            )
+    except Exception as e:
+        logger.error(f"SMS hook on_invoice_voided failed: {e}")
+
+
+async def on_refund_processed(return_doc: dict):
+    """Iter 244 — notify customer when their return / refund is processed.
+
+    Sent only when the return record has a customer_id; walk-in returns
+    are skipped. `refund_line` and `credit_line` are conditional sentences
+    so the SMS reads naturally whether refund was full cash, partial cash,
+    pure store credit, or zero-refund (defective pull-out).
+    """
+    try:
+        from routes.sms import queue_sms
+        customer_id = return_doc.get("customer_id", "")
+        if not customer_id:
+            return  # walk-in
+        customer = await raw_db.customers.find_one({"id": customer_id}, {"_id": 0})
+        if not customer:
+            return
+        phones = customer.get("phones") or ([customer["phone"]] if customer.get("phone") else [])
+        if not phones:
+            return
+
+        branch_id = return_doc.get("branch_id", "")
+        org_id = await _resolve_org_id(branch_id)
+        company_name = await get_company_name(org_id)
+
+        refund_amount = float(return_doc.get("refund_amount", 0) or 0)
+        credit_applied = float(return_doc.get("credit_applied", 0) or 0)
+
+        refund_line = (
+            f"Refund: P{refund_amount:,.2f}. " if refund_amount > 0 else ""
+        )
+        credit_line = (
+            f"Inilapat sa balance: P{credit_applied:,.2f}. "
+            if credit_applied > 0 else ""
+        )
+
+        variables = {
+            "customer_name": customer.get("name", return_doc.get("customer_name", "")),
+            "rma_number": return_doc.get("rma_number", ""),
+            "company_name": company_name,
+            "refund_line": refund_line,
+            "credit_line": credit_line,
+            "reason": return_doc.get("reason", "—") or "—",
+        }
+        for phone in phones:
+            if not phone:
+                continue
+            await queue_sms(
+                template_key="refund_processed",
+                customer_id=customer_id,
+                customer_name=customer.get("name", ""),
+                phone=phone,
+                variables=variables,
+                organization_id=org_id,
+                branch_id=branch_id,
+                branch_name=await get_branch_name(branch_id),
+                trigger="auto",
+                trigger_ref=return_doc.get("id", ""),
+                dedup_key=f"refund_processed:{return_doc.get('id', '')}:{phone}",
+            )
+    except Exception as e:
+        logger.error(f"SMS hook on_refund_processed failed: {e}")

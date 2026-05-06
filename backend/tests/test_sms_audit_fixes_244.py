@@ -290,3 +290,194 @@ def test_snapshot_excludes_safe_paid_expenses_from_cash_expected(monkeypatch):
     assert snap["cash_expected_raw"] == 900.0
     assert snap["expense_total"] == "150.00"  # all expenses still listed
     assert snap["total_cashier_expenses"] == "100.00"  # but only cashier hits drawer
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. Iter 244 — content enrichment + void/refund hooks
+# ─────────────────────────────────────────────────────────────────────────────
+def _stub_customer_lookup(monkeypatch, sms_hooks_mod, customer):
+    """Wire raw_db.customers.find_one to return a fixed customer doc."""
+    class _Coll:
+        async def find_one(self, *a, **kw):
+            return customer
+    class _Raw:
+        customers = _Coll()
+    monkeypatch.setattr(sms_hooks_mod, "raw_db", _Raw())
+
+
+def _coro_value(v):
+    async def _c(*a, **k): return v
+    return _c
+
+
+def test_payment_received_includes_invoice_number(monkeypatch):
+    """`applied_to` placeholder exposes the source invoice number."""
+    from routes import sms_hooks
+    captured: dict = {}
+    async def _fake_queue(**kw): captured.update(kw)
+
+    _stub_customer_lookup(monkeypatch, sms_hooks, {
+        "id": "c1", "name": "Juan", "phone": "+63900",
+    })
+    monkeypatch.setattr(sms_hooks, "_resolve_org_id", _coro_value("org1"))
+    monkeypatch.setattr(sms_hooks, "get_company_name", _coro_value("Test Co"))
+    monkeypatch.setattr(sms_hooks, "get_branch_name", _coro_value("Sampoli"))
+    import routes.sms as sms_mod
+    monkeypatch.setattr(sms_mod, "queue_sms", _fake_queue)
+
+    asyncio.run(sms_hooks.on_payment_received(
+        customer_id="c1", amount_paid=500, remaining_balance=1500,
+        branch_id="b1", next_due_info="Next due: 2026-03-01. ",
+        invoice_number="INV-2025-0041",
+    ))
+
+    assert captured["template_key"] == "payment_received"
+    v = captured["variables"]
+    assert v["applied_to"] == " (applied to INV-2025-0041)"
+    assert v["amount_paid"] == "500.00"
+    assert v["next_due_info"] == "Next due: 2026-03-01. "
+
+
+def test_payment_received_omits_applied_to_when_no_invoice(monkeypatch):
+    """When `invoice_number` is empty, no leading-space artifact appears."""
+    from routes import sms_hooks
+    captured: dict = {}
+    async def _fake_queue(**kw): captured.update(kw)
+    _stub_customer_lookup(monkeypatch, sms_hooks, {"id": "c1", "name": "J", "phone": "+63900"})
+    monkeypatch.setattr(sms_hooks, "_resolve_org_id", _coro_value("o"))
+    monkeypatch.setattr(sms_hooks, "get_company_name", _coro_value("Co"))
+    monkeypatch.setattr(sms_hooks, "get_branch_name", _coro_value("B"))
+    import routes.sms as sms_mod
+    monkeypatch.setattr(sms_mod, "queue_sms", _fake_queue)
+
+    asyncio.run(sms_hooks.on_payment_received("c1", 100, 0, "b1"))
+    assert captured["variables"]["applied_to"] == ""
+
+
+def test_charge_applied_includes_source_invoice(monkeypatch):
+    """`source_invoice` is wrapped as ' for INV-...' so it reads naturally."""
+    from routes import sms_hooks
+    captured = []
+    async def _fake_queue(**kw): captured.append(kw)
+    _stub_customer_lookup(monkeypatch, sms_hooks, {"id": "c1", "name": "Juan", "phone": "+63900"})
+    monkeypatch.setattr(sms_hooks, "_resolve_org_id", _coro_value("org1"))
+    monkeypatch.setattr(sms_hooks, "get_company_name", _coro_value("Test Co"))
+    monkeypatch.setattr(sms_hooks, "get_branch_name", _coro_value("Sampoli"))
+    monkeypatch.setattr(sms_hooks, "_get_cc_phones", _coro_value({}))  # no manager CC
+    import routes.sms as sms_mod
+    monkeypatch.setattr(sms_mod, "queue_sms", _fake_queue)
+
+    asyncio.run(sms_hooks.on_charge_applied(
+        "c1", "Interest", 250.0, 5250.0, "b1",
+        source_invoice="INV-INT-2025-0007",
+    ))
+
+    assert captured, "queue_sms not called"
+    v = captured[0]["variables"]
+    assert v["source_invoice"] == " for INV-INT-2025-0007"
+    assert v["charge_amount"] == "250.00"
+
+
+def test_on_invoice_voided_skips_walkin(monkeypatch):
+    """Walk-in sale (no customer_id) should NOT enqueue any SMS."""
+    from routes import sms_hooks
+    calls = []
+    async def _fake_queue(**kw): calls.append(kw)
+    import routes.sms as sms_mod
+    monkeypatch.setattr(sms_mod, "queue_sms", _fake_queue)
+
+    asyncio.run(sms_hooks.on_invoice_voided(
+        {"id": "i1", "customer_id": "", "invoice_number": "INV-0001",
+         "branch_id": "b1", "grand_total": 500, "balance": 0}
+    ))
+    assert calls == [], "Walk-in voids must not trigger customer SMS"
+
+
+def test_on_invoice_voided_credit_sends_sms(monkeypatch):
+    """Credit-sale void → SMS with reason + balance restoration note."""
+    from routes import sms_hooks
+    captured: dict = {}
+    async def _fake_queue(**kw): captured.update(kw)
+    _stub_customer_lookup(monkeypatch, sms_hooks, {"id": "c1", "name": "Juan", "phone": "+63900"})
+    monkeypatch.setattr(sms_hooks, "_resolve_org_id", _coro_value("org1"))
+    monkeypatch.setattr(sms_hooks, "get_company_name", _coro_value("Co"))
+    monkeypatch.setattr(sms_hooks, "get_branch_name", _coro_value("Br"))
+    monkeypatch.setattr(sms_hooks, "today_local", _coro_value("2026-02-05"))
+    import routes.sms as sms_mod
+    monkeypatch.setattr(sms_mod, "queue_sms", _fake_queue)
+
+    asyncio.run(sms_hooks.on_invoice_voided(
+        {"id": "i1", "customer_id": "c1", "invoice_number": "INV-0007",
+         "branch_id": "b1", "grand_total": 1000.0, "balance": 600.0,
+         "order_date": "2026-02-04"},
+        reason="Wrong item",
+    ))
+
+    assert captured["template_key"] == "sale_voided"
+    v = captured["variables"]
+    assert v["invoice_number"] == "INV-0007"
+    assert v["grand_total"] == "1,000.00"
+    assert "600.00" in v["balance_note"], "balance_note should mention restored balance"
+    assert v["reason"] == "Wrong item"
+
+
+def test_on_refund_processed_walkin_skipped(monkeypatch):
+    """Walk-in returns (no customer_id) → no SMS."""
+    from routes import sms_hooks
+    calls = []
+    async def _fake_queue(**kw): calls.append(kw)
+    import routes.sms as sms_mod
+    monkeypatch.setattr(sms_mod, "queue_sms", _fake_queue)
+
+    asyncio.run(sms_hooks.on_refund_processed(
+        {"id": "r1", "customer_id": "", "rma_number": "RTN-001"}
+    ))
+    assert calls == []
+
+
+def test_on_refund_processed_full_cash_refund(monkeypatch):
+    """Full cash refund → refund_line populated, credit_line empty."""
+    from routes import sms_hooks
+    captured: dict = {}
+    async def _fake_queue(**kw): captured.update(kw)
+    _stub_customer_lookup(monkeypatch, sms_hooks, {"id": "c1", "name": "Juan", "phone": "+63900"})
+    monkeypatch.setattr(sms_hooks, "_resolve_org_id", _coro_value("org1"))
+    monkeypatch.setattr(sms_hooks, "get_company_name", _coro_value("Co"))
+    monkeypatch.setattr(sms_hooks, "get_branch_name", _coro_value("Br"))
+    import routes.sms as sms_mod
+    monkeypatch.setattr(sms_mod, "queue_sms", _fake_queue)
+
+    asyncio.run(sms_hooks.on_refund_processed({
+        "id": "r1", "customer_id": "c1", "rma_number": "RTN-001",
+        "branch_id": "b1", "refund_amount": 500.0, "credit_applied": 0.0,
+        "reason": "Defective",
+    }))
+
+    v = captured["variables"]
+    assert "500.00" in v["refund_line"]
+    assert v["credit_line"] == ""
+    assert v["rma_number"] == "RTN-001"
+
+
+def test_on_refund_processed_store_credit_only(monkeypatch):
+    """Store-credit only → credit_line populated, refund_line empty."""
+    from routes import sms_hooks
+    captured: dict = {}
+    async def _fake_queue(**kw): captured.update(kw)
+    _stub_customer_lookup(monkeypatch, sms_hooks, {"id": "c1", "name": "Juan", "phone": "+63900"})
+    monkeypatch.setattr(sms_hooks, "_resolve_org_id", _coro_value("org1"))
+    monkeypatch.setattr(sms_hooks, "get_company_name", _coro_value("Co"))
+    monkeypatch.setattr(sms_hooks, "get_branch_name", _coro_value("Br"))
+    import routes.sms as sms_mod
+    monkeypatch.setattr(sms_mod, "queue_sms", _fake_queue)
+
+    asyncio.run(sms_hooks.on_refund_processed({
+        "id": "r2", "customer_id": "c1", "rma_number": "RTN-002",
+        "branch_id": "b1", "refund_amount": 0.0, "credit_applied": 750.0,
+        "reason": "Customer changed mind",
+    }))
+
+    v = captured["variables"]
+    assert v["refund_line"] == ""
+    assert "750.00" in v["credit_line"]

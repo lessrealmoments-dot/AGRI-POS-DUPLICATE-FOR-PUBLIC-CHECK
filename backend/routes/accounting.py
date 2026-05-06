@@ -1666,7 +1666,7 @@ async def generate_interest_invoice(customer_id: str, data: dict, user=Depends(g
         {"$group": {"_id": None, "total": {"$sum": "$balance"}}}
     ]).to_list(1)
     live_total = round(live_res[0]["total"], 2) if live_res else 0
-    await on_charge_applied(customer_id, "Interest", round(total_interest, 2), live_total, branch_id)
+    await on_charge_applied(customer_id, "Interest", round(total_interest, 2), live_total, branch_id, source_invoice=inv_number)
 
     return {"message": "Interest invoice created", "invoice_number": inv_number,
             "total_interest": round(total_interest, 2), "invoice": interest_invoice}
@@ -1918,7 +1918,7 @@ async def generate_penalty_invoice(customer_id: str, data: dict, user=Depends(ge
         {"$group": {"_id": None, "total": {"$sum": "$balance"}}}
     ]).to_list(1)
     live_total = round(live_res[0]["total"], 2) if live_res else 0
-    await on_charge_applied(customer_id, "Penalty", round(total_penalty, 2), live_total, branch_id)
+    await on_charge_applied(customer_id, "Penalty", round(total_penalty, 2), live_total, branch_id, source_invoice=inv_number)
 
     return {"message": "Penalty invoice created", "invoice_number": inv_number,
             "total_penalty": round(total_penalty, 2), "invoice": penalty_invoice}

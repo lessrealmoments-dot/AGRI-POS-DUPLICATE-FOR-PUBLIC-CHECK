@@ -1,5 +1,35 @@
 # AgriBooks PRD
 
+## Iter 244 — SMS Audit Full-Fix Batch (Feb 2026) ✅
+
+Continuation of the audit. After shipping the 6 quick wins, this round closed the deferred items.
+
+### What changed
+1. **Sale Voided** customer template + hook — when an invoice is voided and `customer_id` is present, an SMS now goes out via the new editable `sale_voided` template (variables: invoice, grand_total, balance_note when balance>0, reason). `on_invoice_voided` is wired into `routes/invoices.py:void_invoice` after the price-match block. Walk-in voids are skipped.
+2. **Refund Processed** customer template + hook — when a return is created and the customer is known, the new editable `refund_processed` template fires via `on_refund_processed` from `routes/returns.py:create_return`. `refund_line` and `credit_line` are conditional sentences so the SMS reads naturally for full-cash, store-credit-only, mixed, or zero-refund pull-outs.
+3. **Inline staff strings → editable templates** — `credit_new_staff`, `charge_applied_staff`, `crop_season_started_owner` are now real entries in `DEFAULT_TEMPLATES`. `sms_hooks.py` calls `queue_sms(template_key=...)` instead of constructing literal strings, so owners can customise them from `/messages` like every other template.
+4. **`payment_received` enriched** — added `<applied_to>` placeholder. When the payment is single-invoice (qr_actions, accounting), the template now reads "Salamat Juan! Natanggap namin ang P500 mo (applied to INV-2025-0041). Remaining balance: …".
+5. **`charge_applied` enriched** — added `<source_invoice>` and `<period>` placeholders. `accounting.py` interest/penalty calls now pass the originating invoice number so customers see "Interest of P250 for INV-2025-0041 ay na-apply sa account mo …".
+6. **Backwards compatible** — existing callers without the new args still work (defaults to empty string), and non-customised template bodies auto-upgrade via `_ensure_templates` self-healing.
+
+### Files
+- `backend/routes/sms.py` (5 new template entries, payment_received & charge_applied bodies enriched)
+- `backend/routes/sms_hooks.py` (on_payment_received/on_charge_applied take new optional kwargs; converted 3 inline staff CCs to template-driven; appended `on_invoice_voided` + `on_refund_processed`)
+- `backend/routes/invoices.py` (wired `on_invoice_voided` into `void_invoice`)
+- `backend/routes/returns.py` (wired `on_refund_processed` into `create_return`)
+- `backend/routes/qr_actions.py` (passes `invoice_number` to payment hook)
+- `backend/routes/accounting.py` (passes `source_invoice` to interest & penalty hooks)
+- `backend/tests/test_sms_audit_fixes_244.py` (extended — 16 tests total, all passing)
+
+### Verified
+- 16 pytest cases pass (templates, formula, content enrichment, void/refund hooks incl. walk-in skip behaviour).
+- Backend boots clean, /api/health → 200.
+- 34 default SMS templates registered in `DEFAULT_TEMPLATES`.
+
+---
+
+
+
 ## Iter 244 — SMS Audit Quick-Wins (Feb 2026) ✅
 
 User-requested: "Check the formula used on /messages... some data are missing in the SMS text like expected vs actual funds to compute over or short."

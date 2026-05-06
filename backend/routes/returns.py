@@ -380,6 +380,15 @@ async def create_return(data: dict, user=Depends(get_current_user)):
     await db.returns.insert_one(return_doc)
     del return_doc["_id"]
 
+    # Iter 244 — notify customer (credit/known customers only) that their return was processed
+    if return_doc.get("customer_id"):
+        try:
+            from routes.sms_hooks import on_refund_processed
+            await on_refund_processed(return_doc)
+        except Exception as e:
+            import logging
+            logging.getLogger("sms").error(f"on_refund_processed dispatch failed: {e}")
+
     return {
         **return_doc,
         "message": f"Return {rma_number} processed successfully",

@@ -309,13 +309,14 @@ DEFAULT_TEMPLATES = [
         "key": "payment_received",
         "name": "Payment Received Confirmation",
         "body": (
-            "Salamat <customer_name>! Natanggap na namin ang P<amount_paid> mo. "
+            "Salamat <customer_name>! Natanggap na namin ang P<amount_paid> mo"
+            "<applied_to>. "
             "Remaining balance: P<remaining_balance>. "
             "<next_due_info>"
             "Salamat po! - <company_name>"
         ),
-        "placeholders": ["customer_name", "amount_paid", "remaining_balance",
-                         "next_due_info", "company_name"],
+        "placeholders": ["customer_name", "amount_paid", "applied_to",
+                         "remaining_balance", "next_due_info", "company_name"],
         "trigger": "auto",
         "active": True,
     },
@@ -323,13 +324,14 @@ DEFAULT_TEMPLATES = [
         "key": "charge_applied",
         "name": "Interest/Penalty Applied",
         "body": (
-            "Notice: <charge_type> of P<charge_amount> na-apply sa account mo, "
-            "<customer_name>. New balance: P<total_balance>. "
+            "Notice: <charge_type> of P<charge_amount><source_invoice>"
+            "<period> ay na-apply sa account mo, <customer_name>. "
+            "New balance: P<total_balance>. "
             "Para maiwasan ang dagdag charges, bayaran po agad. "
             "- <company_name>"
         ),
-        "placeholders": ["charge_type", "charge_amount", "customer_name",
-                         "total_balance", "company_name"],
+        "placeholders": ["charge_type", "charge_amount", "source_invoice",
+                         "period", "customer_name", "total_balance", "company_name"],
         "trigger": "auto",
         "active": True,
     },
@@ -378,6 +380,76 @@ DEFAULT_TEMPLATES = [
         "body": "<message>",
         "placeholders": ["message"],
         "trigger": "manual",
+        "active": True,
+    },
+    # ── Staff CC notifications (manager / owner) ─────────────────────────────
+    {
+        "key": "credit_new_staff",
+        "name": "New Credit — Staff CC (Manager)",
+        "body": (
+            "[New Credit] <customer_name> - P<amount> on <date>. "
+            "Invoice: <invoice_number>. Due: <due_date>. "
+            "Total balance: P<total_balance>."
+        ),
+        "placeholders": ["customer_name", "amount", "date", "invoice_number",
+                         "due_date", "total_balance"],
+        "trigger": "auto",
+        "active": True,
+    },
+    {
+        "key": "charge_applied_staff",
+        "name": "Interest/Penalty Applied — Staff CC (Manager)",
+        "body": (
+            "[<charge_type> Applied] <customer_name> - P<charge_amount> charged"
+            "<source_invoice>. New total balance: P<total_balance>. "
+            "Customer notified via SMS."
+        ),
+        "placeholders": ["charge_type", "customer_name", "charge_amount",
+                         "source_invoice", "total_balance"],
+        "trigger": "auto",
+        "active": True,
+    },
+    {
+        "key": "crop_season_started_owner",
+        "name": "Crop Season Started — Owner CC",
+        "body": (
+            "[New Crop Season] <customer_name> - planting <planting_date> | "
+            "due <harvest_date>. Balance: P<total_balance>."
+        ),
+        "placeholders": ["customer_name", "planting_date", "harvest_date",
+                         "total_balance"],
+        "trigger": "auto",
+        "active": True,
+    },
+    # ── Reversal notifications (close the loop with customer) ────────────────
+    {
+        "key": "sale_voided",
+        "name": "Sale Voided — Customer Notice",
+        "body": (
+            "Hi <customer_name>, ang inyong invoice <invoice_number> "
+            "(P<grand_total>) sa <company_name> ay na-void na ngayong <date>. "
+            "<balance_note>"
+            "Reason: <reason>. "
+            "Salamat po!"
+        ),
+        "placeholders": ["customer_name", "invoice_number", "grand_total",
+                         "company_name", "date", "balance_note", "reason"],
+        "trigger": "auto",
+        "active": True,
+    },
+    {
+        "key": "refund_processed",
+        "name": "Refund Processed — Customer Notice",
+        "body": (
+            "Hi <customer_name>, na-process na ang inyong return "
+            "<rma_number> sa <company_name>. "
+            "<refund_line>"
+            "<credit_line>"
+            "Reason: <reason>. Salamat po!"
+        ),
+        "placeholders": ["customer_name", "rma_number", "company_name",
+                         "refund_line", "credit_line", "reason"],
+        "trigger": "auto",
         "active": True,
     },
     # ── Branch Transfer Approval Workflow ────────────────────────────────────

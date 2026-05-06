@@ -1240,6 +1240,19 @@ async def void_invoice(inv_id: str, data: dict, user=Depends(get_current_user)):
             "note": "Branch prices remain updated after this void. Review Reports → Price Changes to revert if needed.",
         }
 
+    # Iter 244 — notify customer (credit sales only) that their sale was voided
+    if inv.get("customer_id"):
+        try:
+            from routes.sms_hooks import on_invoice_voided
+            await on_invoice_voided(
+                inv,
+                reason=reason,
+                voided_by=authorized_manager.get("full_name", authorized_manager["username"]),
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger("sms").error(f"on_invoice_voided dispatch failed: {e}")
+
     return {
         "message": "Invoice voided",
         "invoice_number": inv["invoice_number"],
@@ -1259,7 +1272,6 @@ async def void_invoice(inv_id: str, data: dict, user=Depends(get_current_user)):
             "interest_rate": inv.get("interest_rate", 0),
         },
     }
-
 
 # ── Fix #10: Void a single payment record on an invoice ─────────────────────
 

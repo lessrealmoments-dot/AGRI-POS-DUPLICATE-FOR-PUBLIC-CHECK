@@ -706,6 +706,7 @@ async def receive_payment(code: str, data: dict, request: Request):
                 remaining_balance=max(0, new_balance),
                 branch_id=branch_id,
                 next_due_info=next_due_info,
+                invoice_number=invoice.get("invoice_number", ""),
             )
         except Exception:
             pass  # Non-critical — payment is already recorded
