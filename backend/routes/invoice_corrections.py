@@ -303,20 +303,23 @@ async def correct_incomplete_stock(
     if invoice.get("customer_id") and refund_amount > 0:
         try:
             from routes.sms_hooks import on_payment_received
-            
+
             customer = await db.customers.find_one(
                 {"id": invoice["customer_id"]}, {"_id": 0}
             )
-            
+
             if customer:
+                # Iter 244 audit fix: correct signature is
+                # (customer_id, amount_paid, remaining_balance, branch_id, next_due_info)
+                # Previous call passed 7 positional args in the wrong order,
+                # raised TypeError, and the silent except meant refund-
+                # correction SMS never went out.
                 await on_payment_received(
-                    invoice["customer_id"],
-                    refund_amount,
-                    "Cash",
-                    f"Receipt correction - {invoice.get('invoice_number', '')}",
-                    customer.get("balance", 0),
-                    invoice["branch_id"],
-                    db
+                    customer_id=invoice["customer_id"],
+                    amount_paid=refund_amount,
+                    remaining_balance=float(customer.get("balance", 0) or 0),
+                    branch_id=invoice.get("branch_id", ""),
+                    next_due_info=f"Receipt correction — {invoice.get('invoice_number', '')}. ",
                 )
         except Exception as e:
             # Don't fail the whole operation if SMS fails

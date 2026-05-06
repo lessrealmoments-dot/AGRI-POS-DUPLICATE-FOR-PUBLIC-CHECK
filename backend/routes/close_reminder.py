@@ -385,49 +385,171 @@ async def _resolve_recipients(
 
 
 async def _build_branch_snapshot(branch_id: str, target_date: str, organization_id: str = "") -> dict:
-    """Compile the numbers SMS templates need. Uses the RAW db with an
-    explicit organization_id so it works from the background scheduler
-    (which has no org context set) AND from request-scoped callers."""
+    """Compile the numbers SMS templates need.
+
+    Iter 244 audit rewrite: the prior implementation used a shallow
+    `cash_total - exp_total` formula that:
+      - ignored yesterday's carry-forward drawer float (`starting_float`)
+      - ignored AR cash collections on older invoices (biggest leak)
+      - ignored safe ↔ drawer fund transfers
+      - mis-counted split-payment cash vs digital
+      - subtracted ALL expenses (including safe-paid / digital-paid) instead
+        of drawer-paid only.
+
+    Now mirrors `daily_operations.get_daily_close_preview()` so the
+    `cash_expected` figure in close_catchup_3pm / close_precheck /
+    close_status_snapshot etc. matches the Close Wizard on the same day.
+
+    Uses `_raw_db` with explicit `organization_id` because the background
+    scheduler has no tenant ContextVar set.
+    """
     inv_q = {"branch_id": branch_id, "order_date": target_date,
              "status": {"$ne": "voided"}}
     if organization_id:
         inv_q["organization_id"] = organization_id
+
     invoices = await _raw_db.invoices.find(
         inv_q, {"_id": 0, "grand_total": 1, "payment_type": 1, "fund_source": 1,
-                "amount_paid": 1, "balance": 1, "late_encoded": 1}
+                "amount_paid": 1, "balance": 1, "cash_amount": 1,
+                "digital_amount": 1, "late_encoded": 1}
     ).to_list(2000)
 
     s_count = len(invoices)
     s_total = sum(float(i.get("grand_total", 0) or 0) for i in invoices)
-    cash_total = 0.0
-    credit_total = 0.0
-    digital_total = 0.0
+
+    # ── Cash intake today (mirrors close_wizard) ─────────────────────────
+    total_cash_sales = 0.0   # full-cash fund_source
+    total_partial_cash = 0.0  # partial-pay invoices' amount_paid (cash portion)
+    total_split_cash = 0.0    # split-fund invoices' cash_amount
+    total_digital_today = 0.0
+    credit_total_new = 0.0    # balance remaining (new credit extended today)
     credit_count = 0
     for i in invoices:
         ptype = (i.get("payment_type") or "").lower()
-        fsrc = (i.get("fund_source") or "").lower()
+        fsrc = (i.get("fund_source") or "cashier").lower()
         amt = float(i.get("grand_total", 0) or 0)
         paid = float(i.get("amount_paid", 0) or 0)
         bal = float(i.get("balance", 0) or 0)
-        if fsrc == "digital":
-            digital_total += paid
-        elif ptype in ("credit", "partial"):
-            credit_total += bal
-            credit_count += 1
-            cash_total += paid
-        else:
-            cash_total += amt
+        cash_portion = float(i.get("cash_amount", 0) or 0)
+        digi_portion = float(
+            i.get("digital_amount", 0) or (paid if fsrc == "digital" else 0) or 0
+        )
 
+        if fsrc == "digital":
+            total_digital_today += paid
+        elif fsrc == "split":
+            total_split_cash += cash_portion
+            total_digital_today += digi_portion
+        elif ptype == "partial":
+            total_partial_cash += paid
+        elif ptype == "credit":
+            pass  # no cash today on pure credit
+        else:
+            total_cash_sales += amt  # cash sale, full amount to drawer
+
+        if ptype in ("credit", "partial") and bal > 0:
+            credit_total_new += bal
+            credit_count += 1
+
+    # ── AR payments TODAY on OLDER invoices (or today-dated interest/penalty) ──
+    ar_match: dict = {
+        "branch_id": branch_id,
+        "status": {"$ne": "voided"},
+        "$or": [
+            {"order_date": {"$ne": target_date}},
+            {"sale_type": {"$in": ["interest_charge", "penalty_charge"]}},
+        ],
+    }
+    if organization_id:
+        ar_match["organization_id"] = organization_id
+    ar_pipeline = [
+        {"$match": ar_match},
+        {"$unwind": "$payments"},
+        {"$match": {"payments.date": target_date, "payments.voided": {"$ne": True}}},
+        {"$project": {"_id": 0, "amount": "$payments.amount",
+                      "fund_source": "$payments.fund_source"}},
+    ]
+    ar_rows = await _raw_db.invoices.aggregate(ar_pipeline).to_list(500)
+    total_cash_ar = round(sum(
+        float(r.get("amount", 0) or 0) for r in ar_rows
+        if (r.get("fund_source") or "cashier") == "cashier"
+    ), 2)
+    total_digital_ar = round(sum(
+        float(r.get("amount", 0) or 0) for r in ar_rows
+        if (r.get("fund_source") or "cashier") == "digital"
+    ), 2)
+    total_ar_received = round(sum(float(r.get("amount", 0) or 0) for r in ar_rows), 2)
+
+    # ── Expenses today — split by fund source ────────────────────────────
     exp_q = {"branch_id": branch_id, "date": target_date, "status": {"$ne": "voided"}}
     if organization_id:
         exp_q["organization_id"] = organization_id
     expenses = await _raw_db.expenses.find(
-        exp_q, {"_id": 0, "amount": 1}
+        exp_q, {"_id": 0, "amount": 1, "fund_source": 1}
     ).to_list(500)
     exp_count = len(expenses)
-    exp_total = sum(float(e.get("amount", 0) or 0) for e in expenses)
+    exp_total = round(sum(float(e.get("amount", 0) or 0) for e in expenses), 2)
+    total_cashier_expenses = round(sum(
+        float(e.get("amount", 0) or 0) for e in expenses
+        if (e.get("fund_source") or "cashier") == "cashier"
+    ), 2)
 
-    # Pending credit slips (if the Capture Inbox exists; no-op otherwise)
+    # ── Fund transfers today — safe ↔ drawer + capital add ───────────────
+    ft_match: dict = {
+        "branch_id": branch_id,
+        "$or": [
+            {"date": target_date},
+            {"date": {"$exists": False},
+             "created_at": {"$gte": f"{target_date}T00:00:00",
+                            "$lt":  f"{target_date}T23:59:59"}},
+        ],
+    }
+    if organization_id:
+        ft_match["organization_id"] = organization_id
+    fund_transfers = await _raw_db.fund_transfers.find(ft_match, {"_id": 0}).to_list(200)
+    capital_to_cashier = round(sum(
+        float(ft.get("amount", 0) or 0) for ft in fund_transfers
+        if ft.get("transfer_type") == "capital_add"
+        and (ft.get("target_wallet") or "cashier") == "cashier"
+    ), 2)
+    safe_to_cashier = round(sum(
+        float(ft.get("amount", 0) or 0) for ft in fund_transfers
+        if ft.get("transfer_type") == "safe_to_cashier"
+    ), 2)
+    cashier_to_safe = round(sum(
+        float(ft.get("amount", 0) or 0) for ft in fund_transfers
+        if ft.get("transfer_type") == "cashier_to_safe"
+    ), 2)
+    net_fund_transfers = round(
+        capital_to_cashier + safe_to_cashier - cashier_to_safe, 2
+    )
+
+    # ── Starting float: previous close's `cash_to_drawer` ────────────────
+    prev_q: dict = {"branch_id": branch_id, "date": {"$lt": target_date}, "status": "closed"}
+    if organization_id:
+        prev_q["organization_id"] = organization_id
+    prev_close = await _raw_db.daily_closings.find_one(
+        prev_q, {"_id": 0, "cash_to_drawer": 1}, sort=[("date", -1)]
+    )
+    if prev_close:
+        starting_float = round(float(prev_close.get("cash_to_drawer", 0) or 0), 2)
+    else:
+        wallet_q: dict = {"branch_id": branch_id, "type": "cashier", "active": True}
+        if organization_id:
+            wallet_q["organization_id"] = organization_id
+        wallet = await _raw_db.fund_wallets.find_one(wallet_q, {"_id": 0, "balance": 1})
+        starting_float = round(float((wallet or {}).get("balance", 0) or 0), 2)
+
+    total_cash_in = round(
+        total_cash_sales + total_partial_cash + total_cash_ar + total_split_cash, 2
+    )
+    cash_expected = round(
+        starting_float + total_cash_in + net_fund_transfers - total_cashier_expenses, 2
+    )
+    # Drawer-relevant total cash sales proxy for legacy `cash_total` placeholder
+    cash_total = round(total_cash_sales + total_partial_cash + total_split_cash, 2)
+
+    # ── Pending credit slips (capture inbox) — best-effort ───────────────
     try:
         pc_q: dict = {"branch_id": branch_id, "status": "open"}
         if organization_id:
@@ -440,13 +562,24 @@ async def _build_branch_snapshot(branch_id: str, target_date: str, organization_
         "sales_count": s_count,
         "sales_total": f"{s_total:,.2f}",
         "sales_total_raw": s_total,
+        # Cash / credit / digital breakdown
         "cash_total": f"{cash_total:,.2f}",
-        "credit_total": f"{credit_total:,.2f}",
-        "digital_total": f"{digital_total:,.2f}",
+        "credit_total": f"{credit_total_new:,.2f}",
+        "digital_total": f"{total_digital_today:,.2f}",
         "credit_count": credit_count,
+        # Expenses
         "expense_count": exp_count,
         "expense_total": f"{exp_total:,.2f}",
-        "cash_expected": f"{(cash_total - exp_total):,.2f}",
+        # Full close-wizard-matching expected drawer
+        "cash_expected": f"{cash_expected:,.2f}",
+        "cash_expected_raw": cash_expected,
+        "starting_float": f"{starting_float:,.2f}",
+        "total_cash_in": f"{total_cash_in:,.2f}",
+        "total_cash_ar": f"{total_cash_ar:,.2f}",
+        "total_digital_ar": f"{total_digital_ar:,.2f}",
+        "total_ar_received": f"{total_ar_received:,.2f}",
+        "net_fund_transfers": f"{net_fund_transfers:,.2f}",
+        "total_cashier_expenses": f"{total_cashier_expenses:,.2f}",
         "pending_credits": pending_credits,
     }
 
@@ -764,8 +897,13 @@ async def send_zreport_finalized(close_record: dict, user: Optional[dict] = None
         late_note = f"⚠ Includes {late_invoices} late-encoded credit(s).\n"
 
     actual = float(close_record.get("actual_cash", 0) or 0)
-    expected = float(close_record.get("expected_cash", 0) or 0)
-    over_short = actual - expected
+    # Iter 244 audit fix: use the CANONICAL expected + over/short values
+    # persisted by the Close Wizard (`expected_counter`, `over_short`) instead
+    # of recomputing. The previous code read `expected_cash` (wrong key — that
+    # field doesn't exist on daily_closings) and recomputed, so every Z-Report
+    # SMS reported the whole drawer as "over".
+    expected = float(close_record.get("expected_counter", 0) or 0)
+    over_short = float(close_record.get("over_short", actual - expected) or 0)
     os_str = f"+₱{over_short:,.2f} over" if over_short > 0 else \
              (f"-₱{abs(over_short):,.2f} short" if over_short < 0 else "matches")
 

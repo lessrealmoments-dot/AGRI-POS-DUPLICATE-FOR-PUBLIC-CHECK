@@ -686,11 +686,26 @@ async def receive_payment(code: str, data: dict, request: Request):
     if invoice.get("customer_id"):
         try:
             from routes.sms_hooks import on_payment_received
+            # Iter 244 audit fix: compute next-due info so the customer SMS
+            # includes a concrete reminder (matches accounting.py behaviour).
+            next_inv = await db.invoices.find_one(
+                {"customer_id": invoice["customer_id"],
+                 "status": {"$nin": ["voided", "paid"]},
+                 "balance": {"$gt": 0},
+                 "due_date": {"$ne": None}},
+                {"_id": 0, "due_date": 1, "invoice_number": 1},
+                sort=[("due_date", 1)],
+            )
+            next_due_info = (
+                f"Next due: {next_inv['due_date']} ({next_inv.get('invoice_number','')}). "
+                if next_inv else ""
+            )
             await on_payment_received(
                 customer_id=invoice["customer_id"],
                 amount_paid=amount,
                 remaining_balance=max(0, new_balance),
                 branch_id=branch_id,
+                next_due_info=next_due_info,
             )
         except Exception:
             pass  # Non-critical — payment is already recorded

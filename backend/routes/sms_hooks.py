@@ -146,12 +146,16 @@ async def on_credit_sale_created(invoice: dict):
         cc = await _get_cc_phones(org_id, branch_id, {"manager"})
         manager_phone = cc.get("manager", "")
         if manager_phone:
+            # Iter 244 audit fix: use the same live aggregation as the
+            # customer-facing SMS so the manager sees the current total
+            # (previously read stale `customer.balance` from the pre-insert
+            # snapshot, which excluded the new invoice).
             mgr_msg = (
                 f"[New Credit] {customer.get('name','')} — "
                 f"P{invoice.get('balance', 0):,.2f} on {invoice.get('order_date','')}. "
                 f"Invoice: {invoice.get('invoice_number','')}. "
                 f"Due: {invoice.get('due_date','N/A')}. "
-                f"Total balance: P{customer.get('balance', 0):,.2f}."
+                f"Total balance: P{live_total:,.2f}."
             )
             await raw_db.sms_queue.insert_one({
                 "id": new_id(), "organization_id": org_id,

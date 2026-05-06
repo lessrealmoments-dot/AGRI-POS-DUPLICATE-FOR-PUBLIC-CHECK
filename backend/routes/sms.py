@@ -753,11 +753,36 @@ LEGACY_DEFAULT_BODIES = {
 
 # ── Template rendering helper ───────────────────────────────────────────────
 
+import re as _re_template
+
+_PLACEHOLDER_RE = _re_template.compile(r"<([a-z_][a-z0-9_]*)>")
+
+
 def render_template(body: str, variables: dict) -> str:
-    """Replace <placeholder> tokens with actual values."""
-    result = body
-    for key, val in variables.items():
-        result = result.replace(f"<{key}>", str(val))
+    """Replace <placeholder> tokens with actual values.
+
+    Iter 244 audit fix: previously, any placeholder missing from `variables`
+    was left as literal `<name>` text in the outgoing SMS — so recipients
+    occasionally saw `<hours_to_close>hrs left` etc. We now substitute via
+    regex so unknown placeholders silently collapse to an empty string,
+    and we log a single WARN line listing which keys were missing so
+    operators can diagnose coverage gaps from the backend log.
+    """
+    import logging
+    missing: list[str] = []
+
+    def _sub(match):
+        key = match.group(1)
+        if key in variables and variables[key] is not None:
+            return str(variables[key])
+        missing.append(key)
+        return ""
+
+    result = _PLACEHOLDER_RE.sub(_sub, body or "")
+    if missing:
+        logging.getLogger("sms").warning(
+            f"render_template — missing keys substituted as empty string: {sorted(set(missing))}"
+        )
     return result
 
 

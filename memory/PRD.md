@@ -1,4 +1,40 @@
 # AgriBooks PRD
+
+## Iter 244 — SMS Audit Quick-Wins (Feb 2026) ✅
+
+User-requested: "Check the formula used on /messages... some data are missing in the SMS text like expected vs actual funds to compute over or short."
+
+### Audit findings (full scan documented separately)
+Six concrete problems; the four tiny ones plus the snapshot rewrite were applied this round. The remaining three (#7 / #8 / #9) are content/UX enhancements (deferred).
+
+### What changed
+1. **Z-Report SMS over/short was always wrong** — `close_reminder.py:send_zreport_finalized` was reading `close_record.expected_cash` (a key that does not exist on the daily_closings record; the canonical field is `expected_counter`). Result: every Z-Report SMS computed `over_short = actual − 0 = actual`. Now reads the canonical `expected_counter` AND the persisted `over_short` from the close_record (no recomputation).
+2. **`_build_branch_snapshot` rewritten to mirror the Close Wizard** — previously `cash_total − exp_total`, ignoring starting_float, AR cash collections, fund_transfers, and fund-source on expenses. Now uses the same formula as `daily_operations.get_daily_close_preview()`: `starting_float + (cash_sales + partial_cash + cash_ar + split_cash) + net_fund_transfers − cashier_expenses`. Also splits cash vs digital correctly on `fund_source=split` invoices and exposes per-component placeholders (`<starting_float>`, `<total_cash_ar>`, `<net_fund_transfers>`, `<total_cashier_expenses>`).
+3. **Refund-correction SMS silently broken** — `invoice_corrections.py` was calling `on_payment_received(...)` with 7 positional args in the wrong order (string passed as remaining_balance, db handle as last arg). Raised TypeError, caught silently. Fixed to the canonical 5-arg keyword call.
+4. **QR payment SMS missing `next_due_info`** — `qr_actions.py` now computes the next-due invoice and passes it through, matching `accounting.py` behaviour.
+5. **`render_template` hardened** — switched to regex substitution; missing/None placeholders collapse to empty string instead of leaking literal `<placeholder>` text. Logs a single WARN listing missing keys per template render.
+6. **Manager CC for new credit uses live balance** — `sms_hooks.on_credit_sale_created` now reuses the live aggregation result (`live_total`) for the manager CC instead of the stale `customer.balance` snapshot taken before the new invoice was inserted.
+
+### Files
+- `backend/routes/close_reminder.py` (`_build_branch_snapshot` rewrite + `send_zreport_finalized` canonical-key fix)
+- `backend/routes/sms.py` (`render_template` regex hardening)
+- `backend/routes/invoice_corrections.py` (signature fix)
+- `backend/routes/qr_actions.py` (next_due_info)
+- `backend/routes/sms_hooks.py` (live manager total)
+- `backend/tests/test_sms_audit_fixes_244.py` (NEW — 8 regression tests, all passing)
+
+### Verified
+- 8 new pytest cases pass (template rendering, Z-report SMS variance, snapshot formula incl. starting_float/AR/split-payment/fund-source-aware expenses).
+- Backend boots, /api/health → 200.
+
+### Deferred (per user agreement)
+- Convert inline staff strings (`credit_new_staff`, `charge_applied_staff`, `crop_season_started_owner`) to real templates editable from `/messages`.
+- Add `sale_voided` + `refund_processed` customer templates (close the loop on reversed invoices).
+- Enrich `payment_received` and `charge_applied` with source invoice number + period.
+
+---
+
+
 ## Iter 244 (Feb 2026) — Unified Invoice Detail Modal: Refund / Void / Void & Re-open ✅
 
 ### What changed
