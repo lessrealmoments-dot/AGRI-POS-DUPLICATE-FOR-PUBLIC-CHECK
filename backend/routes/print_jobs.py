@@ -7,12 +7,12 @@ Handles: Job creation, status tracking, real-time WebSocket push,
          upload-to-print (PDF / images via Cloudflare R2).
 
 EXE Integration Contract:
-  POST /api/print/terminal/credential-pair  → Login (existing terminal.py)
-  WS   /api/terminal/ws/terminal/{id}       → Real-time push (existing terminal_ws.py)
-  GET  /api/print/jobs/pending              → Polling fallback (new)
-  PUT  /api/print/jobs/{id}/status          → Mark printed/failed (new)
-  GET  /api/print/jobs/{id}/file-url        → Fresh presigned URL for external docs (new)
-  POST /api/print/upload-job                → Upload external doc + create print job (new)
+  POST /api/terminal/credential-pair         → Login + branch selection (terminal.py)
+  WS   /api/terminal/ws/terminal/{id}        → Real-time push (terminal_ws.py)
+  GET  /api/print/jobs/pending?terminal_id=  → Polling fallback — ALWAYS pass terminal_id
+  PUT  /api/print/jobs/{id}/status           → Mark printed/failed/cancelled
+  GET  /api/print/jobs/{id}/file-url         → Fresh presigned URL for external docs
+  POST /api/print/upload-job                 → Upload external doc + create print job
 """
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File, Form
 from typing import Optional
@@ -197,31 +197,55 @@ async def list_print_jobs(
 # ── Pending Jobs Polling (EXE / terminal reconnect) ─────────────────────────
 
 @router.get("/jobs/pending")
-async def get_pending_jobs(user=Depends(get_current_user)):
+async def get_pending_jobs(
+    terminal_id: str = None,
+    user=Depends(get_current_user),
+):
     """
     Polling endpoint for terminal EXE.
     Returns all pending/sent jobs for this terminal and marks them as sent.
     Call this on reconnect and periodically as a fallback to WebSocket.
-    """
-    terminal = await _raw_db.terminal_sessions.find_one(
-        {"user_id": user["id"], "status": "active"},
-        {"_id": 0}, sort=[("paired_at", -1)]
-    )
-    if not terminal:
-        raise HTTPException(status_code=404, detail="No active terminal session")
 
-    terminal_id = terminal["terminal_id"]
+    IMPORTANT: always pass ?terminal_id= so the correct terminal session is
+    used. Without it we fall back to the user's latest session, which can
+    drift if the same user has multiple active terminals (e.g. admin at
+    two branches).
+    """
     org_id = user.get("organization_id")
 
-    # Update last_seen heartbeat
+    if terminal_id:
+        # EXE passes its own terminal_id — precise, no ambiguity
+        t_query = {"terminal_id": terminal_id, "status": "active"}
+        if org_id:
+            t_query["organization_id"] = org_id
+        terminal = await _raw_db.terminal_sessions.find_one(t_query, {"_id": 0})
+        if not terminal:
+            raise HTTPException(status_code=404, detail="Terminal session not found")
+    else:
+        # Fallback: resolve by latest active session for this user.
+        # Works fine for single-terminal users; may drift for admins with
+        # multiple active sessions — pass terminal_id to avoid this.
+        terminal = await _raw_db.terminal_sessions.find_one(
+            {"user_id": user["id"], "status": "active"},
+            {"_id": 0}, sort=[("paired_at", -1)]
+        )
+        if not terminal:
+            raise HTTPException(status_code=404, detail="No active terminal session")
+
+    resolved_terminal_id = terminal["terminal_id"]
+
+    # Heartbeat
     await _raw_db.terminal_sessions.update_one(
-        {"terminal_id": terminal_id},
+        {"terminal_id": resolved_terminal_id},
         {"$set": {"last_seen": now_iso()}}
     )
 
+    job_query: dict = {"terminal_id": resolved_terminal_id, "status": {"$in": ["pending", "sent"]}}
+    if org_id:
+        job_query["organization_id"] = org_id
+
     jobs = await _raw_db.print_jobs.find(
-        {"terminal_id": terminal_id, "organization_id": org_id, "status": {"$in": ["pending", "sent"]}},
-        {"_id": 0}
+        job_query, {"_id": 0}
     ).sort("created_at", 1).to_list(50)
 
     # Mark newly found pending → sent
@@ -235,7 +259,7 @@ async def get_pending_jobs(user=Depends(get_current_user)):
 
     return {
         "jobs":        jobs,
-        "terminal_id": terminal_id,
+        "terminal_id": resolved_terminal_id,
         "print_mode":  terminal.get("print_mode", "manual"),
         "branch_id":   terminal.get("branch_id"),
         "branch_name": terminal.get("branch_name"),
@@ -256,7 +280,12 @@ async def update_job_status(job_id: str, data: dict, user=Depends(get_current_us
     if new_status not in ("printed", "failed", "cancelled"):
         raise HTTPException(status_code=400, detail="Status must be: printed, failed, or cancelled")
 
-    job = await _raw_db.print_jobs.find_one({"id": job_id}, {"_id": 0, "organization_id": 1})
+    org_id = user.get("organization_id")
+    job_query = {"id": job_id}
+    if org_id:
+        job_query["organization_id"] = org_id
+
+    job = await _raw_db.print_jobs.find_one(job_query, {"_id": 0, "organization_id": 1})
     if not job:
         raise HTTPException(status_code=404, detail="Print job not found")
 
@@ -265,12 +294,13 @@ async def update_job_status(job_id: str, data: dict, user=Depends(get_current_us
     if new_status == "printed":
         update["printed_at"] = ts
     elif new_status == "failed":
-        update["failed_at"]    = ts
+        update["failed_at"]     = ts
         update["error_message"] = error_message
     elif new_status == "cancelled":
         update["cancelled_at"] = ts
 
-    await _raw_db.print_jobs.update_one({"id": job_id}, {"$set": update})
+    # Scope the write to the same filter used for the read (defense-in-depth)
+    await _raw_db.print_jobs.update_one(job_query, {"$set": update})
     return {"job_id": job_id, "status": new_status}
 
 

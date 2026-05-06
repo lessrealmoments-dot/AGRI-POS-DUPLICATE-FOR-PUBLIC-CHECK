@@ -175,9 +175,11 @@ threading.Thread(target=connect_ws, daemon=True).start()
 ### 3. Polling Endpoint (fallback + reconnect)
 
 ```
-GET {BASE_URL}/api/print/jobs/pending
+GET {BASE_URL}/api/print/jobs/pending?terminal_id={terminal_id}
 Authorization: Bearer {token}
 ```
+
+**Always pass `terminal_id` as a query parameter.** The EXE already knows its own `terminal_id` from the login response. Passing it explicitly avoids ambiguity if the same account logs into multiple terminals at different branches.
 
 **Response:**
 ```json
