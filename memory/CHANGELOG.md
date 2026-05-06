@@ -1,5 +1,30 @@
 # AgriBooks Changelog
 
+## Feb 2026 — PO + Pay Supplier Wallet Routing Audit & Fix (Iter 248)
+
+**Problem**: `/purchase-orders` Pay-in-Cash dialog only offered Cashier + Safe (no Digital, no Bank). The Payment Adjustment dialog had the same gap. Backend `POST /purchase-orders` silently fell through to deduct from cashier when Bank/Digital was passed (data-integrity bug). `/pay-supplier` worked for all 4 wallets but used hardcoded labels and didn't mask hidden bank balances. No visible "paying via X" hint.
+
+**What changed:**
+- **Backend `purchase_orders.py`**:
+  - `_get_fund_balances()` now returns all 4 wallets (cashier, safe, digital, bank) with `*_name`, `*_id`, and `*_available` flags. `GET /fund-balances` masks bank balance + sets `bank_hidden:true` for non-admin roles.
+  - `POST /purchase-orders` (po_type=cash) accepts `fund_source ∈ {cashier, safe, digital, bank}`. Bank/Digital require admin PIN or TOTP via `verify_pin_for_action(pin, "pay_po_bank")`. Each path correctly: validates balance, drains from the right wallet (lots for safe, `update_digital_wallet`, direct $inc + `wallet_movements` for bank), writes the expense record, and auto-posts a double-entry journal (Debit COGS / Credit Bank-1030 or Digital-1020) for bank/digital.
+  - `POST /{po_id}/adjust-payment` extended with the same 4-wallet support + PIN policy + refund symmetry (lot insertion for safe, helper for digital, $inc + `wallet_movements bank_in` for bank).
+- **Frontend `PurchaseOrderPage.js`**:
+  - Pay-in-Cash dialog shows 4-card grid (Cashier Drawer, Physical Safe, Digital / E-Wallet, Bank Account), with lock icons on Digital/Bank, masked `••••` balance + "Admin-only balance" caption when bank is hidden, conditional admin PIN input shown only when Bank or Digital is selected, and a clear method/wallet hint in the confirm summary.
+  - Pay-Adjustment dialog mirrors the same 4-wallet UX + PIN gate.
+- **Frontend `PaySupplierPage.js`**:
+  - Replaces hardcoded labels with each wallet's `name` from `/fund-wallets` (defaults to canonical `Cashier Drawer` / `Physical Safe` / `Digital / E-Wallet` / `Bank Account`).
+  - Shows masked `••••` balance for bank when `balance_hidden:true`; disables disabled/missing wallets; suppresses the "short" red flag when balance is hidden.
+  - Adds visible "Paying via **<Method>** from **<Wallet name>**" hint below the Pay From row.
+
+**Validated by testing agent (iter 248, 16/16 backend passes + frontend smoke):**
+- All 4 wallet sources route correctly on PO creation + adjustment.
+- Bank/Digital reject without PIN (400) and with invalid PIN (403); succeed with admin PIN 913712.
+- Bank balance masked for non-admin roles. Insufficient-funds returns structured `{type: insufficient_funds, shortfall}`. Journal entries posted for bank (1030) + digital (1020).
+
+---
+
+
 ## May 2026 — Request Stock UX upgrade: SmartProductSearch (Iter 247)
 
 **User scenario**: The Request Stock form had a basic typeahead — no keyboard navigation, no smart bubble positioning, no fuzzy fallback. User asked for parity with `/sales-new` Detailed Sales: ↑/↓ arrow keys, Enter-to-select-and-jump-to-next-field, dropdown that auto-flips above/below the input depending on viewport space, highlighted match always visible (centered), and smart search behaviors (fuzzy + offline cache fallback).

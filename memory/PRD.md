@@ -1,5 +1,39 @@
 # AgriBooks PRD
 
+## Iter 253 — PO + Pay-Supplier Wallet Routing Audit (Feb 2026) ✅
+
+### Problem
+1. `/purchase-orders` Pay-in-Cash dialog only offered Cashier + Safe — no Digital, no Bank. Header dropdown only showed "Cash" or "Credit/Terms".
+2. Backend `POST /purchase-orders` (cash branch) silently fell through to deduct from cashier when `bank` or `digital` was passed (data-integrity bug).
+3. `/pay-supplier` worked for all 4 wallets but used hardcoded labels (e.g., "Check / Bank") instead of the wallet's actual `name` (e.g., "BDO Checking"), and didn't mask hidden bank balances or show a visible "paying via X" hint.
+
+### Decisions
+- Bank balance is masked (`••••` + lock) for all non-admin roles (option A).
+- Canonical wallet labels: **Cashier Drawer**, **Physical Safe**, **Digital / E-Wallet**, **Bank Account** (fall back when DB `name` is empty).
+- PO instant-pay via Bank/Digital deducts immediately; requires admin PIN or TOTP. Cashier/Safe still no PIN.
+- Same PIN policy applies to PO Payment-Adjustment dialog.
+
+### What was built
+**Backend (`purchase_orders.py`)**
+- `_get_fund_balances()` returns 4 wallets with `*_name`, `*_id`, `*_available` flags. `GET /fund-balances` masks bank for non-admins.
+- `POST /purchase-orders` cash branch validates balance + drains correct wallet + writes expense + auto-posts double-entry JE for bank/digital. Bank/Digital go through `verify_pin_for_action(pin, "pay_po_bank")` policy.
+- `POST /{po_id}/adjust-payment` mirrors the 4-wallet support with PIN policy + symmetric refund (safe lot insert / digital helper / bank $inc + `wallet_movements bank_in`).
+
+**Frontend**
+- `PurchaseOrderPage.js`: Pay-in-Cash dialog → 4-card grid with lock icons, masked balance, conditional PIN input, method/wallet hint in summary. Same for Pay-Adjustment dialog.
+- `PaySupplierPage.js`: uses wallet `name` from `/fund-wallets`; masks hidden bank balance; "Paying via **<Method>** from **<Wallet>**" hint.
+
+### Files
+- `/app/backend/routes/purchase_orders.py`
+- `/app/frontend/src/pages/PurchaseOrderPage.js`
+- `/app/frontend/src/pages/PaySupplierPage.js`
+
+### Verified
+Testing agent iter 248: 16/16 backend tests pass (all 4 fund sources × create + adjust + PIN gate + redaction + insufficient-funds + journal entries). Frontend smoke confirmed 4-wallet pills render with canonical labels.
+
+---
+
+
 ## Iter 252 — Request Stock UX: SmartProductSearch parity with /sales-new (Feb 2026) ✅
 
 ### Problem
