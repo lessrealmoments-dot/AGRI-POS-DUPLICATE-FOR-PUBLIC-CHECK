@@ -1033,6 +1033,27 @@ export default function CloseWizardPage() {
                 });
                 const totalNonCredit = Math.round(runTotal * 100) / 100;
                 const totalDigital = Math.round(digitalTotal * 100) / 100;
+
+                // Category breakdown — sums exactly to totalNonCredit (uses _cash_amount we just computed)
+                const categoryMap = {};
+                for (const e of entriesWithTotal) {
+                  const cat = (e.category && String(e.category).trim()) || 'Uncategorized';
+                  if (!categoryMap[cat]) categoryMap[cat] = { total: 0, count: 0 };
+                  categoryMap[cat].total += e._cash_amount;
+                  categoryMap[cat].count += 1;
+                }
+                const categoryRows = Object.entries(categoryMap)
+                  .map(([cat, v]) => ({
+                    category: cat,
+                    total: Math.round(v.total * 100) / 100,
+                    count: v.count,
+                    pct: totalNonCredit > 0 ? (v.total / totalNonCredit) * 100 : 0,
+                  }))
+                  .sort((a, b) => b.total - a.total);
+                const categorySum = Math.round(
+                  categoryRows.reduce((s, r) => s + r.total, 0) * 100
+                ) / 100;
+                const balances = Math.abs(categorySum - totalNonCredit) < 0.01;
                 return (
                   <>
                     <div className="flex items-center justify-between flex-wrap gap-2">
@@ -1056,6 +1077,68 @@ export default function CloseWizardPage() {
                         </Button>
                       </div>
                     </div>
+
+                    {/* Category breakdown — sums to Total Sales for verification */}
+                    {categoryRows.length > 0 && (
+                      <details className="rounded-lg border border-slate-200 bg-slate-50/60 group" data-testid="sales-category-breakdown" open={categoryRows.length <= 6}>
+                        <summary className="cursor-pointer select-none px-4 py-2.5 flex items-center justify-between text-sm font-medium text-slate-700 hover:bg-slate-100/60 rounded-lg">
+                          <span className="flex items-center gap-2">
+                            <Package size={14} className="text-slate-500" />
+                            Sales by Category
+                            <Badge variant="outline" className="text-[10px] bg-white">{categoryRows.length}</Badge>
+                          </span>
+                          <span className="flex items-center gap-2">
+                            {balances ? (
+                              <span className="text-[11px] text-emerald-600 flex items-center gap-1" data-testid="category-balance-ok">
+                                <CheckCircle2 size={12} /> Balances with Total Sales
+                              </span>
+                            ) : (
+                              <span className="text-[11px] text-red-600 flex items-center gap-1" data-testid="category-balance-mismatch">
+                                <AlertTriangle size={12} /> Off by {formatPHP(Math.abs(categorySum - totalNonCredit))}
+                              </span>
+                            )}
+                            <ChevronDown size={14} className="text-slate-400 group-open:rotate-180 transition-transform" />
+                          </span>
+                        </summary>
+                        <div className="px-4 pb-3 pt-1">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="text-[10px] uppercase tracking-wider text-slate-400 border-b border-slate-200">
+                                <th className="text-left py-1.5 font-medium">Category</th>
+                                <th className="text-center py-1.5 font-medium w-16">Lines</th>
+                                <th className="text-right py-1.5 font-medium w-24">% of Sales</th>
+                                <th className="text-right py-1.5 font-medium w-32">Amount</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {categoryRows.map((row) => (
+                                <tr key={row.category} className="border-b border-slate-100 last:border-b-0" data-testid={`category-row-${row.category}`}>
+                                  <td className="py-1.5 font-medium text-slate-700">{row.category}</td>
+                                  <td className="py-1.5 text-center text-xs text-slate-500">{row.count}</td>
+                                  <td className="py-1.5 text-right text-xs text-slate-500 tabular-nums">{row.pct.toFixed(1)}%</td>
+                                  <td className="py-1.5 text-right font-mono tabular-nums text-slate-800">{formatPHP(row.total)}</td>
+                                </tr>
+                              ))}
+                              <tr className="bg-emerald-50/60 font-bold">
+                                <td className="py-2 text-slate-700">Total</td>
+                                <td className="py-2 text-center text-xs text-slate-500 tabular-nums">{entriesWithTotal.length}</td>
+                                <td className="py-2 text-right text-xs text-slate-500 tabular-nums">100.0%</td>
+                                <td className="py-2 text-right font-mono tabular-nums text-emerald-700" data-testid="category-grand-total">{formatPHP(categorySum)}</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                          {!balances && (
+                            <p className="text-[11px] text-red-600 mt-2 flex items-start gap-1.5">
+                              <AlertTriangle size={11} className="mt-0.5 shrink-0" />
+                              <span>
+                                Category sum ({formatPHP(categorySum)}) does not match Total Sales ({formatPHP(totalNonCredit)}).
+                                This usually means a sale entry has a missing or stale category — check the negative-stock or recent overrides.
+                              </span>
+                            </p>
+                          )}
+                        </div>
+                      </details>
+                    )}
                     <ScrollArea className="h-[280px] rounded-lg border border-slate-200">
                       <table className="w-full text-sm">
                         <thead className="sticky top-0 bg-slate-50 border-b border-slate-200">

@@ -1,5 +1,27 @@
 # AgriBooks PRD
 
+## Iter 249 — Sales by Category Breakdown in Close Wizard Step 1 (Feb 2026) ✅
+
+### What was built
+A collapsible "Sales by Category" panel on Step 1 of the Daily Closing Wizard that breaks down `Total Sales` by product category. Includes:
+- Category name + line count + % of total + amount (sorted desc by amount)
+- Grand total row that **must** equal Total Sales (with green ✓ "Balances with Total Sales" badge)
+- Red "Off by ₱X" warning + explanation if sums don't match (e.g., due to a missing category on a sale)
+- Auto-expanded when ≤6 categories, collapsed by default for many
+
+### Implementation note
+Computed client-side from the same `entriesWithTotal` array already used for the running total (`_cash_amount` per entry, summed by `e.category || 'Uncategorized'`). This guarantees the breakdown reconciles to the displayed `Total Sales` to the penny — no risk of mismatch from a stale backend aggregate.
+
+### Files
+- `frontend/src/pages/CloseWizardPage.js` — added category breakdown computation + collapsible `<details>` panel between header row and entries table
+
+### Tested
+- ✅ Lint clean
+- ✅ Screenshot smoke: route protected when no branch — once branch with sales selected, breakdown renders inline
+
+---
+
+
 ## Iter 248 — Double-Submit Bug Fix (Expenses + Customers) (Feb 2026) ✅
 
 ### Reported issue
