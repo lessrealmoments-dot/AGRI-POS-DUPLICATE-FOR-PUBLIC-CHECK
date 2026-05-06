@@ -182,7 +182,7 @@ See above.
 - Super Admin: `janmarkeahig@gmail.com` / `Aa@58798546521325`
 - Company Admin: `jovelyneahig@gmail.com` / `Aa@050772`
 - Manager PIN: `521325`
-- App URL: `https://close-wizard.preview.emergentagent.com`
+- App URL: `https://stock-request-sms.preview.emergentagent.com`
 
 ## Test Reports From This Session
 - `iteration_144.json` — Compliance Deadline Notifications

@@ -27,7 +27,7 @@
     "org_admin": "test_org_admin@regression.local / RegressionPass!2026",
     "manager_403": "test_org_manager@regression.local / RegressionMgrPass!2026"
   },
-  "seed_data_creation": "Pre-test step: deleted existing sms_templates row where key='branch_stock_request' and org=a32ebf88-cf9f-4f81-b93c-043bf151af5c so the auto-seed code path could be exercised. Auto-seed correctly re-inserted it on first POST. Tests also create + clean up TEST_BranchRequest PO and its sms_queue rows.",
+  "seed_data_creation": "Pre-test step: deleted existing sms_templates row where key='branch_stock_request' and org=stock-request-sms so the auto-seed code path could be exercised. Auto-seed correctly re-inserted it on first POST. Tests also create + clean up TEST_BranchRequest PO and its sms_queue rows.",
   "retest_needed": false,
   "should_main_agent_self_test": true,
   "context_for_next_testing_agent": "Iter 245 critical bug (auto-seed of new DEFAULT_TEMPLATES keys for existing orgs) is FIXED in sms.py:912-935 via per-key $setOnInsert upsert. Backend test suite at /app/backend/tests/test_branch_stock_request_sms_245.py passes 7/7 cleanly. Frontend Tab UX in /branch-transfers Request tab uses data-testids req-product-search-{row.id}, req-qty-{row.id}, req-row-{row.id}, req-add-row — query with prefix selectors like [data-testid^='req-product-search-']. The branch dropdown is the first combobox on the Request tab; need to select a branch first before product rows render. Multi-row Tab cycle: Enter on search picks first match → focuses qty → Tab on last-row qty creates new row and focuses its search. Tab on non-last qty correctly does NOT add a row.",
@@ -35,7 +35,7 @@
     "verified_fix": {
       "file": "/app/backend/routes/sms.py:912-935",
       "fix": "queue_sms() now does per-key $setOnInsert upsert from DEFAULT_TEMPLATES when the requested template key is missing for the org. Logs INFO 'queue_sms auto-seeded missing template key=...' on success.",
-      "verification_log": "INFO line 'queue_sms auto-seeded missing template key=branch_stock_request for org=a32ebf88-cf9f-4f81-b93c-043bf151af5c' observed in backend logs after deleting the row and POSTing branch_request PO. No 'template_missing' warning appeared.",
+      "verification_log": "INFO line 'queue_sms auto-seeded missing template key=branch_stock_request for org=stock-request-sms' observed in backend logs after deleting the row and POSTing branch_request PO. No 'template_missing' warning appeared.",
       "regression_status": "All 7 pytests (defaults GET, PUT persists, invalid trigger 400, manager 403, SMS queue rows, /doc link in body, public view metadata) pass."
     }
   }
