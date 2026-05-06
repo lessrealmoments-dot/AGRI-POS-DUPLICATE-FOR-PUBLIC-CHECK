@@ -64,6 +64,7 @@ export default function AccountingPage() {
   const [caSummary, setCaSummary] = useState(null);
   const [caManagerPin, setCaManagerPin] = useState('');
   const [caManagerPinDialog, setCaManagerPinDialog] = useState(false);
+  const [submittingExpense, setSubmittingExpense] = useState(false);  // double-submit guard
   const [uploadQROpen, setUploadQROpen] = useState(false);
   const [uploadExpenseId, setUploadExpenseId] = useState(null);
   const [verifyExpenseId, setVerifyExpenseId] = useState(null);
@@ -211,6 +212,7 @@ export default function AccountingPage() {
   };
 
   const handleSaveExpense = async (approvedBy = '') => {
+    if (submittingExpense) return;
     // Defensive: when bound directly to onClick, React passes a SyntheticEvent
     // here. Only treat string as a real approver name; ignore anything else.
     const approver = (typeof approvedBy === 'string') ? approvedBy.trim() : '';
@@ -231,6 +233,7 @@ export default function AccountingPage() {
         return;
       }
     }
+    setSubmittingExpense(true);
     try {
       const payload = { ...expenseForm, branch_id: currentBranch?.id };
       if (approver) payload.manager_approved_by = approver;
@@ -260,6 +263,8 @@ export default function AccountingPage() {
         return;
       }
       toast.error(getErrorMessage(e, 'Error saving expense'));
+    } finally {
+      setSubmittingExpense(false);
     }
   };
 
@@ -853,8 +858,8 @@ export default function AccountingPage() {
             )}
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setExpenseDialog(false)}>Cancel</Button>
-              <Button onClick={() => handleSaveExpense()} className="bg-[#1A4D2E] hover:bg-[#14532d] text-white" data-testid="save-expense-btn">
-                {editMode ? 'Update Expense' : 'Save Expense'}
+              <Button onClick={() => handleSaveExpense()} disabled={submittingExpense} className="bg-[#1A4D2E] hover:bg-[#14532d] text-white disabled:opacity-50 disabled:cursor-not-allowed" data-testid="save-expense-btn">
+                {submittingExpense ? 'Saving…' : (editMode ? 'Update Expense' : 'Save Expense')}
               </Button>
             </div>
           </div>

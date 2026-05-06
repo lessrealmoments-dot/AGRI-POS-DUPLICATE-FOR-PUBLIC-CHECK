@@ -80,6 +80,7 @@ export default function ExpensesPage() {
     description: '', notes: '', amount: 0, employee_id: '',
     date: localTodayStr(),
   });
+  const [submitting, setSubmitting] = useState(false);  // double-submit guard for all save buttons
   const [eaCaSummary, setEaCaSummary] = useState(null);
   const [eaManagerPin, setEaManagerPin] = useState('');
   const [eaManagerPinDialog, setEaManagerPinDialog] = useState(false);
@@ -208,6 +209,7 @@ export default function ExpensesPage() {
   };
 
   const handleCreateEmployeeAdvance = async (approvedBy = '') => {
+    if (submitting) return;
     if (!employeeAdvanceForm.employee_id) { toast.error('Please select an employee'); return; }
     if (!employeeAdvanceForm.amount || employeeAdvanceForm.amount <= 0) { toast.error('Amount must be greater than 0'); return; }
     if (!currentBranch?.id) { toast.error('Please select a branch first'); return; }
@@ -221,6 +223,7 @@ export default function ExpensesPage() {
       }
     }
 
+    setSubmitting(true);
     try {
       const emp = employees.find(e => e.id === employeeAdvanceForm.employee_id);
       const payload = {
@@ -238,6 +241,8 @@ export default function ExpensesPage() {
       const detail = e.response?.data?.detail;
       const msg = typeof detail === 'string' ? detail : detail?.message || 'Error creating employee advance';
       toast.error(msg);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -276,6 +281,7 @@ export default function ExpensesPage() {
   };
 
   const handleSaveExpense = async (approvedBy = '') => {
+    if (submitting) return;
     if (!expenseForm.amount || expenseForm.amount <= 0) {
       toast.error('Amount must be greater than 0');
       return;
@@ -291,6 +297,7 @@ export default function ExpensesPage() {
         return;
       }
     }
+    setSubmitting(true);
     try {
       const payload = { ...expenseForm, branch_id: currentBranch?.id };
       if (approvedBy) payload.manager_approved_by = approvedBy;
@@ -312,6 +319,8 @@ export default function ExpensesPage() {
       const detail = e.response?.data?.detail;
       const msg = typeof detail === 'string' ? detail : detail?.message || 'Error saving expense';
       toast.error(msg);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -349,8 +358,10 @@ export default function ExpensesPage() {
   };
 
   const handleCreateFarmExpense = async () => {
+    if (submitting) return;
     if (!farmExpenseForm.customer_id) { toast.error('Please select a customer to bill'); return; }
     if (!farmExpenseForm.amount || farmExpenseForm.amount <= 0) { toast.error('Amount must be greater than 0'); return; }
+    setSubmitting(true);
     try {
       const payload = { ...farmExpenseForm, branch_id: currentBranch?.id };
       if (farmReceiptData?.sessionId) {
@@ -365,12 +376,16 @@ export default function ExpensesPage() {
       const detail = e.response?.data?.detail;
       const msg = typeof detail === 'string' ? detail : detail?.message || 'Error creating farm expense';
       toast.error(msg);
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleCreateCashOut = async () => {
+    if (submitting) return;
     if (!cashOutForm.customer_id) { toast.error('Please select a customer'); return; }
     if (!cashOutForm.amount || cashOutForm.amount <= 0) { toast.error('Amount must be greater than 0'); return; }
+    setSubmitting(true);
     try {
       const res = await api.post('/expenses/customer-cashout', { ...cashOutForm, branch_id: currentBranch?.id });
       toast.success(res.data.message);
@@ -380,6 +395,8 @@ export default function ExpensesPage() {
       const detail = e.response?.data?.detail;
       const msg = typeof detail === 'string' ? detail : detail?.message || 'Error creating cash out';
       toast.error(msg);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -719,8 +736,8 @@ export default function ExpensesPage() {
             )}
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setExpenseDialog(false)}>Cancel</Button>
-              <Button onClick={() => handleSaveExpense()} className="bg-[#1A4D2E] hover:bg-[#14532d] text-white" data-testid="expenses-save-btn">
-                {editMode ? 'Update Expense' : 'Save Expense'}
+              <Button onClick={() => handleSaveExpense()} disabled={submitting} className="bg-[#1A4D2E] hover:bg-[#14532d] text-white disabled:opacity-50 disabled:cursor-not-allowed" data-testid="expenses-save-btn">
+                {submitting ? 'Saving…' : (editMode ? 'Update Expense' : 'Save Expense')}
               </Button>
             </div>
           </div>
@@ -936,8 +953,8 @@ export default function ExpensesPage() {
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setFarmExpenseDialog(false)}>Cancel</Button>
-              <Button onClick={handleCreateFarmExpense} className="bg-amber-600 hover:bg-amber-700 text-white" data-testid="expenses-save-farm-btn">
-                <Tractor size={14} className="mr-2" /> Create Expense & Invoice
+              <Button onClick={handleCreateFarmExpense} disabled={submitting} className="bg-amber-600 hover:bg-amber-700 text-white disabled:opacity-50 disabled:cursor-not-allowed" data-testid="expenses-save-farm-btn">
+                <Tractor size={14} className="mr-2" /> {submitting ? 'Creating…' : 'Create Expense & Invoice'}
               </Button>
             </div>
           </div>
@@ -1105,8 +1122,8 @@ export default function ExpensesPage() {
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setCashOutDialog(false)}>Cancel</Button>
-              <Button onClick={handleCreateCashOut} className="bg-blue-600 hover:bg-blue-700 text-white" data-testid="expenses-save-cashout-btn">
-                <Banknote size={14} className="mr-2" /> Release Cash & Create Invoice
+              <Button onClick={handleCreateCashOut} disabled={submitting} className="bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 disabled:cursor-not-allowed" data-testid="expenses-save-cashout-btn">
+                <Banknote size={14} className="mr-2" /> {submitting ? 'Releasing…' : 'Release Cash & Create Invoice'}
               </Button>
             </div>
           </div>
@@ -1187,8 +1204,8 @@ export default function ExpensesPage() {
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setEmployeeAdvanceDialog(false)}>Cancel</Button>
-              <Button onClick={() => handleCreateEmployeeAdvance()} className="bg-violet-600 hover:bg-violet-700 text-white" data-testid="expenses-save-ea-btn">
-                <UserCheck size={14} className="mr-2" /> Record Cash Advance
+              <Button onClick={() => handleCreateEmployeeAdvance()} disabled={submitting} className="bg-violet-600 hover:bg-violet-700 text-white disabled:opacity-50 disabled:cursor-not-allowed" data-testid="expenses-save-ea-btn">
+                <UserCheck size={14} className="mr-2" /> {submitting ? 'Recording…' : 'Record Cash Advance'}
               </Button>
             </div>
           </div>

@@ -1,5 +1,39 @@
 # AgriBooks PRD
 
+## Iter 248 — Double-Submit Bug Fix (Expenses + Customers) (Feb 2026) ✅
+
+### Reported issue
+User accidentally pressed "Create Expense & Invoice" 2-3 times → 2 duplicate expenses created.
+
+### Root cause
+Save handlers had no in-flight guard. Rapid clicks → multiple parallel `api.post('/expenses', ...)` → backend creates each one.
+
+### Fix
+Added a per-handler `submitting` state + early-return guard + `disabled` button + "Saving…" / "Creating…" / "Releasing…" text. Applied across **all** money-creating dialogs that lacked guards:
+- `ExpensesPage.js` — Record Expense, Farm Expense, Customer Cash Out, Employee Cash Advance (4 buttons)
+- `DailyLogPage.js` — quick-expense save
+- `AccountingPage.js` — record/edit expense
+- `CustomersPage.js` — Save (also covers opening-balance invoice creation from Iter 247)
+
+### Already protected (verified)
+- `PaymentsPage.js` `handleApplyPayment` — uses `processing` state ✅
+- `TerminalReturnRefundModal` / `TerminalUpdateReceiptModal` — use `submitting` state ✅
+- `PurchaseOrderPage.js` — has guards on critical paths
+
+### Files
+- `frontend/src/pages/ExpensesPage.js`
+- `frontend/src/pages/DailyLogPage.js`
+- `frontend/src/pages/AccountingPage.js`
+- `frontend/src/pages/CustomersPage.js`
+
+### Tested
+- ✅ Lint clean across all 4 files
+- ✅ UI smoke test: Record Expense dialog renders correctly, button label "Save Expense"
+- ✅ User must manually delete the existing duplicate expense (one-time cleanup)
+
+---
+
+
 ## Iter 247 — Customer Starting Balance + Mobile Modal Scroll Fix (Feb 2026) ✅
 
 ### What was built

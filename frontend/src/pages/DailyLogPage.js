@@ -849,6 +849,7 @@ export default function DailyLogPage() {
   const [closing, setClosing] = useState(null);
   const [preview, setPreview] = useState(null);  // Z-Report preview
   const [expenseDialog, setExpenseDialog] = useState(false);
+  const [submittingExpense, setSubmittingExpense] = useState(false);  // double-submit guard
   const [expenseType, setExpenseType] = useState('other');
   const [expForm, setExpForm] = useState({ category: '', description: '', amount: 0, customer_id: '', tag: '', employee_id: '', employee_name: '' });
   const [customers, setCustomers] = useState([]);
@@ -1095,6 +1096,8 @@ export default function DailyLogPage() {
   };
 
   const handleExpense = async () => {
+    if (submittingExpense) return;
+    setSubmittingExpense(true);
     try {
       if (expenseType === 'farm') {
         await api.post('/expenses/farm', { ...expForm, branch_id: currentBranch?.id, date });
@@ -1106,7 +1109,11 @@ export default function DailyLogPage() {
       toast.success('Expense recorded');
       setExpenseDialog(false);
       fetchReport();
-    } catch (e) { toast.error(e.response?.data?.detail || 'Error'); }
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Error');
+    } finally {
+      setSubmittingExpense(false);
+    }
   };
 
   const handleAddEmployee = async () => {
@@ -2303,7 +2310,7 @@ export default function DailyLogPage() {
             )}
             <div><Label>Description</Label><Input value={expForm.description} onChange={e => setExpForm({ ...expForm, description: e.target.value })} /></div>
             <div><Label>Amount</Label><CalcInput value={expForm.amount} onChange={(v) => setExpForm({ ...expForm, amount: parseFloat(v) || 0 })} className="h-11 text-lg font-bold" /></div>
-            <Button onClick={handleExpense} className="w-full bg-[#1A4D2E] hover:bg-[#14532d] text-white">Save</Button>
+            <Button onClick={handleExpense} disabled={submittingExpense} className="w-full bg-[#1A4D2E] hover:bg-[#14532d] text-white disabled:opacity-50 disabled:cursor-not-allowed">{submittingExpense ? 'Saving…' : 'Save'}</Button>
           </div>
         </DialogContent>
       </Dialog>

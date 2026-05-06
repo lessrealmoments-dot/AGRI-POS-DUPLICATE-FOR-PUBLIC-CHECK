@@ -59,6 +59,7 @@ export default function CustomersPage() {
   const [bulkForce, setBulkForce] = useState(false);
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
   const [bulkResult, setBulkResult] = useState(null);
+  const [savingCustomer, setSavingCustomer] = useState(false);  // double-submit guard for create/edit dialog
   
   // Transaction history
   const [historyDialog, setHistoryDialog] = useState(false);
@@ -172,6 +173,8 @@ export default function CustomersPage() {
   };
 
   const handleSave = async () => {
+    if (savingCustomer) return;
+    setSavingCustomer(true);
     try {
       const phones = form.phones.filter(p => p.trim());
       const payload = { ...form, phones, phone: phones[0] || '' };
@@ -193,7 +196,11 @@ export default function CustomersPage() {
         }
       }
       setDialogOpen(false); fetchCustomers();
-    } catch (e) { toast.error(e.response?.data?.detail || 'Error saving customer'); }
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Error saving customer');
+    } finally {
+      setSavingCustomer(false);
+    }
   };
 
   const handleDelete = async (id) => {
@@ -526,7 +533,7 @@ export default function CustomersPage() {
 
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-              <Button data-testid="save-customer-btn" onClick={handleSave} className="bg-[#1A4D2E] hover:bg-[#14532d] text-white">Save</Button>
+              <Button data-testid="save-customer-btn" onClick={handleSave} disabled={savingCustomer} className="bg-[#1A4D2E] hover:bg-[#14532d] text-white disabled:opacity-50 disabled:cursor-not-allowed">{savingCustomer ? 'Saving…' : 'Save'}</Button>
             </div>
           </div>
         </DialogContent>
