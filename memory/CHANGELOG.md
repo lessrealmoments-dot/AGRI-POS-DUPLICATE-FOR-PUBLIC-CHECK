@@ -1,5 +1,22 @@
 # AgriBooks Changelog
 
+## Feb 2026 — Z-Report PDF: Company + Branch + Date in name & header (Iter 249)
+
+**Problem**: Z-Report PDFs (download + print from `/daily-ops` archive) and from Close Wizard had a generic filename `ZReport_<Branch>_<Date>.pdf` and an "AgriBooks Z-Report" hard-coded title, with no company name anywhere — so multi-tenant clients couldn't tell which client/business a downloaded PDF belonged to.
+
+**What changed:**
+- **Backend `zreport_pdf.py`**:
+  - `ZReportPDF` class accepts new `company_name` arg. New 3-line header: (1) Company name in 16pt brand-green, (2) "Z-Report (COMPACT/DETAILED) | Branch | Date" subtitle, (3) "Prepared by: <cashier>".
+  - Endpoint resolves company name from `settings.company_info` → fallback to `organizations.name`; renders into header **and** filename.
+  - Filename pattern: `<Company>_<Branch>_<YYYY-MM-DD>_ZReport[_DETAILED].pdf` (each part slugified).
+- **Frontend `DailyLogPage.js`**: fetches `business_name` from `/api/settings/business-info` once on mount; download filename uses the same `<Company>_<Branch>_<Date>_ZReport[_DETAILED].pdf` pattern. Print uses the backend's Content-Disposition.
+- **Frontend `CloseWizardPage.js`**: same filename pattern in the wizard's "Download PDF" button.
+
+**Validated**: backend smoke — filename now starts with company slug (e.g., `MyCompany_BranchA_2026-02-01_ZReport.pdf`); PDF first page header reads "Company Name → Z-Report (COMPACT) | Branch | Date → Prepared by: cashier"; ruff/eslint clean.
+
+---
+
+
 ## Feb 2026 — PO + Pay Supplier Wallet Routing Audit & Fix (Iter 248)
 
 **Problem**: `/purchase-orders` Pay-in-Cash dialog only offered Cashier + Safe (no Digital, no Bank). The Payment Adjustment dialog had the same gap. Backend `POST /purchase-orders` silently fell through to deduct from cashier when Bank/Digital was passed (data-integrity bug). `/pay-supplier` worked for all 4 wallets but used hardcoded labels and didn't mask hidden bank balances. No visible "paying via X" hint.

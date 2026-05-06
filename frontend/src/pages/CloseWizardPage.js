@@ -2364,7 +2364,21 @@ export default function CloseWizardPage() {
                         const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
                         const a = document.createElement('a');
                         a.href = url;
-                        a.download = `ZReport_DETAILED_${(preview?.branch_name || 'branch').replace(/\s+/g, '_')}_${date}.pdf`;
+                        // Filename: <Company>_<Branch>_<YYYY-MM-DD>_ZReport_DETAILED.pdf
+                        const slug = (s) => (s || '').toString().trim()
+                          .replace(/[^A-Za-z0-9_\-]+/g, '_')
+                          .replace(/_+/g, '_').replace(/^_+|_+$/g, '') || 'Unknown';
+                        let companyName = '';
+                        try {
+                          const biz = await api.get('/settings/business-info');
+                          companyName = biz.data?.business_name || '';
+                        } catch {}
+                        const parts = [];
+                        if (companyName) parts.push(slug(companyName));
+                        parts.push(slug(preview?.branch_name || 'branch'));
+                        parts.push(date);
+                        parts.push('ZReport_DETAILED');
+                        a.download = parts.join('_') + '.pdf';
                         document.body.appendChild(a);
                         a.click();
                         document.body.removeChild(a);

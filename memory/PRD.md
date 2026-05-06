@@ -1,5 +1,25 @@
 # AgriBooks PRD
 
+## Iter 254 — Z-Report PDF Branding (Feb 2026) ✅
+
+### Problem
+Z-Report PDFs from `/daily-ops` archive and Close Wizard used a generic title "AgriBooks Z-Report" and filename `ZReport_<Branch>_<Date>.pdf` — multi-tenant clients couldn't identify which company a downloaded PDF belonged to.
+
+### What was built
+- **Backend (`zreport_pdf.py`)**: `ZReportPDF` accepts `company_name`; new 3-line header (Company → Z-Report mode + Branch + Date → Prepared by). Endpoint resolves company from `settings.company_info` (fallback `organizations.name`). Filename pattern: `<Company>_<Branch>_<YYYY-MM-DD>_ZReport[_DETAILED].pdf`, slugified.
+- **Frontend `DailyLogPage.js`** + **`CloseWizardPage.js`**: download filenames mirror the same `<Company>_<Branch>_<Date>_ZReport[_DETAILED].pdf` pattern (fetches business_name from `/settings/business-info`).
+
+### Files
+- `/app/backend/routes/zreport_pdf.py`
+- `/app/frontend/src/pages/DailyLogPage.js`
+- `/app/frontend/src/pages/CloseWizardPage.js`
+
+### Verified
+Backend curl smoke: Content-Disposition reads `<Company>_<Branch>_<Date>_ZReport.pdf`; PDF page 1 header confirmed via pypdf extraction. Lint clean.
+
+---
+
+
 ## Iter 253 — PO + Pay-Supplier Wallet Routing Audit (Feb 2026) ✅
 
 ### Problem

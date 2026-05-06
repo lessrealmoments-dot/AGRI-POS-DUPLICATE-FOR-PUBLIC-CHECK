@@ -74,22 +74,34 @@ def php_signed(n) -> str:
 
 
 class ZReportPDF(FPDF):
-    def __init__(self, branch_name: str, date: str, cashier: str, mode_label: str = "COMPACT"):
+    def __init__(self, branch_name: str, date: str, cashier: str, mode_label: str = "COMPACT", company_name: str = ""):
         super().__init__()
         self.branch_name = _s(branch_name)
         self.report_date = _s(date)
         self.cashier_name = _s(cashier)
         self.mode_label = _s(mode_label)
+        self.company_name = _s(company_name or "")
 
     def header(self):
+        # Line 1 — Company name (primary brand) + Z-Report mode tag
         self.set_font("Helvetica", "B", 16)
         self.set_text_color(26, 77, 46)
-        self.cell(0, 8, _s("AgriBooks Z-Report"), align="C", new_x="LMARGIN", new_y="NEXT")
-        self.set_font("Helvetica", "", 9)
-        self.set_text_color(100, 100, 100)
+        title = self.company_name if self.company_name else "AgriBooks"
+        self.cell(0, 8, _s(title), align="C", new_x="LMARGIN", new_y="NEXT")
+        # Line 2 — Z-Report subtitle (so the doc type is unambiguous)
+        self.set_font("Helvetica", "B", 10)
+        self.set_text_color(80, 80, 80)
         self.cell(
             0, 5,
-            _s(f"{self.branch_name}  |  {self.report_date}  |  Prepared by: {self.cashier_name}  |  {self.mode_label}"),
+            _s(f"Z-Report ({self.mode_label})  |  {self.branch_name}  |  {self.report_date}"),
+            align="C", new_x="LMARGIN", new_y="NEXT",
+        )
+        # Line 3 — Cashier metadata
+        self.set_font("Helvetica", "", 8)
+        self.set_text_color(120, 120, 120)
+        self.cell(
+            0, 4,
+            _s(f"Prepared by: {self.cashier_name}"),
             align="C", new_x="LMARGIN", new_y="NEXT",
         )
         self.line(10, self.get_y() + 2, 200, self.get_y() + 2)
@@ -659,6 +671,20 @@ async def generate_z_report_pdf(
     branch = await db.branches.find_one({"id": branch_id}, {"_id": 0, "name": 1})
     branch_name = branch.get("name", branch_id) if branch else branch_id
 
+    # Resolve company name (settings.company_info → fallback to organization.name)
+    company_name = ""
+    try:
+        biz_doc = await db.settings.find_one({"key": "company_info"}, {"_id": 0})
+        company_name = (biz_doc or {}).get("value", {}).get("name", "") or ""
+        if not company_name:
+            from config import db as _raw_db, get_org_context
+            org_id = get_org_context() or user.get("organization_id")
+            if org_id:
+                org = await _raw_db.organizations.find_one({"id": org_id}, {"_id": 0, "name": 1})
+                company_name = (org or {}).get("name", "") if org else ""
+    except Exception:
+        company_name = ""
+
     cashier = (
         (closing.get("closed_by_name") or closing.get("closed_by", "") if closing else "")
         or user.get("full_name")
@@ -667,7 +693,7 @@ async def generate_z_report_pdf(
     )
 
     mode_label = "DETAILED" if detailed else "COMPACT"
-    pdf = ZReportPDF(branch_name, date, cashier, mode_label=mode_label)
+    pdf = ZReportPDF(branch_name, date, cashier, mode_label=mode_label, company_name=company_name)
     pdf.alias_nb_pages()
     pdf.set_auto_page_break(auto=True, margin=20)
     pdf.add_page()
@@ -786,10 +812,22 @@ async def generate_z_report_pdf(
     pdf.output(buf)
     buf.seek(0)
 
-    filename = (
-        f"ZReport{'_DETAILED' if detailed else ''}_"
-        f"{_s(branch_name).replace(' ', '_')}_{date}.pdf"
-    )
+    # Filename pattern: <Company>_<Branch>_<YYYY-MM-DD>_ZReport[_DETAILED].pdf
+    # Slugify each part — keep alphanumerics, dashes, underscores; collapse spaces.
+    import re
+    def _slug(s: str) -> str:
+        s = _s(s).strip()
+        s = re.sub(r"[^A-Za-z0-9_\-]+", "_", s)
+        s = re.sub(r"_+", "_", s).strip("_")
+        return s or "Unknown"
+
+    parts = []
+    if company_name:
+        parts.append(_slug(company_name))
+    parts.append(_slug(branch_name))
+    parts.append(date)
+    parts.append("ZReport_DETAILED" if detailed else "ZReport")
+    filename = "_".join(parts) + ".pdf"
     return StreamingResponse(
         buf,
         media_type="application/pdf",

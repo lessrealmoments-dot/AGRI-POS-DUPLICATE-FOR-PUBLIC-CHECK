@@ -894,6 +894,15 @@ export default function DailyLogPage() {
   const [zreportMode, setZreportMode] = useState('normal');
   const [zreportDetail, setZreportDetail] = useState(null);
   const [zreportDetailLoading, setZreportDetailLoading] = useState(false);
+  // Company name — used in PDF download filenames (matches the in-PDF header)
+  const [companyName, setCompanyName] = useState('');
+  useEffect(() => {
+    let active = true;
+    api.get('/settings/business-info').then(r => {
+      if (active) setCompanyName(r.data?.business_name || '');
+    }).catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   const fetchArchive = useCallback(async (branchId = 'all') => {
     setArchiveLoading(true);
@@ -965,8 +974,17 @@ export default function DailyLogPage() {
       const objUrl = await fetchZReportBlob(date, branchId, detailed);
       const a = document.createElement('a');
       a.href = objUrl;
-      const safeBranch = (branchName || 'branch').replace(/\s+/g, '_');
-      a.download = `ZReport${detailed ? '_DETAILED' : ''}_${safeBranch}_${date}.pdf`;
+      // Filename pattern matches the backend Content-Disposition:
+      // <Company>_<Branch>_<YYYY-MM-DD>_ZReport[_DETAILED].pdf
+      const slug = (s) => (s || '').toString().trim()
+        .replace(/[^A-Za-z0-9_\-]+/g, '_')
+        .replace(/_+/g, '_').replace(/^_+|_+$/g, '') || 'Unknown';
+      const parts = [];
+      if (companyName) parts.push(slug(companyName));
+      parts.push(slug(branchName || 'branch'));
+      parts.push(date);
+      parts.push(detailed ? 'ZReport_DETAILED' : 'ZReport');
+      a.download = parts.join('_') + '.pdf';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -975,7 +993,7 @@ export default function DailyLogPage() {
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Could not download Z-Report PDF', { id: toastId });
     }
-  }, [fetchZReportBlob]);
+  }, [fetchZReportBlob, companyName]);
 
   // Lazy-loads the rich preview payload used by the "Detailed" Z-Report view.
   // Same endpoint Close Wizard Step 7 uses — recomputes from sales_log +
