@@ -369,6 +369,16 @@ async def create_fund_transfer(data: dict, user=Depends(get_current_user)):
     # Resolve effective date — frontend may override (backdate to an open day).
     # Default: today in UTC (kept for backward compatibility).
     effective_date = (data.get("date") or "").strip() or await today_local(user.get("organization_id") or "")
+    # Forward-cap: max = today (or today+1 if today is already closed). Same
+    # rule the closed_day_guard helper enforces everywhere else.
+    from utils.closed_day_guard import enforce_max_date as _enforce_max_date
+    effective_date = await _enforce_max_date(
+        branch_id, effective_date,
+        user=user,
+        organization_id=user.get("organization_id") or "",
+        override_pin=data.get("allow_forward_date_pin", ""),
+        label="fund transfer",
+    )
     # Reject backdating onto a closed day — fund movements must live on an open day.
     closed_day = await db.daily_closings.find_one(
         {"branch_id": branch_id, "date": effective_date, "status": "closed"},

@@ -1,5 +1,18 @@
 # AgriBooks Changelog
 
+## Feb 2026 — Fund Transfer "today closed" unblock (Iter 250)
+
+**Problem**: `Safe → Bank` fund transfer (and the 3 other fund-transfer types) couldn't be recorded if the branch's "today" was already closed. Frontend date picker had `max={today}` (no tomorrow allowed) and defaulted to today; backend rejected closed-day with no escape. User was fully blocked.
+
+**Fix**:
+- **Frontend `FundTransferDialog.js`**: detects on-open whether today is closed for the branch via `/api/invoices/check-date-closed`; auto-bumps the default date to tomorrow and extends `max` to tomorrow when today is closed. Helper text under the date input explains the bump.
+- **Backend `accounting.py /fund-transfers`**: now calls `enforce_max_date()` from the closed-day-guard helper, so today+1 is automatically the cap when today is closed. Closed-day rejection still applies for past closed days.
+
+Behavior matches the rest of the closed-day-guard rollout (Sales/PO/Pay/Expense/Receive Payment): max = today, or today+1 if today is closed. Verified by curl: forward-dating to 2099 still rejected with "Maximum allowed is <today>".
+
+---
+
+
 ## Feb 2026 — Closed-Day Enforcement & Late-Encode Rollout (Iter 249)
 
 **Audit findings**: Sales already had a robust closed-day + late-encode + forward-date pattern. PO/PaySupplier/Expenses/ReceivePayment had **none** — user could pick any past or future date and bypass every Z-Report. Branch-transfer receive on a closed destination branch silently dropped off the books. Fund Transfers were the only other module that already blocked closed days.

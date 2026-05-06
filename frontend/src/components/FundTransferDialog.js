@@ -36,6 +36,13 @@ export default function FundTransferDialog({ open, onClose, transferType, wallet
     const dd = String(d.getDate()).padStart(2, '0');
     return `${yyyy}-${mm}-${dd}`;
   };
+  const tomorrowLocal = () => {
+    const d = new Date(); d.setDate(d.getDate() + 1);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
   const [managerPin, setManagerPin] = useState('');
@@ -44,7 +51,30 @@ export default function FundTransferDialog({ open, onClose, transferType, wallet
   const [capitalTarget, setCapitalTarget] = useState('cashier');
   const [transferDate, setTransferDate] = useState(todayLocal());
   const [dateClosed, setDateClosed] = useState(false);
+  // Whether today is closed — drives auto-bump to tomorrow + max-date extension.
+  const [todayClosed, setTodayClosed] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // On open: detect if today is closed → auto-bump default to tomorrow so
+  // the user can still record (e.g. a Safe → Bank deposit) without being
+  // stuck on a closed day.
+  useEffect(() => {
+    if (!open || !branchId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api.get(`${BACKEND_URL}/api/invoices/check-date-closed`, {
+          params: { date: todayLocal(), branch_id: branchId },
+        });
+        if (cancelled) return;
+        const isClosed = !!r.data.closed;
+        setTodayClosed(isClosed);
+        // Only bump if user hasn't picked a non-default date yet.
+        setTransferDate(prev => (prev === todayLocal() && isClosed) ? tomorrowLocal() : prev);
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [open, branchId]);
 
   // Validate the selected date against daily-closings — fund movements
   // can only be recorded on an open day.
@@ -67,7 +97,7 @@ export default function FundTransferDialog({ open, onClose, transferType, wallet
   const reset = () => {
     setAmount(''); setNote(''); setManagerPin('');
     setTotpCode(''); setOwnerPin(''); setCapitalTarget('cashier');
-    setTransferDate(todayLocal()); setDateClosed(false);
+    setTransferDate(todayLocal()); setDateClosed(false); setTodayClosed(false);
   };
 
   const handleClose = () => { reset(); onClose?.(); };
@@ -141,12 +171,14 @@ export default function FundTransferDialog({ open, onClose, transferType, wallet
             <Label className="text-xs text-slate-600">Date *</Label>
             <Input type="date" value={transferDate}
               onChange={e => setTransferDate(e.target.value)}
-              max={todayLocal()}
+              max={todayClosed ? tomorrowLocal() : todayLocal()}
               className="mt-1 h-9"
               data-testid="fund-transfer-date" />
-            <p className={`text-[10px] mt-1 ${dateClosed ? 'text-red-600 font-medium' : 'text-slate-400'}`}>
+            <p className={`text-[10px] mt-1 ${dateClosed ? 'text-red-600 font-medium' : todayClosed ? 'text-amber-600' : 'text-slate-400'}`}>
               {dateClosed
                 ? 'This day is already closed — only open days can receive fund transfers.'
+                : todayClosed
+                ? `Today is already closed for this branch — defaulting to ${tomorrowLocal()} so you can still record this transfer.`
                 : 'Default: today. Only open (unclosed) days are accepted.'}
             </p>
           </div>
