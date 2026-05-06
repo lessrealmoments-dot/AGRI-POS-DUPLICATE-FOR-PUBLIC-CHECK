@@ -21,6 +21,7 @@ import ExpenseDetailModal from '../components/ExpenseDetailModal';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
 import CustomerStatementModal from '../components/CustomerStatementModal';
 import CustomerBalanceBadge, { useCustomerBalances } from '../components/CustomerBalanceBadge';
+import FundSourcePicker from '../components/FundSourcePicker';
 import CalcInput from '../components/CalcInput';
 import { localTodayStr } from '../lib/dateFormat';
 
@@ -99,17 +100,20 @@ export default function AccountingPage() {
   // Forms
   const [expenseForm, setExpenseForm] = useState({
     category: 'Miscellaneous', description: '', notes: '', amount: 0,
-    payment_method: 'Cash', reference_number: '', date: localTodayStr()
+    payment_method: 'Cash', reference_number: '', date: localTodayStr(),
+    fund_source: 'cashier', fund_source_pin: ''
   });
   const [farmExpenseForm, setFarmExpenseForm] = useState({
     description: '', notes: '', amount: 0, customer_id: '',
     payment_method: 'Cash', reference_number: '', date: localTodayStr(),
-    due_date: '', terms: ''
+    due_date: '', terms: '',
+    fund_source: 'cashier', fund_source_pin: ''
   });
   const [cashOutForm, setCashOutForm] = useState({
     description: '', notes: '', amount: 0, customer_id: '',
     payment_method: 'Cash', reference_number: '', date: localTodayStr(),
-    due_date: '', terms: ''
+    due_date: '', terms: '',
+    fund_source: 'cashier', fund_source_pin: ''
   });
   const [payableForm, setPayableForm] = useState({ supplier: '', description: '', amount: 0, due_date: '' });
   // Typeahead state for Bill-to-Customer (Farm Expense) and Customer Cash Out —
@@ -160,6 +164,7 @@ export default function AccountingPage() {
       category: 'Miscellaneous', description: '', notes: '', amount: 0,
       payment_method: 'Cash', reference_number: '', date: localTodayStr(),
       employee_id: '', employee_name: '',
+      fund_source: 'cashier', fund_source_pin: '',
     });
     setCaSummary(null);
     setExpenseDialog(true);
@@ -178,6 +183,8 @@ export default function AccountingPage() {
       date: expense.date || localTodayStr(),
       employee_id: expense.employee_id || '',
       employee_name: expense.employee_name || '',
+      fund_source: expense.fund_source || 'cashier',
+      fund_source_pin: '',
     });
     setCaSummary(null);
     setExpenseDialog(true);
@@ -197,7 +204,8 @@ export default function AccountingPage() {
     setFarmExpenseForm({
       description: '', notes: '', amount: 0, customer_id: '',
       payment_method: 'Cash', reference_number: '', date: localTodayStr(),
-      due_date: '', terms: ''
+      due_date: '', terms: '',
+      fund_source: 'cashier', fund_source_pin: '',
     });
     setFarmExpenseDialog(true);
   };
@@ -206,7 +214,8 @@ export default function AccountingPage() {
     setCashOutForm({
       description: '', notes: '', amount: 0, customer_id: '',
       payment_method: 'Cash', reference_number: '', date: localTodayStr(),
-      due_date: '', terms: ''
+      due_date: '', terms: '',
+      fund_source: 'cashier', fund_source_pin: '',
     });
     setCashOutDialog(true);
   };
@@ -223,6 +232,12 @@ export default function AccountingPage() {
     // Branch required for all expenses
     if (!currentBranch?.id) {
       toast.error('Please select a specific branch from the sidebar before recording expenses');
+      return;
+    }
+    // Protected fund source — require PIN before submit (UX: prevent server round-trip)
+    const protectedSrc = expenseForm.fund_source === 'digital' || expenseForm.fund_source === 'bank';
+    if (protectedSrc && !editMode && !expenseForm.fund_source_pin) {
+      toast.error('Admin PIN or TOTP is required to pay from Digital / Bank');
       return;
     }
     // Employee Advance CA limit check
@@ -306,6 +321,11 @@ export default function AccountingPage() {
       toast.error('Amount must be greater than 0');
       return;
     }
+    const protectedSrc = farmExpenseForm.fund_source === 'digital' || farmExpenseForm.fund_source === 'bank';
+    if (protectedSrc && !farmExpenseForm.fund_source_pin) {
+      toast.error('Admin PIN or TOTP is required to pay from Digital / Bank');
+      return;
+    }
     try {
       const res = await api.post('/expenses/farm', { ...farmExpenseForm, branch_id: currentBranch?.id });
       toast.success(res.data.message);
@@ -321,6 +341,11 @@ export default function AccountingPage() {
     }
     if (!cashOutForm.amount || cashOutForm.amount <= 0) {
       toast.error('Amount must be greater than 0');
+      return;
+    }
+    const protectedSrc = cashOutForm.fund_source === 'digital' || cashOutForm.fund_source === 'bank';
+    if (protectedSrc && !cashOutForm.fund_source_pin) {
+      toast.error('Admin PIN or TOTP is required to pay from Digital / Bank');
       return;
     }
     try {
@@ -743,11 +768,21 @@ export default function AccountingPage() {
 
       {/* REGULAR EXPENSE DIALOG */}
       <Dialog open={expenseDialog} onOpenChange={setExpenseDialog}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-lg max-h-[90dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle style={{ fontFamily: 'Manrope' }}>{editMode ? 'Edit Expense' : 'Record Expense'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 mt-2">
+            {!editMode && (
+              <FundSourcePicker
+                value={expenseForm.fund_source}
+                onChange={(v) => setExpenseForm({ ...expenseForm, fund_source: v, fund_source_pin: '' })}
+                pin={expenseForm.fund_source_pin}
+                onPinChange={(p) => setExpenseForm({ ...expenseForm, fund_source_pin: p })}
+                branchId={currentBranch?.id}
+                amount={parseFloat(expenseForm.amount) || 0}
+              />
+            )}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label className="text-xs text-slate-500">Category</Label>
@@ -895,7 +930,7 @@ export default function AccountingPage() {
 
       {/* FARM EXPENSE DIALOG */}
       <Dialog open={farmExpenseDialog} onOpenChange={setFarmExpenseDialog}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-lg max-h-[90dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle style={{ fontFamily: 'Manrope' }} className="flex items-center gap-2">
               <Tractor size={20} className="text-amber-600" />
@@ -906,6 +941,15 @@ export default function AccountingPage() {
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
               This will record a farm expense and automatically create an invoice for the selected customer.
             </div>
+
+            <FundSourcePicker
+              value={farmExpenseForm.fund_source}
+              onChange={(v) => setFarmExpenseForm({ ...farmExpenseForm, fund_source: v, fund_source_pin: '' })}
+              pin={farmExpenseForm.fund_source_pin}
+              onPinChange={(p) => setFarmExpenseForm({ ...farmExpenseForm, fund_source_pin: p })}
+              branchId={currentBranch?.id}
+              amount={parseFloat(farmExpenseForm.amount) || 0}
+            />
 
             {/* Bill to Customer — moved to top per user feedback. Replaces
                 dropdown with typeahead (500+ customers can't be browsed). */}
@@ -1105,7 +1149,7 @@ export default function AccountingPage() {
 
       {/* CUSTOMER CASH OUT DIALOG */}
       <Dialog open={cashOutDialog} onOpenChange={setCashOutDialog}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-lg max-h-[90dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle style={{ fontFamily: 'Manrope' }} className="flex items-center gap-2">
               <Banknote size={20} className="text-blue-600" />
@@ -1116,7 +1160,16 @@ export default function AccountingPage() {
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
               This will release cash to a customer and automatically create an invoice for the amount owed.
             </div>
-            
+
+            <FundSourcePicker
+              value={cashOutForm.fund_source}
+              onChange={(v) => setCashOutForm({ ...cashOutForm, fund_source: v, fund_source_pin: '' })}
+              pin={cashOutForm.fund_source_pin}
+              onPinChange={(p) => setCashOutForm({ ...cashOutForm, fund_source_pin: p })}
+              branchId={currentBranch?.id}
+              amount={parseFloat(cashOutForm.amount) || 0}
+            />
+
             <div>
               <Label className="text-xs text-slate-500 font-semibold">Select Customer *</Label>
               <p className="text-xs text-slate-400 mb-2">Search by name — an invoice will be auto-created for the selected customer</p>

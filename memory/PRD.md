@@ -1,5 +1,51 @@
 # AgriBooks PRD
 
+## Iter 250 — Fund Source Picker on Expense Modals (Feb 2026) ✅
+
+### What was built
+Top-of-modal "Fund Source" picker on **Record Expense**, **Farm Expense** and **Customer Cash Out** dialogs in the Accounting page. Four colorful tiles + a prominent "Paying from X" banner so cashiers can never miss what wallet is being debited.
+
+### Wallets supported
+| Source | Color | Balance shown? | PIN required? |
+|---|---|---|---|
+| Cashier Drawer | Emerald | ✅ | ❌ Role-only |
+| Physical Safe | Amber | ✅ | ❌ Role-only |
+| Digital / E-Wallet | Violet | ✅ | ✅ Admin PIN or TOTP |
+| Bank Account | Sky | ❌ Hidden | ✅ Admin PIN or TOTP |
+
+### Backend
+- `derive_fund_source` extended → now returns `cashier | safe | digital | bank`
+- `deduct_from_fund_source` extended → handles `bank` (deducts from bank wallet, logs `wallet_movements` of type `bank_expense`)
+- New helper `return_to_fund_source(branch_id, fund_source, amount, ref, user, payment_method)` — single source-of-truth used by all 3 void/reverse paths plus the `update_expense` adjustment delta
+- New `_verify_protected_fund_source_pin` helper — called on every create endpoint (`/expenses`, `/expenses/farm`, `/expenses/customer-cashout`, `/expenses/employee-advance`) when fund_source is `digital` or `bank`
+- 2 new PIN action keys registered in `verify.py`:
+  - `expense_from_digital` (defaults: admin_pin + totp)
+  - `expense_from_bank` (defaults: admin_pin + totp)
+
+### Frontend
+- New `components/FundSourcePicker.jsx` — reusable, fetches `/api/fund-wallets?branch_id=...`, renders 4 tiles with live balances, the "Paying from X" banner with after-balance preview, insufficient-funds warning, and a PIN input that only appears for protected sources.
+- All 3 dialogs updated: state forms now include `fund_source` + `fund_source_pin`, picker rendered at top, submit handlers validate PIN presence before POST.
+- All 3 dialogs scrollable on mobile (`max-h-[90dvh] overflow-y-auto`).
+
+### Void / Refund flow
+On void/reverse of any of the 3 expense types, funds are returned to the **original** fund source (cashier → cashier, safe → safe-lot, digital → digital wallet, bank → bank wallet) via `return_to_fund_source`. Mirror entries are recorded in `wallet_movements` for audit trail.
+
+### Tested (curl)
+- ✅ `GET /api/fund-wallets` — returns all 4 wallet types per branch with balances
+- ✅ Cashier expense without PIN → 200 created
+- ✅ Digital expense without PIN → **400** "Admin PIN or TOTP required to pay from digital"
+- ✅ Digital expense with wrong PIN → **403** "Invalid PIN. Admin PIN or TOTP required to pay from digital."
+- ✅ UI smoke: tile selection, banner update, PIN input appears for Digital/Bank, balance hidden for Bank
+
+### Files
+- `backend/routes/accounting.py` — fund-source helpers + 4 endpoints + void paths refactored
+- `backend/routes/verify.py` — 2 new PIN action keys
+- `frontend/src/components/FundSourcePicker.jsx` — NEW
+- `frontend/src/pages/AccountingPage.js` — 3 dialogs wired to picker
+
+---
+
+
 ## Iter 249 — Sales by Category Breakdown in Close Wizard Step 1 (Feb 2026) ✅
 
 ### What was built

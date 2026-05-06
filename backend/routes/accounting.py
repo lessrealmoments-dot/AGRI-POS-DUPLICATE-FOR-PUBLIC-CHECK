@@ -18,15 +18,17 @@ router = APIRouter(tags=["Accounting"])
 
 def derive_fund_source(payment_method: str, explicit_fund_source: str = None) -> str:
     """Derive the correct fund source from the payment method.
-    Cash/Check → cashier, Safe → safe, GCash/Maya/etc → digital.
+    Cash/Check → cashier, Safe → safe, GCash/Maya/etc → digital, Bank → bank.
     If an explicit fund_source is provided, use it as override."""
-    if explicit_fund_source and explicit_fund_source in ("cashier", "safe", "digital"):
+    if explicit_fund_source and explicit_fund_source in ("cashier", "safe", "digital", "bank"):
         return explicit_fund_source
     if not payment_method:
         return "cashier"
     pm = payment_method.lower().strip()
     if pm in ("safe", "vault", "from safe", "cash (from safe)"):
         return "safe"
+    if pm in ("bank", "bank account", "bank transfer", "bank deposit"):
+        return "bank"
     if is_digital_payment(pm):
         return "digital"
     return "cashier"
@@ -58,8 +60,102 @@ async def deduct_from_fund_source(branch_id: str, fund_source: str, amount: floa
     elif fund_source == "digital":
         await update_digital_wallet(branch_id, -amount, ref_text,
                                      platform=payment_method or "digital")
+    elif fund_source == "bank":
+        bank_wallet = await db.fund_wallets.find_one(
+            {"branch_id": branch_id, "type": "bank", "active": True}, {"_id": 0}
+        )
+        if not bank_wallet:
+            raise HTTPException(status_code=404, detail="Bank wallet not found for this branch")
+        bank_balance = float(bank_wallet.get("balance", 0))
+        if bank_balance < amount:
+            raise HTTPException(status_code=400, detail=f"Bank has ₱{bank_balance:,.2f}, need ₱{amount:,.2f}")
+        await db.fund_wallets.update_one(
+            {"id": bank_wallet["id"]},
+            {"$inc": {"balance": -amount}}
+        )
+        await db.wallet_movements.insert_one({
+            "id": new_id(),
+            "wallet_id": bank_wallet["id"],
+            "branch_id": branch_id,
+            "type": "bank_expense",
+            "amount": -amount,
+            "reference": ref_text,
+            "balance_after": round(bank_balance - amount, 2),
+            "created_at": now_iso(),
+        })
     else:
         await update_cashier_wallet(branch_id, -amount, ref_text)
+
+
+async def return_to_fund_source(branch_id: str, fund_source: str, amount: float,
+                                 ref_text: str, user: dict, payment_method: str = ""):
+    """Return funds to the original source (used on void/reverse).
+    Mirrors deduct_from_fund_source — supports cashier, safe, digital, bank.
+    """
+    if fund_source == "safe":
+        safe_wallet = await db.fund_wallets.find_one(
+            {"branch_id": branch_id, "type": "safe", "active": True}, {"_id": 0}
+        )
+        if safe_wallet:
+            await db.safe_lots.insert_one({
+                "id": new_id(), "branch_id": branch_id,
+                "wallet_id": safe_wallet["id"],
+                "date_received": await today_local(user.get("organization_id") or ""),
+                "original_amount": amount,
+                "remaining_amount": amount,
+                "source_reference": ref_text,
+                "created_by": user["id"],
+                "created_at": now_iso(),
+            })
+    elif fund_source == "digital":
+        await update_digital_wallet(branch_id, amount, ref_text,
+                                     platform=payment_method or "digital")
+    elif fund_source == "bank":
+        bank_wallet = await db.fund_wallets.find_one(
+            {"branch_id": branch_id, "type": "bank", "active": True}, {"_id": 0}
+        )
+        if bank_wallet:
+            new_bal = round(float(bank_wallet.get("balance", 0)) + amount, 2)
+            await db.fund_wallets.update_one(
+                {"id": bank_wallet["id"]},
+                {"$inc": {"balance": amount}}
+            )
+            await db.wallet_movements.insert_one({
+                "id": new_id(),
+                "wallet_id": bank_wallet["id"],
+                "branch_id": branch_id,
+                "type": "bank_expense_reversal",
+                "amount": amount,
+                "reference": ref_text,
+                "balance_after": new_bal,
+                "created_at": now_iso(),
+            })
+    else:
+        await update_cashier_wallet(branch_id, amount, ref_text)
+
+
+async def _verify_protected_fund_source_pin(fund_source: str, pin: str, branch_id: str = None):
+    """Validate PIN when paying from digital or bank fund source.
+    Default policy: admin_pin or TOTP only. Configurable via PIN policy settings.
+    Raises HTTPException(403) if invalid.
+    Returns the verifier dict on success.
+    """
+    if fund_source not in ("digital", "bank"):
+        return None
+    if not pin:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Admin PIN or TOTP required to pay from {fund_source}"
+        )
+    from routes.verify import verify_pin_for_action
+    action_key = f"expense_from_{fund_source}"  # expense_from_digital | expense_from_bank
+    verifier = await verify_pin_for_action(pin, action_key, branch_id=branch_id)
+    if not verifier:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Invalid PIN. Admin PIN or TOTP required to pay from {fund_source}."
+        )
+    return verifier
 
 
 # Preset expense categories
@@ -651,6 +747,12 @@ async def create_expense(data: dict, user=Depends(get_current_user)):
 
     payment_method = data.get("payment_method", "Cash")
     fund_source = derive_fund_source(payment_method, data.get("fund_source"))
+
+    # Protected fund sources (digital / bank) require admin PIN or TOTP
+    await _verify_protected_fund_source_pin(
+        fund_source, data.get("fund_source_pin", ""), branch_id
+    )
+
     expense = {
         "id": new_id(),
         "branch_id": branch_id,
@@ -762,41 +864,19 @@ async def update_expense(expense_id: str, data: dict, user=Depends(get_current_u
     await db.expenses.update_one({"id": expense_id}, {"$set": update})
     
     if amount_diff != 0:
-        # FIX: use the expense's original fund_source, not always cashier
+        # Use the expense's original fund_source for adjustments
         fund_source = expense.get("fund_source", "cashier")
         ref = f"Expense adjusted: {expense.get('description', '')} ({'+' if amount_diff > 0 else ''}{amount_diff:.2f})"
-        if fund_source == "safe" and amount_diff > 0:
-            # Expense increased — deduct additional from safe
-            safe_wallet = await db.fund_wallets.find_one(
-                {"branch_id": expense["branch_id"], "type": "safe", "active": True}, {"_id": 0}
+        if amount_diff > 0:
+            await deduct_from_fund_source(
+                expense["branch_id"], fund_source, amount_diff, ref,
+                payment_method=expense.get("payment_method", ""),
             )
-            if safe_wallet:
-                remaining = amount_diff
-                for lot in await db.safe_lots.find(
-                    {"wallet_id": safe_wallet["id"], "remaining_amount": {"$gt": 0}}, {"_id": 0}
-                ).sort("remaining_amount", -1).to_list(500):
-                    if remaining <= 0: break
-                    take = min(lot["remaining_amount"], remaining)
-                    await db.safe_lots.update_one({"id": lot["id"]}, {"$inc": {"remaining_amount": -take}})
-                    remaining -= take
-                await record_safe_movement(expense["branch_id"], -amount_diff, ref)
-        elif fund_source == "safe" and amount_diff < 0:
-            # Expense decreased — refund difference back to safe
-            safe_wallet = await db.fund_wallets.find_one(
-                {"branch_id": expense["branch_id"], "type": "safe", "active": True}, {"_id": 0}
-            )
-            if safe_wallet:
-                refund = abs(amount_diff)
-                await db.safe_lots.insert_one({
-                    "id": new_id(), "branch_id": expense["branch_id"],
-                    "wallet_id": safe_wallet["id"],
-                    "date_received": await today_local(user.get("organization_id") or ""),
-                    "original_amount": refund, "remaining_amount": refund,
-                    "source_reference": ref, "created_by": user["id"], "created_at": now_iso(),
-                })
-                await record_safe_movement(expense["branch_id"], refund, ref)
         else:
-            await update_cashier_wallet(expense["branch_id"], -amount_diff, ref)
+            await return_to_fund_source(
+                expense["branch_id"], fund_source, abs(amount_diff), ref, user,
+                payment_method=expense.get("payment_method", ""),
+            )
 
     # BUG-6 FIX: Adjust employee advance_balance when editing Employee Advance expenses
     if amount_diff != 0 and expense.get("category") == "Employee Advance" and expense.get("employee_id"):
@@ -836,25 +916,12 @@ async def delete_expense(expense_id: str, data: dict = None, user=Depends(get_cu
     fund_source = expense.get("fund_source", "cashier")
     ref_text = f"Expense voided: {expense.get('description', '')}"
 
-    # Return funds to the ORIGINAL source (not always cashier)
+    # Return funds to the ORIGINAL source (cashier, safe, digital, or bank)
     if amount > 0:
-        if fund_source == "safe":
-            safe_wallet = await db.fund_wallets.find_one(
-                {"branch_id": branch_id, "type": "safe", "active": True}, {"_id": 0}
-            )
-            if safe_wallet:
-                await db.safe_lots.insert_one({
-                    "id": new_id(), "branch_id": branch_id,
-                    "wallet_id": safe_wallet["id"],
-                    "date_received": await today_local(user.get("organization_id") or ""),
-                    "original_amount": amount,
-                    "remaining_amount": amount,
-                    "source_reference": ref_text,
-                    "created_by": user["id"],
-                    "created_at": now_iso(),
-                })
-        else:
-            await update_cashier_wallet(branch_id, amount, ref_text)
+        await return_to_fund_source(
+            branch_id, fund_source, amount, ref_text, user,
+            payment_method=expense.get("payment_method", ""),
+        )
 
     # Soft-void: keep the record for audit trail
     await db.expenses.update_one(
@@ -894,7 +961,12 @@ async def create_farm_expense_with_invoice(data: dict, user=Depends(get_current_
     branch_id = data["branch_id"]
     payment_method = data.get("payment_method", "Cash")
     fund_source = derive_fund_source(payment_method, data.get("fund_source"))
-    
+
+    # Protected fund sources (digital / bank) require admin PIN or TOTP
+    await _verify_protected_fund_source_pin(
+        fund_source, data.get("fund_source_pin", ""), branch_id
+    )
+
     expense = {
         "id": new_id(),
         "branch_id": branch_id,
@@ -1036,7 +1108,12 @@ async def create_customer_cashout(data: dict, user=Depends(get_current_user)):
     branch_id = data["branch_id"]
     payment_method = data.get("payment_method", "Cash")
     fund_source = derive_fund_source(payment_method, data.get("fund_source"))
-    
+
+    # Protected fund sources (digital / bank) require admin PIN or TOTP
+    await _verify_protected_fund_source_pin(
+        fund_source, data.get("fund_source_pin", ""), branch_id
+    )
+
     expense = {
         "id": new_id(),
         "branch_id": branch_id,
@@ -1142,6 +1219,12 @@ async def create_employee_advance(data: dict, user=Depends(get_current_user)):
     
     payment_method = data.get("payment_method", "Cash")
     fund_source = derive_fund_source(payment_method, data.get("fund_source"))
+
+    # Protected fund sources (digital / bank) require admin PIN or TOTP
+    await _verify_protected_fund_source_pin(
+        fund_source, data.get("fund_source_pin", ""), branch_id
+    )
+
     expense = {
         "id": new_id(),
         "branch_id": branch_id,
@@ -2707,21 +2790,10 @@ async def reverse_customer_cashout(expense_id: str, data: dict, user=Depends(get
 
     # Return cash to fund (the original cash-out deducted from fund; reversal adds it back)
     ref_text = f"Reversal — Customer advance {expense.get('description', '')} — {reason}"
-    if fund_source == "safe":
-        safe_wallet = await db.fund_wallets.find_one(
-            {"branch_id": branch_id, "type": "safe", "active": True}, {"_id": 0}
-        )
-        if safe_wallet:
-            await db.safe_lots.insert_one({
-                "id": new_id(), "branch_id": branch_id,
-                "wallet_id": safe_wallet["id"],
-                "date_received": await today_local(user.get("organization_id") or ""),
-                "original_amount": amount, "remaining_amount": amount,
-                "source_reference": ref_text,
-                "created_by": user["id"], "created_at": now_iso(),
-            })
-    else:
-        await update_cashier_wallet(branch_id, amount, ref_text)
+    await return_to_fund_source(
+        branch_id, fund_source, amount, ref_text, user,
+        payment_method=expense.get("payment_method", ""),
+    )
 
     # Reduce customer AR balance
     customer_id = expense.get("customer_id")
@@ -2778,21 +2850,10 @@ async def reverse_employee_advance(expense_id: str, data: dict, user=Depends(get
 
     # Return cash to fund
     ref_text = f"Employee advance reversed — {expense.get('employee_name', '')} — {reason}"
-    if fund_source == "safe":
-        safe_wallet = await db.fund_wallets.find_one(
-            {"branch_id": branch_id, "type": "safe", "active": True}, {"_id": 0}
-        )
-        if safe_wallet:
-            await db.safe_lots.insert_one({
-                "id": new_id(), "branch_id": branch_id,
-                "wallet_id": safe_wallet["id"],
-                "date_received": await today_local(user.get("organization_id") or ""),
-                "original_amount": amount, "remaining_amount": amount,
-                "source_reference": ref_text,
-                "created_by": user["id"], "created_at": now_iso(),
-            })
-    else:
-        await update_cashier_wallet(branch_id, amount, ref_text)
+    await return_to_fund_source(
+        branch_id, fund_source, amount, ref_text, user,
+        payment_method=expense.get("payment_method", ""),
+    )
 
     # Reduce employee advance balance
     employee_id = expense.get("employee_id")
