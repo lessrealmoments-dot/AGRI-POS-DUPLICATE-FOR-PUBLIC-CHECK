@@ -1,5 +1,25 @@
 # AgriBooks PRD
 
+## Iter 247 — Customer Starting Balance + Mobile Modal Scroll Fix (Feb 2026) ✅
+
+### What was built
+1. **Customer Opening Balance on create** — When adding a new customer, optionally enter `Amount Owed` + `As Of Date`. Backend (`POST /api/customers`) auto-generates a one-time receipt flagged `is_opening_balance=True` (named "Opening Balance Carry-forward (Migrated)"). Reuses existing `_create_opening_balance_invoice` and `_send_opening_balance_sms` helpers from import flow. Sets the customer's balance to the entered amount. Toast shows the generated invoice number.
+2. **Mobile scroll fix on Return & Refund + Update for Incomplete Stock modals** — Replaced Radix `<ScrollArea>` (which intermittently swallows touch events on small viewports) with native `overflow-y-auto overscroll-contain` divs. Switched modal `max-h` from `vh` → `dvh` so on-screen keyboard doesn't squeeze the scroll region.
+
+### Files
+- `backend/routes/customers.py` — `create_customer` accepts `opening_balance` + `opening_balance_date`, lazy-imports import helpers, returns `opening_invoice_number`
+- `frontend/src/pages/CustomersPage.js` — "Starting Balance (optional)" section in Add dialog (create-only, hidden on edit), dialog made scrollable on mobile (`max-h-[90dvh]`)
+- `frontend/src/components/TerminalReturnRefundModal.jsx` — removed ScrollArea import, replaced step-1 + step-2 scroll regions with native scroll
+- `frontend/src/components/TerminalUpdateReceiptModal.jsx` — same native-scroll swap
+
+### Tested (backend curl)
+- ✅ Create with opening_balance=1500 → balance=1500, opening_invoice_number=SI-MW-001079, invoice has is_opening_balance=true
+- ✅ Create without opening_balance → balance=0, no invoice (regression preserved)
+- ✅ Frontend: Add Customer dialog renders Starting Balance section with both fields visible
+
+---
+
+
 ## Iter 246 — External Document Upload to Print (Feb 2026) ✅
 
 ### What was built

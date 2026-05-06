@@ -176,12 +176,21 @@ export default function CustomersPage() {
       const phones = form.phones.filter(p => p.trim());
       const payload = { ...form, phones, phone: phones[0] || '' };
       if (editing) {
+        // Opening balance is migration-only (create flow). Strip from edit payload.
+        delete payload.opening_balance;
+        delete payload.opening_balance_date;
         await api.put(`/customers/${editing.id}`, payload);
         toast.success('Customer updated');
       } else {
         if (currentBranch) payload.branch_id = currentBranch.id;
-        await api.post('/customers', payload);
-        toast.success('Customer created');
+        // Coerce opening balance to number
+        payload.opening_balance = parseFloat(payload.opening_balance) || 0;
+        const res = await api.post('/customers', payload);
+        if (res.data?.opening_invoice_number) {
+          toast.success(`Customer created — starting balance receipt ${res.data.opening_invoice_number} generated`);
+        } else {
+          toast.success('Customer created');
+        }
       }
       setDialogOpen(false); fetchCustomers();
     } catch (e) { toast.error(e.response?.data?.detail || 'Error saving customer'); }
@@ -389,7 +398,7 @@ export default function CustomersPage() {
 
       {/* Create/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md max-h-[90dvh] overflow-y-auto">
           <DialogHeader><DialogTitle style={{ fontFamily: 'Manrope' }}>{editing ? 'Edit Customer' : 'New Customer'}</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-2">
             <div>
@@ -477,6 +486,44 @@ export default function CustomersPage() {
  title={!canManageCredit ? 'No permission to manage credit' : ''} />
               </div>
             </div>
+
+            {/* Migration helper — Starting Balance (create-only) */}
+            {!editing && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3 space-y-2" data-testid="opening-balance-section">
+                <div className="flex items-start gap-2">
+                  <FileText size={14} className="text-amber-600 mt-0.5 shrink-0" />
+                  <div className="text-xs text-amber-800">
+                    <p className="font-semibold">Starting Balance (optional)</p>
+                    <p className="text-[11px] text-amber-700 mt-0.5">
+                      For migrating from another system. Generates a one-time receipt
+                      flagged as <em>Opening Balance Carry-forward</em> so it appears
+                      in AR aging without inflating sales reports.
+                    </p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-[11px]">Amount Owed (₱)</Label>
+                    <CalcInput
+                      data-testid="customer-opening-balance-input"
+                      value={form.opening_balance}
+                      onChange={(v) => setForm({ ...form, opening_balance: v })}
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-[11px]">As Of Date</Label>
+                    <Input
+                      type="date"
+                      data-testid="customer-opening-balance-date-input"
+                      value={form.opening_balance_date}
+                      onChange={(e) => setForm({ ...form, opening_balance_date: e.target.value })}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
               <Button data-testid="save-customer-btn" onClick={handleSave} className="bg-[#1A4D2E] hover:bg-[#14532d] text-white">Save</Button>

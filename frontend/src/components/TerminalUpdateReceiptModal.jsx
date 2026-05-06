@@ -5,7 +5,6 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Badge } from './ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
-import { ScrollArea } from './ui/scroll-area';
 import {
   AlertTriangle, FileEdit, CheckCircle2,
   RefreshCw, Printer, ShieldCheck, Package
@@ -115,7 +114,7 @@ export default function TerminalUpdateReceiptModal({
 
   return (
     <Dialog open={true} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-hidden flex flex-col p-0" data-testid="terminal-update-receipt-modal">
+      <DialogContent className="sm:max-w-3xl max-h-[95dvh] overflow-hidden flex flex-col p-0 gap-0" data-testid="terminal-update-receipt-modal">
         {/* Step 1: Configure Quantities */}
         {step === 1 && (
           <>
@@ -131,7 +130,7 @@ export default function TerminalUpdateReceiptModal({
               </div>
             </DialogHeader>
 
-            <ScrollArea className="flex-1 max-h-[55vh]">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain" data-testid="update-items-scroll">
               <div className="p-6 space-y-6">
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                   <p className="text-sm text-blue-800 flex items-start gap-2">
@@ -216,7 +215,7 @@ export default function TerminalUpdateReceiptModal({
                   </div>
                 )}
               </div>
-            </ScrollArea>
+            </div>
 
             <div className="px-6 py-4 bg-slate-50 border-t flex items-center justify-between">
               <Button variant="outline" onClick={onClose} data-testid="update-cancel-btn">Cancel</Button>

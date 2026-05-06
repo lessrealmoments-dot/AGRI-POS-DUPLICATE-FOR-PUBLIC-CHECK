@@ -121,7 +121,13 @@ async def list_customers(
 
 @router.post("")
 async def create_customer(data: dict, user=Depends(get_current_user)):
-    """Create a new customer. Accepts phones[] array or a single phone string."""
+    """Create a new customer. Accepts phones[] array or a single phone string.
+
+    Optionally seeds a migrated *Opening Balance* invoice when
+    `opening_balance` > 0. This generates a starting-balance receipt
+    (flagged is_opening_balance=True) — perfect for migrating from a
+    different POS while preserving the customer's prior debt.
+    """
     check_perm(user, "customers", "create")
     
     branch_id = data.get("branch_id")
@@ -135,6 +141,15 @@ async def create_customer(data: dict, user=Depends(get_current_user)):
     phones = list(dict.fromkeys(_norm_phone(p) for p in phones_raw if p.strip()))
     phone_primary = phones[0] if phones else ""
 
+    # Opening balance (optional, defaults to 0). Date defaults to today.
+    try:
+        opening_balance = float(data.get("opening_balance") or 0)
+    except (TypeError, ValueError):
+        opening_balance = 0.0
+    if opening_balance < 0:
+        opening_balance = 0.0
+    ob_date = (data.get("opening_balance_date") or now_iso()[:10]).strip() or now_iso()[:10]
+
     customer = {
         "id": new_id(),
         "name": data["name"],
@@ -146,7 +161,7 @@ async def create_customer(data: dict, user=Depends(get_current_user)):
         "credit_limit": float(data.get("credit_limit", 0)),
         "interest_rate": float(data.get("interest_rate", 0)),
         "grace_period": int(data.get("grace_period", 7)),
-        "balance": 0.0,
+        "balance": round(opening_balance, 2),
         "branch_id": branch_id,
         "active": True,
         "created_at": now_iso(),
@@ -157,6 +172,35 @@ async def create_customer(data: dict, user=Depends(get_current_user)):
     # Auto-migrate Unknown SMS for all registered phones
     if phones:
         await _auto_migrate_sms(phones, customer["id"], customer["name"], branch_id or "")
+
+    # Seed starting balance invoice (uses same helper as customer import)
+    opening_invoice = None
+    if opening_balance > 0 and branch_id:
+        try:
+            from routes.import_data import (
+                _create_opening_balance_invoice,
+                _send_opening_balance_sms,
+            )
+            opening_invoice = await _create_opening_balance_invoice(
+                customer, opening_balance, branch_id, user, ob_date,
+            )
+            try:
+                await _send_opening_balance_sms(customer, opening_balance, branch_id)
+            except Exception:
+                pass  # SMS failure shouldn't block customer creation
+        except Exception as e:
+            # Roll back balance if invoice creation failed (avoid orphan balance)
+            await db.customers.update_one(
+                {"id": customer["id"]}, {"$set": {"balance": 0.0}}
+            )
+            customer["balance"] = 0.0
+            raise HTTPException(
+                status_code=500,
+                detail=f"Customer created but opening balance invoice failed: {e}",
+            )
+
+    if opening_invoice:
+        customer["opening_invoice_number"] = opening_invoice.get("invoice_number")
 
     return customer
 

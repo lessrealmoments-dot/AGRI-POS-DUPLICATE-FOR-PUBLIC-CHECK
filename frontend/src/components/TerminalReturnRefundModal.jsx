@@ -5,7 +5,6 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Badge } from './ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
-import { ScrollArea } from './ui/scroll-area';
 import {
   AlertTriangle, RotateCcw, Package, CheckCircle2,
   RefreshCw, Printer, ShieldCheck,
@@ -152,7 +151,7 @@ export default function TerminalReturnRefundModal({
 
   return (
     <Dialog open={true} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-hidden flex flex-col p-0" data-testid="terminal-return-refund-modal">
+      <DialogContent className="sm:max-w-3xl max-h-[95dvh] overflow-hidden flex flex-col p-0 gap-0" data-testid="terminal-return-refund-modal">
         {/* Step 1: Select Items */}
         {step === 1 && (
           <>
@@ -168,7 +167,7 @@ export default function TerminalReturnRefundModal({
               </div>
             </DialogHeader>
 
-            <ScrollArea className="flex-1 max-h-[55vh]">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain" data-testid="return-items-scroll">
               <div className="p-6">
                 <p className="text-sm text-slate-600 mb-4">
                   <Package size={14} className="inline mr-1.5" />
@@ -216,7 +215,7 @@ export default function TerminalReturnRefundModal({
                   </div>
                 )}
               </div>
-            </ScrollArea>
+            </div>
 
             <div className="px-6 py-4 bg-slate-50 border-t flex items-center justify-between">
               <div>
@@ -252,7 +251,7 @@ export default function TerminalReturnRefundModal({
               </div>
             </DialogHeader>
 
-            <ScrollArea className="flex-1 max-h-[55vh]">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain" data-testid="return-config-scroll">
               <div className="p-6 space-y-6">
                 <div>
                   <label className="text-sm font-semibold text-slate-700 mb-2 block">Return Reason *</label>
@@ -331,7 +330,7 @@ export default function TerminalReturnRefundModal({
                   </div>
                 </div>
               </div>
-            </ScrollArea>
+            </div>
 
             <div className="px-6 py-4 bg-slate-50 border-t">
               <div className="flex items-center justify-between mb-3">
