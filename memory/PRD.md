@@ -1,5 +1,35 @@
 # AgriBooks PRD
 
+## Iter 251 — Branch Stock Request: SMS + Tab UX + Configurable Recipients (Feb 2026) ✅
+
+### Problem
+Stock Request flow on Branch Transfer page had three usability gaps:
+1. Manual "+ Add Product" button only — slow data entry.
+2. No SMS to admins/managers — owners away from the dashboard missed urgent requests.
+3. Concern about 3-4 staff racing to fulfill the same request.
+
+### What was built
+**Backend**
+- New SMS template `branch_stock_request` (sms.py:`DEFAULT_TEMPLATES`).
+- **Auto-seed bug fix** (`queue_sms()` sms.py:912-935): now does per-key `$setOnInsert` upsert from DEFAULT_TEMPLATES instead of only seeding when an org has zero templates. Existing tenants now get any newly-shipped template key on first send.
+- New endpoints `GET/PUT /api/sms/recipients/{trigger_key}` (sms.py:1091-1142). Stores role config in `db.sms_recipient_config`. Used by `branch_stock_request` with flags: `include_admins`, `include_supply_manager`, `include_supply_auditor`, `include_all_supply_users`.
+- New helper `_notify_stock_request_recipients()` (purchase_orders.py top). Resolves recipients per role config, builds public view link from `auto_generate_doc_code` output, calls `queue_sms()`. Wired into the existing branch_request block in `POST /api/purchase-orders`.
+- Public viewer (`GET /api/doc/view/{code}`) enriched: returns `is_branch_request`, `supply_branch_name`, `requesting_branch_name`, `notes`, `fulfillment_started_at/by`.
+
+**Frontend**
+- `BranchTransferPage.js` — Request Stock rows now mirror /sales-new Detailed Sales UX: Enter on search picks first match + focuses qty; Tab on LAST row qty (when product+qty present) auto-adds a new row and focuses its search.
+- `MessagesPage.js` — Settings tab gained "Branch Stock Request — Recipients" card with 4 toggles.
+- `DocViewerPage.jsx` — branch_request POs render as "Stock Request" with `<requesting> requests from <supply>` route line + view-only amber notice + "Open in Branch Transfer" button.
+
+### Concurrency safety
+`POST /api/purchase-orders/{po_id}/generate-branch-transfer` already locks the request (status: requested → in_progress). Subsequent clicks return `400 "Request has already been processed"`. SMS link is deliberately view-only; only login can fulfill.
+
+### Testing
+- Backend: 7/7 pytests pass (`/app/backend/tests/test_branch_stock_request_sms_245.py`)
+- Frontend: Tab UX, Settings card, DocViewer all validated in iter 246
+
+---
+
 ## Iter 250 — Fund Source Picker on Expense Modals (Feb 2026) ✅
 
 ### What was built

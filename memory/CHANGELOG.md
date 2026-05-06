@@ -1,5 +1,30 @@
 # AgriBooks Changelog
 
+## May 2026 — Branch Stock Request: SMS Notifications + Tab UX + Configurable Recipients (Iter 246)
+
+**User scenarios prompting this change:**
+1. The Request Stock form on the Branch Transfer page only had a manual "+ Add Product" button — slow data entry compared to the fast `/sales-new` Detailed Sales flow.
+2. When a branch fired a stock request, only an in-app notification was created. Owners away from the dashboard had no idea a request was waiting.
+3. Concern: if 3-4 staff race to fulfill the same request, who wins? Need view-only links so the link is safe to share, but fulfillment must happen via the authenticated app.
+
+**Backend** (`/app/backend/routes/sms.py`, `purchase_orders.py`, `doc_lookup.py`):
+- New SMS template `branch_stock_request` (Body: "Hi <recipient_name>, <requesting_branch> requested stocks from <supply_branch> (PO <po_number>, <items_count> item/s). Top items: <items_summary>. View: <view_link>").
+- **Critical auto-seed fix**: `queue_sms()` previously only seeded `DEFAULT_TEMPLATES` if the org had ZERO templates. New keys shipped in subsequent releases never reached existing tenants. Now does per-key `$setOnInsert` upsert when the requested template_key is missing — every new template is reachable for every existing tenant on first send.
+- New endpoints `GET /api/sms/recipients/{trigger_key}` and `PUT /api/sms/recipients/{trigger_key}` storing config in `db.sms_recipient_config`. Currently used by `branch_stock_request` with role flags `include_admins`, `include_supply_manager`, `include_supply_auditor`, `include_all_supply_users`.
+- New helper `_notify_stock_request_recipients()` in `purchase_orders.py` resolves recipients per the role config, builds the public view link from `auto_generate_doc_code`'s output, and queues SMS via `queue_sms()`. Called from the existing `branch_request` block in `POST /api/purchase-orders` — in-app notifications still fire alongside SMS regardless of role config.
+- Public viewer (`GET /api/doc/view/{code}`) now returns `is_branch_request`, `supply_branch_name`, `requesting_branch_name`, `notes`, `fulfillment_started_at/by` for branch_request POs so the existing DocViewer can render them as Stock Requests.
+
+**Concurrency:** `POST /api/purchase-orders/{po_id}/generate-branch-transfer` already enforces a single-fulfillment lock (status flips `requested → in_progress` on first click; subsequent attempts return `400 "Request has already been processed"`). No race for 3-4 viewers.
+
+**Frontend**:
+- `BranchTransferPage.js` — Request Stock form rows now mirror Detailed Sales UX: Enter on the search input picks the first dropdown match and auto-focuses qty; Tab on the LAST row's qty (when product + qty present) auto-adds a new empty row and focuses its search field. Tab on non-last rows behaves normally.
+- `MessagesPage.js` — Settings tab gained a "Branch Stock Request — Recipients" card with 4 toggles persisting via the new recipients endpoint.
+- `DocViewerPage.jsx` — when `is_branch_request==true`, header label becomes "Stock Request", body shows `<requesting_branch> requests from <supply_branch>`, and the action area is a view-only amber notice + "Open in Branch Transfer" button (login-gated).
+
+**Testing**: 7/7 backend pytests at `/app/backend/tests/test_branch_stock_request_sms_245.py` pass clean. Frontend Tab UX, Settings card, and DocViewer behavior all validated by testing agent (iter 246).
+
+---
+
 ## May 2026 — Admin Reconciliation Adjustments on Closed Days (Iter 237)
 
 User scenario that prompted this: a branch migrated from a legacy POS had its first few days' sync double-count AR carry-over, producing phantom Over/Short figures like `−₱145,608.40` when the physical drawer was actually `+₱1,746` over. The user needed a way to correct the displayed Net Over/Short **without** rewriting history — Expected/Actual values must remain the raw-as-recorded figures for auditability.
