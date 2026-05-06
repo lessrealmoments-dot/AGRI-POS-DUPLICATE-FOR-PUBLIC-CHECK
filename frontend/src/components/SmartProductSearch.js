@@ -127,7 +127,18 @@ async function searchProductsLocal(query, branchId) {
   };
 }
 
-export default function SmartProductSearch({ onSelect, branchId, onCreateNew }) {
+export default function SmartProductSearch({
+  onSelect,
+  branchId,
+  onCreateNew,
+  // ── Optional: 'request' mode for Branch Stock Requests ───────────────────
+  // Renders a compact row showing supply-branch stock + your-branch stock
+  // (no prices/cost/reserved). Same keyboard nav, dropdown positioning,
+  // scrollIntoView, and offline fallback as the default 'sales' mode.
+  mode = 'sales',
+  alsoBranchId = '',
+  placeholder,
+}) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [open, setOpen] = useState(false);
@@ -188,7 +199,10 @@ export default function SmartProductSearch({ onSelect, branchId, onCreateNew }) 
       let usedFallback = false;
       let fallbackHint = null;
       try {
-        const res = await api.get('/products/search-detail', { params: { q: query, branch_id: branchId } });
+        const params = { q: query, branch_id: branchId };
+        if (alsoBranchId) params.also_branch_id = alsoBranchId;
+        if (mode === 'request') params.limit = 8;
+        const res = await api.get('/products/search-detail', { params });
         data = res.data || [];
       } catch {
         try {
@@ -214,7 +228,7 @@ export default function SmartProductSearch({ onSelect, branchId, onCreateNew }) 
       setActiveIndex(data.length > 0 ? 0 : -1);
     }, 200);
     return () => clearTimeout(debounceRef.current);
-  }, [query, branchId]);
+  }, [query, branchId, alsoBranchId, mode]);
 
   const handleKeyDown = (e) => {
     if (!open || !results.length) {
@@ -272,7 +286,7 @@ export default function SmartProductSearch({ onSelect, branchId, onCreateNew }) 
           onKeyDown={handleKeyDown}
           onFocus={() => { if (results.length) setOpen(true); }}
           onBlur={() => setTimeout(() => setOpen(false), 200)}
-          placeholder="Type product name or scan barcode..."
+          placeholder={placeholder || (mode === 'request' ? 'Search product to request...' : 'Type product name or scan barcode...')}
           className="w-full h-9 pl-8 pr-3 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-[#1A4D2E]/30 focus:border-[#1A4D2E] bg-white"
           autoComplete="new-password"
         />
@@ -321,6 +335,38 @@ export default function SmartProductSearch({ onSelect, branchId, onCreateNew }) 
           <div ref={dropdownRef}>
           {results.map((p, i) => {
             const isDisabled = !!p.disabled_at_branch;
+            // ── 'request' mode: compact row with supply + your-branch stock ──
+            if (mode === 'request') {
+              return (
+                <div
+                  key={p.id}
+                  data-testid={`search-result-${p.id}`}
+                  onMouseDown={() => selectProduct(p)}
+                  onMouseEnter={() => !isDisabled && setActiveIndex(i)}
+                  className={`px-3 py-2 border-b border-slate-100 last:border-0 transition-colors ${
+                    isDisabled ? 'opacity-50 bg-slate-50/60 cursor-not-allowed'
+                    : (i === activeIndex ? 'bg-emerald-50 border-l-[3px] border-l-emerald-700 cursor-pointer' : 'hover:bg-slate-50 cursor-pointer')
+                  }`}
+                >
+                  <div className="flex items-center justify-between min-w-0">
+                    <span className="font-medium text-sm truncate">{p.name}</span>
+                    <span className="text-[10px] font-mono text-slate-400 ml-2 shrink-0">{p.sku || ''}</span>
+                  </div>
+                  <div className="flex gap-3 mt-0.5 text-[11px]">
+                    <span className={`font-medium ${(p.available ?? 0) > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
+                      Supply: {(p.available ?? 0).toFixed(1)} {p.unit || ''}
+                    </span>
+                    {p.also_branch_stock !== undefined && (
+                      <span className={`font-medium ${p.also_branch_stock > 0 ? 'text-amber-600' : 'text-red-500'}`}>
+                        You: {Number(p.also_branch_stock).toFixed(1)} {p.unit || ''}
+                      </span>
+                    )}
+                    {p.category && <span className="text-slate-400">· {p.category}</span>}
+                  </div>
+                </div>
+              );
+            }
+            // ── 'sales' mode (default): rich row with prices, capital, available, reserved ──
             return (
             <div
               key={p.id}

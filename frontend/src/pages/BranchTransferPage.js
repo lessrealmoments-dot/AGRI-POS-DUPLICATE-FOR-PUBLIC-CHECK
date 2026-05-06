@@ -30,6 +30,7 @@ import PrintEngine from '../lib/PrintEngine';
 import { toast } from 'sonner';
 import { useUnsavedChangesGuard } from '../lib/useUnsavedChangesGuard';
 import CalcInput from '../components/CalcInput';
+import SmartProductSearch from '../components/SmartProductSearch';
 
 // Smart quantity formatter — display max 3 decimal places, no trailing zeros.
 // Raw precision is preserved in the database — this is display only.
@@ -159,7 +160,7 @@ export default function BranchTransferPage() {
   const isAdmin = user?.role === 'admin';
   const searchTimers = useRef({});
   const dropdownRefs = useRef({});
-  const reqDropdownRefs = useRef({});
+  const reqQtyRefs = useRef({});  // per-row qty input refs (Detailed-Sales-style focus handoff)
   const skipResetRef = useRef(false); // skip row/branch reset when loading from request
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -171,7 +172,7 @@ export default function BranchTransferPage() {
   const [generatingTransfer, setGeneratingTransfer] = useState(null); // request id being processed
   // ── Request Stock form state ────────────────────────────────────────────
   const [reqTargetBranch, setReqTargetBranch] = useState('');
-  const [reqRows, setReqRows] = useState([{ id: Date.now(), search: '', product: null, qty: '', matches: [] }]);
+  const [reqRows, setReqRows] = useState([{ id: Date.now(), product: null, qty: '' }]);
 
   // Unsaved-changes guard — fires when the request form has at least one
   // chosen product. Provider renders the dialog.
@@ -185,7 +186,6 @@ export default function BranchTransferPage() {
   const [outgoingRequests, setOutgoingRequests] = useState([]);
   const [outgoingLoading, setOutgoingLoading] = useState(false);
   const [requestsView, setRequestsView] = useState('incoming'); // 'incoming' | 'outgoing'
-  const reqSearchTimers = useRef({});
 
   // Sync tab state from URL params (for deep-linking from notifications)
   useEffect(() => {
@@ -359,33 +359,31 @@ export default function BranchTransferPage() {
   };
 
   // ── Request Stock form helpers ────────────────────────────────────────────
-  const newReqRow = () => ({ id: Date.now() + Math.random(), search: '', product: null, qty: '', matches: [] });
+  // Uses SmartProductSearch (same component as /sales-new Detailed Sales) for
+  // each empty row: smart positioning, ↑/↓ keyboard nav, Enter-to-select,
+  // scroll-into-center, fuzzy fallback, offline IndexedDB fallback.
+  const newReqRow = () => ({ id: Date.now() + Math.random(), product: null, qty: '' });
   const updateReqRow = (id, updates) => setReqRows(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
   const addReqRow = () => setReqRows(prev => [...prev, newReqRow()]);
   const removeReqRow = (id) => setReqRows(prev => prev.length > 1 ? prev.filter(r => r.id !== id) : prev);
 
-  const handleReqSearch = (rowId, query) => {
-    updateReqRow(rowId, { search: query, product: null });
-    clearTimeout(reqSearchTimers.current[rowId]);
-    if (!query || query.length < 1) { updateReqRow(rowId, { matches: [] }); return; }
-    reqSearchTimers.current[rowId] = setTimeout(async () => {
-      try {
-        const myBranch = currentBranch?.id || user?.branch_id || '';
-        const res = await api.get('/products/search-detail', {
-          params: {
-            q: query,
-            branch_id: reqTargetBranch || undefined,
-            also_branch_id: myBranch || undefined,
-            limit: 8,
-          }
-        });
-        updateReqRow(rowId, { matches: res.data || [] });
-      } catch { updateReqRow(rowId, { matches: [] }); }
-    }, 200);
-  };
-
+  // Called when SmartProductSearch on an empty row picks a product.
+  // Mirrors UnifiedSalesPage.handleProductSelect:
+  //   1. Fill the row
+  //   2. If it was the last row, append a new empty row (auto-grow)
+  //   3. Focus the qty input on this row so user can immediately type quantity
   const selectReqProduct = (rowId, product) => {
-    updateReqRow(rowId, { product, search: product.name, matches: [], qty: reqRows.find(r => r.id === rowId)?.qty || '1' });
+    setReqRows(prev => {
+      const idx = prev.findIndex(r => r.id === rowId);
+      if (idx < 0) return prev;
+      const next = [...prev];
+      next[idx] = { ...next[idx], product, qty: next[idx].qty || '1' };
+      // Auto-add a fresh empty row when the LAST row gets filled
+      if (idx === next.length - 1) next.push(newReqRow());
+      return next;
+    });
+    // Focus this row's qty input after React commits the new state
+    setTimeout(() => reqQtyRefs.current[rowId]?.focus?.(), 60);
   };
 
   const resetReqForm = () => {
@@ -1659,86 +1657,56 @@ export default function BranchTransferPage() {
                 </div>
                 {reqRows.map((row) => {
                   const targetBranchObj = branches.find(b => b.id === reqTargetBranch);
-                  const isLastReqRow = reqRows[reqRows.length - 1]?.id === row.id;
+                  const myBranchId = currentBranch?.id || user?.branch_id || '';
                   return (
                   <div key={row.id} className="grid grid-cols-[1fr_100px_60px_40px] gap-2 items-start" data-testid={`req-row-${row.id}`}>
+                    {/* Empty row → SmartProductSearch (Detailed-Sales-style typeahead).
+                        Filled row → product summary card with stock context + remove. */}
                     <div className="relative">
-                      <Input
-                        className="h-9 text-sm"
-                        value={row.search}
-                        onChange={e => handleReqSearch(row.id, e.target.value)}
-                        onKeyDown={e => {
-                          // Enter → pick first match & focus the qty input
-                          if (e.key === 'Enter' && (row.matches?.length || 0) > 0) {
-                            e.preventDefault();
-                            selectReqProduct(row.id, row.matches[0]);
-                            setTimeout(() => {
-                              const q = document.querySelector(`[data-testid="req-qty-${row.id}"]`);
-                              if (q) q.focus();
-                            }, 50);
-                          }
-                        }}
-                        placeholder="Search product..."
-                        data-testid={`req-product-search-${row.id}`}
-                        ref={el => { reqDropdownRefs.current[row.id] = el; }}
-                      />
-                      <AnchoredDropdown
-                        anchor={reqDropdownRefs.current[row.id]}
-                        open={(row.matches?.length || 0) > 0}
-                        minWidth={300}
-                      >
-                        {(row.matches || []).map(p => (
-                            <button key={p.id} onClick={() => selectReqProduct(row.id, p)}
-                              className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 border-b border-slate-50 last:border-0"
-                              data-testid={`req-match-${p.id}`}>
-                              <div className="flex items-center justify-between">
-                                <span className="truncate font-medium">{p.name}</span>
-                                <span className="text-[10px] text-slate-400 ml-2 shrink-0 font-mono">{p.sku || ''}</span>
-                              </div>
-                              <div className="flex gap-3 mt-0.5">
-                                {p.also_branch_stock !== undefined && (
-                                  <span className={`text-[10px] font-medium ${p.also_branch_stock > 0 ? 'text-amber-600' : 'text-red-500'}`}>
-                                    You: {fmtQty(p.also_branch_stock)} {p.unit || ''}
-                                  </span>
-                                )}
-                                <span className={`text-[10px] font-medium ${(p.available || 0) > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
-                                  {targetBranchObj?.name || 'Supplier'}: {fmtQty(p.available)} {p.unit || ''}
+                      {!row.product ? (
+                        <SmartProductSearch
+                          mode="request"
+                          branchId={reqTargetBranch || undefined}
+                          alsoBranchId={myBranchId || undefined}
+                          onSelect={(p) => selectReqProduct(row.id, p)}
+                          placeholder={reqTargetBranch ? 'Search product to request...' : 'Pick a supply branch first…'}
+                        />
+                      ) : (
+                        <div className="h-9 px-3 rounded-md border border-emerald-200 bg-emerald-50/40 flex items-center justify-between gap-3"
+                             data-testid={`req-product-filled-${row.id}`}>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="truncate font-medium text-sm">{row.product.name}</span>
+                              <span className="text-[10px] text-slate-400 font-mono shrink-0">{row.product.sku || ''}</span>
+                            </div>
+                            <div className="flex gap-3 text-[10px] -mt-0.5">
+                              <span className={`font-semibold ${(row.product.available || 0) > 0 ? 'text-emerald-700' : 'text-slate-400'}`}>
+                                {targetBranchObj?.name || 'Supply'}: {fmtQty(row.product.available)} {row.product.unit || ''}
+                              </span>
+                              {row.product.also_branch_stock !== undefined && (
+                                <span className={`font-semibold ${row.product.also_branch_stock > 0 ? 'text-amber-600' : 'text-red-500'}`}>
+                                  You: {fmtQty(row.product.also_branch_stock)} {row.product.unit || ''}
                                 </span>
-                              </div>
-                            </button>
-                          ))}
-                      </AnchoredDropdown>
-                      {row.product && (
-                        <div className="flex items-center gap-3 mt-0.5 px-1">
-                          <span className="text-[10px] text-slate-400">{row.product.sku || ''} {row.product.category ? `· ${row.product.category}` : ''}</span>
-                          {row.product.also_branch_stock !== undefined && (
-                            <span className={`text-[10px] font-semibold ${row.product.also_branch_stock > 0 ? 'text-amber-600' : 'text-red-500'}`}>
-                              Your stock: {fmtQty(row.product.also_branch_stock)}
-                            </span>
-                          )}
-                          <span className={`text-[10px] font-semibold ${(row.product.available || 0) > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
-                            {targetBranchObj?.name || 'Supplier'}: {fmtQty(row.product.available)}
-                          </span>
+                              )}
+                            </div>
+                          </div>
+                          <button type="button"
+                            onClick={() => updateReqRow(row.id, { product: null, qty: '' })}
+                            className="text-slate-300 hover:text-red-500 transition-colors shrink-0"
+                            title="Change product"
+                            data-testid={`req-clear-product-${row.id}`}>
+                            <X size={13} />
+                          </button>
                         </div>
                       )}
                     </div>
                     <CalcInput className="h-9 text-sm text-center"
- value={row.qty}
- onChange={(v) => updateReqRow(row.id, { qty: v })}
- onKeyDown={e => {
-   // Tab on the last row (with product + qty) → auto-add a new row
-   if (e.key === 'Tab' && !e.shiftKey && isLastReqRow && row.product && parseFloat(row.qty) > 0) {
-     e.preventDefault();
-     const nr = newReqRow();
-     setReqRows(rs => [...rs, nr]);
-     setTimeout(() => {
-       const next = document.querySelector(`[data-testid="req-product-search-${nr.id}"]`);
-       if (next) next.focus();
-     }, 50);
-   }
- }}
- placeholder="0"
- data-testid={`req-qty-${row.id}`} />
+                      ref={(el) => { reqQtyRefs.current[row.id] = el; }}
+                      value={row.qty}
+                      onChange={(v) => updateReqRow(row.id, { qty: v })}
+                      placeholder="0"
+                      disabled={!row.product}
+                      data-testid={`req-qty-${row.id}`} />
                     <span className="h-9 flex items-center text-xs text-slate-500 px-1">{row.product?.unit || '—'}</span>
                     <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-slate-400 hover:text-red-500"
                       onClick={() => removeReqRow(row.id)} disabled={reqRows.length <= 1}>

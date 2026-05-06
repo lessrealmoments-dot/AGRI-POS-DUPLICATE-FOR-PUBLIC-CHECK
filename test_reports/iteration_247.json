@@ -1,0 +1,39 @@
+{
+  "summary": "Verified new SmartProductSearch UX in /branch-transfers Request Stock tab. All critical behaviors PASS: typeahead (10 results for 'a'), data-flip='down'/'up' smart positioning (confirmed 'up' after adding 8 rows + scrolling to last input), ArrowDown keyboard nav, Enter-to-select auto-grows new empty row, qty auto-focus post-select (focused element data-testid=req-qty-<rowId>), multi-row creation via Enter (1→2→3 rows), X button clears row back to search (1→2 search inputs), fuzzy fallback chip visible for 'cosistency' (2 Consistency-* matches) and 'edgge' (8 Edge-* matches) with text 'No exact match for \"<q>\" — showing closest matches'. One minor Tab-order regression: Tab from qty input focuses the per-row X remove Button instead of the next empty row's product-search-input — user must press Tab twice. Spec expected direct hop to next search input.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Request Stock — Tab from qty to next row search",
+        "issue": "Tab from req-qty-<rowId> lands on the X remove Button (line 1711 of BranchTransferPage.js has no tabIndex) before reaching the next row's product-search-input. Spec says Tab 'should naturally move to the next row's search input'. User must press Tab twice.",
+        "affected_selectors": ["[data-testid^='req-qty-']", "Button with X icon on same row", "[data-testid='product-search-input']"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Add tabIndex={-1} to the per-row X remove button (BranchTransferPage.js line ~1711 <Button variant='ghost' ...><X size={14}/></Button>) OR move it out of the natural tab order so Tab from qty jumps straight to the next SmartProductSearch input, matching the documented UX and /sales-new parity."
+  ],
+  "critical_code_review_comments": [
+    "SmartProductSearch.js is reused cleanly with `mode='request'` — good DRY. Result card in request mode is compact (name/SKU + Supply/You badges) as described.",
+    "selectReqProduct (BranchTransferPage.js:375-387) correctly mirrors UnifiedSalesPage.handleProductSelect: fills row → auto-appends empty row if last → setTimeout(60) to focus qty. Works as observed.",
+    "Row clear button (line 1711) is focusable — causes the Tab regression noted in integration_issues. Non-blocking but easy fix."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "not tested (frontend-only run per request)",
+    "frontend": "~95% (10/11 UX checks pass; only Tab→next-search hop deviates from spec by 1 Tab press)"
+  },
+  "test_credentials": {
+    "org_admin": "test_org_admin@regression.local / RegressionPass!2026"
+  },
+  "seed_data_creation": "None — used existing products (Consistency-*, Edge-*, etc.) in regression org.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iter 247 validated the new SmartProductSearch integration into Request Stock tab. Selectors confirmed working: data-testid='product-search-input' (only present on empty rows; filled rows render data-testid='req-product-filled-<rowId>' card with X at data-testid='req-clear-product-<rowId>'); dropdown 'search-results-dropdown' with data-flip='down'|'up' attribute flips based on viewport space; 'search-fuzzy-hint' chip appears when no strict matches but fuzzy candidates exist (both local IndexedDB fallback and backend hints supported). Tab-order issue noted — main agent needs to add tabIndex=-1 to the row's X remove button."
+}
