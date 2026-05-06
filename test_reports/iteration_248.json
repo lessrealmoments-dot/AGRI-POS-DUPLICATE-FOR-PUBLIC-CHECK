@@ -1,0 +1,30 @@
+{
+  "summary": "Iter 248 — PO wallet routing (Cashier/Safe/Digital/Bank) end-to-end backend regression: 16/16 tests PASS. Verified GET /api/purchase-orders/fund-balances exposes all 4 wallets with canonical names + availability flags for admin, and masks bank (bank=null, bank_hidden=true) for non-admin. POST /api/purchase-orders po_type=cash flows verified for all 4 fund_source values: cashier/safe succeed without PIN; digital/bank require admin PIN — correctly returns 400 'Admin PIN or TOTP is required' without pin, 403 with invalid pin, succeeds with valid admin pin (913712), correctly deducts wallet balance, writes wallet_movements (bank), and creates journal_entries with entry_type='ap_payment' for both bank (1030) and digital (1020). Insufficient-funds returns structured detail {type:'insufficient_funds', shortfall} for both digital and bank. POST /{po_id}/adjust-payment mirrors the same PIN policy: cashier/safe pass without pin; digital/bank reject without pin; succeed with valid admin pin and deduct correctly. Frontend smoke: /pay-supplier rendered all 4 wallet pills with canonical labels (Cashier Drawer, Physical Safe, Digital / E-Wallet, Bank Account) — verified visually. /purchase-orders Pay-in-Cash dialog testids (po-fund-cashier/safe/digital/bank, po-cash-pin-input) confirmed present in source (PurchaseOrderPage.js lines 1523, 1575) — dialog auto-opens only when PO has items so couldn't open without seeded PO; backend tests already exercise the same fund_source values end-to-end.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_po_wallet_routing_248.py",
+    "/app/test_reports/pytest/iter248_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "purchase_orders.py _get_fund_balances (line 301) cleanly returns all 4 wallets with name + availability flags; redaction is implemented in the route handler (line 345) and is admin-gated correctly.",
+    "Cash PO branch (line 621-800) consolidates pin verification (verify_pin_for_action with policy 'pay_po_bank'), structured insufficient_funds errors, lot-based safe drawdown, digital via update_digital_wallet helper, and bank via direct fund_wallets $inc + wallet_movements doc — all 4 paths correct. Auto-rollback (delete_one) on validation failure is sound.",
+    "adjust-payment (line 1022-1234) replicates PIN policy and supports refund via delta<0 with safe lot insertion / digital helper / bank $inc + wallet_movement bank_in. Tested both directions.",
+    "Frontend PurchaseOrderPage.js cash dialog (lines 1497-1577) renders 4 wallet cards with proper testids, lock icons for bank/digital, masked balance for bank when bank_hidden, and conditional PIN input — implementation matches spec.",
+    "Minor: in PurchaseOrderPage.js line 1530, fund cards check `f.balance >= computed.grandTotal` BEFORE checking f.hidden, so a hidden-bank card briefly evaluates a comparison against null — behaviour is OK because the JSX renders '••••' anyway when f.hidden, but a `f.balance != null` guard would be cleaner."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_po_wallet_routing_248.py (new)"
+  ],
+  "success_rate": {"backend": "100% (16/16)", "frontend": "smoke OK — PaySupplier 4-wallet UI confirmed; PO cash dialog testids verified in source"},
+  "test_credentials": {
+    "org_admin": "test_org_admin@regression.local / RegressionPass!2026 (PIN 913712)",
+    "manager": "test_org_manager@regression.local (PIN 521325)"
+  },
+  "seed_data_creation": "Idempotently seeds 4 fund_wallets (cashier, safe, digital, bank) on the first branch of the regression org with balances 100k/100k/100k/500k. Safe wallet uses safe_lots with organization_id (REQUIRED — TenantCollection scopes safe_lots reads by org_id; lots without it are invisible to API). Adds non-admin manager 'test_mgr_<orgPrefix>@regression.local / MgrPass!2026' for the bank-balance redaction test. Wallets are NOT restored to original balances after run (deductions persisted; cumulative drift across re-runs is small ~₱2k/run and easily reset by editing balance directly).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "test_po_wallet_routing_248.py is fully self-bootstrapping — depends only on _org_test_helpers.ensure_org_admin_token and seeds its own wallets/manager. KEY GOTCHA: when seeding safe_lots manually via pymongo, ALWAYS include organization_id, otherwise TenantCollection (config.py:65) silently filters them out and the helper returns safe=0 (caused initial test_safe_no_pin failure). To inspect live balances via API: `GET /api/purchase-orders/fund-balances?branch_id=<bid>` with admin token. Frontend PO Pay-in-Cash dialog opens only when a valid PO has items + vendor; couldn't trigger via empty form click — verified testids in source instead.",
+  "rca of the issue": "N/A — no bugs. Implementation matches spec; backend deduction/journal/PIN-policy paths are all correct."
+}

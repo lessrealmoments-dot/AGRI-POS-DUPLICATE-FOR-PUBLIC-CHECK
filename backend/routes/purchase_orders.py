@@ -299,6 +299,7 @@ async def _apply_po_inventory(po: dict, user: dict, capital_choices: dict = None
 
 # ── Fund balance helper ────────────────────────────────────────────────────────
 async def _get_fund_balances(branch_id: str) -> dict:
+    """Internal helper — returns true balances for all 4 wallet types (no redaction)."""
     cashier_wallet = await db.fund_wallets.find_one({"branch_id": branch_id, "type": "cashier", "active": True}, {"_id": 0})
     cashier_balance = float(cashier_wallet.get("balance", 0)) if cashier_wallet else 0.0
     cashier_id = cashier_wallet.get("id") if cashier_wallet else None
@@ -312,9 +313,25 @@ async def _get_fund_balances(branch_id: str) -> dict:
         ).to_list(500)
         safe_balance = sum(lot["remaining_amount"] for lot in lots)
 
+    digital_wallet = await db.fund_wallets.find_one({"branch_id": branch_id, "type": "digital", "active": True}, {"_id": 0})
+    digital_balance = float(digital_wallet.get("balance", 0)) if digital_wallet else 0.0
+    digital_id = digital_wallet.get("id") if digital_wallet else None
+
+    bank_wallet = await db.fund_wallets.find_one({"branch_id": branch_id, "type": "bank", "active": True}, {"_id": 0})
+    bank_balance = float(bank_wallet.get("balance", 0)) if bank_wallet else 0.0
+    bank_id = bank_wallet.get("id") if bank_wallet else None
+
     return {
         "cashier": round(cashier_balance, 2), "cashier_id": cashier_id,
+        "cashier_name": cashier_wallet.get("name") if cashier_wallet else "Cashier Drawer",
         "safe": round(safe_balance, 2), "safe_id": safe_id,
+        "safe_name": safe_wallet.get("name") if safe_wallet else "Physical Safe",
+        "digital": round(digital_balance, 2), "digital_id": digital_id,
+        "digital_name": digital_wallet.get("name") if digital_wallet else "Digital / E-Wallet",
+        "digital_available": bool(digital_wallet),
+        "bank": round(bank_balance, 2), "bank_id": bank_id,
+        "bank_name": bank_wallet.get("name") if bank_wallet else "Bank Account",
+        "bank_available": bool(bank_wallet),
         "cashier_is_negative": cashier_balance < 0,
         "cashier_warning": f"Cashier is at ₱{cashier_balance:,.2f} (negative). Use the Safe instead." if cashier_balance < 0 else None,
     }
@@ -322,8 +339,15 @@ async def _get_fund_balances(branch_id: str) -> dict:
 
 @router.get("/fund-balances")
 async def get_fund_balances(branch_id: str = "", user=Depends(get_current_user)):
-    """Get live fund balances (cashier + safe) for a branch. Used before PO payment."""
-    return await _get_fund_balances(branch_id)
+    """Get live fund balances (all 4 wallets) for a branch. Bank balance is masked for non-admins."""
+    balances = await _get_fund_balances(branch_id)
+    # Bank balance confidentiality — hide from non-admin roles
+    if user.get("role") not in ["admin"]:
+        balances["bank"] = None
+        balances["bank_hidden"] = True
+    else:
+        balances["bank_hidden"] = False
+    return balances
 
 
 
@@ -596,8 +620,30 @@ async def create_purchase_order(data: dict, user=Depends(get_current_user)):
     # ── Cash: validate fund + deduct + expense (BEFORE upload linking) ────
     if po_type == "cash" and grand_total > 0:
         fund_source = data.get("fund_source", "cashier")
+        if fund_source not in ("cashier", "safe", "digital", "bank"):
+            fund_source = "cashier"
         balances = await _get_fund_balances(branch_id)
 
+        # ── PIN verification for bank/digital (admin or TOTP only) ─────────
+        verifier = None
+        if fund_source in ("bank", "digital"):
+            pin = str(data.get("pin", ""))
+            if not pin:
+                await db.purchase_orders.delete_one({"id": po["id"]})
+                raise HTTPException(
+                    status_code=400,
+                    detail="Admin PIN or TOTP is required to pay from Bank or Digital wallet"
+                )
+            from routes.verify import verify_pin_for_action
+            verifier = await verify_pin_for_action(pin, "pay_po_bank", branch_id=branch_id)
+            if not verifier:
+                await db.purchase_orders.delete_one({"id": po["id"]})
+                raise HTTPException(
+                    status_code=403,
+                    detail="Invalid PIN or TOTP — Bank/Digital payments require admin or time-based code"
+                )
+
+        # ── Balance checks ─────────────────────────────────────────────────
         if fund_source == "safe" and balances["safe"] < grand_total:
             await db.purchase_orders.delete_one({"id": po["id"]})
             raise HTTPException(status_code=400, detail={
@@ -606,7 +652,7 @@ async def create_purchase_order(data: dict, user=Depends(get_current_user)):
                 "cashier_balance": balances["cashier"], "safe_balance": balances["safe"],
                 "shortfall": round(grand_total - balances["safe"], 2),
             })
-        if fund_source != "safe" and balances["cashier"] < grand_total:
+        if fund_source == "cashier" and balances["cashier"] < grand_total:
             await db.purchase_orders.delete_one({"id": po["id"]})
             raise HTTPException(status_code=400, detail={
                 "type": "insufficient_funds",
@@ -615,6 +661,30 @@ async def create_purchase_order(data: dict, user=Depends(get_current_user)):
                 "shortfall": round(grand_total - balances["cashier"], 2),
                 "can_use_safe": balances["safe"] >= grand_total,
             })
+        if fund_source == "digital":
+            if not balances.get("digital_id"):
+                await db.purchase_orders.delete_one({"id": po["id"]})
+                raise HTTPException(status_code=400, detail="No Digital / E-Wallet configured for this branch")
+            if balances["digital"] < grand_total:
+                await db.purchase_orders.delete_one({"id": po["id"]})
+                raise HTTPException(status_code=400, detail={
+                    "type": "insufficient_funds",
+                    "message": f"Digital / E-Wallet has only ₱{balances['digital']:,.2f}. Need ₱{grand_total:,.2f}.",
+                    "digital_balance": balances["digital"],
+                    "shortfall": round(grand_total - balances["digital"], 2),
+                })
+        if fund_source == "bank":
+            if not balances.get("bank_id"):
+                await db.purchase_orders.delete_one({"id": po["id"]})
+                raise HTTPException(status_code=400, detail="No Bank Account configured for this branch")
+            if balances["bank"] < grand_total:
+                await db.purchase_orders.delete_one({"id": po["id"]})
+                raise HTTPException(status_code=400, detail={
+                    "type": "insufficient_funds",
+                    "message": f"Bank Account has only ₱{balances['bank']:,.2f}. Need ₱{grand_total:,.2f}.",
+                    "bank_balance": balances["bank"],
+                    "shortfall": round(grand_total - balances["bank"], 2),
+                })
 
         ref_text = f"PO {po['po_number']} — {data['vendor']}"
         if data.get("check_number"):
@@ -630,6 +700,17 @@ async def create_purchase_order(data: dict, user=Depends(get_current_user)):
                     take = min(lot["remaining_amount"], remaining)
                     await db.safe_lots.update_one({"id": lot["id"]}, {"$inc": {"remaining_amount": -take}})
                     remaining -= take
+                await record_safe_movement(branch_id, -grand_total, ref_text)
+            elif fund_source == "digital":
+                await update_digital_wallet(branch_id, -grand_total, ref_text)
+            elif fund_source == "bank":
+                new_bank_bal = round(balances["bank"] - grand_total, 2)
+                await db.fund_wallets.update_one({"id": balances["bank_id"]}, {"$inc": {"balance": -round(grand_total, 2)}})
+                await db.wallet_movements.insert_one({
+                    "id": new_id(), "wallet_id": balances["bank_id"], "branch_id": branch_id,
+                    "type": "bank_out", "amount": -round(grand_total, 2),
+                    "reference": ref_text, "balance_after": new_bank_bal, "created_at": now_iso(),
+                })
             else:
                 await update_cashier_wallet(branch_id, -grand_total, ref_text)
         except HTTPException:
@@ -638,16 +719,28 @@ async def create_purchase_order(data: dict, user=Depends(get_current_user)):
             logger.error(f"PO {po['po_number']} — fund deduction failed: {str(e)}\n{traceback.format_exc()}")
             raise HTTPException(status_code=500, detail=f"Fund deduction failed: {str(e)}")
 
+        # Derived payment_method_detail for display consistency
+        method_map = {
+            "cashier": data.get("payment_method_detail", "Cash"),
+            "safe": data.get("payment_method_detail", "Cash"),
+            "digital": "Digital Transfer",
+            "bank": "Check/Bank Transfer",
+        }
+        method_label = method_map.get(fund_source, "Cash")
+
         payment_record = {
             "id": new_id(), "amount": grand_total,
             "date": purchase_date,
-            "method": data.get("payment_method_detail", "Cash"),
+            "method": method_label,
             "fund_source": fund_source,
             "check_number": data.get("check_number", ""),
             "reference": data.get("dr_number", ""),
-            "recorded_by": user.get("full_name", user["username"]),
+            "recorded_by": (verifier["verifier_name"] if verifier else user.get("full_name", user["username"])),
             "recorded_at": now_iso(),
         }
+        if verifier:
+            payment_record["auth_method"] = verifier.get("method", "")
+            payment_record["recorded_by_id"] = verifier.get("verifier_id", "")
         await db.purchase_orders.update_one(
             {"id": po["id"]},
             {"$push": {"payment_history": payment_record},
@@ -660,7 +753,7 @@ async def create_purchase_order(data: dict, user=Depends(get_current_user)):
             "description": f"PO {po['po_number']} — {data['vendor']}",
             "notes": f"DR#{data.get('dr_number','')} | {data.get('notes','')}".strip(" |"),
             "amount": grand_total,
-            "payment_method": data.get("payment_method_detail", "Cash"),
+            "payment_method": method_label,
             "reference_number": po["po_number"],
             "date": purchase_date,
             "po_id": po["id"], "po_number": po["po_number"], "vendor": data["vendor"],
@@ -668,6 +761,43 @@ async def create_purchase_order(data: dict, user=Depends(get_current_user)):
             "created_by": user["id"], "created_by_name": user.get("full_name", user["username"]),
             "created_at": now_iso(),
         })
+
+        # Auto double-entry journal for bank/digital (matches /pay endpoint convention)
+        if fund_source in ("bank", "digital"):
+            account_credit_code = "1030" if fund_source == "bank" else "1020"
+            account_credit_name = "Cash - Bank Account" if fund_source == "bank" else "Digital Wallet (GCash/Maya)"
+            je_number = await generate_next_number("JE", branch_id)
+            await db.journal_entries.insert_one({
+                "id": new_id(),
+                "je_number": je_number,
+                "entry_type": "ap_payment",
+                "entry_type_label": "Accounts Payable Payment",
+                "branch_id": branch_id,
+                "organization_id": po.get("organization_id"),
+                "effective_date": purchase_date,
+                "posted_date": now_iso()[:10],
+                "memo": f"Instant PO payment — {po['po_number']} · {data['vendor']} via {fund_source}",
+                "reference_number": po["po_number"],
+                "reference_type": "purchase_order",
+                "lines": [
+                    {"account_code": "5000", "account_name": "Cost of Goods Sold / Purchases",
+                     "debit": round(grand_total, 2), "credit": 0.0,
+                     "memo": f"Purchase from {data['vendor']}"},
+                    {"account_code": account_credit_code, "account_name": account_credit_name,
+                     "debit": 0.0, "credit": round(grand_total, 2),
+                     "memo": f"Paid from {fund_source} wallet"},
+                ],
+                "total_amount": round(grand_total, 2),
+                "status": "posted",
+                "auto_generated": True,
+                "authorized_by_id": verifier["verifier_id"] if verifier else user["id"],
+                "authorized_by_name": verifier["verifier_name"] if verifier else user.get("full_name", user["username"]),
+                "authorized_method": verifier.get("method", "") if verifier else "",
+                "created_by_id": user["id"],
+                "created_by_name": user.get("full_name", user["username"]),
+                "created_at": now_iso(),
+                "voided": False, "void_reason": "", "voided_at": "", "voided_by": "",
+            })
 
     # ── Terms: create accounts payable ────────────────────────────────────
     if po_type == "terms" and grand_total > 0:
@@ -921,22 +1051,42 @@ async def adjust_po_payment(po_id: str, data: dict, user=Depends(get_current_use
     delta = round(new_total - old_total, 2)
     reason = data.get("reason", "PO edit — payment adjusted")
     fund_source = data.get("fund_source", "cashier")
+    if fund_source not in ("cashier", "safe", "digital", "bank"):
+        fund_source = "cashier"
     branch_id = po.get("branch_id", "")
     po_type = po.get("po_type", po.get("payment_method", ""))
 
     if delta == 0:
         return {"message": "No payment adjustment needed (amount unchanged)", "delta": 0}
 
+    # PIN required for Bank/Digital adjustments (same policy as /pay)
+    verifier = None
+    if fund_source in ("bank", "digital"):
+        pin = str(data.get("pin", ""))
+        if not pin:
+            raise HTTPException(
+                status_code=400,
+                detail="Admin PIN or TOTP is required to adjust from Bank or Digital wallet"
+            )
+        from routes.verify import verify_pin_for_action
+        verifier = await verify_pin_for_action(pin, "pay_po_bank", branch_id=branch_id)
+        if not verifier:
+            raise HTTPException(
+                status_code=403,
+                detail="Invalid PIN or TOTP — Bank/Digital adjustments require admin or time-based code"
+            )
+
+    method_map = {"cashier": "Cash", "safe": "Cash", "digital": "Digital Transfer", "bank": "Check/Bank Transfer"}
     adjustment_entry = {
         "id": new_id(),
         "amount": abs(delta),
         "delta": delta,
         "date": now_iso()[:10],
-        "method": data.get("payment_method", "Cash"),
+        "method": data.get("payment_method") or method_map.get(fund_source, "Cash"),
         "fund_source": fund_source,
         "type": "additional_payment" if delta > 0 else "overpayment_refund",
         "reason": reason,
-        "recorded_by": user.get("full_name", user["username"]),
+        "recorded_by": (verifier["verifier_name"] if verifier else user.get("full_name", user["username"])),
         "recorded_at": now_iso(),
     }
 
@@ -965,7 +1115,17 @@ async def adjust_po_payment(po_id: str, data: dict, user=Depends(get_current_use
 
     if delta > 0:
         # More owed — check fund has enough
-        avail = balances["safe"] if fund_source == "safe" else balances["cashier"]
+        fund_avail_map = {
+            "cashier": balances["cashier"],
+            "safe": balances["safe"],
+            "digital": balances["digital"],
+            "bank": balances["bank"],
+        }
+        avail = fund_avail_map.get(fund_source, 0)
+        if fund_source == "digital" and not balances.get("digital_id"):
+            raise HTTPException(status_code=400, detail="No Digital / E-Wallet configured for this branch")
+        if fund_source == "bank" and not balances.get("bank_id"):
+            raise HTTPException(status_code=400, detail="No Bank Account configured for this branch")
         if avail < delta:
             raise HTTPException(status_code=400, detail={
                 "type": "insufficient_funds",
@@ -983,6 +1143,16 @@ async def adjust_po_payment(po_id: str, data: dict, user=Depends(get_current_use
                 await db.safe_lots.update_one({"id": lot["id"]}, {"$inc": {"remaining_amount": -take}})
                 remaining -= take
             await record_safe_movement(branch_id, -delta, ref_text)
+        elif fund_source == "digital":
+            await update_digital_wallet(branch_id, -delta, ref_text)
+        elif fund_source == "bank":
+            new_bank_bal = round(balances["bank"] - delta, 2)
+            await db.fund_wallets.update_one({"id": balances["bank_id"]}, {"$inc": {"balance": -round(delta, 2)}})
+            await db.wallet_movements.insert_one({
+                "id": new_id(), "wallet_id": balances["bank_id"], "branch_id": branch_id,
+                "type": "bank_out", "amount": -round(delta, 2),
+                "reference": ref_text, "balance_after": new_bank_bal, "created_at": now_iso(),
+            })
         else:
             await update_cashier_wallet(branch_id, -delta, ref_text)
 
@@ -992,7 +1162,7 @@ async def adjust_po_payment(po_id: str, data: dict, user=Depends(get_current_use
             "category": "Purchase Payment",
             "description": f"Additional payment — PO {po['po_number']} — {po['vendor']}",
             "notes": f"Reason: {reason} | Δ +₱{delta:.2f}",
-            "amount": delta, "payment_method": data.get("payment_method", "Cash"),
+            "amount": delta, "payment_method": adjustment_entry["method"],
             "fund_source": fund_source, "reference_number": po["po_number"],
             "date": now_iso()[:10], "po_id": po_id,
             "created_by": user["id"], "created_by_name": user.get("full_name", user["username"]),
@@ -1015,6 +1185,16 @@ async def adjust_po_payment(po_id: str, data: dict, user=Depends(get_current_use
                 "created_at": now_iso(),
             })
             await record_safe_movement(branch_id, abs(delta), ref_text)
+        elif fund_source == "digital":
+            await update_digital_wallet(branch_id, abs(delta), ref_text)
+        elif fund_source == "bank" and balances.get("bank_id"):
+            new_bank_bal = round(balances["bank"] + abs(delta), 2)
+            await db.fund_wallets.update_one({"id": balances["bank_id"]}, {"$inc": {"balance": round(abs(delta), 2)}})
+            await db.wallet_movements.insert_one({
+                "id": new_id(), "wallet_id": balances["bank_id"], "branch_id": branch_id,
+                "type": "bank_in", "amount": round(abs(delta), 2),
+                "reference": ref_text, "balance_after": new_bank_bal, "created_at": now_iso(),
+            })
         else:
             await update_cashier_wallet(branch_id, abs(delta), ref_text)
 
@@ -1025,7 +1205,7 @@ async def adjust_po_payment(po_id: str, data: dict, user=Depends(get_current_use
             "description": f"Overpayment refund — PO {po['po_number']} — {po['vendor']}",
             "notes": f"Reason: {reason} | Δ ₱{delta:.2f} (refund)",
             "amount": delta,  # negative amount
-            "payment_method": data.get("payment_method", "Cash"),
+            "payment_method": adjustment_entry["method"],
             "fund_source": fund_source, "reference_number": po["po_number"],
             "date": now_iso()[:10], "po_id": po_id,
             "created_by": user["id"], "created_by_name": user.get("full_name", user["username"]),

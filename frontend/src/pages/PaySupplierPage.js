@@ -27,6 +27,14 @@ const FUND_METHOD_MAP = {
   digital: 'Digital Transfer',
 };
 
+// Standard canonical labels (used if wallet has no DB `name`)
+const FUND_DEFAULT_LABELS = {
+  cashier: 'Cashier Drawer',
+  safe:    'Physical Safe',
+  digital: 'Digital / E-Wallet',
+  bank:    'Bank Account',
+};
+
 function round2(n) { return Math.round(n * 100) / 100; }
 
 export default function PaySupplierPage() {
@@ -55,8 +63,16 @@ export default function PaySupplierPage() {
   // payMethod is derived — no separate picker
   const payMethod = FUND_METHOD_MAP[fundSource] || 'Cash';
 
-  // Fund balances
+  // Fund balances + labels + visibility
   const [walletBalances, setWalletBalances] = useState({ cashier: 0, safe: 0, bank: 0, digital: 0 });
+  const [walletLabels, setWalletLabels] = useState({
+    cashier: FUND_DEFAULT_LABELS.cashier,
+    safe: FUND_DEFAULT_LABELS.safe,
+    digital: FUND_DEFAULT_LABELS.digital,
+    bank: FUND_DEFAULT_LABELS.bank,
+  });
+  const [walletAvailable, setWalletAvailable] = useState({ cashier: true, safe: true, digital: false, bank: false });
+  const [bankHidden, setBankHidden] = useState(false);
 
   // Processing
   const [processing, setProcessing] = useState(false);
@@ -88,12 +104,31 @@ export default function PaySupplierPage() {
     try {
       const res = await api.get('/fund-wallets', { params: { branch_id: currentBranch.id } });
       const ws = res.data || [];
+      const byType = (t) => ws.find(w => w.type === t);
+      const cashierW = byType('cashier');
+      const safeW = byType('safe');
+      const digitalW = byType('digital');
+      const bankW = byType('bank');
+
       setWalletBalances({
-        cashier: ws.find(w => w.type === 'cashier')?.balance || 0,
-        safe:    ws.find(w => w.type === 'safe')?.balance || 0,
-        bank:    ws.find(w => w.type === 'bank')?.balance || 0,
-        digital: ws.find(w => w.type === 'digital')?.balance || 0,
+        cashier: cashierW?.balance || 0,
+        safe:    safeW?.balance || 0,
+        digital: digitalW?.balance || 0,
+        bank:    (bankW && !bankW.balance_hidden) ? (bankW.balance || 0) : 0,
       });
+      setWalletLabels({
+        cashier: cashierW?.name || FUND_DEFAULT_LABELS.cashier,
+        safe:    safeW?.name    || FUND_DEFAULT_LABELS.safe,
+        digital: digitalW?.name || FUND_DEFAULT_LABELS.digital,
+        bank:    bankW?.name    || FUND_DEFAULT_LABELS.bank,
+      });
+      setWalletAvailable({
+        cashier: !!cashierW,
+        safe:    !!safeW,
+        digital: !!digitalW,
+        bank:    !!bankW,
+      });
+      setBankHidden(!!bankW?.balance_hidden);
     } catch {}
   }, [currentBranch]);
 
@@ -126,7 +161,8 @@ export default function PaySupplierPage() {
   const unusedBudget  = budget > 0 ? round2(Math.max(0, budget - totalApplied)) : null;
   const isBankOrDig   = fundSource === 'bank' || fundSource === 'digital';
   const currentWalBal = walletBalances[fundSource] ?? 0;
-  const isShort       = totalApplied > currentWalBal && totalApplied > 0;
+  const balanceUnknown = fundSource === 'bank' && bankHidden;
+  const isShort       = !balanceUnknown && totalApplied > currentWalBal && totalApplied > 0;
 
   // Overdue sum for a supplier (computed client-side)
   const getOverdue = (sup) =>
@@ -223,12 +259,12 @@ export default function PaySupplierPage() {
     if (errors.length) {
       toast.error(`${errors.length} payment(s) failed: ${errors[0]}`);
     } else {
-      toast.success(`₱${totalPaid.toFixed(2)} paid to ${selected.vendor} from ${fundSource}`);
+      toast.success(`₱${totalPaid.toFixed(2)} paid to ${selected.vendor} from ${walletLabels[fundSource]}`);
       const batchPos = allocations
         .filter(a => paidPoIds.includes(a.po_id))
         .map(a => ({ po_id: a.po_id, po_number: selected.pos.find(p => p.id === a.po_id)?.po_number || a.po_id, amount: a.amount, uploaded: false }));
       if (batchPos.length === 1) { setPsUploadPOId(batchPos[0].po_id); setPsUploadQROpen(true); }
-      else { setPaidBatch({ vendor: selected.vendor, totalPaid, fundSource, pos: batchPos }); setBatchUploadOpen(true); }
+      else { setPaidBatch({ vendor: selected.vendor, totalPaid, fundSource, fundSourceLabel: walletLabels[fundSource], pos: batchPos }); setBatchUploadOpen(true); }
     }
 
     setCheckedPos({});
@@ -385,23 +421,30 @@ export default function PaySupplierPage() {
             <Label className="text-[10px] text-slate-400 uppercase shrink-0">Pay From</Label>
             <div className="flex gap-1.5 flex-wrap">
               {[
-                { key: 'cashier', label: 'Cashier',       lock: false },
-                { key: 'safe',    label: 'Safe',           lock: false },
-                { key: 'bank',    label: 'Check / Bank',   lock: true  },
-                { key: 'digital', label: 'Digital',        lock: true  },
+                { key: 'cashier', lock: false },
+                { key: 'safe',    lock: false },
+                { key: 'digital', lock: true  },
+                { key: 'bank',    lock: true  },
               ].map(f => {
+                const label = walletLabels[f.key];
+                const available = walletAvailable[f.key];
+                const isBankHidden = f.key === 'bank' && bankHidden;
                 const bal = walletBalances[f.key] ?? 0;
                 const active = fundSource === f.key;
-                const insuff = active && isShort;
+                const insuff = active && !isBankHidden && isShort;
+                const disabled = !available;
                 return (
-                  <button key={f.key} onClick={() => setFundSource(f.key)}
+                  <button key={f.key} onClick={() => disabled ? null : setFundSource(f.key)}
+                    disabled={disabled}
                     data-testid={`fund-${f.key}`}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-all ${
                       active ? 'border-[#1A4D2E] bg-[#1A4D2E]/5 font-semibold' : 'border-slate-200 hover:border-slate-300'
-                    } ${insuff ? 'border-red-400 bg-red-50' : ''}`}>
+                    } ${insuff ? 'border-red-400 bg-red-50' : ''} ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}>
                     {f.lock && <Lock size={9} className="text-amber-500" />}
-                    <span>{f.label}</span>
-                    <span className={`font-mono text-[10px] ${insuff ? 'text-red-600' : 'text-slate-500'}`}>{formatPHP(bal)}</span>
+                    <span>{label}</span>
+                    <span className={`font-mono text-[10px] ${insuff ? 'text-red-600' : 'text-slate-500'}`}>
+                      {isBankHidden ? '••••' : formatPHP(bal)}
+                    </span>
                   </button>
                 );
               })}
@@ -412,6 +455,17 @@ export default function PaySupplierPage() {
               </span>
             )}
           </div>
+
+          {/* Visible method hint */}
+          {selected && (
+            <div className="mt-2 text-[11px] text-slate-500 flex items-center gap-1.5" data-testid="pay-method-hint">
+              <Banknote size={12} className="text-slate-400" />
+              <span>Paying via <b className="text-slate-700">{payMethod}</b> from <b className="text-slate-700">{walletLabels[fundSource]}</b></span>
+              {bankHidden && fundSource === 'bank' && (
+                <span className="text-amber-600 flex items-center gap-1 ml-2"><Lock size={9} /> balance masked for your role</span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* ── No supplier selected ── */}
@@ -664,7 +718,7 @@ export default function PaySupplierPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-white font-semibold text-sm" style={{ fontFamily: 'Manrope' }}>Upload Payment Receipts</p>
-                  <p className="text-emerald-200 text-[11px] mt-0.5">{paidBatch.vendor} · ₱{paidBatch.totalPaid.toFixed(2)} from {paidBatch.fundSource}</p>
+                  <p className="text-emerald-200 text-[11px] mt-0.5">{paidBatch.vendor} · ₱{paidBatch.totalPaid.toFixed(2)} from {paidBatch.fundSourceLabel || paidBatch.fundSource}</p>
                 </div>
                 <div className="text-right">
                   <p className="text-white text-xs font-semibold">{paidBatch.pos.filter(p => p.uploaded).length} / {paidBatch.pos.length}</p>

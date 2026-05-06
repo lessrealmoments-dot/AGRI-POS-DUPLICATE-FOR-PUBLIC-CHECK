@@ -27,7 +27,7 @@ import {
   Search, History, ArrowRight, Receipt, UserPlus, Package,
   Wallet, Banknote, CreditCard, AlertTriangle, ChevronDown, RefreshCw,
   ShieldCheck, Clock, Pencil, Upload, ImageIcon, TrendingDown, TrendingUp, Printer,
-  Smartphone, Lock, PauseCircle, Inbox, RotateCcw, Wifi, WifiOff, Send
+  Smartphone, Lock, PauseCircle, Inbox, RotateCcw, Wifi, WifiOff, Send, Shield
 } from 'lucide-react';
 import {
   buildParkPOPayload, parkPO, loadParkedPOs,
@@ -116,8 +116,14 @@ export default function PurchaseOrderPage() {
 
   // ── Cash dialog ────────────────────────────────────────────────────────
   const [cashDialog, setCashDialog] = useState(false);
-  const [cashFunds, setCashFunds] = useState({ cashier: 0, safe: 0 });
-  const [cashForm, setCashForm] = useState({ fund_source: 'cashier', payment_method_detail: 'Cash', check_number: '' });
+  const [cashFunds, setCashFunds] = useState({
+    cashier: 0, safe: 0, digital: 0, bank: 0,
+    cashier_name: 'Cashier Drawer', safe_name: 'Physical Safe',
+    digital_name: 'Digital / E-Wallet', bank_name: 'Bank Account',
+    digital_available: false, bank_available: false,
+    bank_hidden: false,
+  });
+  const [cashForm, setCashForm] = useState({ fund_source: 'cashier', payment_method_detail: 'Cash', check_number: '', pin: '' });
   const [cashLoading, setCashLoading] = useState(false);
 
   // ── Terms dialog ───────────────────────────────────────────────────────
@@ -156,7 +162,14 @@ export default function PurchaseOrderPage() {
   const [payAdjData, setPayAdjData] = useState(null); // { po, delta, oldTotal, newTotal }
   const [payAdjFundSource, setPayAdjFundSource] = useState('cashier');
   const [payAdjReason, setPayAdjReason] = useState('');
-  const [payAdjFunds, setPayAdjFunds] = useState({ cashier: 0, safe: 0 });
+  const [payAdjFunds, setPayAdjFunds] = useState({
+    cashier: 0, safe: 0, digital: 0, bank: 0,
+    cashier_name: 'Cashier Drawer', safe_name: 'Physical Safe',
+    digital_name: 'Digital / E-Wallet', bank_name: 'Bank Account',
+    digital_available: false, bank_available: false,
+    bank_hidden: false,
+  });
+  const [payAdjPin, setPayAdjPin] = useState('');
   const [payAdjSaving, setPayAdjSaving] = useState(false);
   const [schemes, setSchemes] = useState([]);
 
@@ -415,47 +428,79 @@ export default function PurchaseOrderPage() {
     setCashLoading(true);
     try {
       const res = await api.get('/purchase-orders/fund-balances', { params: { branch_id: currentBranch.id } });
-      const funds = { cashier: res.data.cashier || 0, safe: res.data.safe || 0, cashier_is_negative: res.data.cashier_is_negative };
+      const d = res.data || {};
+      const funds = {
+        cashier: d.cashier || 0,
+        safe: d.safe || 0,
+        digital: d.digital || 0,
+        bank: d.bank_hidden ? 0 : (d.bank || 0),
+        cashier_name: d.cashier_name || 'Cashier Drawer',
+        safe_name: d.safe_name || 'Physical Safe',
+        digital_name: d.digital_name || 'Digital / E-Wallet',
+        bank_name: d.bank_name || 'Bank Account',
+        digital_available: !!d.digital_available,
+        bank_available: !!d.bank_available,
+        bank_hidden: !!d.bank_hidden,
+        cashier_is_negative: d.cashier_is_negative,
+      };
       setCashFunds(funds);
       // Auto-select Safe if: cashier is negative, or cashier doesn't have enough
       if (funds.cashier_is_negative || funds.cashier < computed.grandTotal) {
         if (funds.safe >= computed.grandTotal) {
-          setCashForm(f => ({ ...f, fund_source: 'safe' }));
+          setCashForm(f => ({ ...f, fund_source: 'safe', pin: '' }));
         } else if (funds.cashier_is_negative) {
-          setCashForm(f => ({ ...f, fund_source: 'safe' })); // Safe even if insufficient, user can see warning
+          setCashForm(f => ({ ...f, fund_source: 'safe', pin: '' })); // Safe even if insufficient, user can see warning
         } else {
-          setCashForm(f => ({ ...f, fund_source: 'cashier' }));
+          setCashForm(f => ({ ...f, fund_source: 'cashier', pin: '' }));
         }
       } else {
-        setCashForm(f => ({ ...f, fund_source: 'cashier' }));
+        setCashForm(f => ({ ...f, fund_source: 'cashier', pin: '' }));
       }
-    } catch { setCashFunds({ cashier: 0, safe: 0 }); }
+    } catch {
+      setCashFunds(prev => ({ ...prev, cashier: 0, safe: 0, digital: 0, bank: 0 }));
+    }
     setCashLoading(false);
     setCashDialog(true);
   };
 
   const handlePayInCash = async () => {
     const valid = validate(); if (!valid) return;
-    const insufficient = cashForm.fund_source === 'cashier'
-      ? cashFunds.cashier < computed.grandTotal
-      : cashFunds.safe < computed.grandTotal;
-    if (insufficient) { toast.error('Insufficient funds in selected source'); return; }
+    const src = cashForm.fund_source;
+    const avail = src === 'safe' ? cashFunds.safe
+      : src === 'digital' ? cashFunds.digital
+      : src === 'bank' ? cashFunds.bank
+      : cashFunds.cashier;
+    if (avail < computed.grandTotal) { toast.error('Insufficient funds in selected source'); return; }
+    if ((src === 'bank' || src === 'digital') && !cashForm.pin.trim()) {
+      toast.error('Admin PIN or TOTP is required for Bank/Digital payments'); return;
+    }
     setSaving(true);
     try {
       const res = await api.post('/purchase-orders', buildPayload(valid, {
         po_type: 'cash',
-        fund_source: cashForm.fund_source,
+        fund_source: src,
         payment_method_detail: cashForm.payment_method_detail,
         check_number: cashForm.check_number,
+        pin: cashForm.pin,
       }));
-      toast.success(`PO ${res.data.po_number} created — inventory updated, ₱${computed.grandTotal.toFixed(2)} deducted from ${cashForm.fund_source}`);
+      const srcLabel = src === 'safe' ? cashFunds.safe_name
+        : src === 'digital' ? cashFunds.digital_name
+        : src === 'bank' ? cashFunds.bank_name
+        : cashFunds.cashier_name;
+      toast.success(`PO ${res.data.po_number} created — inventory updated, ₱${computed.grandTotal.toFixed(2)} deducted from ${srcLabel}`);
       setRefPrompt({ open: true, number: res.data.po_number, vendor: header.vendor });
       setCashDialog(false); resetForm(); fetchOrders(); setTab('list');
     } catch (e) {
       const detail = e.response?.data?.detail;
       if (detail?.type === 'insufficient_funds') {
         toast.error(detail.message);
-        setCashFunds({ cashier: detail.cashier_balance || 0, safe: detail.safe_balance || 0 });
+        setCashFunds(prev => ({
+          ...prev,
+          cashier: detail.cashier_balance ?? prev.cashier,
+          safe: detail.safe_balance ?? prev.safe,
+          digital: detail.digital_balance ?? prev.digital,
+          bank: detail.bank_balance ?? prev.bank,
+        }));
       } else {
         const msg = typeof detail === 'string' ? detail
           : detail?.message ? detail.message
@@ -667,11 +712,25 @@ export default function PurchaseOrderPage() {
         // Fetch fund balances for the dialog
         try {
           const fundsRes = await api.get('/purchase-orders/fund-balances', { params: { branch_id: currentBranch?.id } });
-          setPayAdjFunds({ cashier: fundsRes.data.cashier || 0, safe: fundsRes.data.safe || 0 });
+          const d = fundsRes.data || {};
+          setPayAdjFunds({
+            cashier: d.cashier || 0,
+            safe: d.safe || 0,
+            digital: d.digital || 0,
+            bank: d.bank_hidden ? 0 : (d.bank || 0),
+            cashier_name: d.cashier_name || 'Cashier Drawer',
+            safe_name: d.safe_name || 'Physical Safe',
+            digital_name: d.digital_name || 'Digital / E-Wallet',
+            bank_name: d.bank_name || 'Bank Account',
+            digital_available: !!d.digital_available,
+            bank_available: !!d.bank_available,
+            bank_hidden: !!d.bank_hidden,
+          });
         } catch {}
         setPayAdjData({ po: updatedPO, delta, oldTotal, newTotal });
         setPayAdjReason(detailEditReason);
         setPayAdjFundSource('cashier');
+        setPayAdjPin('');
         setPayAdjDialog(true);
         toast.info(`Payment adjustment of ₱${Math.abs(delta).toFixed(2)} ${delta > 0 ? 'needed' : 'to be refunded'} — see the adjustment dialog.`);
       } else if (Math.abs(delta) > 0.01) {
@@ -684,18 +743,24 @@ export default function PurchaseOrderPage() {
   const handlePayAdjustment = async () => {
     if (!payAdjReason.trim()) { toast.error('Please enter a reason'); return; }
     if (!payAdjData) return;
+    if ((payAdjFundSource === 'bank' || payAdjFundSource === 'digital') && !payAdjPin.trim()) {
+      toast.error('Admin PIN or TOTP is required for Bank/Digital adjustments'); return;
+    }
     setPayAdjSaving(true);
     try {
+      const methodMap = { cashier: 'Cash', safe: 'Cash', digital: 'Digital Transfer', bank: 'Check/Bank Transfer' };
       const res = await api.post(`/purchase-orders/${payAdjData.po.id}/adjust-payment`, {
         new_grand_total: payAdjData.newTotal,
         old_grand_total: payAdjData.oldTotal,
         fund_source: payAdjFundSource,
         reason: payAdjReason,
-        payment_method: 'Cash',
+        payment_method: methodMap[payAdjFundSource] || 'Cash',
+        pin: payAdjPin,
       });
       toast.success(res.data.message);
       setPayAdjDialog(false);
       setPayAdjData(null);
+      setPayAdjPin('');
       // Refresh the detail PO
       const updated = await api.get(`/purchase-orders/${payAdjData.po.id}`).catch(() => null);
       if (updated) setDetailPO(updated.data);
@@ -1431,41 +1496,58 @@ export default function PurchaseOrderPage() {
 
       {/* ── PAY IN CASH DIALOG ──────────────────────────────────────── */}
       <Dialog open={cashDialog} onOpenChange={v => { if (!v) setCashDialog(false); }}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle style={{ fontFamily: 'Manrope' }} className="flex items-center gap-2">
               <Wallet size={18} className="text-[#1A4D2E]" /> Pay in Cash — {formatPHP(computed.grandTotal)}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 mt-1">
-            {/* Fund source selection */}
+            {/* Fund source selection — 4 wallets */}
             <div>
               <Label className="text-xs text-slate-500 font-medium">Select Fund Source</Label>
               <div className="grid grid-cols-2 gap-3 mt-2">
                 {[
-                  { key: 'cashier', label: 'Cashier Drawer', balance: cashFunds.cashier },
-                  { key: 'safe', label: 'Safe / Vault', balance: cashFunds.safe },
+                  { key: 'cashier', label: cashFunds.cashier_name || 'Cashier Drawer', balance: cashFunds.cashier, available: true, locked: false, hidden: false },
+                  { key: 'safe',    label: cashFunds.safe_name    || 'Physical Safe',   balance: cashFunds.safe,    available: true, locked: false, hidden: false },
+                  { key: 'digital', label: cashFunds.digital_name || 'Digital / E-Wallet', balance: cashFunds.digital, available: cashFunds.digital_available, locked: true, hidden: false },
+                  { key: 'bank',    label: cashFunds.bank_name    || 'Bank Account',    balance: cashFunds.bank,    available: cashFunds.bank_available, locked: true, hidden: cashFunds.bank_hidden },
                 ].map(f => {
-                  const sufficient = f.balance >= computed.grandTotal;
+                  const sufficient = !f.hidden && f.balance >= computed.grandTotal;
                   const isNegative = f.key === 'cashier' && cashFunds.cashier_is_negative;
+                  const unavailable = !f.available;
+                  const selected = cashForm.fund_source === f.key;
                   return (
-                    <button key={f.key} onClick={() => setCashForm(c => ({ ...c, fund_source: f.key }))}
-                      className={`p-3 rounded-lg border-2 text-left transition-all ${cashForm.fund_source === f.key ? 'border-[#1A4D2E] bg-emerald-50' : 'border-slate-200 hover:border-slate-300'} ${(isNegative || !sufficient) ? 'opacity-80' : ''}`}>
-                      <p className="text-xs font-medium text-slate-600">{f.label}</p>
-                      <p className={`text-xl font-bold font-mono mt-0.5 ${isNegative ? 'text-red-600' : sufficient ? 'text-[#1A4D2E]' : 'text-red-600'}`}>
-                        {formatPHP(f.balance)}
+                    <button key={f.key} onClick={() => unavailable ? null : setCashForm(c => ({ ...c, fund_source: f.key, pin: '' }))}
+                      disabled={unavailable}
+                      data-testid={`po-fund-${f.key}`}
+                      className={`p-3 rounded-lg border-2 text-left transition-all ${selected ? 'border-[#1A4D2E] bg-emerald-50' : 'border-slate-200 hover:border-slate-300'} ${unavailable ? 'opacity-40 cursor-not-allowed' : ''} ${(isNegative || (!sufficient && !f.hidden && !unavailable)) ? 'opacity-80' : ''}`}>
+                      <div className="flex items-start justify-between gap-1">
+                        <p className="text-xs font-medium text-slate-600">{f.label}</p>
+                        {f.locked && <Lock size={10} className="text-amber-500 shrink-0 mt-0.5" />}
+                      </div>
+                      <p className={`text-xl font-bold font-mono mt-0.5 ${f.hidden ? 'text-slate-400' : isNegative ? 'text-red-600' : sufficient ? 'text-[#1A4D2E]' : 'text-red-600'}`}>
+                        {f.hidden ? '••••' : formatPHP(f.balance)}
                       </p>
-                      {isNegative && (
-                        <p className="text-[10px] text-red-600 mt-0.5 flex items-center gap-0.5 font-semibold">
-                          <AlertTriangle size={10} /> Cashier is already negative — use Safe instead
+                      {f.hidden && (
+                        <p className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-0.5">
+                          <Lock size={9} /> Admin-only balance
                         </p>
                       )}
-                      {!isNegative && !sufficient && (
+                      {unavailable && !f.hidden && (
+                        <p className="text-[10px] text-slate-400 mt-0.5">Not configured</p>
+                      )}
+                      {!unavailable && !f.hidden && isNegative && (
+                        <p className="text-[10px] text-red-600 mt-0.5 flex items-center gap-0.5 font-semibold">
+                          <AlertTriangle size={10} /> Already negative — use Safe
+                        </p>
+                      )}
+                      {!unavailable && !f.hidden && !isNegative && !sufficient && (
                         <p className="text-[10px] text-red-500 mt-0.5 flex items-center gap-0.5">
                           <AlertTriangle size={10} /> Short {formatPHP(computed.grandTotal - f.balance)}
                         </p>
                       )}
-                      {!isNegative && sufficient && cashForm.fund_source === f.key && (
+                      {!unavailable && !f.hidden && !isNegative && sufficient && selected && (
                         <p className="text-[10px] text-emerald-600 mt-0.5">
                           Balance after: {formatPHP(f.balance - computed.grandTotal)}
                         </p>
@@ -1476,7 +1558,25 @@ export default function PurchaseOrderPage() {
               </div>
             </div>
 
-            {/* Payment method */}
+            {/* Method badge + PIN for Bank/Digital */}
+            {(cashForm.fund_source === 'bank' || cashForm.fund_source === 'digital') && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
+                <div className="flex items-center gap-2 text-xs text-amber-800">
+                  <Shield size={13} />
+                  <span className="font-semibold">
+                    Paying via {cashForm.fund_source === 'bank' ? 'Check / Bank Transfer' : 'Digital Transfer'} — admin authorization required
+                  </span>
+                </div>
+                <Input type="password" autoComplete="new-password"
+                  value={cashForm.pin}
+                  onChange={e => setCashForm(c => ({ ...c, pin: e.target.value }))}
+                  placeholder="Admin PIN or TOTP (6-digit)"
+                  className="h-9 font-mono"
+                  data-testid="po-cash-pin-input" />
+              </div>
+            )}
+
+            {/* Payment method / Check # */}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs text-slate-500">Payment Method</Label>
@@ -1488,9 +1588,9 @@ export default function PurchaseOrderPage() {
                   </SelectContent>
                 </Select>
               </div>
-              {cashForm.payment_method_detail === 'Check' && (
+              {(cashForm.payment_method_detail === 'Check' || cashForm.fund_source === 'bank') && (
                 <div>
-                  <Label className="text-xs text-slate-500">Check #</Label>
+                  <Label className="text-xs text-slate-500">{cashForm.fund_source === 'bank' ? 'Check # / Ref' : 'Check #'}</Label>
                   <Input className="h-9 mt-1" value={cashForm.check_number}
                     onChange={e => setCashForm(c => ({ ...c, check_number: e.target.value }))} />
                 </div>
@@ -1501,8 +1601,16 @@ export default function PurchaseOrderPage() {
             <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-sm space-y-1">
               <p className="font-semibold text-slate-700">On confirm:</p>
               <ul className="text-xs text-slate-500 space-y-0.5 list-disc list-inside">
-                <li><b>{formatPHP(computed.grandTotal)}</b> deducted from {cashForm.fund_source === 'safe' ? 'Safe' : 'Cashier'}</li>
+                <li><b>{formatPHP(computed.grandTotal)}</b> deducted from {
+                  cashForm.fund_source === 'safe' ? (cashFunds.safe_name || 'Physical Safe')
+                  : cashForm.fund_source === 'digital' ? (cashFunds.digital_name || 'Digital / E-Wallet')
+                  : cashForm.fund_source === 'bank' ? (cashFunds.bank_name || 'Bank Account')
+                  : (cashFunds.cashier_name || 'Cashier Drawer')
+                }</li>
                 <li>Expense record created: PO Payment — {header.vendor}</li>
+                {(cashForm.fund_source === 'bank' || cashForm.fund_source === 'digital') && (
+                  <li>Journal entry auto-posted (AP → {cashForm.fund_source === 'bank' ? 'Bank' : 'Digital Wallet'})</li>
+                )}
                 <li>Inventory updated immediately</li>
               </ul>
             </div>
@@ -2087,33 +2195,49 @@ export default function PurchaseOrderPage() {
               </Label>
               <div className="grid grid-cols-2 gap-2 mt-2">
                 {[
-                  { k: 'cashier', label: 'Cashier Drawer', bal: payAdjFunds.cashier },
-                  { k: 'safe', label: 'Safe / Vault', bal: payAdjFunds.safe },
+                  { k: 'cashier', label: payAdjFunds.cashier_name || 'Cashier Drawer', bal: payAdjFunds.cashier, available: true, locked: false, hidden: false },
+                  { k: 'safe',    label: payAdjFunds.safe_name    || 'Physical Safe',   bal: payAdjFunds.safe,    available: true, locked: false, hidden: false },
+                  { k: 'digital', label: payAdjFunds.digital_name || 'Digital / E-Wallet', bal: payAdjFunds.digital, available: payAdjFunds.digital_available, locked: true, hidden: false },
+                  { k: 'bank',    label: payAdjFunds.bank_name    || 'Bank Account',    bal: payAdjFunds.bank,    available: payAdjFunds.bank_available, locked: true, hidden: payAdjFunds.bank_hidden },
                 ].map(f => {
+                  const unavailable = !f.available;
                   const isNegative = f.k === 'cashier' && payAdjFunds.cashier < 0;
-                  const wouldGoNeg = payAdjData.delta > 0 && f.bal < Math.abs(payAdjData.delta);
+                  const wouldGoNeg = !f.hidden && payAdjData.delta > 0 && f.bal < Math.abs(payAdjData.delta);
                   const selected = payAdjFundSource === f.k;
                   return (
-                    <button key={f.k} onClick={() => setPayAdjFundSource(f.k)}
-                      className={`p-3 rounded-xl border-2 text-left transition-all ${selected ? 'border-[#1A4D2E] bg-emerald-50' : 'border-slate-200 hover:border-slate-300'}`}>
-                      <p className="text-xs font-medium text-slate-600 mb-0.5">{f.label}</p>
-                      <p className={`text-lg font-bold font-mono ${isNegative ? 'text-red-600' : wouldGoNeg ? 'text-amber-600' : 'text-[#1A4D2E]'}`}>
-                        {formatPHP(f.bal)}
+                    <button key={f.k} onClick={() => unavailable ? null : (setPayAdjFundSource(f.k), setPayAdjPin(''))}
+                      disabled={unavailable}
+                      data-testid={`po-adj-fund-${f.k}`}
+                      className={`p-3 rounded-xl border-2 text-left transition-all ${selected ? 'border-[#1A4D2E] bg-emerald-50' : 'border-slate-200 hover:border-slate-300'} ${unavailable ? 'opacity-40 cursor-not-allowed' : ''}`}>
+                      <div className="flex items-start justify-between gap-1">
+                        <p className="text-xs font-medium text-slate-600 mb-0.5">{f.label}</p>
+                        {f.locked && <Lock size={9} className="text-amber-500 shrink-0 mt-0.5" />}
+                      </div>
+                      <p className={`text-lg font-bold font-mono ${f.hidden ? 'text-slate-400' : isNegative ? 'text-red-600' : wouldGoNeg ? 'text-amber-600' : 'text-[#1A4D2E]'}`}>
+                        {f.hidden ? '••••' : formatPHP(f.bal)}
                       </p>
-                      {isNegative && (
+                      {f.hidden && (
+                        <p className="text-[9px] text-slate-400 mt-0.5 flex items-center gap-0.5">
+                          <Lock size={8} /> Admin-only
+                        </p>
+                      )}
+                      {unavailable && !f.hidden && (
+                        <p className="text-[9px] text-slate-400 mt-0.5">Not configured</p>
+                      )}
+                      {!unavailable && !f.hidden && isNegative && (
                         <p className="text-[9px] text-red-600 mt-0.5 font-semibold flex items-center gap-0.5">
                           <AlertTriangle size={9} /> Already negative — use Safe
                         </p>
                       )}
-                      {!isNegative && wouldGoNeg && payAdjData.delta > 0 && (
+                      {!unavailable && !f.hidden && !isNegative && wouldGoNeg && payAdjData.delta > 0 && (
                         <p className="text-[9px] text-amber-600 mt-0.5 flex items-center gap-0.5">
                           <AlertTriangle size={9} /> Short ₱{(Math.abs(payAdjData.delta) - f.bal).toFixed(2)}
                         </p>
                       )}
-                      {selected && !isNegative && !wouldGoNeg && payAdjData.delta > 0 && (
+                      {selected && !unavailable && !f.hidden && !isNegative && !wouldGoNeg && payAdjData.delta > 0 && (
                         <p className="text-[9px] text-emerald-600 mt-0.5">After: {formatPHP(f.bal - Math.abs(payAdjData.delta))}</p>
                       )}
-                      {selected && payAdjData.delta < 0 && (
+                      {selected && !unavailable && !f.hidden && payAdjData.delta < 0 && (
                         <p className="text-[9px] text-blue-600 mt-0.5">After: {formatPHP(f.bal + Math.abs(payAdjData.delta))}</p>
                       )}
                     </button>
@@ -2121,6 +2245,24 @@ export default function PurchaseOrderPage() {
                 })}
               </div>
             </div>
+
+            {/* PIN for Bank/Digital */}
+            {(payAdjFundSource === 'bank' || payAdjFundSource === 'digital') && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
+                <div className="flex items-center gap-2 text-xs text-amber-800">
+                  <Shield size={13} />
+                  <span className="font-semibold">
+                    {payAdjFundSource === 'bank' ? 'Bank' : 'Digital'} adjustment — admin authorization required
+                  </span>
+                </div>
+                <Input type="password" autoComplete="new-password"
+                  value={payAdjPin}
+                  onChange={e => setPayAdjPin(e.target.value)}
+                  placeholder="Admin PIN or TOTP (6-digit)"
+                  className="h-9 font-mono"
+                  data-testid="po-adj-pin-input" />
+              </div>
+            )}
 
             {/* Reason */}
             <div>
