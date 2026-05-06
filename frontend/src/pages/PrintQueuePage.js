@@ -18,6 +18,7 @@ import {
   Printer, Wifi, WifiOff, Clock, CheckCircle2, XCircle, AlertTriangle,
   RefreshCw, Send, Ban, Building2, User, Calendar, ChevronDown, ChevronRight,
   Loader2, RotateCcw, History, Settings2, Info, CloudUpload, FileText, Image,
+  Unlink, Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatDistanceToNow } from 'date-fns';
@@ -64,6 +65,7 @@ function StatusBadge({ status }) {
 
 function TerminalCard({ terminal, onModeChange, onRefresh }) {
   const [changing, setChanging] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
 
   const toggleMode = async () => {
     const newMode = terminal.print_mode === 'auto' ? 'manual' : 'auto';
@@ -79,6 +81,19 @@ function TerminalCard({ terminal, onModeChange, onRefresh }) {
       toast.error(err?.response?.data?.detail || 'Failed to change mode');
     }
     setChanging(false);
+  };
+
+  const handleDisconnect = async () => {
+    if (!window.confirm(`Remove terminal "${terminal.user_name || terminal.terminal_id.slice(0,8)}"? This only removes the session record — the EXE will create a new one on next login.`)) return;
+    setDisconnecting(true);
+    try {
+      await api.post(`/terminal/disconnect/${terminal.terminal_id}`);
+      toast.success('Terminal removed');
+      onRefresh();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to remove terminal');
+    }
+    setDisconnecting(false);
   };
 
   return (
@@ -136,6 +151,16 @@ function TerminalCard({ terminal, onModeChange, onRefresh }) {
               {terminal.print_mode === 'auto' ? 'Auto Print' : 'Manual'}
             </button>
             <span className="text-[9px] text-slate-400">via {terminal.paired_via || 'code'}</span>
+            <button
+              onClick={handleDisconnect}
+              disabled={disconnecting}
+              className="text-[10px] text-red-400 hover:text-red-600 flex items-center gap-0.5 transition-colors"
+              title="Remove this terminal session"
+              data-testid={`disconnect-terminal-${terminal.terminal_id}`}
+            >
+              {disconnecting ? <Loader2 size={9} className="animate-spin" /> : <Unlink size={9} />}
+              Remove
+            </button>
           </div>
         </div>
       </CardContent>
@@ -353,6 +378,23 @@ export default function PrintQueuePage() {
           >
             <CloudUpload size={13} />
             Upload Document
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              try {
+                const res = await api.post('/terminal/cleanup-duplicates');
+                toast.success(res.data.message);
+                fetchTerminals();
+              } catch { toast.error('Cleanup failed'); }
+            }}
+            className="flex items-center gap-1.5 text-amber-600 border-amber-200 hover:bg-amber-50"
+            data-testid="cleanup-duplicates-btn"
+            title="Remove duplicate terminal sessions (same user + branch)"
+          >
+            <Trash2 size={13} />
+            Clean Duplicates
           </Button>
           <Button
             variant="outline"

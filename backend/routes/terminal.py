@@ -331,10 +331,54 @@ async def credential_pair_terminal(data: dict):
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
 
+    # ── Session deduplication ─────────────────────────────────────────────────
+    # If the same device is re-logging in (EXE restart), reuse the existing
+    # session instead of creating a new one. This prevents the "9 duplicate
+    # cards" problem where every EXE launch creates a new terminal_id.
+    device_id = (data.get("device_id") or "").strip()
+
+    if device_id:
+        # Device-scoped reuse: same user + branch + device
+        existing = await _raw_db.terminal_sessions.find_one(
+            {"user_id": user["id"], "branch_id": branch_id,
+             "device_id": device_id, "status": "active"},
+            {"_id": 0}
+        )
+    else:
+        # No device_id: reuse most-recent session for same user + branch
+        # (handles first launch before device_id binding)
+        existing = await _raw_db.terminal_sessions.find_one(
+            {"user_id": user["id"], "branch_id": branch_id,
+             "status": "active", "paired_via": "credential"},
+            {"_id": 0}, sort=[("last_seen", -1)]
+        )
+
+    if existing:
+        # Refresh the token so it stays valid, update last_seen
+        fresh_token = create_token(user["id"], user["role"], org_id=org_id)
+        update_fields = {"token": fresh_token, "last_seen": now_iso()}
+        if device_id and not existing.get("device_id"):
+            update_fields["device_id"] = device_id   # bind device on reconnect
+        await _raw_db.terminal_sessions.update_one(
+            {"terminal_id": existing["terminal_id"]},
+            {"$set": update_fields}
+        )
+        return {
+            "status": "paired",
+            "token": fresh_token,
+            "terminal_id": existing["terminal_id"],
+            "branch_id": branch_id,
+            "branch_name": branch.get("name", existing.get("branch_name", "")),
+            "user_name": user.get("full_name", user.get("username", "")),
+            "organization_id": org_id or "",
+            "is_admin": is_admin,
+            "session_reused": True,   # EXE can log this for debugging
+        }
+
+    # ── New session ───────────────────────────────────────────────────────────
     # Create terminal session
     terminal_id = new_id()
     token = create_token(user["id"], user["role"], org_id=org_id)
-    device_id = (data.get("device_id") or "").strip()
 
     session = {
         "id": new_id(), "terminal_id": terminal_id, "code": f"CRED-{email[:8]}",
@@ -457,6 +501,46 @@ async def disconnect_terminal(terminal_id: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Terminal not found")
     terminal_ws_manager.disconnect_terminal(terminal_id)
     return {"message": "Terminal disconnected"}
+
+
+@router.post("/cleanup-duplicates")
+async def cleanup_duplicate_sessions(user=Depends(get_current_user)):
+    """
+    Remove duplicate terminal sessions for the same user+branch.
+    Keeps the most recently seen session per user+branch+device combination.
+    Call this once to clean up the accumulation from repeated EXE logins.
+    """
+    org_id = user.get("organization_id")
+    query = {"status": "active", "paired_via": "credential"}
+    if org_id:
+        query["organization_id"] = org_id
+
+    sessions = await _raw_db.terminal_sessions.find(
+        query, {"_id": 0}
+    ).sort("last_seen", -1).to_list(500)
+
+    # Group by (user_id, branch_id, device_id)
+    seen: dict = {}
+    to_deactivate = []
+
+    for s in sessions:
+        key = (s["user_id"], s["branch_id"], s.get("device_id", ""))
+        if key not in seen:
+            seen[key] = s["terminal_id"]   # keep this one (most recent)
+        else:
+            to_deactivate.append(s["terminal_id"])
+
+    if to_deactivate:
+        await _raw_db.terminal_sessions.update_many(
+            {"terminal_id": {"$in": to_deactivate}},
+            {"$set": {"status": "deduped", "deduped_at": now_iso()}}
+        )
+
+    return {
+        "kept": len(seen),
+        "removed": len(to_deactivate),
+        "message": f"Cleaned up {len(to_deactivate)} duplicate session(s). {len(seen)} unique session(s) remain."
+    }
 
 
 
