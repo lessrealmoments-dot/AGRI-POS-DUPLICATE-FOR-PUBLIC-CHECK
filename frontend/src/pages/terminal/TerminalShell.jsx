@@ -24,6 +24,103 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const WS_URL = BACKEND_URL.replace(/^http/, 'ws');
 const fmtPHP = (v) => `₱${(parseFloat(v) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 
+// ── QuickScan Cloud Print — terminal-scoped send-to-print picker ──────────────
+function QuickScanCloudPrint({ basic, branchId, api, businessInfo, onClose }) {
+  const [terminals, setTerminals] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  useEffect(() => {
+    api.get(`/print/terminals/for-branch/${branchId}`)
+      .then(res => {
+        const list = res.data || [];
+        setTerminals(list);
+        if (list.length === 1) setSelected(list[0].terminal_id);
+        else { const online = list.find(t => t.is_online); if (online) setSelected(online.terminal_id); else if (list[0]) setSelected(list[0].terminal_id); }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [branchId, api]);
+
+  const getHtml = () => {
+    try {
+      const data = basicDocToPrintData(basic);
+      const type = basic.doc_type === 'invoice' ? 'order_slip' : basic.doc_type === 'purchase_order' ? 'purchase_order' : 'branch_transfer';
+      return PrintEngine.generateHtml({ type, data, format: 'full_page', businessInfo: businessInfo || {}, docCode: '' });
+    } catch { return '<p>Document</p>'; }
+  };
+
+  const getDocType = () => basic.doc_type === 'invoice' ? 'sales_receipt' : basic.doc_type === 'purchase_order' ? 'purchase_order' : 'branch_transfer';
+  const getDocName = () => {
+    const labels = { invoice: 'Sales Receipt', purchase_order: 'Purchase Order', branch_transfer: 'Branch Transfer' };
+    return `${labels[basic.doc_type] || 'Document'} #${basic.number || ''}`;
+  };
+
+  const handleSend = async () => {
+    if (!selected) return;
+    setSending(true);
+    try {
+      await api.post('/print/jobs', {
+        terminal_id: selected, branch_id: branchId,
+        document_type: getDocType(), document_name: getDocName(),
+        document_id: basic.id || '', reference_number: basic.number || '',
+        html_content: getHtml(), metadata: { doc_type: basic.doc_type },
+      });
+      setSent(true);
+    } catch { /* silent */ }
+    setSending(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-end" data-testid="terminal-cloud-print">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative w-full bg-white rounded-t-3xl p-5 space-y-4" style={{ boxShadow: '0 -4px 24px rgba(0,0,0,0.13)' }}>
+        <div className="flex items-center justify-between">
+          <p className="font-bold text-slate-900 text-base" style={{ fontFamily: 'Manrope' }}>
+            <Printer size={15} className="inline mr-1.5 text-emerald-600" /> Send to Cloud Printer
+          </p>
+          <button onClick={onClose} className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center"><X size={13} /></button>
+        </div>
+        <p className="text-xs text-slate-500 truncate">{getDocName()}</p>
+        {sent ? (
+          <div className="text-center py-4 text-emerald-600">
+            <CheckCircle2 size={32} className="mx-auto mb-1" />
+            <p className="font-semibold text-sm">Sent to printer!</p>
+            <button onClick={onClose} className="mt-3 text-xs text-slate-400 hover:underline">Close</button>
+          </div>
+        ) : loading ? (
+          <div className="flex items-center justify-center py-4 text-slate-400"><Loader2 size={18} className="animate-spin mr-2" /> Loading...</div>
+        ) : terminals.length === 0 ? (
+          <p className="text-sm text-amber-600 text-center py-3">No printers registered for this branch.</p>
+        ) : (
+          <>
+            <div className="space-y-2 max-h-40 overflow-y-auto">
+              {terminals.map(t => (
+                <button key={t.terminal_id} onClick={() => setSelected(t.terminal_id)}
+                  className={`w-full flex items-center gap-3 p-2.5 rounded-xl border text-left transition-all ${selected === t.terminal_id ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200'}`}>
+                  <Printer size={14} className={t.is_online ? 'text-emerald-600' : 'text-slate-400'} />
+                  <span className="text-sm font-medium text-slate-800 flex-1 truncate">{t.user_name || t.branch_name || 'Terminal'}</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${t.is_online ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                    {t.is_online ? 'Online' : 'Offline'}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <button onClick={handleSend} disabled={sending || !selected}
+              className="w-full py-3 rounded-2xl bg-emerald-700 text-white font-semibold text-sm disabled:opacity-50 active:scale-95 transition-all flex items-center justify-center gap-2"
+              data-testid="terminal-cloud-print-send">
+              {sending ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
+              {sending ? 'Sending...' : 'Send to Print'}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Transform basic doc data (from /api/doc/view/:code) into PrintEngine-compatible format
 function basicDocToPrintData(basic) {
   if (!basic) return {};
@@ -140,6 +237,7 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
   const [printMode, setPrintMode] = useState('manual'); // 'auto' | 'manual'
   const [printQueue, setPrintQueue] = useState([]); // pending print jobs in manual mode
   const [printQueueOpen, setPrintQueueOpen] = useState(false);
+  const [quickScanCloudPrint, setQuickScanCloudPrint] = useState(false); // cloud print for scanned doc
 
   // Android back button / browser back navigation handler
   const backExitRef = useRef(false);
@@ -1228,6 +1326,13 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
                     <ExternalLink size={15} /> View & Reprint
                   </button>
                   <button
+                    onClick={() => setQuickScanCloudPrint(true)}
+                    className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border border-emerald-200 text-emerald-700 bg-emerald-50 font-semibold text-sm active:scale-95 transition-transform"
+                    data-testid="quickscan-cloud-print"
+                  >
+                    <Printer size={15} /> Send to Cloud Printer
+                  </button>
+                  <button
                     onClick={() => setQuickScanDoc(null)}
                     className="w-full py-2.5 text-sm text-slate-400 hover:text-slate-600 transition-colors"
                     data-testid="quickscan-close"
@@ -1255,8 +1360,18 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
         />
       )}
 
-      {/* Print Queue Overlay */}
-      {printQueueOpen && (
+      {/* QuickScan Cloud Print Overlay */}
+      {quickScanCloudPrint && quickScanDoc?.basic && (
+        <QuickScanCloudPrint
+          basic={quickScanDoc.basic}
+          branchId={session.branchId}
+          api={api}
+          businessInfo={businessInfo}
+          onClose={() => setQuickScanCloudPrint(false)}
+        />
+      )}
+
+      {/* Print Queue Overlay */}      {printQueueOpen && (
         <div className="fixed inset-0 z-50 flex flex-col justify-end" data-testid="print-queue-overlay">
           <div className="absolute inset-0 bg-black/40" onClick={() => setPrintQueueOpen(false)} />
           <div className="relative bg-white rounded-t-3xl overflow-hidden max-h-[70vh]" style={{ boxShadow: '0 -4px 24px rgba(0,0,0,0.13)' }}>

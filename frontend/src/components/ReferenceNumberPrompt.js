@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Button } from '../components/ui/button';
-import { Copy, Check, FileText, Printer, X } from 'lucide-react';
+import { Copy, Check, FileText, Printer, X, Send } from 'lucide-react';
 import PrintEngine from '../lib/PrintEngine';
 import { api } from '../contexts/AuthContext';
+import SendToPrintModal from './SendToPrintModal';
 
 /**
  * Modal after transaction creation — shows reference number + print option.
@@ -15,6 +16,7 @@ import { api } from '../contexts/AuthContext';
 export default function ReferenceNumberPrompt({ open, onClose, referenceNumber, type = "sale", title, invoiceData, businessInfo }) {
   const [copied, setCopied] = useState(false);
   const [printing, setPrinting] = useState(false);
+  const [sendToPrintOpen, setSendToPrintOpen] = useState(false);
 
   const typeLabel = {
     sale: 'Transaction',
@@ -74,7 +76,16 @@ export default function ReferenceNumberPrompt({ open, onClose, referenceNumber, 
     setPrinting(false);
   };
 
+  const getRemoteHtml = () => {
+    if (!invoiceData) return '';
+    const printType = type === 'po' ? 'purchase_order' : (PrintEngine.getDocType(invoiceData) || 'order_slip');
+    return PrintEngine.generateHtml({ type: printType, data: invoiceData, format: 'full_page', businessInfo: businessInfo || {}, docCode: '' });
+  };
+
+  const getRemoteDocType = () => type === 'po' ? 'purchase_order' : 'sales_receipt';
+
   return (
+    <>
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-md" data-testid="reference-number-prompt">
         <DialogHeader>
@@ -118,6 +129,14 @@ export default function ReferenceNumberPrompt({ open, onClose, referenceNumber, 
                   <Printer size={16} className="mr-2" /> Thermal (58mm)
                 </Button>
               </div>
+              <Button
+                data-testid="remote-print-btn"
+                variant="outline"
+                className="w-full h-10 text-emerald-700 border-emerald-200 hover:bg-emerald-50"
+                onClick={() => setSendToPrintOpen(true)}
+              >
+                <Send size={15} className="mr-2" /> Send to Branch Printer
+              </Button>
               {invoiceData.release_mode === 'partial' && invoiceData.doc_code && (
                 <Button
                   data-testid="view-release-history-btn"
@@ -159,5 +178,20 @@ export default function ReferenceNumberPrompt({ open, onClose, referenceNumber, 
         </div>
       </DialogContent>
     </Dialog>
+
+    {invoiceData && (
+      <SendToPrintModal
+        open={sendToPrintOpen}
+        onOpenChange={setSendToPrintOpen}
+        documentType={getRemoteDocType()}
+        documentName={`${getRemoteDocType() === 'purchase_order' ? 'Purchase Order' : 'Sales Receipt'} #${referenceNumber}`}
+        documentId={invoiceData.id || ''}
+        referenceNumber={referenceNumber}
+        branchId={invoiceData.branch_id || ''}
+        htmlContent={getRemoteHtml()}
+        metadata={{ invoice_id: invoiceData.id, customer_name: invoiceData.customer_name }}
+      />
+    )}
+    </>
   );
 }

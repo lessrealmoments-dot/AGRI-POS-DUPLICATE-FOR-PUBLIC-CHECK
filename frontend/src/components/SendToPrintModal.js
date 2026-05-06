@@ -22,7 +22,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Printer, Wifi, WifiOff, AlertTriangle, Clock, CheckCircle2, RefreshCw, Building2, Loader2 } from 'lucide-react';
-import { api } from '../contexts/AuthContext';
+import { api as defaultApi } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 
 const DOC_TYPE_LABELS = {
@@ -45,7 +45,9 @@ export default function SendToPrintModal({
   branchId     = '',
   htmlContent  = '',
   metadata     = {},
+  axiosInstance,   // optional — used by terminal (outside AuthContext)
 }) {
+  const api = axiosInstance || defaultApi;
   const [terminals, setTerminals]   = useState([]);
   const [selected, setSelected]     = useState(null);
   const [loading, setLoading]       = useState(false);

@@ -1,6 +1,16 @@
 # AgriBooks PRD
 
-## Iter 245 — Remote Branch Printing Terminal (Feb 2026) ✅
+## Iter 245b — Remote Print on PO, Sales Final Phase & Terminal (Feb 2026) ✅
+
+- Added "Send to Branch Printer" button to `ReferenceNumberPrompt` (sales completion modal — alongside Full Page + 58mm)
+- Added "Remote Print" button to `PurchaseOrderPage` action toolbar (alongside Print Full + Print 58mm)
+- Added "Send to Cloud Printer" button to `TerminalShell` QuickScan sheet (alongside View & Reprint)
+- `SendToPrintModal` now accepts optional `axiosInstance` prop (used by terminal outside AuthContext)
+- `QuickScanCloudPrint` inline component in TerminalShell uses terminal's own `api` axios instance
+
+---
+
+
 
 ### What was built
 A complete Remote Branch Printing Terminal system so users can send print jobs from anywhere to branch computers.

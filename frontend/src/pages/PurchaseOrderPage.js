@@ -21,12 +21,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import SmartProductSearch from '../components/SmartProductSearch';
 import ReceiptUploadInline from '../components/ReceiptUploadInline';
 import ReferenceNumberPrompt from '../components/ReferenceNumberPrompt';
+import SendToPrintModal from '../components/SendToPrintModal';
 import {
   FileText, Plus, Trash2, Save, Truck, Check, X, DollarSign,
   Search, History, ArrowRight, Receipt, UserPlus, Package,
   Wallet, Banknote, CreditCard, AlertTriangle, ChevronDown, RefreshCw,
   ShieldCheck, Clock, Pencil, Upload, ImageIcon, TrendingDown, TrendingUp, Printer,
-  Smartphone, Lock, PauseCircle, Inbox, RotateCcw, Wifi, WifiOff
+  Smartphone, Lock, PauseCircle, Inbox, RotateCcw, Wifi, WifiOff, Send
 } from 'lucide-react';
 import {
   buildParkPOPayload, parkPO, loadParkedPOs,
@@ -211,6 +212,14 @@ export default function PurchaseOrderPage() {
   // ── Business info for printing ─────────────────────────────────────────
   const [bizInfo, setBizInfo] = useState({});
   useEffect(() => { api.get('/settings/business-info').then(r => setBizInfo(r.data)).catch(() => {}); }, []);
+
+  // ── Send to Cloud Print ────────────────────────────────────────────────
+  const [sendToPrintOpen, setSendToPrintOpen] = useState(false);
+
+  const getPORemoteHtml = (po) => {
+    if (!po) return '';
+    return PrintEngine.generateHtml({ type: 'purchase_order', data: po, format: 'full_page', businessInfo: bizInfo, docCode: po.doc_code || '' });
+  };
 
   const handlePrintPO = async (po, format = 'full_page') => {
     let docCode = po.doc_code || '';
@@ -1606,6 +1615,10 @@ export default function PurchaseOrderPage() {
                 onClick={() => handlePrintPO(detailPO, 'thermal')} data-testid="po-print-thermal-btn">
                 <Printer size={12} className="mr-1" /> Print 58mm
               </Button>
+              <Button size="sm" variant="outline" className="h-7 text-xs text-emerald-700 border-emerald-200 hover:bg-emerald-50"
+                onClick={() => setSendToPrintOpen(true)} data-testid="po-remote-print-btn">
+                <Send size={12} className="mr-1" /> Remote Print
+              </Button>
               <Button size="sm" variant="outline" className="h-7 text-xs"
                 onClick={() => { setViewQROpen(true); setViewQRFileCount(0); }} data-testid="po-view-phone-btn">
                 <Package size={12} className="mr-1" /> View on Phone
@@ -2444,6 +2457,21 @@ export default function PurchaseOrderPage() {
         </div>
       </DialogContent>
     </Dialog>
+
+    {/* Send to Cloud Print */}
+    {detailPO && (
+      <SendToPrintModal
+        open={sendToPrintOpen}
+        onOpenChange={setSendToPrintOpen}
+        documentType="purchase_order"
+        documentName={`Purchase Order #${detailPO.po_number || ''}`}
+        documentId={detailPO.id || ''}
+        referenceNumber={detailPO.po_number || ''}
+        branchId={detailPO.branch_id || ''}
+        htmlContent={getPORemoteHtml(detailPO)}
+        metadata={{ po_id: detailPO.id, vendor: detailPO.vendor }}
+      />
+    )}
   </div>
   );
 }
