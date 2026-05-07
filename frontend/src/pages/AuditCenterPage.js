@@ -27,6 +27,7 @@ import ReceiptGallery from '../components/ReceiptGallery';
 import SignatureVerifyToolbar from '../components/SignatureVerifyToolbar';
 import ReserveTab from '../components/audit/ReserveTab';
 import DateMovesTab from '../components/audit/DateMovesTab';
+import OfflineReconciliationTab from '../components/audit/OfflineReconciliationTab';
 
 import { Wallet } from 'lucide-react';
 import CalcInput from '../components/CalcInput';
@@ -1170,6 +1171,10 @@ export default function AuditCenterPage() {
                 {securityFlags.filter(e => !e.acknowledged).length}
               </span>
             )}
+          </TabsTrigger>
+          <TabsTrigger value="offline-reconcile" data-testid="offline-reconcile-tab">
+            <CircleAlert size={14} className="mr-1.5" />
+            Offline Reconcile
           </TabsTrigger>
         </TabsList>
 
@@ -2358,6 +2363,11 @@ export default function AuditCenterPage() {
         {/* ── DATE MOVES TAB (Iter 231) ───────────────────────────────── */}
         <TabsContent value="date-moves" className="mt-4">
           <DateMovesTab />
+        </TabsContent>
+
+        {/* ── OFFLINE RECONCILE TAB (Iter 252) ─────────────────────────── */}
+        <TabsContent value="offline-reconcile" className="mt-4">
+          <OfflineReconciliationTab branchId={auditBranchId} />
         </TabsContent>
 
         {/* Security Flags Tab */}

@@ -1829,6 +1829,34 @@ export default function DocViewerPage() {
           />
         )}
 
+        {/* Iter 252 — Linked Offline Draft Finalization banner */}
+        {(basic.linked_offline_receipt_number || basic.finalized_from_draft_offline) && (
+          <div className="mt-4 rounded-xl border-2 border-emerald-300 bg-emerald-50 p-4" data-testid="linked-receipt-banner">
+            <p className="text-xs font-bold uppercase tracking-wider text-emerald-700 mb-2">Linked Offline Receipt</p>
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <p className="text-[10px] uppercase text-slate-500 font-semibold">Official Invoice</p>
+                <p className="font-mono font-bold text-slate-800">{basic.original_draft_invoice_number || basic.number}</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase text-slate-500 font-semibold">Offline Receipt (printed copy)</p>
+                <p className="font-mono font-bold text-emerald-700">{basic.linked_offline_receipt_number || '—'}</p>
+              </div>
+            </div>
+            <p className="text-[11px] text-emerald-700 mt-2 italic">
+              This invoice was finalized while offline and synced afterward. Both numbers resolve to this same record.
+            </p>
+            {(basic.offline_items_diverged || basic.payment_diverged) && (
+              <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-[11px] text-amber-800" data-testid="divergence-warning">
+                <p className="font-bold mb-1">⚠ Divergence flagged for manager review</p>
+                {basic.offline_items_diverged && <p>· Items differ from the original draft.</p>}
+                {basic.payment_diverged && <p>· Payment total differs from the original draft.</p>}
+                <p className="text-[10px] mt-1 text-amber-700">Offline copy was treated as source of truth (customer holds that receipt). Cross-check via Audit Center → Offline Reconciliation.</p>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Stock Release Manager (PIN-gated: history + form) — Terminal only */}
         {basic.release_mode === 'partial' && (!isForeignBranch || crossBranchUnlocked) && (
           isTerminal ? (

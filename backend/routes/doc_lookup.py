@@ -385,6 +385,13 @@ async def view_document_open(code: str):
             "reservations": reservations,
             "available_actions": available_actions,
             "qr_edit_disabled": doc.get("qr_edit_disabled", False),
+            # Linked Offline Draft Finalization (Feb 2026) — both numbers
+            # resolve to the same canonical record after sync.
+            "linked_offline_receipt_number": doc.get("linked_offline_receipt_number", ""),
+            "finalized_from_draft_offline": doc.get("finalized_from_draft_offline", False),
+            "original_draft_invoice_number": doc.get("original_draft_invoice_number", ""),
+            "offline_items_diverged": doc.get("offline_items_diverged", False),
+            "payment_diverged": doc.get("payment_diverged", False),
         }
 
     elif doc_type == "purchase_order":

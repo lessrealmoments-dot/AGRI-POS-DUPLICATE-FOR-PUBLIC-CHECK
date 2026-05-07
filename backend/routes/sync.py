@@ -9,6 +9,476 @@ from utils import get_current_user, now_iso, new_id, log_movement, log_sale_item
 router = APIRouter(tags=["Sync"])
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Linked Offline Draft Finalization (Feb 2026)
+# ─────────────────────────────────────────────────────────────────────────────
+# Sync helper: finalize an existing for_preparation draft from an offline
+# envelope. Preserves the canonical invoice_number; stamps the OFF number as
+# linked_offline_receipt_number for bidirectional lookup. Idempotent.
+# Conflicts (already paid / cancelled / not found) push to
+# `offline_reconciliation_queue` for manager review.
+# ─────────────────────────────────────────────────────────────────────────────
+async def _finalize_draft_offline(sale: dict, user: dict, envelope_id: str) -> dict:
+    draft_id = (sale.get("draft_invoice_id") or "").strip()
+    off_num = sale.get("invoice_number") or sale.get("offline_receipt_number") or ""
+    branch_id = sale.get("branch_id", "")
+
+    # Idempotency canary — if this OFF number was already linked, no-op.
+    already = await db.invoices.find_one(
+        {"linked_offline_receipt_number": off_num, "id": draft_id} if draft_id and off_num
+        else {"linked_offline_receipt_number": off_num} if off_num else {"_id": "__none__"},
+        {"_id": 0, "id": 1, "invoice_number": 1, "status": 1},
+    )
+    if already:
+        return {
+            "id": draft_id or already.get("id"),
+            "envelope_id": envelope_id,
+            "status": "duplicate",
+            "official_invoice": already.get("invoice_number"),
+            "kind": "draft_finalization_offline",
+        }
+
+    # Locate the draft.
+    draft = None
+    if draft_id:
+        draft = await db.invoices.find_one({"id": draft_id}, {"_id": 0})
+    if not draft:
+        # Try by draft invoice_number as fallback
+        dnum = sale.get("draft_invoice_number") or ""
+        if dnum:
+            draft = await db.invoices.find_one(
+                {"invoice_number": dnum, "branch_id": branch_id}, {"_id": 0}
+            )
+    if not draft:
+        await _push_reconciliation(sale, "draft_not_found", envelope_id, user)
+        return {
+            "id": draft_id, "envelope_id": envelope_id,
+            "status": "conflict", "reason": "draft_not_found",
+            "off_receipt": off_num, "kind": "draft_finalization_offline",
+        }
+
+    canonical_id = draft["id"]
+    canonical_num = draft["invoice_number"]
+    cur_status = draft.get("status", "")
+
+    if cur_status != "for_preparation":
+        await _push_reconciliation(sale, f"draft_already_{cur_status}", envelope_id, user,
+                                   canonical_invoice_number=canonical_num)
+        return {
+            "id": canonical_id, "envelope_id": envelope_id,
+            "status": "conflict", "reason": f"draft_already_{cur_status}",
+            "official_invoice": canonical_num, "off_receipt": off_num,
+            "kind": "draft_finalization_offline",
+        }
+
+    # ── Build finalize payload from the offline envelope ──────────────────
+    items = sale.get("items", []) or draft.get("items", [])
+    subtotal = float(sale.get("subtotal") or sum(float(i.get("total", 0)) for i in items))
+    grand_total = float(sale.get("grand_total") or
+                        subtotal + float(sale.get("freight", 0))
+                        - float(sale.get("overall_discount", 0)))
+    amount_paid = float(sale.get("amount_paid", grand_total))
+    balance = float(sale.get("balance", max(0.0, grand_total - amount_paid)))
+    payment_type = sale.get("payment_type", "cash")
+    payments = sale.get("payments") or []
+    sale_date = sale.get("date") or draft.get("order_date") \
+        or await today_local(user.get("organization_id") or "")
+
+    # ── Items / payment divergence flags (offline copy wins) ──────────────
+    draft_items_sig = _items_signature(draft.get("items", []))
+    offline_items_sig = _items_signature(items)
+    items_diverged = draft_items_sig != offline_items_sig
+
+    draft_total = float(draft.get("grand_total", 0))
+    payment_diverged = abs(grand_total - draft_total) > 0.01 if draft_total else False
+
+    # ── Apply inventory deduction ONCE (mirrors the offline-sync code path
+    # used for brand-new sales). Stock warnings are appended to the invoice
+    # record so managers can review negative-stock situations afterwards.
+    stock_warnings = []
+    for item in items:
+        qty = float(item.get("quantity", 0))
+        rate = float(item.get("rate", item.get("price", 0)))
+        product = await db.products.find_one({"id": item.get("product_id")}, {"_id": 0})
+        if not product:
+            continue
+        if product.get("is_repack") and product.get("parent_id"):
+            units_per_parent = product.get("units_per_parent", 1)
+            parent_deduction = qty / units_per_parent
+            parent_inv = await db.inventory.find_one(
+                {"product_id": product["parent_id"], "branch_id": branch_id}, {"_id": 0}
+            )
+            current_stock = float(parent_inv["quantity"]) if parent_inv else 0.0
+            if current_stock < parent_deduction:
+                stock_warnings.append(
+                    f"{product['name']}: need {parent_deduction:.4f} boxes, "
+                    f"have {current_stock:.4f} — inventory will go negative"
+                )
+            await db.inventory.update_one(
+                {"product_id": product["parent_id"], "branch_id": branch_id},
+                {"$inc": {"quantity": -parent_deduction},
+                 "$set": {"updated_at": now_iso()}},
+                upsert=True,
+            )
+            await log_movement(
+                product["parent_id"], branch_id, "sale", -parent_deduction,
+                canonical_id, canonical_num, rate * units_per_parent,
+                user["id"], user.get("full_name", user.get("username", "")),
+                f"Offline draft finalization (synced): {product['name']} x {qty}",
+            )
+        else:
+            inv = await db.inventory.find_one(
+                {"product_id": item.get("product_id"), "branch_id": branch_id}, {"_id": 0}
+            )
+            current_stock = float(inv["quantity"]) if inv else 0.0
+            if current_stock < qty:
+                stock_warnings.append(
+                    f"{product['name']}: need {qty}, have {current_stock:.2f} — inventory will go negative"
+                )
+            await db.inventory.update_one(
+                {"product_id": item.get("product_id"), "branch_id": branch_id},
+                {"$inc": {"quantity": -qty}, "$set": {"updated_at": now_iso()}},
+                upsert=True,
+            )
+            await log_movement(
+                item.get("product_id"), branch_id, "sale", -qty,
+                canonical_id, canonical_num, rate,
+                user["id"], user.get("full_name", user.get("username", "")),
+                "Offline draft finalization (synced)",
+            )
+
+    # ── Flip the draft from for_preparation to paid/credit/partial ────────
+    update_fields = {
+        "items": items,
+        "subtotal": round(subtotal, 2),
+        "freight": float(sale.get("freight", 0)),
+        "overall_discount": float(sale.get("overall_discount", 0)),
+        "grand_total": round(grand_total, 2),
+        "amount_paid": round(amount_paid, 2),
+        "balance": round(balance, 2),
+        "payment_type": payment_type,
+        "payments": payments,
+        "status": _final_status_from_payment_type(payment_type, balance),
+        "envelope_id": envelope_id,
+        "linked_offline_receipt_number": off_num,
+        "finalized_from_draft_offline": True,
+        "offline_completion_synced_at": now_iso(),
+        "original_draft_invoice_number": canonical_num,
+        "synced_from_offline": True,
+        "stock_warnings": stock_warnings,
+        "offline_items_diverged": items_diverged,
+        "payment_diverged": payment_diverged,
+        "finalized_by_id": user["id"],
+        "finalized_by_name": user.get("full_name", user.get("username", "")),
+        "order_date": sale_date,
+        "updated_at": now_iso(),
+    }
+    await db.invoices.update_one(
+        {"id": canonical_id, "status": "for_preparation"},  # guard race condition
+        {"$set": update_fields},
+    )
+    await log_sale_items(
+        branch_id, sale_date, items, canonical_num,
+        draft.get("customer_name", "Walk-in"),
+        payment_type,
+        user.get("full_name", user.get("username", "")),
+    )
+
+    return {
+        "id": canonical_id,
+        "envelope_id": envelope_id,
+        "status": "synced",
+        "official_invoice": canonical_num,
+        "off_receipt": off_num,
+        "items_diverged": items_diverged,
+        "payment_diverged": payment_diverged,
+        "stock_warnings": stock_warnings,
+        "kind": "draft_finalization_offline",
+    }
+
+
+def _items_signature(items: list) -> tuple:
+    """Order-independent fingerprint of (product_id, qty) pairs for comparison."""
+    return tuple(sorted(
+        (i.get("product_id", ""), round(float(i.get("quantity", 0)), 4))
+        for i in (items or [])
+    ))
+
+
+def _final_status_from_payment_type(payment_type: str, balance: float) -> str:
+    pt = (payment_type or "cash").lower()
+    if pt == "credit":
+        return "credit" if balance > 0.005 else "paid"
+    if pt == "partial":
+        return "partial" if balance > 0.005 else "paid"
+    return "paid"
+
+
+async def _push_reconciliation(sale: dict, reason: str, envelope_id: str,
+                               user: dict, canonical_invoice_number: str = "") -> None:
+    """Insert a row into offline_reconciliation_queue for manager review."""
+    try:
+        await db.offline_reconciliation_queue.insert_one({
+            "id": new_id(),
+            "envelope_id": envelope_id,
+            "reason": reason,
+            "off_receipt": sale.get("invoice_number")
+                or sale.get("offline_receipt_number") or "",
+            "draft_invoice_id": sale.get("draft_invoice_id") or "",
+            "draft_invoice_number": sale.get("draft_invoice_number") or "",
+            "canonical_invoice_number": canonical_invoice_number,
+            "branch_id": sale.get("branch_id", ""),
+            "customer_name": sale.get("customer_name", ""),
+            "customer_id": sale.get("customer_id", ""),
+            "amount": float(sale.get("grand_total", 0)),
+            "snapshot": sale,
+            "cashier_id": user.get("id", ""),
+            "cashier_name": user.get("full_name", user.get("username", "")),
+            "status": "open",
+            "created_at": now_iso(),
+        })
+    except Exception:
+        # Don't let queue write failure block sync response
+        pass
+
+
+@router.get("/sync/offline-reconciliation")
+async def list_offline_reconciliation(branch_id: str = "", status: str = "open",
+                                      limit: int = 100,
+                                      user=Depends(get_current_user)):
+    """
+    List entries in the offline_reconciliation_queue for the Audit Center tab.
+    Admins see all branches; non-admins are scoped to their branches.
+    """
+    q = {"status": status} if status else {}
+    if branch_id:
+        q["branch_id"] = branch_id
+    elif user.get("role") not in ("admin", "owner"):
+        # Scope to assigned branches
+        bids = user.get("branch_ids") or ([user.get("branch_id")] if user.get("branch_id") else [])
+        if bids:
+            q["branch_id"] = {"$in": bids}
+    rows = await db.offline_reconciliation_queue.find(
+        q, {"_id": 0}
+    ).sort("created_at", -1).to_list(min(max(limit, 1), 500))
+    return {"items": rows, "count": len(rows)}
+
+
+@router.post("/sync/offline-reconciliation/{rec_id}/resolve")
+async def resolve_offline_reconciliation(rec_id: str, body: dict,
+                                         user=Depends(get_current_user)):
+    """Mark a reconciliation row as resolved with a manager note."""
+    if user.get("role") not in ("admin", "owner", "manager"):
+        raise HTTPException(403, "Manager or admin role required")
+    note = (body.get("note") or "").strip()
+    action = (body.get("action") or "manual").strip()
+    upd = await db.offline_reconciliation_queue.update_one(
+        {"id": rec_id, "status": "open"},
+        {"$set": {
+            "status": "resolved",
+            "resolved_action": action,
+            "resolved_note": note,
+            "resolved_by_id": user.get("id", ""),
+            "resolved_by_name": user.get("full_name", user.get("username", "")),
+            "resolved_at": now_iso(),
+        }},
+    )
+    if upd.matched_count == 0:
+        raise HTTPException(404, "Reconciliation entry not found or already resolved")
+    return {"ok": True}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Recovery endpoint — orphan offline-completion reconciliation
+# ─────────────────────────────────────────────────────────────────────────────
+# For pre-fix duplicates: an OFF receipt was created as an independent sale
+# while the original draft remained `for_preparation`. This endpoint cleanly
+# voids the OFF, reverses its inventory + payment + sales-log effects, and
+# leaves the draft ready to be re-finalized through the normal flow.
+#
+# Safety:
+#   • Defaults to dry-run (returns the planned actions, mutates nothing).
+#   • Caller MUST pass `confirm: true` AND a valid Owner PIN to execute.
+#   • Idempotent: a second confirmed call after success returns "already_done".
+# ─────────────────────────────────────────────────────────────────────────────
+@router.post("/admin/reconcile-orphan-offline-draft")
+async def reconcile_orphan_offline_draft(body: dict, user=Depends(get_current_user)):
+    if user.get("role") not in ("admin", "owner"):
+        raise HTTPException(403, "Admin or owner role required")
+
+    off_num = (body.get("off_invoice_number") or "").strip()
+    draft_num = (body.get("draft_invoice_number") or "").strip()
+    admin_pin = (body.get("admin_pin") or "").strip()
+    confirm = bool(body.get("confirm"))
+
+    if not off_num or not draft_num:
+        raise HTTPException(400, "off_invoice_number and draft_invoice_number are required")
+
+    # Locate both invoices
+    off_inv = await db.invoices.find_one({"invoice_number": off_num}, {"_id": 0})
+    draft_inv = await db.invoices.find_one({"invoice_number": draft_num}, {"_id": 0})
+    if not off_inv:
+        raise HTTPException(404, f"OFF invoice '{off_num}' not found")
+    if not draft_inv:
+        raise HTTPException(404, f"Draft invoice '{draft_num}' not found")
+
+    # Sanity checks
+    issues = []
+    if off_inv.get("status") == "voided":
+        issues.append(f"OFF invoice {off_num} is already voided")
+    if draft_inv.get("status") != "for_preparation":
+        issues.append(
+            f"Draft invoice {draft_num} is not in 'for_preparation' state "
+            f"(current: {draft_inv.get('status')})"
+        )
+    if off_inv.get("branch_id") != draft_inv.get("branch_id"):
+        issues.append("OFF and draft invoices belong to different branches")
+
+    # Plan inventory reversals
+    inventory_plan = []
+    for item in (off_inv.get("items") or []):
+        product_id = item.get("product_id")
+        qty = float(item.get("quantity", 0))
+        if not product_id or qty <= 0:
+            continue
+        product = await db.products.find_one({"id": product_id}, {"_id": 0})
+        if not product:
+            continue
+        if product.get("is_repack") and product.get("parent_id"):
+            units_per_parent = product.get("units_per_parent", 1)
+            inventory_plan.append({
+                "product_id": product["parent_id"],
+                "product_name": product.get("name", ""),
+                "delta": qty / units_per_parent,
+                "via": "parent_repack",
+            })
+        else:
+            inventory_plan.append({
+                "product_id": product_id,
+                "product_name": product.get("name", ""),
+                "delta": qty,
+                "via": "direct",
+            })
+
+    payment_plan = {
+        "amount_paid": float(off_inv.get("amount_paid", 0)),
+        "balance": float(off_inv.get("balance", 0)),
+        "payments": off_inv.get("payments") or [],
+        "customer_id": off_inv.get("customer_id"),
+    }
+
+    plan = {
+        "off_invoice": {
+            "id": off_inv["id"], "invoice_number": off_num,
+            "status": off_inv.get("status"), "amount": off_inv.get("grand_total"),
+            "items_count": len(off_inv.get("items") or []),
+        },
+        "draft_invoice": {
+            "id": draft_inv["id"], "invoice_number": draft_num,
+            "status": draft_inv.get("status"), "amount": draft_inv.get("grand_total"),
+        },
+        "actions": [
+            f"Reverse inventory ({len(inventory_plan)} line items)",
+            "Reverse customer balance impact (if any)",
+            f"Void OFF invoice {off_num} with audit reason",
+            f"Stamp draft {draft_num} with recovery note",
+            "Leave draft as 'for_preparation' for clean re-finalization",
+        ],
+        "inventory_plan": inventory_plan,
+        "payment_plan": payment_plan,
+        "issues": issues,
+        "dry_run": not confirm,
+    }
+
+    # Idempotency: if OFF is already voided AND tagged with a recovery flag,
+    # treat as already-done.
+    if off_inv.get("status") == "voided" and off_inv.get("reconciled_into_draft"):
+        return {**plan, "result": "already_done"}
+
+    if not confirm:
+        # Dry-run: return plan without mutating anything.
+        return {**plan, "result": "dry_run", "next_step": "Resubmit with confirm=true and admin_pin"}
+
+    # ── Confirmation path ────────────────────────────────────────────────────
+    # Verify admin PIN
+    if not admin_pin:
+        raise HTTPException(400, "admin_pin required for confirmed execution")
+    pin_doc = await db.system_settings.find_one({"key": "admin_pin"}, {"_id": 0})
+    from utils import verify_password
+    if not (pin_doc and pin_doc.get("pin_hash")
+            and verify_password(admin_pin, pin_doc["pin_hash"])):
+        raise HTTPException(401, "Invalid admin PIN")
+    if issues:
+        raise HTTPException(409, {"issues": issues, "plan": plan})
+
+    branch_id = off_inv.get("branch_id", "")
+
+    # 1) Reverse inventory (add back what OFF deducted)
+    for plan_row in inventory_plan:
+        await db.inventory.update_one(
+            {"product_id": plan_row["product_id"], "branch_id": branch_id},
+            {"$inc": {"quantity": plan_row["delta"]},
+             "$set": {"updated_at": now_iso()}},
+            upsert=True,
+        )
+        await log_movement(
+            plan_row["product_id"], branch_id, "void_reversal", plan_row["delta"],
+            off_inv["id"], off_num, 0,
+            user["id"], user.get("full_name", user.get("username", "")),
+            f"Reconciled into draft {draft_num} via post-bug recovery",
+        )
+
+    # 2) Reverse customer balance for credit/partial payments on OFF
+    cust_id = off_inv.get("customer_id")
+    bal_owed = float(off_inv.get("balance", 0))
+    if cust_id and bal_owed > 0:
+        await db.customers.update_one(
+            {"id": cust_id},
+            {"$inc": {"current_balance": -bal_owed},
+             "$set": {"updated_at": now_iso()}},
+        )
+
+    # 3) Void OFF invoice with full audit trail
+    await db.invoices.update_one(
+        {"id": off_inv["id"]},
+        {"$set": {
+            "status": "voided",
+            "void_reason": f"Reconciled into draft {draft_num} via post-bug recovery",
+            "voided_by_id": user["id"],
+            "voided_by_name": user.get("full_name", user.get("username", "")),
+            "voided_at": now_iso(),
+            "reconciled_into_draft": draft_num,
+            "reconciled_into_draft_id": draft_inv["id"],
+        }},
+    )
+    # Mark daily_sales_log entries as voided (best-effort; the close wizard
+    # already excludes status=voided invoices from cash totals).
+    try:
+        await db.daily_sales_log.update_many(
+            {"invoice_id": off_inv["id"]},
+            {"$set": {"voided": True, "voided_at": now_iso(),
+                      "void_reason": f"Reconciled into draft {draft_num}"}},
+        )
+    except Exception:
+        pass
+
+    # 4) Stamp draft with recovery note
+    await db.invoices.update_one(
+        {"id": draft_inv["id"]},
+        {"$set": {
+            "recovery_note": (
+                f"Manually reconciled with voided OFF receipt {off_num} on "
+                f"{now_iso()} by {user.get('full_name', user.get('username', ''))}. "
+                f"Re-finalize via normal flow."
+            ),
+            "updated_at": now_iso(),
+        }},
+    )
+
+    return {**plan, "result": "executed", "off_voided": off_num,
+            "draft_ready": draft_num}
+
+
 @router.get("/sync/estimate")
 async def get_sync_estimate(user=Depends(get_current_user), branch_id: str = None):
     """
@@ -404,6 +874,27 @@ async def sync_offline_sales(data: dict, user=Depends(get_current_user)):
             )
             if existing:
                 synced.append({"id": sale_id, "envelope_id": envelope_id, "status": "duplicate"})
+                continue
+
+            # ── Linked Offline Draft Finalization (Feb 2026) ──────────────────
+            # If the offline envelope carries a draft_invoice_id, this is NOT a
+            # brand-new sale — it's a finalization of an existing for_preparation
+            # draft that was reserved online. Route to a dedicated handler that
+            # locates the draft, applies payment & inventory ONCE, and stamps
+            # `linked_offline_receipt_number` so both the OFF number and the
+            # canonical draft number resolve to the same record.
+            draft_invoice_id = (sale.get("draft_invoice_id") or "").strip()
+            if draft_invoice_id or sale.get("kind") == "draft_finalization_offline":
+                try:
+                    res = await _finalize_draft_offline(sale, user, envelope_id)
+                    synced.append(res)
+                except HTTPException:
+                    raise
+                except Exception as _dexc:
+                    errors.append({
+                        "id": sale_id, "envelope_id": envelope_id,
+                        "error": f"Draft finalization sync failed: {_dexc}",
+                    })
                 continue
 
             items = sale.get("items", [])

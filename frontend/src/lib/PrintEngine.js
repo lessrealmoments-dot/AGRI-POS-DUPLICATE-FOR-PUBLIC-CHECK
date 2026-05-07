@@ -341,6 +341,16 @@ function buildItemsThermal(items) {
 function orderSlipFullPage(data, biz, docCode) {
   const inv = data;
   const isDraft = inv.status === 'for_preparation';
+  // Iter 252 — Linked Offline Draft Finalization.
+  // When this is being printed for an offline draft completion (before sync)
+  // OR a synced one (after sync), show both the OFF receipt number AND the
+  // canonical draft invoice number on the printed copy so the customer's
+  // paper can always be tied back to the official record.
+  const offlineDraftPending = inv.kind === 'draft_finalization_offline' && !inv.synced_from_offline;
+  const offlineDraftSynced = inv.linked_offline_receipt_number && inv.finalized_from_draft_offline;
+  const linkedOff = inv.linked_offline_receipt_number || (offlineDraftPending ? (inv.offline_receipt_number || inv.invoice_number) : '');
+  const linkedDraftNum = inv.original_draft_invoice_number || inv.draft_invoice_number || (offlineDraftPending ? inv.draft_invoice_number : '');
+
   let html = buildPageHeader(biz, 'Order Slip', inv.invoice_number || '', inv.created_at || inv.order_date, [
     inv.cashier_name ? `Cashier: ${inv.cashier_name}` : '',
     inv.release_mode === 'full' ? 'Status: FULLY RELEASED' : inv.release_mode === 'partial' ? 'Status: PARTIAL RELEASE' : '',
@@ -351,6 +361,24 @@ function orderSlipFullPage(data, biz, docCode) {
     html += `<div style="background:#fef3c7;border:3px solid #f59e0b;border-radius:8px;padding:14px 18px;margin:0 0 18px;text-align:center">
       <div style="font-size:17px;font-weight:900;color:#92400e;letter-spacing:1.5px;margin-bottom:3px">FOR PREPARATION ONLY</div>
       <div style="font-size:11px;font-weight:700;color:#92400e;letter-spacing:0.5px">NOT YET PAID — NOT A FINAL RECEIPT</div>
+    </div>`;
+  }
+
+  // OFFLINE RECEIPT — pending sync (draft finalized while offline)
+  if (offlineDraftPending) {
+    html += `<div style="background:#fef9c3;border:3px solid #ca8a04;border-radius:8px;padding:14px 18px;margin:0 0 18px;text-align:center" data-testid="offline-pending-banner">
+      <div style="font-size:17px;font-weight:900;color:#854d0e;letter-spacing:1.5px;margin-bottom:3px">OFFLINE RECEIPT — PENDING SYNC</div>
+      <div style="font-size:12px;font-weight:700;color:#854d0e;margin-top:6px">Receipt No.: <span style="font-family:monospace">${linkedOff || ''}</span></div>
+      <div style="font-size:12px;font-weight:700;color:#854d0e">Linked Draft / Original Invoice: <span style="font-family:monospace">${linkedDraftNum || ''}</span></div>
+      <div style="font-size:10px;font-weight:600;color:#854d0e;margin-top:5px">This receipt will be linked to ${linkedDraftNum} once synced. The official invoice number remains ${linkedDraftNum}.</div>
+    </div>`;
+  }
+
+  // Synced offline draft completion banner
+  if (offlineDraftSynced) {
+    html += `<div style="background:#dcfce7;border:2px solid #16a34a;border-radius:8px;padding:10px 14px;margin:0 0 16px;text-align:center" data-testid="offline-synced-banner">
+      <div style="font-size:13px;font-weight:800;color:#166534">SYNCED — OFFICIAL RECEIPT</div>
+      <div style="font-size:11px;color:#166534;margin-top:3px">Invoice No.: <span style="font-family:monospace;font-weight:700">${inv.invoice_number}</span> · Linked Offline Receipt: <span style="font-family:monospace">${linkedOff}</span></div>
     </div>`;
   }
 

@@ -209,6 +209,30 @@ export async function getPendingSaleCount() {
   return countStore(STORES.PENDING_SALES);
 }
 
+/**
+ * Iter 252 — Linked Offline Draft Finalization.
+ * Returns a map of { draft_invoice_id → offline_receipt_number } for any
+ * pending offline draft finalizations. The Draft Orders panel uses this
+ * overlay to show a yellow "Offline Completion Pending" badge and disable
+ * finalize buttons until sync resolves.
+ */
+export async function getPendingDraftCompletions() {
+  const all = await getAll(STORES.PENDING_SALES);
+  const map = {};
+  for (const s of all || []) {
+    const dId = s?.draft_invoice_id;
+    if (!dId) continue;
+    if (s?.kind === 'draft_finalization_offline' || s?.draft_invoice_id) {
+      map[dId] = {
+        offline_receipt_number: s.invoice_number || s.offline_receipt_number || '',
+        draft_invoice_number: s.draft_invoice_number || '',
+        timestamp: s.timestamp || s.created_at || '',
+      };
+    }
+  }
+  return map;
+}
+
 export async function setMeta(key, value) {
   await putOne(STORES.META, { key, value, updated_at: new Date().toISOString() });
 }

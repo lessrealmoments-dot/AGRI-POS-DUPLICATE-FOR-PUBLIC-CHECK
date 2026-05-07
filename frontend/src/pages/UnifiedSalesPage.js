@@ -27,7 +27,7 @@ import {
   cacheProducts, getProducts, cacheCustomers, getCustomers,
   cachePriceSchemes, getPriceSchemes, addPendingSale, getPendingSaleCount,
   setOfflineAdminPinHash, setOfflinePinGrants,
-  getNextOfflineReceiptNumber,
+  getNextOfflineReceiptNumber, getPendingDraftCompletions,
 } from '../lib/offlineDB';
 import { syncPendingSales, startAutoSync, stopAutoSync, newEnvelopeId } from '../lib/syncManager';
 import {
@@ -625,6 +625,11 @@ export default function UnifiedSalesPage() {
   const [activeDraftId, setActiveDraftId] = useState(null);
   const [draftOrders, setDraftOrders] = useState([]);
   const [draftOrdersOpen, setDraftOrdersOpen] = useState(false);
+  // Iter 252: pending offline completions overlay — maps draft_invoice_id →
+  // offline_receipt_number for drafts that were finalized offline and are
+  // queued to sync. Lets the Draft Orders panel show a yellow pending badge
+  // and disable duplicate finalization until sync runs.
+  const [pendingDraftCompletions, setPendingDraftCompletions] = useState({});
   const [preparingOrder, setPreparingOrder] = useState(false);
 
   // ── PIN Session: cache a successful PIN for 3 min (per-sale scope) ────────
@@ -1386,7 +1391,20 @@ export default function UnifiedSalesPage() {
     }
   }, [currentBranch?.id, isOnline]);
 
+  // Iter 252: load IndexedDB overlay so drafts that were finalized offline
+  // show "Offline Completion Pending" until sync runs. Refresh whenever the
+  // panel opens or pending count changes (sync just removed an entry).
+  const refreshPendingDraftOverlay = useCallback(async () => {
+    try {
+      const map = await getPendingDraftCompletions();
+      setPendingDraftCompletions(map);
+    } catch (err) {
+      console.error('Failed to load pending draft completions', err);
+    }
+  }, []);
+
   useEffect(() => { refreshDraftOrders(); }, [refreshDraftOrders]);
+  useEffect(() => { refreshPendingDraftOverlay(); }, [refreshPendingDraftOverlay, pendingCount, draftOrdersOpen]);
 
   const handlePrepareOrder = async () => {
     const hasItems = mode === 'quick' ? cart.length > 0 : lines.some(l => l.product_id);
@@ -2576,7 +2594,20 @@ export default function UnifiedSalesPage() {
           setSaving(false);
           return;
         }
-        // Save offline if API fails for other reasons
+        // Save offline if API fails for other reasons.
+        // ── Linked Offline Draft Finalization (Feb 2026) ──────────────────
+        // If this is a draft finalization (activeDraftId set), preserve the
+        // canonical draft number on the offline envelope and tag it with
+        // kind="draft_finalization_offline" so /api/sales/sync routes it to
+        // the dedicated handler that updates the existing draft instead of
+        // creating a new invoice. The OFF number printed for the customer
+        // becomes a `linked_offline_receipt_number` after sync; both numbers
+        // resolve to the same official record.
+        const isDraftFinalization = !!saleData.draft_invoice_id;
+        if (isDraftFinalization) {
+          saleData.kind = 'draft_finalization_offline';
+          saleData.draft_invoice_number = (draftOrders.find(d => d.id === saleData.draft_invoice_id)?.invoice_number) || saleData.draft_invoice_number;
+        }
         // If we didn't have an offline receipt number (we started online),
         // mint one now so the saved record carries a proper identifier.
         if (!saleData.invoice_number) {
@@ -2587,24 +2618,52 @@ export default function UnifiedSalesPage() {
             );
           } catch {}
         }
+        if (isDraftFinalization) {
+          saleData.offline_receipt_number = saleData.invoice_number;
+        }
         await addPendingSale(saleData);
         const count = await getPendingSaleCount();
         setPendingCount(count);
-        toast.success(saleData.invoice_number
-          ? `${saleData.invoice_number} saved offline (will sync later)`
-          : 'Sale saved offline (will sync later)');
+        if (isDraftFinalization) {
+          toast.success(
+            `Draft ${saleData.draft_invoice_number} finalized offline as ${saleData.invoice_number}. ` +
+            `Will sync to the original invoice once online.`,
+            { duration: 6000 }
+          );
+        } else {
+          toast.success(saleData.invoice_number
+            ? `${saleData.invoice_number} saved offline (will sync later)`
+            : 'Sale saved offline (will sync later)');
+        }
         clearCart();
+        setActiveDraftId(null);
         setCheckoutDialog(false);
         setPendingCreditSale(null);
       }
     } else {
+      // ── Offline-from-start branch (no internet at checkout) ────────────
+      const isDraftFinalization = !!saleData.draft_invoice_id;
+      if (isDraftFinalization) {
+        saleData.kind = 'draft_finalization_offline';
+        saleData.draft_invoice_number = (draftOrders.find(d => d.id === saleData.draft_invoice_id)?.invoice_number) || saleData.draft_invoice_number;
+        saleData.offline_receipt_number = saleData.invoice_number;
+      }
       await addPendingSale(saleData);
       const count = await getPendingSaleCount();
       setPendingCount(count);
-      toast.success(saleData.invoice_number
-        ? `${saleData.invoice_number} saved offline!`
-        : 'Sale saved offline!');
+      if (isDraftFinalization) {
+        toast.success(
+          `Draft ${saleData.draft_invoice_number} finalized offline as ${saleData.invoice_number}. ` +
+          `Will sync to the original invoice once online.`,
+          { duration: 6000 }
+        );
+      } else {
+        toast.success(saleData.invoice_number
+          ? `${saleData.invoice_number} saved offline!`
+          : 'Sale saved offline!');
+      }
       clearCart();
+      setActiveDraftId(null);
       setCheckoutDialog(false);
       setPendingCreditSale(null);
     }
@@ -5312,16 +5371,25 @@ export default function UnifiedSalesPage() {
             </div>
           ) : (
             <div className="divide-y">
-              {draftOrders.map(draft => (
+              {draftOrders.map(draft => {
+                const pendingOff = pendingDraftCompletions[draft.id];
+                const isPendingOffline = !!pendingOff;
+                return (
                 <div key={draft.id} className="py-4 space-y-2.5" data-testid={`draft-order-row-${draft.id}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-mono font-bold text-sm text-slate-800">{draft.invoice_number}</span>
-                        <Badge className="bg-amber-100 text-amber-800 border-amber-300 text-[10px] px-1.5">
-                          FOR PREPARATION
-                        </Badge>
-                        {draft.id === activeDraftId && (
+                        {isPendingOffline ? (
+                          <Badge className="bg-yellow-100 text-yellow-800 border-yellow-300 text-[10px] px-1.5" data-testid={`draft-pending-offline-${draft.id}`}>
+                            Offline Completion Pending — {pendingOff.offline_receipt_number}
+                          </Badge>
+                        ) : (
+                          <Badge className="bg-amber-100 text-amber-800 border-amber-300 text-[10px] px-1.5">
+                            FOR PREPARATION
+                          </Badge>
+                        )}
+                        {draft.id === activeDraftId && !isPendingOffline && (
                           <Badge className="bg-blue-100 text-blue-700 border-blue-300 text-[10px] px-1.5">
                             Currently Editing
                           </Badge>
@@ -5333,6 +5401,11 @@ export default function UnifiedSalesPage() {
                       <div className="text-xs text-slate-400 mt-0.5">
                         {draft.items?.length || 0} item{draft.items?.length !== 1 ? 's' : ''} &middot; {fmtDate(draft.order_date)} &middot; {draft.cashier_name}
                       </div>
+                      {isPendingOffline && (
+                        <div className="text-[11px] text-yellow-700 mt-1.5 italic">
+                          This draft was finalized offline as <span className="font-mono font-semibold">{pendingOff.offline_receipt_number}</span> and will sync when online. Editing & finalizing are disabled to prevent duplicates.
+                        </div>
+                      )}
                     </div>
                     <div className="text-sm font-bold text-[#1A4D2E] whitespace-nowrap">{formatPHP(draft.grand_total)}</div>
                   </div>
@@ -5342,7 +5415,9 @@ export default function UnifiedSalesPage() {
                       size="sm" variant="outline"
                       className="text-slate-700"
                       onClick={() => loadDraftIntoCart(draft)}
+                      disabled={isPendingOffline}
                       data-testid={`draft-open-${draft.id}`}
+                      title={isPendingOffline ? 'Disabled — offline completion pending sync' : ''}
                     >
                       <ClipboardList size={13} className="mr-1" /> Open / Edit
                     </Button>
@@ -5350,7 +5425,9 @@ export default function UnifiedSalesPage() {
                       size="sm" variant="outline"
                       className="text-emerald-700 border-emerald-300 hover:bg-emerald-50"
                       onClick={() => { loadDraftIntoCart(draft); setTimeout(() => openCheckout(), 300); }}
+                      disabled={isPendingOffline}
                       data-testid={`draft-pay-${draft.id}`}
+                      title={isPendingOffline ? 'Disabled — offline completion pending sync' : ''}
                     >
                       <CreditCard size={13} className="mr-1" /> Pay Now
                     </Button>
@@ -5381,13 +5458,16 @@ export default function UnifiedSalesPage() {
                       size="sm" variant="outline"
                       className="text-red-500 border-red-200 hover:bg-red-50"
                       onClick={() => cancelDraftOrder(draft.id)}
+                      disabled={isPendingOffline}
                       data-testid={`draft-cancel-${draft.id}`}
+                      title={isPendingOffline ? 'Disabled — offline completion pending sync' : ''}
                     >
                       <X size={13} className="mr-1" /> Cancel
                     </Button>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
 

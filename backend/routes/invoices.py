@@ -150,25 +150,41 @@ async def get_invoice(inv_id: str, user=Depends(get_current_user)):
 
 @router.get("/invoices/by-number/{invoice_number}")
 async def get_invoice_by_number(invoice_number: str, user=Depends(get_current_user)):
-    """Get invoice by invoice number (searches all collections)."""
-    # Search in invoices
-    invoice = await db.invoices.find_one({"invoice_number": invoice_number}, {"_id": 0})
+    """Get invoice by invoice number (searches all collections).
+
+    Also resolves linked offline receipt numbers (SI-XX-OFF-NNNNNN) by
+    matching `linked_offline_receipt_number` — so scanning either the
+    canonical draft number OR the OFF receipt number returns the same
+    official record after sync.
+    """
+    # Primary: invoice_number OR linked_offline_receipt_number
+    invoice = await db.invoices.find_one(
+        {"$or": [
+            {"invoice_number": invoice_number},
+            {"linked_offline_receipt_number": invoice_number},
+        ]},
+        {"_id": 0},
+    )
     if invoice:
         invoice["_collection"] = "invoices"
+        # Surface the linked-receipt context for the UI banner / DocViewer
+        if invoice.get("linked_offline_receipt_number") == invoice_number \
+                and invoice.get("invoice_number") != invoice_number:
+            invoice["_resolved_via_linked_receipt"] = True
         return invoice
-    
+
     # Search in sales
     sale = await db.sales.find_one({"sale_number": invoice_number}, {"_id": 0})
     if sale:
         sale["_collection"] = "sales"
         return sale
-    
+
     # Search in purchase orders
     po = await db.purchase_orders.find_one({"po_number": invoice_number}, {"_id": 0})
     if po:
         po["_collection"] = "purchase_orders"
         return po
-    
+
     raise HTTPException(status_code=404, detail="Invoice not found")
 
 
