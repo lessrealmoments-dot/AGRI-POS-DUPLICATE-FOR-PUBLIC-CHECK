@@ -1,6 +1,31 @@
 # AgriBooks Changelog
 
 
+## Feb 2026 — Z-Report PDF Layout & Math Display Fixes (Iter 254)
+
+**Goal**: Fix 4 visual/math bugs in the closing Z-Report PDF that were making the cash drawer reconciliation hard to audit.
+
+**Bugs fixed**:
+1. **"Total Cash In" subtotal removed** — the value displayed (`cash_sales + cash_ar + split_cash`) did NOT match the running sum of the rows above it (Opening Float and Fund Transfers were rendered above the subtotal but excluded from its math). The Cash Drawer Reconciliation block is now a single top-to-bottom math ledger ending in one bolded subtotal: `= Expected in Drawer (Pre-Vault)`.
+2. **"Expected in Drawer (Pre-Vault)" labeled explicitly** — eliminates the impression that the value was post-vault while Over/Short used a different basis.
+3. **Fund Transfer column overlap** — rebalanced widths from `65/40/35/30` to `38/52/30/50`, switched to a hand-rolled column writer (instead of `detail_row`), and bumped truncation from 25→32 chars (Authorized By) and 20→32 chars (Note). Long names like "Sibugay Agrivet Supply / J. Domunales" no longer bleed into the Amount column.
+4. **Expense verification footer** — Normal layout now prints an `Itemized total (N rows)` line at the end of the Expenses section. If the rendered subtotal disagrees with `closing.total_expenses` (typical when an expense is late-encoded onto a closed day AFTER the snapshot was saved), a red warning flags the diff and direction so the auditor isn't left guessing.
+5. **End-of-Day Vault Allocation** — both Normal and Detailed layouts now break "To Vault / Safe" and "Float for Tomorrow" into a clearly labeled sub-block AFTER the Over/Short calc, removing visual ambiguity about pre-vault vs post-vault math.
+
+**Files**:
+- Backend MOD: `routes/zreport_pdf.py` (~80 lines changed across `render_normal` and `render_detailed`)
+- Backend NEW: `tests/test_zreport_pdf_layout_iter254.py` — 6 regression tests, all passing
+  - `test_detailed_no_misleading_total_cash_in_subtotal`
+  - `test_detailed_expected_minus_actual_equals_over_short`
+  - `test_normal_cash_reconciliation_labels_pre_vault`
+  - `test_fund_transfers_no_column_overlap`
+  - `test_normal_expense_verification_footer_matches_section_total`
+  - `test_normal_expense_mismatch_warning_when_stale_snapshot`
+
+**Result**: All 6 new tests pass, pre-existing 14 zreport tests (unicode + share + net sales) still pass.
+
+
+
 ## Feb 2026 — Z-Report SMS Share Links (Iter 253)
 
 **Goal**: One-tap mobile-friendly Z-Report viewing + Detailed PDF download from the closing SMS, no app login required (the system isn't phone-friendly per user feedback).

@@ -27,7 +27,7 @@ from _org_test_helpers import (
     TEST_ORG_ADMIN_PASSWORD,
 )
 
-API = os.environ.get("REACT_APP_BACKEND_URL", "https://draft-audit-pulse.preview.emergentagent.com").rstrip("/") + "/api"
+API = os.environ.get("REACT_APP_BACKEND_URL", "https://closing-math.preview.emergentagent.com").rstrip("/") + "/api"
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "test_database")
 

@@ -216,14 +216,23 @@ def render_normal(pdf: ZReportPDF, closing: dict):
 
     # 2. Cash Reconciliation
     pdf.section_header("CASH RECONCILIATION")
-    pdf.row("Expected in Counter", php(expected))
+    pdf.row("Expected in Counter (Pre-Vault)", php(expected))
     pdf.row("Actual Cash Counted", php(actual), bold=True)
     pdf.separator()
     os_label = "Cash Over" if over_short >= 0 else "Cash Short"
     os_color = (21, 128, 61) if over_short >= 0 else (220, 38, 38)
-    pdf.row(os_label, php_signed(over_short), bold=True, color=os_color)
-    pdf.row("Transferred to Vault", php(cash_to_safe))
-    pdf.row("Opening Float (Next Day)", php(cash_to_drawer), bold=True, color=(21, 128, 61))
+    pdf.row(f"{os_label} (Actual - Expected)", php_signed(over_short), bold=True, color=os_color)
+    pdf.ln(2)
+    # End-of-day vault allocation block — explicit label so cashiers
+    # understand these movements happen AFTER the over/short calc.
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(80, 80, 80)
+    pdf.set_x(12)
+    pdf.cell(0, 5, _s("End-of-Day Vault Allocation:"))
+    pdf.ln(5)
+    pdf.set_text_color(30, 30, 30)
+    pdf.row("  -> To Vault / Safe", php(cash_to_safe), indent=6)
+    pdf.row("  -> Float for Tomorrow", php(cash_to_drawer), indent=6, bold=True, color=(21, 128, 61))
     pdf.ln(2)
 
     # 3. Walk-in Sales by Category
@@ -301,16 +310,21 @@ def render_normal(pdf: ZReportPDF, closing: dict):
     total_expenses = float(closing.get("total_expenses", 0))
     if expenses or total_expenses:
         pdf.section_header("EXPENSES", php(total_expenses), accent=(254, 242, 242))
+        rendered_sum = 0.0
+        rendered_count = 0
         for e in expenses:
             cat = str(e.get("category", ""))[:20]
             desc = str(e.get("description") or e.get("employee_name") or "")[:50]
             label = f"[{cat}] {desc}" if cat else desc
-            pdf.row(label, php(e.get("amount", 0)), color=(220, 38, 38))
+            amt = float(e.get("amount", 0) or 0)
+            pdf.row(label, php(amt), color=(220, 38, 38))
+            rendered_sum += amt
+            rendered_count += 1
             # Late-encoded carryover note (printed in italics if backdated)
             if e.get("late_encoded") and e.get("late_encode_label"):
                 pdf.set_font("Helvetica", "I", 7)
                 pdf.set_text_color(217, 119, 6)
-                pdf.cell(0, 3.5, f"   {e['late_encode_label']}", new_x="LMARGIN", new_y="NEXT")
+                pdf.cell(0, 3.5, _s(f"   {e['late_encode_label']}"), new_x="LMARGIN", new_y="NEXT")
                 pdf.set_text_color(0, 0, 0)
             if e.get("category") == "Employee Advance" and "monthly_ca_total" in e:
                 emp = e.get("employee_name", "Employee")
@@ -330,6 +344,29 @@ def render_normal(pdf: ZReportPDF, closing: dict):
                 pdf.cell(0, 4, _s(note))
                 pdf.ln(5)
                 pdf.set_text_color(30, 30, 30)
+        # Iter 254 — Verification footer. Prints the rendered subtotal and
+        # explicitly flags any mismatch vs the section-header total. This
+        # surfaces stale closing snapshots (e.g. expenses backdated AFTER
+        # the day was closed) instead of leaving a silent visual discrepancy.
+        pdf.separator()
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_text_color(80, 80, 80)
+        pdf.set_x(14)
+        pdf.cell(150, 5, _s(f"  Itemized total ({rendered_count} row{'s' if rendered_count != 1 else ''}):"))
+        pdf.cell(40, 5, _s(php(rendered_sum)), align="R")
+        pdf.ln(5)
+        if abs(rendered_sum - total_expenses) > 0.01:
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.set_text_color(220, 38, 38)
+            pdf.set_x(14)
+            diff = total_expenses - rendered_sum
+            pdf.cell(150, 5, _s(
+                f"  ! Mismatch vs section total (P{abs(diff):,.2f} "
+                f"{'missing from itemized list' if diff > 0 else 'extra in itemized list'}). "
+                f"Closing snapshot may be stale (late-encoded expense)."
+            ))
+            pdf.ln(5)
+        pdf.set_text_color(30, 30, 30)
 
 
 # ── Layout: DETAILED — mirrors Close Wizard Step 7 ──────────────────────────
@@ -338,14 +375,21 @@ def render_detailed(pdf: ZReportPDF, preview: dict, closing: Optional[dict]):
     expected = float(preview.get("expected_counter", 0))
 
     # 1. Cash Drawer Reconciliation
+    # Iter 254 — fully restructured to read top-to-bottom as a single math
+    # ledger. Previous layout displayed "Total Cash In" as a subtotal whose
+    # value (cash_sales + cash_ar + split_cash) did NOT match the running
+    # sum of the rows above it — Opening Float and Fund Transfers were
+    # rendered above the subtotal but excluded from its math, which made
+    # the Over/Short calculation appear inconsistent. We now show every
+    # contributing line, then a single subtotal that equals the actual
+    # `expected_counter` math: starting_float + total_cash_in
+    # + net_fund_transfers - total_cashier_expenses.
     pdf.section_header("CASH DRAWER RECONCILIATION")
+
     pdf.row("Opening Float", php(preview.get("starting_float", 0)))
-    pdf.separator()
     pdf.row("+ Cash Sales", php(preview.get("total_cash_sales", 0)), color=(21, 128, 61))
     if float(preview.get("total_split_cash", 0)) > 0:
         pdf.row("+ Split Payment Cash", php(preview.get("total_split_cash", 0)), color=(13, 148, 136))
-    if float(preview.get("total_partial_cash", 0)) > 0:
-        pdf.row("+ Partial Cash Received", php(preview.get("total_partial_cash", 0)), color=(37, 99, 235))
     pdf.row(
         "+ AR Cash Payments",
         php(preview.get("total_cash_ar", preview.get("total_ar_received", 0))),
@@ -354,18 +398,13 @@ def render_detailed(pdf: ZReportPDF, preview: dict, closing: Optional[dict]):
     if float(preview.get("total_digital_ar", 0)) > 0:
         pdf.row("  (AR Digital - not in drawer)", php(preview.get("total_digital_ar", 0)), indent=6, color=(150, 150, 150))
 
-    net_ft = float(preview.get("net_fund_transfers", 0))
-    if net_ft != 0:
-        pdf.separator()
-        if float(preview.get("capital_to_cashier", 0)) > 0:
-            pdf.row("+ Capital Injection", php(preview.get("capital_to_cashier", 0)), color=(8, 145, 178))
-        if float(preview.get("safe_to_cashier", 0)) > 0:
-            pdf.row("+ Safe -> Cashier", php(preview.get("safe_to_cashier", 0)), color=(8, 145, 178))
-        if float(preview.get("cashier_to_safe", 0)) > 0:
-            pdf.row("- Cashier -> Safe", php(preview.get("cashier_to_safe", 0)), color=(234, 88, 12))
+    if float(preview.get("capital_to_cashier", 0)) > 0:
+        pdf.row("+ Capital Injection (mid-day)", php(preview.get("capital_to_cashier", 0)), color=(8, 145, 178))
+    if float(preview.get("safe_to_cashier", 0)) > 0:
+        pdf.row("+ Safe -> Cashier (mid-day)", php(preview.get("safe_to_cashier", 0)), color=(8, 145, 178))
+    if float(preview.get("cashier_to_safe", 0)) > 0:
+        pdf.row("- Cashier -> Safe (mid-day)", php(preview.get("cashier_to_safe", 0)), color=(234, 88, 12))
 
-    pdf.separator()
-    pdf.row("= Total Cash In", php(preview.get("total_cash_in", 0)), bold=True, color=(21, 128, 61))
     pdf.row(
         "- Cashier Expenses",
         php(preview.get("total_cashier_expenses", preview.get("total_expenses", 0))),
@@ -375,18 +414,28 @@ def render_detailed(pdf: ZReportPDF, preview: dict, closing: Optional[dict]):
         pdf.row("  (Safe expenses - not from drawer)", php(preview.get("total_safe_expenses", 0)), indent=6, color=(150, 150, 150))
 
     pdf.separator()
-    pdf.row("Expected in Drawer", php(expected), bold=True)
+    pdf.row("= Expected in Drawer (Pre-Vault)", php(expected), bold=True, color=(26, 77, 46))
     if closing:
         actual_cash = float(closing.get("actual_cash", 0))
         over_short = float(closing.get("over_short", 0))
         cash_to_safe = float(closing.get("cash_to_safe", 0))
         cash_to_drawer = float(closing.get("cash_to_drawer", 0))
-        pdf.row("Actual Count", php(actual_cash), bold=True)
-        color = (21, 128, 61) if over_short >= 0 else (220, 38, 38)
-        pdf.row("Over / Short", php_signed(over_short), bold=True, color=color)
+        pdf.row("Actual Count Submitted", php(actual_cash), bold=True)
+        pdf.separator()
+        os_label = "Cash Over" if over_short >= 0 else "Cash Short"
+        os_color = (21, 128, 61) if over_short >= 0 else (220, 38, 38)
+        pdf.row(f"{os_label} (Actual - Expected)", php_signed(over_short), bold=True, color=os_color)
         pdf.ln(2)
-        pdf.row("To Vault/Safe", php(cash_to_safe))
-        pdf.row("Float Tomorrow", php(cash_to_drawer))
+        # End-of-day vault allocation — explicit sub-block so the reader
+        # knows these movements happen AFTER the over/short calculation.
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(80, 80, 80)
+        pdf.set_x(12)
+        pdf.cell(0, 5, _s("End-of-Day Vault Allocation:"))
+        pdf.ln(5)
+        pdf.set_text_color(30, 30, 30)
+        pdf.row("  -> To Vault / Safe", php(cash_to_safe), indent=6)
+        pdf.row("  -> Float for Tomorrow", php(cash_to_drawer), indent=6, color=(21, 128, 61))
     pdf.ln(3)
 
     # 2. AR Payments Detail
@@ -429,21 +478,34 @@ def render_detailed(pdf: ZReportPDF, preview: dict, closing: Optional[dict]):
     # 4. Fund Transfers
     fund_transfers = preview.get("fund_transfers_today", [])
     if fund_transfers:
+        net_ft = float(preview.get("net_fund_transfers", 0))
         pdf.section_header("FUND TRANSFERS", php(net_ft))
-        pdf.detail_row("Type", "Authorized By", "Amount", "Note", header=True)
+        # Iter 254 — widened Authorized By + Note columns and tightened
+        # truncation so long names ("Sibugay Agrivet Supply / J. Domunales")
+        # no longer bleed into the Amount column. Widths sum to 170mm to
+        # match the rest of the detail rows: Type 38 | Auth By 52 | Amount 30 | Note 50.
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_fill_color(248, 248, 248)
+        pdf.set_x(14)
+        pdf.cell(38, 5, _s("Type"), fill=True)
+        pdf.cell(52, 5, _s("Authorized By"), fill=True)
+        pdf.cell(30, 5, _s("Amount"), align="R", fill=True)
+        pdf.cell(50, 5, _s("Note"), fill=True)
+        pdf.ln(5)
         for ft in fund_transfers:
             ft_type = ft.get("type", "")
             label = (
-                "Capital Injection" if ft_type == "capital_add"
+                "Capital Inject." if ft_type == "capital_add"
                 else "Safe -> Cashier" if ft_type == "safe_to_cashier"
                 else "Cashier -> Safe"
             )
-            pdf.detail_row(
-                label,
-                str(ft.get("authorized_by", ""))[:25],
-                php(ft.get("amount", 0)),
-                str(ft.get("note", ""))[:20],
-            )
+            pdf.set_font("Helvetica", "", 8)
+            pdf.set_x(14)
+            pdf.cell(38, 5, _s(label[:20]))
+            pdf.cell(52, 5, _s(str(ft.get("authorized_by", ""))[:32]))
+            pdf.cell(30, 5, _s(php(ft.get("amount", 0))), align="R")
+            pdf.cell(50, 5, _s(str(ft.get("note", ""))[:32]))
+            pdf.ln(5)
         pdf.ln(3)
 
     # 5. Expenses Detail
