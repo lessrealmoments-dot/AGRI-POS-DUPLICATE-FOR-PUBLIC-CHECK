@@ -1,6 +1,51 @@
 # AgriBooks Changelog
 
 
+## Feb 2026 — Linked Offline Draft Finalization (Iter 252)
+
+**Problem**: When a Draft Order (status=for_preparation) was finalized while offline OR when the online `/api/unified-sale` call failed mid-flight, the offline-replay path (`/api/sales/sync`) created a brand-new SI-XX-OFF-NNNNNN invoice instead of completing the existing draft. The original draft remained stuck in `for_preparation`, the customer's printed OFF receipt was orphaned from the books, and inventory/payment got recorded against the wrong invoice.
+
+**Fix — Linked offline draft finalization with bidirectional lookup**:
+- Offline envelope now carries `kind="draft_finalization_offline"` + `draft_invoice_id` + `draft_invoice_number` + `offline_receipt_number` whenever finalizing while offline / on network failure.
+- New backend handler `_finalize_draft_offline` (in `sync.py`) is called when the per-sale sync loop sees `draft_invoice_id`. It locates the canonical draft, applies inventory deduction + payment + status flip in a single atomic update, and stamps `linked_offline_receipt_number` on the canonical record.
+- **Option A semantics**: the canonical draft invoice number stays as the official record; the OFF number lives only as `linked_offline_receipt_number` (not in the sequence). One customer/order = one invoice in the books.
+- **Idempotency**: re-syncing the same envelope returns `duplicate` — no double inventory deduction / double payment / double customer balance.
+- **Doc lookup** (`/api/invoices/by-number/{n}` and `/api/view/{code}`) now resolves either the canonical number or the OFF number to the same canonical record. QR scans + manual lookups work both ways.
+- **Conflict handling**: draft already paid / cancelled / not found / items diverged / payment diverged → `offline_reconciliation_queue` entry with full snapshot for manager review (NEW Audit Center → Offline Reconcile tab).
+- **Recovery endpoint** for pre-fix duplicates: `POST /api/admin/reconcile-orphan-offline-draft` (admin/owner-only, dry-run by default; requires `confirm=true` + Owner PIN to execute). Reverses OFF inventory, reverses customer balance, voids OFF with audit reason, leaves draft ready for clean re-finalization.
+
+**Frontend**:
+- **Draft Orders panel**: IndexedDB overlay (`getPendingDraftCompletions()`) maps draft_id → OFF number. Drafts with a pending offline completion show yellow "Offline Completion Pending — SI-XX-OFF-NNNNNN" badge and have Open/Edit/Pay/Cancel disabled, preventing duplicate finalization.
+- **PrintEngine**: orderSlipFullPage renders `OFFLINE RECEIPT — PENDING SYNC` banner before sync (with both numbers visible) and a green `SYNCED — OFFICIAL RECEIPT` banner after sync.
+- **DocViewer**: linked-receipt banner shows official invoice + linked OFF number; divergence warnings displayed when items/payment diverged.
+- **Audit Center**: new `Offline Reconcile` tab listing queue entries with status filter, manager-resolve action with note.
+
+**Tests**:
+- 5 new pytest tests in `/app/backend/tests/test_linked_offline_draft_finalization_iter252.py` — all PASS (happy path, idempotency, draft_already_paid conflict, draft_not_found conflict, doc-lookup resolves both numbers).
+- 9/9 backend tests PASS (4 regression from Iter 251 still green).
+- Testing agent (iteration_252.json) live-API verified 6/6 + frontend test IDs verified 100%, no critical/minor/UI/design issues.
+
+**API endpoints added/modified**:
+- `POST /api/sales/sync` — extended to route by `draft_invoice_id`/`kind`
+- `GET /api/sync/offline-reconciliation?status=open|resolved`
+- `POST /api/sync/offline-reconciliation/{rec_id}/resolve` (manager+)
+- `POST /api/admin/reconcile-orphan-offline-draft` (admin/owner, dry-run + PIN-confirm)
+- `GET /api/invoices/by-number/{n}` — resolves both invoice_number and linked_offline_receipt_number
+- `GET /api/view/{doc_code}` — payload extended with linked-receipt fields
+
+**DB schema additions on `invoices`**:
+- `linked_offline_receipt_number` (str)
+- `finalized_from_draft_offline` (bool)
+- `offline_completion_synced_at` (iso str)
+- `original_draft_invoice_number` (str)
+- `offline_items_diverged`, `payment_diverged` (bool, audit flags)
+
+**New collection**: `offline_reconciliation_queue` (snapshots of conflicts for manager review).
+
+---
+
+
+
 ## Feb 2026 — Close Wizard Credit & AR Refactor (Iter 252)
 
 **Problem**: Same-day partial credit payments were INVISIBLE under "Credit Payment Today" (Step 3) of the Closing Wizard. The AR pipeline filtered out `order_date == today` invoices to avoid double-counting with `total_partial_cash`, which meant the initial cash leg of a partial sale created today (and any same-day top-up payment) only ever showed as `amount_paid` on the partial invoice in Step 1 — never as an auditable payment event. Cross-day payments worked fine; same-day did not. Confusing during cash balancing.

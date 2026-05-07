@@ -1,6 +1,40 @@
 # AgriBooks PRD
 
 
+## Iter 252 — Linked Offline Draft Finalization (Feb 2026) ✅
+
+### Problem
+Finalizing a Draft Order while offline (or when the online API call failed mid-flight) created a brand-new `SI-XX-OFF-NNNNNN` invoice instead of completing the existing draft. The draft stayed stuck in `for_preparation`, the customer's OFF receipt was orphaned, and inventory/payment landed on the wrong invoice.
+
+### What was built
+- **Linked offline finalization** — Offline envelope tags `kind=draft_finalization_offline` + `draft_invoice_id` + `draft_invoice_number` + `offline_receipt_number`. `/api/sales/sync` routes such envelopes to `_finalize_draft_offline` which flips the existing draft → paid, preserves the canonical invoice_number, stamps `linked_offline_receipt_number` (Option A — canonical draft number stays official; OFF is the customer-facing reference).
+- **Idempotent** — re-sync returns `duplicate`; inventory/payment/customer balance applied exactly once.
+- **Bidirectional lookup** — `/api/invoices/by-number/{n}` and `/api/view/{code}` resolve either number to the same canonical record (QR scans + searches work both ways).
+- **Conflict handling** — draft already paid / cancelled / not found / items diverged / payment diverged → entries in new `offline_reconciliation_queue` collection for manager review.
+- **Recovery endpoint** — `POST /api/admin/reconcile-orphan-offline-draft` (admin/owner only). Defaults to dry-run; requires `confirm=true` + Owner PIN to execute. Reverses OFF inventory + customer balance, voids OFF with audit reason, leaves draft ready for clean re-finalization.
+- **Audit Center → "Offline Reconcile" tab** — lists open/resolved queue entries with manager-resolve action.
+- **Draft Orders panel overlay** — IndexedDB-backed badge "Offline Completion Pending — SI-XX-OFF-NNNNNN" on drafts with a queued offline completion; Open/Edit/Pay/Cancel disabled to prevent duplicate finalization.
+- **PrintEngine** — Orange "OFFLINE RECEIPT — PENDING SYNC" banner before sync, green "SYNCED — OFFICIAL RECEIPT" banner after, with both numbers visible.
+
+### Files Modified
+- Backend: `routes/sync.py`, `routes/invoices.py`, `routes/doc_lookup.py`
+- Frontend: `pages/UnifiedSalesPage.js`, `lib/offlineDB.js`, `lib/PrintEngine.js`, `pages/DocViewerPage.jsx`, `pages/AuditCenterPage.js`
+- New: `components/audit/OfflineReconciliationTab.js`
+- Tests: `backend/tests/test_linked_offline_draft_finalization_iter252.py`
+
+### Tests
+- 5 new pytest tests PASS: happy path, idempotency, draft_already_paid conflict, draft_not_found conflict, doc-lookup both numbers
+- 9/9 total backend tests PASS (Iter 251 regression suite + Iter 252)
+- Testing agent (iteration_252.json): backend 100%, frontend test IDs verified, no issues
+
+### DB Schema Additions
+- `invoices`: `linked_offline_receipt_number`, `finalized_from_draft_offline`, `offline_completion_synced_at`, `original_draft_invoice_number`, `offline_items_diverged`, `payment_diverged`
+- New collection: `offline_reconciliation_queue`
+
+---
+
+
+
 ## Iter 252 — Close Wizard Credit & AR Refactor (Feb 2026) ✅
 
 ### Problem
