@@ -1,5 +1,34 @@
 # AgriBooks Changelog
 
+
+## Feb 2026 — Close Wizard Credit & AR Refactor (Iter 252)
+
+**Problem**: Same-day partial credit payments were INVISIBLE under "Credit Payment Today" (Step 3) of the Closing Wizard. The AR pipeline filtered out `order_date == today` invoices to avoid double-counting with `total_partial_cash`, which meant the initial cash leg of a partial sale created today (and any same-day top-up payment) only ever showed as `amount_paid` on the partial invoice in Step 1 — never as an auditable payment event. Cross-day payments worked fine; same-day did not. Confusing during cash balancing.
+
+**Fix — Clean separation across Steps 1/2/3 + Z-report**:
+- **Step 1 — Cash Sales Today**: now excludes BOTH `credit` and `partial` payment_types from the entries list and category breakdown. Pure cash/digital/split sales only. Added a legend banner explaining where credit & partial flows are now shown.
+- **Step 2 — Customer Credit Generated Today**: each row now renders a 3-column grid (Invoice Total / Paid Today / Remaining) plus a status pill (`Unpaid` / `Partially Paid` / `Fully Paid Same-Day`) and a type pill (`Full Credit` / `Partial Credit`). Backend `credit_sales_today` enriched with `paid_today`, `remaining_balance`, `status`.
+- **Step 3 — AR / Credit Payments Today**: AR pipeline now matches ALL payments dated today regardless of invoice age. Each payment row tagged `is_same_day` and `is_initial_partial`. UI splits into two labeled sub-sections — "Same-Day Credit Payments" (green) and "Older Credit Payments" (blue) — each with its own subtotal. INITIAL badge marks the initial cash leg of a partial sale.
+- **Z-report**: same structure mirrored — "Customer Credit Generated Today" replaces "Credit Extended Today", AR section split into same-day/older sub-rows, "Partial Cash Received" tile removed (now subsumed by AR / Credit Payments Today).
+
+**Math invariant preserved**: `total_cash_in` and `expected_counter` are byte-for-byte identical to the old computation when partial cash is via cashier wallet. Money is reattributed from the `total_partial_cash` bucket → `total_cash_ar` bucket; sum is unchanged. No Z-report regression. (Backed by 3-test pytest suite at `/app/backend/tests/test_close_wizard_credit_refactor_feb2026.py`.)
+
+**Backend changes** (`/app/backend/routes/daily_operations.py`):
+- `_closing_summary` (`get_daily_close_preview`): rewrote AR pipeline (drop `order_date != date` filter), enriched `credit_sales_today`, tagged `ar_payments` with `is_same_day` / `is_initial_partial` / `order_date` / `payment_type_invoice` / `invoice_total` / `recorded_by` / `recorded_at`, dropped `total_partial_cash` from `total_cash_in`, exposed `total_ar_same_day`, `total_ar_older`, `total_credit_invoice_value`.
+- `get_daily_close_preview_batch`, `close_day`, `close_day_batch (seal)`: same pipeline + math change for parity.
+
+**Frontend changes** (`/app/frontend/src/pages/CloseWizardPage.js`):
+- STEPS array updated (new titles & descriptions for steps 1/2/3).
+- Step 1 filter excludes `partial`; legend banner added (`step1-credit-legend`).
+- Step 2 row rebuilt with 3-column grid + status pill (`credit-status-{idx}`).
+- Step 3 split-section IIFE renders `same-day-credit-payments` and `older-credit-payments`.
+- Cash Drawer Reconciliation tile + Z-report blocks updated to new structure (`zreport-credit-generated`, `z-ar-same-day`, `z-ar-older`).
+
+**Tests**: `/app/backend/tests/test_close_wizard_credit_refactor_feb2026.py` — 3 PASS (pipeline shape, enrichment, math invariant). Testing agent (iteration_251.json) confirmed live API returns new fields, all new test IDs present in source, no critical/minor/UI/design issues.
+
+---
+
+
 ## Feb 2026 — `today+1` auto-bump rolled out to all date pickers (Iter 251)
 
 Following the Fund Transfer fix, applied the same "if today is closed, default and `max` jump to tomorrow" UX to every other date-bearing page so users are never stuck.

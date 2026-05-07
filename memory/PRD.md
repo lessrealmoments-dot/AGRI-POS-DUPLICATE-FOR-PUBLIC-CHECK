@@ -1,5 +1,31 @@
 # AgriBooks PRD
 
+
+## Iter 252 — Close Wizard Credit & AR Refactor (Feb 2026) ✅
+
+### Problem
+Same-day partial credit payments were invisible under "Credit Payment Today" in Step 3 of the Closing Wizard, while cross-day payments worked fine. Users were confused during cash balancing because the ₱ payment received on a same-day partial sale was conflated with the original sale event.
+
+### What was built — Clean separation across Steps 1/2/3 + Z-report
+- **Step 1 — Cash Sales Today**: now excludes credit AND partial-credit invoices. Pure cash/digital/split sales only. Legend banner explains where credit/partial flows are shown.
+- **Step 2 — Customer Credit Generated Today**: each row shows Invoice Total / Paid Today / Remaining + status pill (Unpaid / Partially Paid / Fully Paid Same-Day) + type pill (Full Credit / Partial Credit).
+- **Step 3 — AR / Credit Payments Today**: AR pipeline now matches ALL payments dated today regardless of invoice age. Split into "Same-Day Credit Payments" (green) and "Older Credit Payments" (blue) sub-sections, each with its own subtotal. INITIAL badge marks the initial cash leg of a partial sale.
+- **Z-report**: same structure mirrored.
+
+### Math invariant
+`total_cash_in` and `expected_counter` are unchanged when partial cash is via cashier wallet — money is reattributed from `total_partial_cash` bucket to `total_cash_ar` bucket; sum is identical. No Z-report regression.
+
+### Files Modified
+- `/app/backend/routes/daily_operations.py` — 4 functions (`_closing_summary`, `get_daily_close_preview_batch`, `close_day`, batch seal): rewrote AR pipeline, enriched `credit_sales_today`, tagged `ar_payments` with `is_same_day` / `is_initial_partial`, dropped `total_partial_cash` from `total_cash_in`, exposed `total_ar_same_day` / `total_ar_older` / `total_credit_invoice_value`.
+- `/app/frontend/src/pages/CloseWizardPage.js` — STEPS array updated, Step 1 filter + legend, Step 2 3-column row + status pill, Step 3 split-section IIFE, Cash Drawer tile + Z-report blocks updated.
+
+### Tests
+- `/app/backend/tests/test_close_wizard_credit_refactor_feb2026.py` — 3 PASS (pipeline shape, enrichment, math invariant).
+- Testing agent iteration_251.json: backend 100%, frontend test IDs verified in source, no critical/minor issues, no UI bugs.
+
+---
+
+
 ## Iter 258 — QR-Based Draft Order Quantity Editing (May 2026) ✅
 
 ### Problem
