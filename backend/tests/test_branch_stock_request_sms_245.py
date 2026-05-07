@@ -24,7 +24,7 @@ from _org_test_helpers import (
     TEST_ORG_ADMIN_PASSWORD,
 )
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://stock-request-sms.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://sales-unify.preview.emergentagent.com").rstrip("/")
 API = BASE_URL + "/api"
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "test_database")

@@ -11,7 +11,7 @@ import pytest
 import requests
 import os
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://stock-request-sms.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://sales-unify.preview.emergentagent.com').rstrip('/')
 
 # Main Branch - Downtown
 BRANCH_ID = "da114e26-fd00-467f-8728-6b8047a244b5"
