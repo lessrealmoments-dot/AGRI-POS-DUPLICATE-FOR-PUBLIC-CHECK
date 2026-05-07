@@ -623,39 +623,55 @@ async def get_daily_close_preview(
     total_partial_cash = round(sum(float(inv.get("amount_paid", 0)) for inv in partial_invoices), 2)
 
     # ── New credit sales today (info only — not cash) ─────────────────────────
+    # Enrich each row with full audit context for the Closing Wizard "Customer
+    # Credit Generated Today" section: invoice total, paid_today (cash leg
+    # received today on this invoice), remaining balance, and a status badge.
     credit_invoices = await db.invoices.find(
         {"branch_id": branch_id, "order_date": date,
          "payment_type": {"$in": ["credit", "partial"]}, "status": {"$ne": "voided"}},
-        {"_id": 0, "customer_name": 1, "invoice_number": 1, "grand_total": 1, "balance": 1, "payment_type": 1, "amount_paid": 1}
+        {"_id": 0, "customer_name": 1, "invoice_number": 1, "grand_total": 1,
+         "balance": 1, "payment_type": 1, "amount_paid": 1, "payments": 1, "id": 1}
     ).to_list(500)
-    credit_sales_today = [
-        {"customer_name": inv["customer_name"], "invoice_number": inv["invoice_number"],
-         "grand_total": inv.get("grand_total", 0), "balance": inv.get("balance", 0),
-         "payment_type": inv.get("payment_type", "credit"), "amount_paid": inv.get("amount_paid", 0)}
-        for inv in credit_invoices
-    ]
+    credit_sales_today = []
+    for inv in credit_invoices:
+        gt = float(inv.get("grand_total", 0))
+        bal = float(inv.get("balance", 0))
+        # Sum of payments dated today (matches what we will surface in Step 3)
+        paid_today = round(sum(
+            float(p.get("amount", 0))
+            for p in (inv.get("payments") or [])
+            if p.get("date") == date and not p.get("voided")
+        ), 2)
+        if bal <= 0.005:
+            status = "Fully Paid Same-Day"
+        elif paid_today > 0 or float(inv.get("amount_paid", 0)) > 0:
+            status = "Partially Paid"
+        else:
+            status = "Unpaid"
+        credit_sales_today.append({
+            "customer_name": inv.get("customer_name", ""),
+            "invoice_number": inv.get("invoice_number", ""),
+            "grand_total": round(gt, 2),
+            "balance": round(bal, 2),
+            "remaining_balance": round(bal, 2),
+            "payment_type": inv.get("payment_type", "credit"),
+            "amount_paid": round(float(inv.get("amount_paid", 0)), 2),
+            "paid_today": paid_today,
+            "status": status,
+        })
     total_credit_today = round(sum(c["balance"] for c in credit_sales_today), 2)
+    total_credit_invoice_value = round(sum(c["grand_total"] for c in credit_sales_today), 2)
 
-    # ── AR payments received today (on OLDER invoices) ───────────────────────
-    # IMPORTANT: Exclude voided payments. Without this, a single payment that
-    # was later modified/voided still appears in the Z-Report, double-counting
-    # the collection (bug seen with SI-SB-001029 where the same invoice
-    # appeared twice — once as ₱42,295 voided, once as ₱38,995 live).
-    #
-    # Iter 242 FIX: We exclude invoices order-dated TODAY to avoid double-count
-    # with today's partial/credit sales (already in Step 1/2). BUT interest
-    # and penalty invoices can legitimately be created AND paid on the same
-    # day via the Payments page. Those payments flow cash into the cashier
-    # drawer but were previously excluded from `total_cash_ar`, causing an
-    # OVER-MONEY variance in Step 5 equal to the interest collected today.
-    # The $or clause below includes today-dated interest/penalty invoices so
-    # their payments correctly appear in AR and expected_counter.
+    # ── AR / Credit Payments Today (ALL payments dated today) ────────────────
+    # Includes: (a) initial cash leg of partial sales created today,
+    #           (b) same-day extra payments on today's credit/partial sales,
+    #           (c) payments today on older credit invoices,
+    #           (d) interest/penalty invoice payments.
+    # Each payment is tagged `is_same_day` so the UI can split the display
+    # into "Same-Day Credit Payments" vs "Older Credit Payments" without
+    # affecting the underlying cash-in math.
     ar_pipeline = [
-        {"$match": {"branch_id": branch_id, "status": {"$ne": "voided"},
-                    "$or": [
-                        {"order_date": {"$ne": date}},
-                        {"sale_type": {"$in": ["interest_charge", "penalty_charge"]}},
-                    ]}},
+        {"$match": {"branch_id": branch_id, "status": {"$ne": "voided"}}},
         {"$unwind": "$payments"},
         {"$match": {
             "payments.date": date,
@@ -665,7 +681,9 @@ async def get_daily_close_preview(
             "_id": 0,
             "id": 1, "customer_name": 1, "invoice_number": 1,
             "customer_id": 1, "sale_type": 1,
+            "order_date": 1, "payment_type": 1,
             "balance": 1,  # current balance after all payments
+            "grand_total": 1, "amount_paid": 1,
             "payment": "$payments"
         }}
     ]
@@ -691,12 +709,26 @@ async def get_daily_close_preview(
             penalty_paid = float(pmt.get("applied_to_penalty", 0))
             principal_paid = float(pmt.get("applied_to_principal", amount - interest_paid - penalty_paid))
         current_bal = float(p.get("balance", 0))
+        order_date_inv = p.get("order_date", "")
+        is_same_day = (order_date_inv == date)
+        payment_type_inv = p.get("payment_type", "")
+        # First payment chronologically on today's partial sale = "initial cash leg"
+        is_initial_partial = (
+            is_same_day
+            and payment_type_inv == "partial"
+            and pmt.get("recorded_at", "")
+        )
         ar_payments.append({
             "invoice_id": p.get("id", ""),
             "customer_id": p.get("customer_id", ""),
             "customer_name": p.get("customer_name", ""),
             "invoice_number": p.get("invoice_number", ""),
             "sale_type": sale_type,
+            "order_date": order_date_inv,
+            "payment_type_invoice": payment_type_inv,
+            "is_same_day": is_same_day,
+            "is_initial_partial": bool(is_initial_partial),
+            "invoice_total": round(float(p.get("grand_total", 0)), 2),
             "balance_before": round(current_bal + amount, 2),
             "interest_paid": round(interest_paid, 2),
             "penalty_paid": round(penalty_paid, 2),
@@ -705,8 +737,20 @@ async def get_daily_close_preview(
             "remaining_balance": round(current_bal, 2),
             "fund_source": pmt.get("fund_source", "cashier"),
             "method": pmt.get("method", "Cash"),
+            "recorded_by": pmt.get("recorded_by", ""),
+            "recorded_at": pmt.get("recorded_at", ""),
+            "reference": pmt.get("reference", ""),
         })
+    # Sort: same-day first (initial partial first per invoice), then by recorded_at
+    ar_payments.sort(key=lambda p: (
+        not p.get("is_same_day", False),
+        p.get("recorded_at", ""),
+    ))
     total_ar_received = round(sum(p["amount_paid"] for p in ar_payments), 2)
+    total_ar_same_day = round(sum(
+        p["amount_paid"] for p in ar_payments if p.get("is_same_day")
+    ), 2)
+    total_ar_older = round(total_ar_received - total_ar_same_day, 2)
 
     # ── Expenses today — split by fund source for accurate reconciliation ────
     expenses_raw = await db.expenses.find(
@@ -819,7 +863,7 @@ async def get_daily_close_preview(
     # Net cashier fund movement
     net_fund_transfers = round(capital_to_cashier + safe_to_cashier - cashier_to_safe, 2)
 
-    total_cash_in = total_cash_sales + total_partial_cash + total_cash_ar + total_split_cash
+    total_cash_in = total_cash_sales + total_cash_ar + total_split_cash
     if has_prev_close:
         expected_counter = round(starting_float + total_cash_in + net_fund_transfers - total_cashier_expenses, 2)
     else:
@@ -868,14 +912,17 @@ async def get_daily_close_preview(
         ],
         "digital_by_platform": {k: round(v, 2) for k, v in digital_by_platform.items()},
         "total_digital_today": total_digital_today,
-        # AR collections — split by fund source
+        # AR collections — split by fund source AND by same-day vs older
         "ar_payments": ar_payments,
         "total_ar_received": total_ar_received,
+        "total_ar_same_day": total_ar_same_day,
+        "total_ar_older": total_ar_older,
         "total_cash_ar": total_cash_ar,
         "total_digital_ar": total_digital_ar,
         # Credit today (info)
         "credit_sales_today": credit_sales_today,
         "total_credit_today": total_credit_today,
+        "total_credit_invoice_value": total_credit_invoice_value,
         # Expenses — split by fund source
         "expenses": expenses,
         "total_expenses": total_expenses,
@@ -1506,14 +1553,18 @@ async def batch_close_preview(
 
     # AR collections — need per-payment detail to split cash vs digital.
     # Exclude voided payments so modify/void cycles don't inflate totals.
+    # CLOSE WIZARD REFACTOR (Feb 2026): include ALL payments dated in this
+    # batch, even on invoices created within the batch (initial partial-sale
+    # cash legs). The expanded `total_cash_ar` subsumes `partial_total`,
+    # which is dropped from the cash_in math below.
     ar_pipeline = [
-        {"$match": {"branch_id": branch_id, "status": {"$ne": "voided"}, "order_date": {"$nin": date_list}}},
+        {"$match": {"branch_id": branch_id, "status": {"$ne": "voided"}}},
         {"$unwind": "$payments"},
         {"$match": {
             "payments.date": date_filter,
             "payments.voided": {"$ne": True},
         }},
-        {"$project": {"_id": 0, "payment": "$payments"}}
+        {"$project": {"_id": 0, "payment": "$payments", "order_date": 1, "payment_type": 1}}
     ]
     ar_payments_raw = await db.invoices.aggregate(ar_pipeline).to_list(500)
     total_ar_received = round(sum(float(p.get("payment", {}).get("amount", 0)) for p in ar_payments_raw), 2)
@@ -1581,7 +1632,9 @@ async def batch_close_preview(
     ), 2)
     net_fund_transfers = round(capital_to_cashier + safe_to_cashier - cashier_to_safe, 2)
 
-    total_cash_in = total_cash_sales + partial_total + total_cash_ar + total_split_cash
+    # CLOSE WIZARD REFACTOR (Feb 2026): same-day partial cash now lives in
+    # total_cash_ar via the expanded payments-today aggregation.
+    total_cash_in = total_cash_sales + total_cash_ar + total_split_cash
     if has_prev_close:
         expected_counter = round(starting_float + total_cash_in + net_fund_transfers - total_cashier_expenses, 2)
     else:
@@ -1733,21 +1786,22 @@ async def close_day(data: dict, user=Depends(get_current_user)):
     ).to_list(500)
     partial_total = round(sum(float(inv.get("amount_paid", 0)) for inv in partial_invoices), 2)
 
-    # Iter 242 FIX: Include today-dated interest/penalty invoice payments
-    # (same bug as preview — these are legitimate same-day AR collections).
+    # CLOSE WIZARD REFACTOR (Feb 2026): Include ALL payments dated today —
+    # same-day partial-sale cash legs, same-day extra payments, AND payments
+    # on older credit invoices. The expanded `total_cash_ar` now subsumes
+    # what `partial_total` used to represent (we drop partial_total from the
+    # cash_in math below to avoid double-counting).
     ar_pipeline = [
-        {"$match": {"branch_id": branch_id, "status": {"$ne": "voided"},
-                    "$or": [
-                        {"order_date": {"$ne": date}},
-                        {"sale_type": {"$in": ["interest_charge", "penalty_charge"]}},
-                    ]}},
+        {"$match": {"branch_id": branch_id, "status": {"$ne": "voided"}}},
         {"$unwind": "$payments"},
         {"$match": {
             "payments.date": date,
             "payments.voided": {"$ne": True},
         }},
         {"$project": {"_id": 0, "customer_name": 1, "invoice_number": 1,
-                      "sale_type": 1, "balance": 1, "payment": "$payments"}}
+                      "sale_type": 1, "balance": 1, "order_date": 1,
+                      "payment_type": 1, "grand_total": 1,
+                      "payment": "$payments"}}
     ]
     ar_raw = await db.invoices.aggregate(ar_pipeline).to_list(500)
     credit_collections = []
@@ -1763,10 +1817,16 @@ async def close_day(data: dict, user=Depends(get_current_user)):
             interest_paid = float(pmt.get("applied_to_interest", 0))
             penalty_paid = float(pmt.get("applied_to_penalty", 0))
             principal_paid = float(pmt.get("applied_to_principal", amount - interest_paid - penalty_paid))
+        order_date_inv = p.get("order_date", "")
+        is_same_day = (order_date_inv == date)
         credit_collections.append({
             "customer": p.get("customer_name", ""),
             "invoice": p.get("invoice_number", ""),
             "sale_type": sale_type,
+            "order_date": order_date_inv,
+            "is_same_day": is_same_day,
+            "payment_type_invoice": p.get("payment_type", ""),
+            "invoice_total": round(float(p.get("grand_total", 0)), 2),
             "balance_before": round(float(p.get("balance", 0)) + amount, 2),
             "interest_paid": round(interest_paid, 2),
             "penalty_paid": round(penalty_paid, 2),
@@ -1779,6 +1839,8 @@ async def close_day(data: dict, user=Depends(get_current_user)):
     total_ar_received = round(sum(c["total_paid"] for c in credit_collections), 2)
     total_cash_ar = round(sum(c["total_paid"] for c in credit_collections if c.get("fund_source", "cashier") == "cashier"), 2)
     total_digital_ar = round(total_ar_received - total_cash_ar, 2)
+    total_ar_same_day = round(sum(c["total_paid"] for c in credit_collections if c.get("is_same_day")), 2)
+    total_ar_older = round(total_ar_received - total_ar_same_day, 2)
 
     expenses_raw = await db.expenses.find({"branch_id": branch_id, "date": date, "voided": {"$ne": True}}, {"_id": 0}).to_list(500)
     expenses = []
@@ -1839,7 +1901,9 @@ async def close_day(data: dict, user=Depends(get_current_user)):
     ), 2)
     net_fund_transfers = round(capital_to_cashier + safe_to_cashier - cashier_to_safe, 2)
 
-    total_cash_in = total_cash_sales + partial_total + total_cash_ar + total_split_cash
+    # CLOSE WIZARD REFACTOR (Feb 2026): partial_total dropped — same-day
+    # partial-sale cash legs are now part of total_cash_ar.
+    total_cash_in = total_cash_sales + total_cash_ar + total_split_cash
     expected_counter = round(starting_float + total_cash_in + net_fund_transfers - total_cashier_expenses, 2)
 
     actual_cash = float(data.get("actual_cash", 0))
@@ -1897,6 +1961,8 @@ async def close_day(data: dict, user=Depends(get_current_user)):
         "total_partial_cash": partial_total,
         "credit_collections": credit_collections,
         "total_ar_received": total_ar_received,
+        "total_ar_same_day": total_ar_same_day,
+        "total_ar_older": total_ar_older,
         "total_cash_ar": total_cash_ar,
         "total_digital_ar": total_digital_ar,
         "total_expenses": total_expenses,
@@ -2099,21 +2165,21 @@ async def batch_close_days(data: dict, user=Depends(get_current_user)):
     partial_total = round(sum(float(inv.get("amount_paid", 0)) for inv in partial_invoices), 2)
 
     # AR collections across all dates
-    # Iter 242 FIX: Include today-dated interest/penalty invoice payments
-    # (same bug as preview/close_day — same-day interest payments were dropped).
+    # CLOSE WIZARD REFACTOR (Feb 2026): include ALL payments dated within
+    # the batch — same-day partial-sale cash legs and same-day extra
+    # payments. The expanded `total_cash_ar` subsumes `partial_total`,
+    # which is dropped from the cash_in math below.
     ar_pipeline = [
-        {"$match": {"branch_id": branch_id, "status": {"$ne": "voided"},
-                    "$or": [
-                        {"order_date": {"$nin": dates}},
-                        {"sale_type": {"$in": ["interest_charge", "penalty_charge"]}},
-                    ]}},
+        {"$match": {"branch_id": branch_id, "status": {"$ne": "voided"}}},
         {"$unwind": "$payments"},
         {"$match": {
             "payments.date": date_filter,
             "payments.voided": {"$ne": True},
         }},
         {"$project": {"_id": 0, "customer_name": 1, "invoice_number": 1,
-                      "sale_type": 1, "balance": 1, "payment": "$payments"}}
+                      "sale_type": 1, "balance": 1, "order_date": 1,
+                      "payment_type": 1, "grand_total": 1,
+                      "payment": "$payments"}}
     ]
     ar_raw = await db.invoices.aggregate(ar_pipeline).to_list(500)
     credit_collections = []
@@ -2129,10 +2195,16 @@ async def batch_close_days(data: dict, user=Depends(get_current_user)):
             interest_paid = float(pmt.get("applied_to_interest", 0))
             penalty_paid = float(pmt.get("applied_to_penalty", 0))
             principal_paid = float(pmt.get("applied_to_principal", amount - interest_paid - penalty_paid))
+        order_date_inv = p.get("order_date", "")
+        is_same_day_batch = order_date_inv in dates
         credit_collections.append({
             "customer": p.get("customer_name", ""),
             "invoice": p.get("invoice_number", ""),
             "sale_type": sale_type,
+            "order_date": order_date_inv,
+            "is_same_day": is_same_day_batch,
+            "payment_type_invoice": p.get("payment_type", ""),
+            "invoice_total": round(float(p.get("grand_total", 0)), 2),
             "balance_before": round(float(p.get("balance", 0)) + amount, 2),
             "interest_paid": round(interest_paid, 2),
             "penalty_paid": round(penalty_paid, 2),
@@ -2211,7 +2283,9 @@ async def batch_close_days(data: dict, user=Depends(get_current_user)):
     ), 2)
     net_fund_transfers = round(capital_to_cashier + safe_to_cashier - cashier_to_safe_ft, 2)
 
-    total_cash_in = total_cash_sales + partial_total + total_cash_ar + total_split_cash
+    # CLOSE WIZARD REFACTOR (Feb 2026): partial_total dropped — same-day
+    # partial-sale cash legs are now part of total_cash_ar.
+    total_cash_in = total_cash_sales + total_cash_ar + total_split_cash
     expected_counter = round(starting_float + total_cash_in + net_fund_transfers - total_cashier_expenses, 2)
     over_short = round(actual_cash - expected_counter, 2)
 

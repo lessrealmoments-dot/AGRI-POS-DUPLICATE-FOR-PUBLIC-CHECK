@@ -27,9 +27,9 @@ import ExpenseDetailModal from '../components/ExpenseDetailModal';
 import CalcInput from '../components/CalcInput';
 
 const STEPS = [
-  { id: 1, title: 'Sales Log',        icon: Receipt,      desc: 'Verify all cash & credit sales' },
-  { id: 2, title: 'Customer Credits', icon: CreditCard,   desc: 'Credit sales, cashouts & farm services' },
-  { id: 3, title: 'AR Payments',      icon: Banknote,     desc: 'Payments received on existing credit' },
+  { id: 1, title: 'Cash Sales Today', icon: Receipt,      desc: 'Cash, digital & split sales (credit excluded)' },
+  { id: 2, title: 'Customer Credit Generated Today', icon: CreditCard,   desc: 'Credit & partial-credit sales created today' },
+  { id: 3, title: 'AR / Credit Payments Today', icon: Banknote,     desc: 'Same-day & older credit payments received today' },
   { id: 4, title: 'Expenses',         icon: ReceiptText,  desc: 'All expenses recorded today' },
   { id: 5, title: 'Actual Count',       icon: Calculator,   desc: 'Count the actual funds in the operating fund' },
   { id: 6, title: 'Fund Allocation',  icon: Wallet,       desc: 'Distribute to vault and opening float' },
@@ -946,9 +946,13 @@ export default function CloseWizardPage() {
         </CardHeader>
         <CardContent>
 
-          {/* ── STEP 1: Sales Log (non-credit only — credit is in Step 2) ── */}
+          {/* ── STEP 1: Cash Sales Today (excludes credit & partial-credit) ── */}
           {step === 1 && (
             <div className="space-y-3">
+              {/* Audit legend — explains where credit/partial flows are shown */}
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600 leading-relaxed" data-testid="step1-credit-legend">
+                <strong className="text-slate-700">Cash Sales Today.</strong> Credit and partial-credit sales are shown under <em>Customer Credit Generated Today</em>. Payments received from those credits are shown under <em>AR / Credit Payments Today</em>.
+              </div>
               {/* Pending stock releases warning */}
               {preview?.pending_stock_releases?.pending_invoice_count > 0 && (
                 <div className={`rounded-lg border px-4 py-3 flex items-start gap-3 ${
@@ -1000,10 +1004,12 @@ export default function CloseWizardPage() {
                 const CASH_METHODS = new Set(['cash', 'check', 'cheque', 'credit', 'partial', 'split']);
                 const isDigital = (pm) => !CASH_METHODS.has(pm);
 
-                // Filter out full-credit entries — they're shown in Step 2 (Customer Credits)
+                // Filter out credit AND partial entries — partial cash legs are
+                // now attributed to AR / Credit Payments Today (Step 3), and
+                // credit sales are shown in Customer Credit Generated Today (Step 2).
                 const nonCreditEntries = (dailyLog?.entries || []).filter(e => {
                   const pm = (e.payment_method || 'cash').toLowerCase();
-                  return pm !== 'credit';
+                  return pm !== 'credit' && pm !== 'partial';
                 });
                 // Compute running total — includes ALL non-credit sales (cash + digital)
                 // For partial entries, only count the cash portion
@@ -1063,7 +1069,7 @@ export default function CloseWizardPage() {
                           <span className="text-violet-500 text-xs">(includes {formatPHP(totalDigital)} digital)</span>
                         )}
                         {dailyLog?.summary?.by_payment_method && Object.entries(dailyLog.summary.by_payment_method)
-                          .filter(([method]) => method.toLowerCase() !== 'credit')
+                          .filter(([method]) => method.toLowerCase() !== 'credit' && method.toLowerCase() !== 'partial')
                           .map(([method, d]) => (
                             <span key={method} className="text-slate-400 capitalize">{method}: <strong className="text-slate-600">{formatPHP(d.total)}</strong> <span className="text-[10px]">({d.count})</span></span>
                         ))}
@@ -1220,34 +1226,60 @@ export default function CloseWizardPage() {
             </div>
           )}
 
-          {/* ── STEP 2: Customer Credits ── */}
+          {/* ── STEP 2: Customer Credit Generated Today ── */}
           {step === 2 && (
             <div className="space-y-3">
               <LateEncodedCarryover branchId={currentBranch?.id} />
               <div className="flex items-center justify-between mb-1">
-                <p className="text-sm text-slate-500">Credit invoices with per-order breakdown and payment status.</p>
+                <p className="text-sm text-slate-500">Credit & partial-credit invoices created today — full audit context with payment status.</p>
                 <Button size="sm" variant="outline" onClick={() => window.open('/sales-new', '_blank')}>
                   <ExternalLink size={13} className="mr-1" /> Add Credit Sale
                 </Button>
               </div>
               <ScrollArea className="h-[320px]">
                 <div className="space-y-2">
-                  {(dailyLog?.credit_invoices || []).map((inv, idx) => (
+                  {(dailyLog?.credit_invoices || []).map((inv, idx) => {
+                    const gt = parseFloat(inv.grand_total || 0);
+                    const bal = parseFloat(inv.balance || 0);
+                    const paid = parseFloat(inv.amount_paid || 0);
+                    let statusLabel, statusClass;
+                    if (bal <= 0.005) {
+                      statusLabel = 'Fully Paid Same-Day';
+                      statusClass = 'bg-emerald-100 text-emerald-700';
+                    } else if (paid > 0) {
+                      statusLabel = 'Partially Paid';
+                      statusClass = 'bg-amber-100 text-amber-700';
+                    } else {
+                      statusLabel = 'Unpaid';
+                      statusClass = 'bg-red-100 text-red-700';
+                    }
+                    const typeLabel = inv.payment_type === 'partial' ? 'Partial Credit' : 'Full Credit';
+                    return (
                     <div key={idx} className="rounded-lg border border-amber-200 overflow-hidden" data-testid={`credit-invoice-${idx}`}>
-                      <div className="flex items-center justify-between px-4 py-2.5 bg-amber-50">
-                        <div>
-                          <p className="font-semibold text-sm">{inv.customer_id ? <button onClick={() => openCustStmt(inv.customer_id, inv.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{inv.customer_name}</button> : inv.customer_name}</p>
-                          <p className="text-xs text-slate-400">
-                            <button className="text-blue-600 hover:underline font-mono" onClick={() => openDetailModal(inv.invoice_number)}>{inv.invoice_number}</button> · {inv.payment_type}
-                            {inv.sale_type && !['credit','walk_in'].includes(inv.sale_type) && ` · ${inv.sale_type.replace(/_/g, ' ')}`}
-                          </p>
+                      <div className="px-4 py-2.5 bg-amber-50">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <p className="font-semibold text-sm">{inv.customer_id ? <button onClick={() => openCustStmt(inv.customer_id, inv.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{inv.customer_name}</button> : inv.customer_name}</p>
+                            <p className="text-xs text-slate-500 flex items-center gap-1.5 flex-wrap">
+                              <button className="text-blue-600 hover:underline font-mono" onClick={() => openDetailModal(inv.invoice_number)}>{inv.invoice_number}</button>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-medium">{typeLabel}</span>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${statusClass}`} data-testid={`credit-status-${idx}`}>{statusLabel}</span>
+                              {inv.sale_type && !['credit','walk_in'].includes(inv.sale_type) && <span className="text-slate-400">· {inv.sale_type.replace(/_/g, ' ')}</span>}
+                            </p>
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <p className="font-mono font-bold text-amber-700">{formatPHP(inv.balance || inv.grand_total)}</p>
-                          <div className="text-[10px] space-x-2">
-                            {(inv.amount_paid || 0) > 0 && <span className="text-emerald-600">Paid: {formatPHP(inv.amount_paid)}</span>}
-                            {(inv.amount_paid || 0) > 0 && <span className="text-slate-400">of {formatPHP(inv.grand_total)}</span>}
-                            {(inv.balance || 0) === 0 && <span className="text-emerald-600 font-semibold">FULLY PAID</span>}
+                        <div className="grid grid-cols-3 gap-2 mt-2 text-xs">
+                          <div>
+                            <p className="text-[10px] uppercase text-slate-500 font-semibold">Invoice Total</p>
+                            <p className="font-mono font-bold text-slate-700">{formatPHP(gt)}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] uppercase text-slate-500 font-semibold">Paid Today</p>
+                            <p className="font-mono font-bold text-emerald-700">{formatPHP(paid)}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] uppercase text-slate-500 font-semibold">Remaining</p>
+                            <p className="font-mono font-bold text-amber-700">{formatPHP(bal)}</p>
                           </div>
                         </div>
                       </div>
@@ -1267,7 +1299,8 @@ export default function CloseWizardPage() {
                         </div>
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
 
                   {(report?.ar_credits_today || []).length > 0 && (
                     <div>
@@ -1294,7 +1327,7 @@ export default function CloseWizardPage() {
               </ScrollArea>
               <Separator />
               <div className="flex justify-between text-sm font-semibold px-1">
-                <span>Total Credit Extended Today</span>
+                <span>Total Credit Generated Today (Outstanding)</span>
                 <span className="text-amber-700">{formatPHP(r2((dailyLog?.summary?.total_credit || 0) + (report?.total_ar_credits_today || 0)))}</span>
               </div>
             </div>
@@ -1304,7 +1337,7 @@ export default function CloseWizardPage() {
           {step === 3 && (
             <div className="space-y-3">
               <div className="flex items-center justify-between mb-1">
-                <p className="text-sm text-slate-500">Payments received today on existing credit accounts.</p>
+                <p className="text-sm text-slate-500">All credit/AR payments received today — same-day partials and older balances.</p>
                 <div className="flex items-center gap-3">
                   {(preview?.ar_discount_today || 0) > 0 && (
                     <span className="text-xs text-blue-600 flex items-center gap-1">
@@ -1333,8 +1366,40 @@ export default function CloseWizardPage() {
                 </div>
               )}
 
-              <ScrollArea className="h-[240px] rounded-lg border border-slate-200">
-                <table className="w-full text-sm">
+              {(() => {
+                const allPayments = (preview?.ar_payments || []).filter(p => p.fund_source !== 'discount');
+                const sameDay = allPayments.filter(p => p.is_same_day);
+                const older = allPayments.filter(p => !p.is_same_day);
+                const sumSameDay = sameDay.reduce((s, p) => s + (p.amount_paid || 0), 0);
+                const sumOlder = older.reduce((s, p) => s + (p.amount_paid || 0), 0);
+
+                const renderRow = (p, i, group) => (
+                  <tr key={`${group}-${i}`} className="border-b border-slate-50 hover:bg-slate-50/50">
+                    <td className="px-3 py-2">
+                      <p className="font-medium flex items-center gap-1.5">
+                        {p.customer_id ? <button onClick={() => openCustStmt(p.customer_id, p.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{p.customer_name}</button> : p.customer_name}
+                        {p.is_initial_partial && (
+                          <span className="text-[9px] px-1 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium" data-testid={`initial-partial-${i}`}>INITIAL</span>
+                        )}
+                      </p>
+                      <p className="text-xs text-slate-400 font-mono"><button className="text-blue-600 hover:underline" onClick={() => openDetailModal(p.invoice_number)}>{p.invoice_number}</button></p>
+                    </td>
+                    <td className="px-3 py-2 text-xs text-slate-600">{p.method || 'Cash'}</td>
+                    <td className="px-3 py-2 text-right font-mono text-xs">{formatPHP(p.balance_before)}</td>
+                    <td className="px-3 py-2 text-right font-mono text-xs text-amber-600">{p.interest_paid > 0 ? formatPHP(p.interest_paid) : '—'}</td>
+                    <td className="px-3 py-2 text-right font-mono text-xs text-red-500">{p.penalty_paid > 0 ? formatPHP(p.penalty_paid) : '—'}</td>
+                    <td className="px-3 py-2 text-right font-mono font-bold text-blue-700">{formatPHP(p.amount_paid)}</td>
+                    <td className="px-3 py-2 text-right font-mono text-xs">{formatPHP(p.remaining_balance)}</td>
+                    <td className="px-3 py-2">
+                      <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[10px] text-blue-500"
+                        onClick={() => { setPmtDialog({ open: true, invoice: p }); setPmtAmount(''); }}>
+                        + Pay
+                      </Button>
+                    </td>
+                  </tr>
+                );
+
+                const tableHead = (
                   <thead className="sticky top-0 bg-slate-50 border-b border-slate-200">
                     <tr className="text-xs uppercase text-slate-500">
                       <th className="px-3 py-2 text-left">Customer / Invoice</th>
@@ -1347,32 +1412,67 @@ export default function CloseWizardPage() {
                       <th className="px-3 py-2 w-10"></th>
                     </tr>
                   </thead>
-                  <tbody>
-                    {(preview?.ar_payments || []).filter(p => p.fund_source !== 'discount').length === 0
-                      ? <tr><td colSpan={8} className="text-center py-8 text-slate-400">No AR payments received today</td></tr>
-                      : (preview?.ar_payments || []).filter(p => p.fund_source !== 'discount').map((p, i) => (
-                      <tr key={i} className="border-b border-slate-50 hover:bg-slate-50/50">
-                        <td className="px-3 py-2">
-                          <p className="font-medium">{p.customer_id ? <button onClick={() => openCustStmt(p.customer_id, p.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{p.customer_name}</button> : p.customer_name}</p>
-                          <p className="text-xs text-slate-400 font-mono"><button className="text-blue-600 hover:underline" onClick={() => openDetailModal(p.invoice_number)}>{p.invoice_number}</button></p>
-                        </td>
-                        <td className="px-3 py-2 text-xs text-slate-600">{p.method || 'Cash'}</td>
-                        <td className="px-3 py-2 text-right font-mono text-xs">{formatPHP(p.balance_before)}</td>
-                        <td className="px-3 py-2 text-right font-mono text-xs text-amber-600">{p.interest_paid > 0 ? formatPHP(p.interest_paid) : '—'}</td>
-                        <td className="px-3 py-2 text-right font-mono text-xs text-red-500">{p.penalty_paid > 0 ? formatPHP(p.penalty_paid) : '—'}</td>
-                        <td className="px-3 py-2 text-right font-mono font-bold text-blue-700">{formatPHP(p.amount_paid)}</td>
-                        <td className="px-3 py-2 text-right font-mono text-xs">{formatPHP(p.remaining_balance)}</td>
-                        <td className="px-3 py-2">
-                          <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[10px] text-blue-500"
-                            onClick={() => { setPmtDialog({ open: true, invoice: p }); setPmtAmount(''); }}>
-                            + Pay
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </ScrollArea>
+                );
+
+                if (allPayments.length === 0) {
+                  return (
+                    <ScrollArea className="h-[240px] rounded-lg border border-slate-200">
+                      <table className="w-full text-sm">
+                        {tableHead}
+                        <tbody>
+                          <tr><td colSpan={8} className="text-center py-8 text-slate-400">No credit payments received today</td></tr>
+                        </tbody>
+                      </table>
+                    </ScrollArea>
+                  );
+                }
+
+                return (
+                  <div className="space-y-3">
+                    {/* Same-Day Credit Payments */}
+                    <div className="rounded-lg border border-emerald-200 overflow-hidden" data-testid="same-day-credit-payments">
+                      <div className="px-3 py-2 bg-emerald-50 flex items-center justify-between">
+                        <p className="text-xs font-bold uppercase tracking-wide text-emerald-700 flex items-center gap-1.5">
+                          Same-Day Credit Payments
+                          <span className="text-[10px] font-medium text-emerald-600 normal-case">· payments on credits created today</span>
+                        </p>
+                        <span className="text-xs font-mono text-emerald-700 font-semibold">{formatPHP(sumSameDay)} <span className="text-[10px] text-emerald-500">({sameDay.length})</span></span>
+                      </div>
+                      <ScrollArea className="max-h-[200px]">
+                        <table className="w-full text-sm">
+                          {tableHead}
+                          <tbody>
+                            {sameDay.length === 0
+                              ? <tr><td colSpan={8} className="text-center py-4 text-slate-400 text-xs">No same-day payments</td></tr>
+                              : sameDay.map((p, i) => renderRow(p, i, 'sd'))}
+                          </tbody>
+                        </table>
+                      </ScrollArea>
+                    </div>
+
+                    {/* Older Credit Payments */}
+                    <div className="rounded-lg border border-blue-200 overflow-hidden" data-testid="older-credit-payments">
+                      <div className="px-3 py-2 bg-blue-50 flex items-center justify-between">
+                        <p className="text-xs font-bold uppercase tracking-wide text-blue-700 flex items-center gap-1.5">
+                          Older Credit Payments
+                          <span className="text-[10px] font-medium text-blue-600 normal-case">· payments on prior-day credit invoices</span>
+                        </p>
+                        <span className="text-xs font-mono text-blue-700 font-semibold">{formatPHP(sumOlder)} <span className="text-[10px] text-blue-500">({older.length})</span></span>
+                      </div>
+                      <ScrollArea className="max-h-[200px]">
+                        <table className="w-full text-sm">
+                          {tableHead}
+                          <tbody>
+                            {older.length === 0
+                              ? <tr><td colSpan={8} className="text-center py-4 text-slate-400 text-xs">No older-credit payments</td></tr>
+                              : older.map((p, i) => renderRow(p, i, 'old'))}
+                          </tbody>
+                        </table>
+                      </ScrollArea>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Interest / Penalty Invoices Created Today */}
               {(preview?.interest_invoices_today || []).length > 0 && (
@@ -1701,16 +1801,20 @@ export default function CloseWizardPage() {
                     <p className="text-xl font-bold font-mono text-teal-700">{formatPHP(preview?.total_split_cash || 0)}</p>
                   </div>
                 )}
-                <div className="p-3 rounded-lg bg-blue-50 border border-blue-200">
-                  <p className="text-xs text-blue-500 uppercase font-medium mb-1">Partial Cash Received</p>
-                  <p className="text-xl font-bold font-mono text-blue-700">{formatPHP(preview?.total_partial_cash || 0)}</p>
-                </div>
                 <div className="p-3 rounded-lg bg-indigo-50 border border-indigo-200">
-                  <p className="text-xs text-indigo-500 uppercase font-medium mb-1">AR Cash Payments</p>
+                  <p className="text-xs text-indigo-500 uppercase font-medium mb-1">AR / Credit Payments Today</p>
                   <p className="text-xl font-bold font-mono text-indigo-700">{formatPHP(preview?.total_cash_ar || preview?.total_ar_received || 0)}</p>
-                  {(preview?.total_digital_ar || 0) > 0 && (
-                    <p className="text-[10px] text-indigo-400 mt-0.5">+ {formatPHP(preview.total_digital_ar)} digital AR (e-wallet)</p>
-                  )}
+                  <div className="text-[10px] text-indigo-500 mt-0.5 space-y-0.5">
+                    {(preview?.total_ar_same_day || 0) > 0 && (
+                      <p>Same-day: {formatPHP(preview.total_ar_same_day)}</p>
+                    )}
+                    {(preview?.total_ar_older || 0) > 0 && (
+                      <p>Older: {formatPHP(preview.total_ar_older)}</p>
+                    )}
+                    {(preview?.total_digital_ar || 0) > 0 && (
+                      <p className="text-indigo-400">+ {formatPHP(preview.total_digital_ar)} digital (e-wallet)</p>
+                    )}
+                  </div>
                 </div>
                 {(preview?.net_fund_transfers || 0) !== 0 && (
                   <div className={`p-3 rounded-lg border ${preview.net_fund_transfers > 0 ? 'bg-cyan-50 border-cyan-200' : 'bg-orange-50 border-orange-200'}`}>
@@ -1854,8 +1958,13 @@ export default function CloseWizardPage() {
                   {(preview?.total_split_cash || 0) > 0 && (
                     <div className="flex justify-between"><span className="text-teal-600">+ Split Cash Portion</span><span className="font-mono font-semibold text-teal-700">{formatPHP(preview?.total_split_cash || 0)}</span></div>
                   )}
-                  <div className="flex justify-between"><span className="text-blue-600">+ Partial Cash Received</span><span className="font-mono text-blue-700">{formatPHP(preview?.total_partial_cash || 0)}</span></div>
-                  <div className="flex justify-between"><span className="text-indigo-600">+ AR Cash Payments</span><span className="font-mono text-indigo-700">{formatPHP(preview?.total_cash_ar ?? preview?.total_ar_received ?? 0)}</span></div>
+                  <div className="flex justify-between"><span className="text-indigo-600">+ AR / Credit Payments Today</span><span className="font-mono font-semibold text-indigo-700">{formatPHP(preview?.total_cash_ar ?? preview?.total_ar_received ?? 0)}</span></div>
+                  {(preview?.total_ar_same_day || 0) > 0 && (
+                    <div className="flex justify-between text-xs"><span className="text-emerald-500 pl-3">↳ same-day partials & top-ups</span><span className="font-mono text-emerald-600">{formatPHP(preview.total_ar_same_day)}</span></div>
+                  )}
+                  {(preview?.total_ar_older || 0) > 0 && (
+                    <div className="flex justify-between text-xs"><span className="text-blue-500 pl-3">↳ older credit payments</span><span className="font-mono text-blue-600">{formatPHP(preview.total_ar_older)}</span></div>
+                  )}
                   {(preview?.total_digital_ar || 0) > 0 && (
                     <div className="flex justify-between text-xs"><span className="text-indigo-400 pl-3">AR Digital (e-wallet, not in drawer)</span><span className="font-mono text-indigo-400">{formatPHP(preview?.total_digital_ar || 0)}</span></div>
                   )}
@@ -1989,12 +2098,12 @@ export default function CloseWizardPage() {
                 </div>
               )}
 
-              {/* Z-Report: AR Cash Payments — Detailed */}
+              {/* Z-Report: AR / Credit Payments Today — Detailed (split by same-day vs older) */}
               {(preview?.ar_payments || []).filter(p => p.fund_source !== 'discount').length > 0 && (
                 <div className="rounded-xl border border-indigo-200 overflow-hidden" data-testid="z-ar-payments">
                   <div className="px-4 py-2 bg-indigo-50 flex items-center justify-between flex-wrap gap-2">
                     <div className="flex items-center gap-3">
-                      <p className="text-xs font-bold uppercase tracking-wider text-indigo-600">AR Collections Today</p>
+                      <p className="text-xs font-bold uppercase tracking-wider text-indigo-600">AR / Credit Payments Today</p>
                       {/* Method breakdown chips */}
                       {preview?.ar_payment_by_method && Object.entries(preview.ar_payment_by_method).map(([m, v]) => (
                         <span key={m} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">
@@ -2004,23 +2113,51 @@ export default function CloseWizardPage() {
                     </div>
                     <span className="font-bold font-mono text-indigo-700 text-sm">{formatPHP((preview?.ar_payments || []).filter(p => p.fund_source !== 'discount').reduce((s, p) => s + p.amount_paid, 0))}</span>
                   </div>
-                  <div className="divide-y divide-indigo-100">
-                    {preview.ar_payments.filter(p => p.fund_source !== 'discount').map((p, i) => (
-                      <div key={i} className="px-4 py-2 flex items-center justify-between text-sm">
-                        <div>
+                  {(() => {
+                    const all = preview.ar_payments.filter(p => p.fund_source !== 'discount');
+                    const sd = all.filter(p => p.is_same_day);
+                    const od = all.filter(p => !p.is_same_day);
+                    const renderRow = (p, i, key) => (
+                      <div key={`${key}-${i}`} className="px-4 py-2 flex items-center justify-between text-sm">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-medium text-slate-800">{p.customer_id ? <button onClick={() => openCustStmt(p.customer_id, p.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{p.customer_name}</button> : p.customer_name}</span>
-                          <button className="text-xs text-blue-600 hover:underline font-mono ml-2" onClick={() => openDetailModal(p.invoice_number)}>{p.invoice_number}</button>
-                          <span className={`ml-2 text-[10px] px-1.5 py-0.5 rounded font-medium ${p.fund_source === 'cashier' ? 'bg-emerald-100 text-emerald-700' : 'bg-violet-100 text-violet-700'}`}>
+                          <button className="text-xs text-blue-600 hover:underline font-mono" onClick={() => openDetailModal(p.invoice_number)}>{p.invoice_number}</button>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${p.fund_source === 'cashier' ? 'bg-emerald-100 text-emerald-700' : 'bg-violet-100 text-violet-700'}`}>
                             {p.method || (p.fund_source === 'cashier' ? 'Cash' : 'Digital')}
                           </span>
+                          {p.is_initial_partial && (
+                            <span className="text-[9px] px-1 py-0.5 rounded bg-emerald-100 text-emerald-700 font-semibold">INITIAL</span>
+                          )}
                           {p.interest_paid > 0 && (
-                            <span className="ml-1 text-[10px] text-amber-600">INT: {formatPHP(p.interest_paid)}</span>
+                            <span className="text-[10px] text-amber-600">INT: {formatPHP(p.interest_paid)}</span>
                           )}
                         </div>
                         <span className="font-mono font-semibold text-indigo-700">{formatPHP(p.amount_paid)}</span>
                       </div>
-                    ))}
-                  </div>
+                    );
+                    return (
+                      <>
+                        {sd.length > 0 && (
+                          <div data-testid="z-ar-same-day">
+                            <div className="px-4 py-1 bg-emerald-50/60 text-[10px] uppercase font-bold text-emerald-700 flex items-center justify-between">
+                              <span>Same-Day Credit Payments</span>
+                              <span className="font-mono">{formatPHP(preview.total_ar_same_day || sd.reduce((s, p) => s + p.amount_paid, 0))}</span>
+                            </div>
+                            <div className="divide-y divide-indigo-100">{sd.map((p, i) => renderRow(p, i, 'sd'))}</div>
+                          </div>
+                        )}
+                        {od.length > 0 && (
+                          <div data-testid="z-ar-older">
+                            <div className="px-4 py-1 bg-blue-50/60 text-[10px] uppercase font-bold text-blue-700 flex items-center justify-between">
+                              <span>Older Credit Payments</span>
+                              <span className="font-mono">{formatPHP(preview.total_ar_older || od.reduce((s, p) => s + p.amount_paid, 0))}</span>
+                            </div>
+                            <div className="divide-y divide-indigo-100">{od.map((p, i) => renderRow(p, i, 'od'))}</div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                   {/* Discounts given on interest/penalty */}
                   {(preview?.ar_discount_today || 0) > 0 && (
                     <div className="px-4 py-2 bg-blue-50/60 border-t border-indigo-100 flex items-center justify-between text-xs">
@@ -2151,29 +2288,40 @@ export default function CloseWizardPage() {
                 );
               })()}
 
-              {/* Z-Report: Credit Extended Today — Detailed */}
+              {/* Z-Report: Customer Credit Generated Today — Detailed */}
               {(preview?.credit_sales_today || []).length > 0 && (
-                <div className="rounded-xl border border-amber-200 overflow-hidden">
+                <div className="rounded-xl border border-amber-200 overflow-hidden" data-testid="zreport-credit-generated">
                   <div className="px-4 py-2 bg-amber-50 flex items-center justify-between">
-                    <p className="text-xs font-bold uppercase tracking-wider text-amber-700">Credit Extended Today</p>
-                    <span className="font-bold font-mono text-amber-700 text-sm">{formatPHP(preview?.total_credit_today || 0)}</span>
+                    <p className="text-xs font-bold uppercase tracking-wider text-amber-700">Customer Credit Generated Today</p>
+                    <span className="text-[10px] text-amber-600 font-mono">
+                      Invoice total {formatPHP(preview?.total_credit_invoice_value || 0)} · Remaining {formatPHP(preview?.total_credit_today || 0)}
+                    </span>
                   </div>
                   <div className="divide-y divide-amber-100">
-                    {preview.credit_sales_today.map((inv, i) => (
-                      <div key={i} className="px-4 py-2 flex items-center justify-between text-sm">
-                        <div>
-                          <span className="font-medium text-slate-800">{inv.customer_id ? <button onClick={() => openCustStmt(inv.customer_id, inv.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{inv.customer_name}</button> : inv.customer_name}</span>
-                          <button className="text-xs text-blue-600 hover:underline font-mono ml-2" onClick={() => openDetailModal(inv.invoice_number)}>{inv.invoice_number}</button>
-                          <span className={`ml-2 text-[10px] px-1.5 py-0.5 rounded font-medium ${inv.payment_type === 'credit' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-600'}`}>
-                            {inv.payment_type === 'credit' ? 'Full Credit' : 'Partial'}
-                          </span>
+                    {preview.credit_sales_today.map((inv, i) => {
+                      const statusClass = inv.status === 'Fully Paid Same-Day' ? 'bg-emerald-100 text-emerald-700'
+                        : inv.status === 'Partially Paid' ? 'bg-amber-100 text-amber-700'
+                        : 'bg-red-100 text-red-700';
+                      return (
+                      <div key={i} className="px-4 py-2 text-sm">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-medium text-slate-800">{inv.customer_id ? <button onClick={() => openCustStmt(inv.customer_id, inv.customer_name)} className="hover:text-[#1A4D2E] hover:underline">{inv.customer_name}</button> : inv.customer_name}</span>
+                            <button className="text-xs text-blue-600 hover:underline font-mono" onClick={() => openDetailModal(inv.invoice_number)}>{inv.invoice_number}</button>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${inv.payment_type === 'credit' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-600'}`}>
+                              {inv.payment_type === 'credit' ? 'Full Credit' : 'Partial Credit'}
+                            </span>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${statusClass}`}>{inv.status || (inv.balance === 0 ? 'Fully Paid Same-Day' : 'Unpaid')}</span>
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <span className="font-mono font-semibold text-amber-700">{formatPHP(inv.balance)}</span>
-                          {inv.amount_paid > 0 && <span className="text-[10px] text-emerald-500 ml-1">(paid {formatPHP(inv.amount_paid)})</span>}
+                        <div className="grid grid-cols-3 gap-2 mt-1 text-xs">
+                          <div><span className="text-slate-500">Total: </span><span className="font-mono text-slate-700">{formatPHP(inv.grand_total)}</span></div>
+                          <div><span className="text-slate-500">Paid: </span><span className="font-mono text-emerald-700">{formatPHP(inv.paid_today ?? inv.amount_paid ?? 0)}</span></div>
+                          <div><span className="text-slate-500">Remaining: </span><span className="font-mono font-semibold text-amber-700">{formatPHP(inv.balance)}</span></div>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
