@@ -1,6 +1,39 @@
 # AgriBooks PRD
 
-## Iter 255 — Closed-Day Enforcement Universally (Feb 2026) ✅
+## Iter 256 — 8.5×11 Dot Matrix Print Format (May 2026) ✅
+
+### Problem
+The existing "Full Page (8.5×11)" format uses colours, gradients, shaded table rows, and Segoe UI / Arial fonts — all optimised for inkjet/laser printing. Users with Epson LX-310 dot matrix printers could not use this format; text came out faded or misaligned on continuous-feed paper.
+
+### What was built
+- **`/app/frontend/src/lib/PrintEngine.js`**:
+  - Added `dotMatrixCSS` block: `@page 8.5in 11in / 0.5in 0.75in`, Courier New monospace, all solid-black (`#000`), no gradients/backgrounds, `1px solid #000` borders on every table row, minimum 12px font, `page-break-inside:avoid` on rows.
+  - Added `qrImgTagDM()` — 120×120 QR (double the thermal size) with high-contrast URL (`color=000000&bgcolor=ffffff`), placed in its own `dm-qr-section` with supporting text fields.
+  - Added `orderSlipDotMatrix(data, biz, docCode)` — full Order Slip layout (header / doc title / meta / customer box / items table with discount column / totals / QR / signature / footer).
+  - Added `trustReceiptDotMatrix(data, biz, docCode)` — Charge Agreement layout (all credit/partial sales) with T&C block, tax disclaimer, QR, and tamper-evident signature stamp.
+  - Updated `generateHtml()` and `print()` switch statements to route `format: 'dot_matrix'` to the new functions; non-sales doc types fall back to `full_page`.
+- **`/app/frontend/src/components/ReferenceNumberPrompt.js`**:
+  - Print prompt now shows **4 options** in a logical 2+1+1 layout:
+    1. `8.5x11 Inkjet / Standard` (full_page — unchanged)
+    2. `8.5x11 Dot Matrix` (dot_matrix — new)
+    3. `Thermal 58mm` (thermal — unchanged)
+    4. `Send to Branch Printer` (unchanged)
+  - All existing `data-testid` attributes preserved; new button uses `data-testid="print-dot-matrix-btn"`.
+
+### Files changed
+- `/app/frontend/src/lib/PrintEngine.js` (+~250 lines — new CSS + 2 render functions + updated routing)
+- `/app/frontend/src/components/ReferenceNumberPrompt.js` (button layout only)
+
+### Existing formats
+- `thermal` (58mm) — **zero changes**
+- `full_page` (inkjet/laser) — **zero changes**
+
+### Verified
+ESLint clean (0 errors, 0 warnings). Smoke screenshot confirms app loads, hot-reload active.
+
+---
+
+
 
 ### Problem
 Sales had robust closed-day + late-encode + forward-cap protection. PO, Pay Supplier, Expenses, Receive Payment had NONE — users could pick any past/future date and silently bypass every Z-Report. Branch-transfer receive on a closed destination silently dropped off books.

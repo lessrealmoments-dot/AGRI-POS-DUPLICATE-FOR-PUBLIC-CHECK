@@ -113,22 +113,31 @@ export default function ReferenceNumberPrompt({ open, onClose, referenceNumber, 
                 <Button
                   data-testid="print-full-page-btn"
                   variant="outline"
-                  className="flex-1 h-11"
+                  className="flex-1 h-11 text-xs"
                   onClick={() => handlePrint('full_page')}
                   disabled={printing}
                 >
-                  <Printer size={16} className="mr-2" /> Full Page (8.5x11)
+                  <Printer size={15} className="mr-1.5" /> 8.5x11 Inkjet / Standard
                 </Button>
                 <Button
-                  data-testid="print-thermal-btn"
+                  data-testid="print-dot-matrix-btn"
                   variant="outline"
-                  className="flex-1 h-11"
-                  onClick={() => handlePrint('thermal')}
+                  className="flex-1 h-11 text-xs"
+                  onClick={() => handlePrint('dot_matrix')}
                   disabled={printing}
                 >
-                  <Printer size={16} className="mr-2" /> Thermal (58mm)
+                  <Printer size={15} className="mr-1.5" /> 8.5x11 Dot Matrix
                 </Button>
               </div>
+              <Button
+                data-testid="print-thermal-btn"
+                variant="outline"
+                className="w-full h-11"
+                onClick={() => handlePrint('thermal')}
+                disabled={printing}
+              >
+                <Printer size={16} className="mr-2" /> Thermal 58mm
+              </Button>
               <Button
                 data-testid="remote-print-btn"
                 variant="outline"

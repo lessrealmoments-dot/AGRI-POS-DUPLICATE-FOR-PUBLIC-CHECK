@@ -166,6 +166,129 @@ const fullPageCSS = `
   @media print { body { max-width: none; } }
 `;
 
+// ── Dot Matrix CSS (8.5×11 — Epson LX-310 optimised) ────────────────────────
+// Rules: monospace throughout, solid black text only, no colours/gradients/
+// shading, visible 1px solid borders on all table rows, minimum 11px body.
+const dotMatrixCSS = `
+  @page { size: 8.5in 11in; margin: 0.5in 0.75in; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 12px; line-height: 1.65; color: #000; background: #fff;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+
+  /* ── Company header ── */
+  .dm-header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 8px; }
+  .dm-biz-name { font-size: 18px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; }
+  .dm-biz-detail { font-size: 11px; line-height: 1.5; }
+
+  /* ── Document title banner ── */
+  .dm-doc-title {
+    text-align: center; font-size: 15px; font-weight: bold;
+    text-transform: uppercase; letter-spacing: 3px;
+    border-top: 1px solid #000; border-bottom: 1px solid #000;
+    padding: 6px 0; margin: 8px 0;
+  }
+
+  /* ── Meta grid (two-column key-value pairs) ── */
+  .dm-meta-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+  .dm-meta-table td { padding: 3px 4px; font-size: 12px; vertical-align: top; }
+  .dm-meta-table .dm-label { font-weight: bold; white-space: nowrap; width: 1%; padding-right: 6px; }
+
+  /* ── Customer / info box ── */
+  .dm-info-box {
+    border: 1px solid #000; padding: 7px 10px; margin: 8px 0;
+  }
+  .dm-info-box .dm-box-label {
+    font-size: 10px; font-weight: bold; text-transform: uppercase;
+    letter-spacing: 0.5px; margin-bottom: 3px; border-bottom: 1px solid #000; padding-bottom: 2px;
+  }
+  .dm-info-box .dm-box-name { font-size: 13px; font-weight: bold; }
+  .dm-info-box .dm-box-sub { font-size: 11px; }
+
+  /* ── Warning banner ── */
+  .dm-warning {
+    border: 2px solid #000; padding: 7px; margin: 8px 0;
+    text-align: center; font-weight: bold; font-size: 11px;
+  }
+
+  /* ── Items table ── */
+  .dm-items-table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+  .dm-items-table thead tr { border-bottom: 2px solid #000; }
+  .dm-items-table th {
+    border: 1px solid #000; padding: 6px 7px;
+    font-size: 11px; font-weight: bold; text-transform: uppercase;
+    text-align: left; background: #fff;
+  }
+  .dm-items-table th.r { text-align: right; }
+  .dm-items-table th.c { text-align: center; }
+  .dm-items-table td {
+    border: 1px solid #000; padding: 6px 7px;
+    font-size: 12px; vertical-align: top; word-break: break-word;
+  }
+  .dm-items-table td.r { text-align: right; }
+  .dm-items-table td.c { text-align: center; }
+  .dm-items-table td.strong { font-weight: bold; }
+
+  /* ── Totals block ── */
+  .dm-totals { margin-top: 6px; border-top: 2px solid #000; padding-top: 8px; }
+  .dm-tot-row {
+    display: flex; justify-content: flex-end; gap: 0;
+    font-size: 12px; padding: 2px 0;
+  }
+  .dm-tot-row .dm-tot-label {
+    min-width: 140px; text-align: right; font-weight: bold; padding-right: 16px;
+  }
+  .dm-tot-row .dm-tot-val {
+    min-width: 130px; text-align: right;
+  }
+  .dm-tot-row.dm-grand {
+    font-size: 14px; font-weight: bold;
+    border-top: 1px solid #000; border-bottom: 1px solid #000;
+    padding: 4px 0; margin: 4px 0;
+  }
+
+  /* ── QR section ── */
+  .dm-qr-section {
+    display: flex; align-items: flex-start; gap: 20px;
+    margin-top: 16px; border-top: 1px solid #000; padding-top: 12px;
+  }
+  .dm-qr-section img {
+    display: block; width: 120px; height: 120px;
+    image-rendering: pixelated; image-rendering: crisp-edges;
+    flex-shrink: 0;
+  }
+  .dm-qr-info { font-size: 11px; }
+  .dm-qr-info .dm-qr-code { font-size: 13px; font-weight: bold; letter-spacing: 1px; margin-bottom: 4px; }
+  .dm-qr-info .dm-qr-scan { font-size: 11px; font-weight: bold; margin-bottom: 6px; }
+  .dm-qr-info .dm-qr-sub { font-size: 11px; }
+
+  /* ── Signature row ── */
+  .dm-sig-row { display: flex; justify-content: space-between; gap: 24px; margin-top: 32px; }
+  .dm-sig-block { flex: 1; text-align: center; }
+  .dm-sig-line { border-bottom: 1px solid #000; height: 28px; margin-bottom: 4px; }
+  .dm-sig-label { font-size: 10px; font-weight: bold; text-transform: uppercase; }
+
+  /* ── Footer ── */
+  .dm-footer {
+    text-align: center; border-top: 2px solid #000;
+    margin-top: 18px; padding-top: 10px;
+  }
+  .dm-footer .dm-thankyou { font-size: 14px; font-weight: bold; margin-bottom: 4px; }
+  .dm-footer .dm-disclaimer { font-size: 9px; line-height: 1.45; }
+
+  /* ── Terms / Note boxes ── */
+  .dm-box { border: 1px solid #000; padding: 8px 10px; margin: 10px 0; font-size: 11px; line-height: 1.5; }
+  .dm-box strong { font-size: 12px; text-transform: uppercase; }
+
+  @media print {
+    body { max-width: none; }
+    .dm-items-table { page-break-inside: auto; }
+    .dm-items-table tr { page-break-inside: avoid; }
+  }
+`;
+
 // ── Build page header ───────────────────────────────────────────────────────
 function buildPageHeader(biz, docType, docNumber, date, extraLines = []) {
   let companyHtml = `<div class="biz-name">${biz.business_name || 'AgriBooks'}</div>`;
@@ -556,6 +679,266 @@ function statementFullPage(data, biz, docCode) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+//  DOT MATRIX DOCUMENTS (8.5×11 — Epson LX-310)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── Dot Matrix: shared company header ──────────────────────────────────────
+function buildDotMatrixHeader(biz) {
+  let html = `<div class="dm-header">`;
+  html += `<div class="dm-biz-name">${biz.business_name || 'AgriBooks'}</div>`;
+  if (biz.address) html += `<div class="dm-biz-detail">${biz.address}</div>`;
+  if (biz.phone) html += `<div class="dm-biz-detail">Tel: ${biz.phone}</div>`;
+  if (biz.tin) html += `<div class="dm-biz-detail">TIN: ${biz.tin}</div>`;
+  html += `</div>`;
+  return html;
+}
+
+// ── Dot Matrix: QR block (120×120, high contrast for LX-310) ───────────────
+function qrImgTagDM(code, inv) {
+  if (!code) return '';
+  const url = `${window.location.origin}/doc/${code}`;
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(url)}&margin=4&color=000000&bgcolor=ffffff`;
+  return `
+    <div class="dm-qr-section">
+      <img src="${qrUrl}" alt="QR Code" width="120" height="120" />
+      <div class="dm-qr-info">
+        <div class="dm-qr-code">${code}</div>
+        <div class="dm-qr-scan">Scan to view document</div>
+        ${inv.invoice_number ? `<div class="dm-qr-sub">Receipt No: ${inv.invoice_number}</div>` : ''}
+        ${inv.created_at || inv.order_date ? `<div class="dm-qr-sub">Date: ${fmtDate(inv.created_at || inv.order_date)}</div>` : ''}
+        ${inv.customer_name ? `<div class="dm-qr-sub">Customer: ${inv.customer_name}</div>` : ''}
+      </div>
+    </div>`;
+}
+
+// ── Order Slip — Dot Matrix ─────────────────────────────────────────────────
+function orderSlipDotMatrix(data, biz, docCode) {
+  const inv = data;
+  let html = buildDotMatrixHeader(biz);
+
+  html += `<div class="dm-doc-title">ORDER SLIP</div>`;
+
+  // Meta: receipt no, date, cashier, payment method
+  html += `<table class="dm-meta-table">`;
+  html += `<tr>
+    <td class="dm-label">Receipt No:</td><td>${inv.invoice_number || ''}</td>
+    <td class="dm-label">Date:</td><td>${fmtDateMaybeTime(inv.created_at || inv.order_date)}</td>
+  </tr>`;
+  html += `<tr>
+    <td class="dm-label">Cashier:</td><td>${inv.cashier_name || ''}</td>
+    <td class="dm-label">Payment:</td><td>${inv.payment_method || 'Cash'}</td>
+  </tr>`;
+  if (inv.release_mode === 'full') {
+    html += `<tr><td class="dm-label">Status:</td><td colspan="3"><strong>FULLY RELEASED</strong></td></tr>`;
+  } else if (inv.release_mode === 'partial') {
+    html += `<tr><td class="dm-label">Status:</td><td colspan="3"><strong>PARTIAL RELEASE</strong></td></tr>`;
+  }
+  html += `</table>`;
+
+  // Customer info (only when not walk-in)
+  if (inv.customer_name && inv.customer_name !== 'Walk-in') {
+    html += `<div class="dm-info-box">`;
+    html += `<div class="dm-box-label">Customer</div>`;
+    html += `<div class="dm-box-name">${inv.customer_name}</div>`;
+    if (inv.customer_address) html += `<div class="dm-box-sub">${inv.customer_address}</div>`;
+    if (inv.customer_phone) html += `<div class="dm-box-sub">Tel: ${inv.customer_phone}</div>`;
+    html += `</div>`;
+  }
+
+  if (inv.release_mode === 'partial') {
+    html += `<div class="dm-warning">** PARTIAL RELEASE — SCAN QR CODE BELOW TO RELEASE ITEMS **</div>`;
+  }
+
+  // Items table
+  const items = inv.items || [];
+  const hasDiscount = items.some(i => parseFloat(i.discount_amount) > 0);
+  html += `<table class="dm-items-table"><thead><tr>`;
+  html += `<th style="width:4%">#</th>`;
+  html += `<th>ITEM DESCRIPTION</th>`;
+  html += `<th class="c" style="width:7%">QTY</th>`;
+  html += `<th class="r" style="width:16%">UNIT PRICE</th>`;
+  if (hasDiscount) html += `<th class="r" style="width:12%">DISC</th>`;
+  html += `<th class="r" style="width:15%">LINE TOTAL</th>`;
+  html += `</tr></thead><tbody>`;
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const qty   = parseFloat(item.quantity) || 0;
+    const rate  = parseFloat(item.rate || item.unit_price || item.price) || 0;
+    const disc  = parseFloat(item.discount_amount) || 0;
+    const total = parseFloat(item.total) || (qty * rate - disc);
+    html += `<tr>`;
+    html += `<td class="c">${i + 1}</td>`;
+    html += `<td>${item.product_name || ''}</td>`;
+    html += `<td class="c">${qty}</td>`;
+    html += `<td class="r">${formatPHP(rate)}</td>`;
+    if (hasDiscount) html += `<td class="r">${disc > 0 ? formatPHP(disc) : '-'}</td>`;
+    html += `<td class="r strong">${formatPHP(total)}</td>`;
+    html += `</tr>`;
+  }
+  html += `</tbody></table>`;
+
+  // Totals
+  html += `<div class="dm-totals">`;
+  html += `<div class="dm-tot-row"><span class="dm-tot-label">Subtotal:</span><span class="dm-tot-val">${formatPHP(inv.subtotal)}</span></div>`;
+  if (parseFloat(inv.overall_discount) > 0) {
+    html += `<div class="dm-tot-row"><span class="dm-tot-label">Discount:</span><span class="dm-tot-val">- ${formatPHP(inv.overall_discount)}</span></div>`;
+  }
+  if (parseFloat(inv.freight) > 0) {
+    html += `<div class="dm-tot-row"><span class="dm-tot-label">Freight:</span><span class="dm-tot-val">${formatPHP(inv.freight)}</span></div>`;
+  }
+  html += `<div class="dm-tot-row dm-grand"><span class="dm-tot-label">GRAND TOTAL:</span><span class="dm-tot-val">${formatPHP(inv.grand_total)}</span></div>`;
+  if (parseFloat(inv.amount_paid) > 0 && inv.payment_type !== 'credit') {
+    html += `<div class="dm-tot-row"><span class="dm-tot-label">Amount Paid:</span><span class="dm-tot-val">${formatPHP(inv.amount_paid)}</span></div>`;
+    const change = (parseFloat(inv.amount_paid) || 0) - (parseFloat(inv.grand_total) || 0);
+    if (change > 0) {
+      html += `<div class="dm-tot-row"><span class="dm-tot-label">Change:</span><span class="dm-tot-val">${formatPHP(change)}</span></div>`;
+    }
+  }
+  if (inv.payment_type === 'credit' || parseFloat(inv.balance) > 0) {
+    html += `<div class="dm-tot-row dm-grand"><span class="dm-tot-label">BALANCE DUE:</span><span class="dm-tot-val">${formatPHP(inv.balance || inv.grand_total)}</span></div>`;
+  }
+  html += `</div>`;
+
+  // QR Code — placed after totals, before signature
+  html += qrImgTagDM(docCode, inv);
+
+  // Acknowledgment + signature
+  const today = fmtDate(new Date().toISOString());
+  html += `<div style="border-top:1px solid #000;margin-top:20px;padding-top:14px;">`;
+  html += `<p style="font-size:11px;margin-bottom:24px;line-height:1.5;">I acknowledge receipt of the items listed above in good physical condition and complete.</p>`;
+  html += `<div class="dm-sig-row">`;
+  html += `<div class="dm-sig-block"><div class="dm-sig-line"></div><div class="dm-sig-label">Customer Signature</div></div>`;
+  html += `<div class="dm-sig-block"><div class="dm-sig-line"></div><div class="dm-sig-label">Printed Name</div></div>`;
+  html += `<div class="dm-sig-block"><div class="dm-sig-line" style="display:flex;align-items:flex-end;justify-content:center;padding-bottom:2px;font-size:12px">${today}</div><div class="dm-sig-label">Date</div></div>`;
+  html += `</div></div>`;
+
+  // Footer
+  html += `<div class="dm-footer">`;
+  html += `<div class="dm-thankyou">Thank you for your business!</div>`;
+  html += `<div class="dm-disclaimer">${TAX_DISCLAIMER}</div>`;
+  html += `</div>`;
+
+  return html;
+}
+
+// ── Charge Agreement (Credit / Partial) — Dot Matrix ───────────────────────
+function trustReceiptDotMatrix(data, biz, docCode) {
+  const inv = data;
+  let html = buildDotMatrixHeader(biz);
+
+  html += `<div class="dm-doc-title">CHARGE AGREEMENT</div>`;
+
+  // Meta
+  html += `<table class="dm-meta-table">`;
+  html += `<tr>
+    <td class="dm-label">Receipt No:</td><td>${inv.invoice_number || ''}</td>
+    <td class="dm-label">Date:</td><td>${fmtDateMaybeTime(inv.created_at || inv.order_date)}</td>
+  </tr>`;
+  html += `<tr>
+    <td class="dm-label">Cashier:</td><td>${inv.cashier_name || ''}</td>
+    <td class="dm-label">Terms:</td><td>${inv.terms || 'COD'}</td>
+  </tr>`;
+  if (inv.due_date) {
+    html += `<tr><td class="dm-label">Due Date:</td><td colspan="3">${fmtDate(inv.due_date)}</td></tr>`;
+  }
+  if (inv.release_mode === 'full') {
+    html += `<tr><td class="dm-label">Status:</td><td colspan="3"><strong>FULLY RELEASED</strong></td></tr>`;
+  } else if (inv.release_mode === 'partial') {
+    html += `<tr><td class="dm-label">Status:</td><td colspan="3"><strong>PARTIAL RELEASE</strong></td></tr>`;
+  }
+  html += `</table>`;
+
+  // Customer box
+  html += `<div class="dm-info-box">`;
+  html += `<div class="dm-box-label">Customer</div>`;
+  html += `<div class="dm-box-name">${inv.customer_name || ''}</div>`;
+  if (inv.customer_address) html += `<div class="dm-box-sub">${inv.customer_address}</div>`;
+  if (inv.customer_phone) html += `<div class="dm-box-sub">Tel: ${inv.customer_phone}</div>`;
+  html += `</div>`;
+
+  if (inv.release_mode === 'partial') {
+    html += `<div class="dm-warning">** PARTIAL RELEASE — SCAN QR CODE BELOW TO RELEASE ITEMS **</div>`;
+  }
+
+  // Items table
+  const items = inv.items || [];
+  html += `<table class="dm-items-table"><thead><tr>`;
+  html += `<th style="width:4%">#</th>`;
+  html += `<th>ITEM DESCRIPTION</th>`;
+  html += `<th class="c" style="width:7%">QTY</th>`;
+  html += `<th class="r" style="width:16%">UNIT PRICE</th>`;
+  html += `<th class="r" style="width:15%">LINE TOTAL</th>`;
+  html += `</tr></thead><tbody>`;
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const qty   = parseFloat(item.quantity) || 0;
+    const rate  = parseFloat(item.rate || item.unit_price || item.price) || 0;
+    const total = parseFloat(item.total) || (qty * rate);
+    html += `<tr>`;
+    html += `<td class="c">${i + 1}</td>`;
+    html += `<td>${item.product_name || ''}</td>`;
+    html += `<td class="c">${qty}</td>`;
+    html += `<td class="r">${formatPHP(rate)}</td>`;
+    html += `<td class="r strong">${formatPHP(total)}</td>`;
+    html += `</tr>`;
+  }
+  html += `</tbody></table>`;
+
+  // Totals
+  html += `<div class="dm-totals">`;
+  html += `<div class="dm-tot-row"><span class="dm-tot-label">Subtotal:</span><span class="dm-tot-val">${formatPHP(inv.subtotal)}</span></div>`;
+  if (parseFloat(inv.overall_discount) > 0) {
+    html += `<div class="dm-tot-row"><span class="dm-tot-label">Discount:</span><span class="dm-tot-val">- ${formatPHP(inv.overall_discount)}</span></div>`;
+  }
+  html += `<div class="dm-tot-row dm-grand"><span class="dm-tot-label">GRAND TOTAL:</span><span class="dm-tot-val">${formatPHP(inv.grand_total)}</span></div>`;
+  if (parseFloat(inv.amount_paid) > 0) {
+    html += `<div class="dm-tot-row"><span class="dm-tot-label">Amount Paid:</span><span class="dm-tot-val">${formatPHP(inv.amount_paid)}</span></div>`;
+  }
+  if (parseFloat(inv.balance) > 0) {
+    html += `<div class="dm-tot-row dm-grand"><span class="dm-tot-label">BALANCE DUE:</span><span class="dm-tot-val">${formatPHP(inv.balance)}</span></div>`;
+  }
+  html += `</div>`;
+
+  // Terms & Conditions
+  const terms = (biz.trust_receipt_terms || '').replace('{business_name}', biz.business_name || '');
+  if (terms) {
+    html += `<div class="dm-box"><strong>Terms and Conditions</strong><br/>${terms}</div>`;
+  }
+
+  // Tax disclaimer
+  html += `<div style="border:1px solid #000;padding:7px;margin:8px 0;text-align:center;font-size:9px;line-height:1.45;">${TAX_DISCLAIMER}</div>`;
+
+  // QR Code
+  html += qrImgTagDM(docCode, inv);
+
+  // Signature block
+  const sigStampDM = (() => {
+    const t  = data.signature_verification_token || '';
+    const sa = data.signature_signed_at || '';
+    if (!t && !sa) return '';
+    const dt    = sa ? new Date(sa) : null;
+    const dtStr = dt ? dt.toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : '';
+    return `<div style="font-size:9px;text-align:center;margin-top:3px;">Signed ${dtStr}${t ? ` - v.${t}` : ''}</div>`;
+  })();
+
+  html += `<div style="border-top:1px solid #000;margin-top:20px;padding-top:14px;">`;
+  html += `<div class="dm-sig-row">`;
+  html += `<div class="dm-sig-block"><div class="dm-sig-line"></div><div class="dm-sig-label">Authorized Representative</div></div>`;
+  if (data.signature_url) {
+    html += `<div class="dm-sig-block"><img src="${data.signature_url}" alt="signature" style="max-width:80%;max-height:50px;display:block;margin:0 auto 2px;object-fit:contain"/><div class="dm-sig-line"></div><div class="dm-sig-label">Customer Signature</div>${sigStampDM}</div>`;
+  } else if (data.bypass_method) {
+    html += `<div class="dm-sig-block"><div style="margin:8px auto;font-size:10px;border:1px solid #000;padding:4px 8px;display:inline-block;">AUTHORIZED VIA MANAGER PIN</div><div class="dm-sig-label">Customer (Bypassed)</div>${sigStampDM}</div>`;
+  } else {
+    html += `<div class="dm-sig-block"><div class="dm-sig-line"></div><div class="dm-sig-label">Customer Signature &amp; Printed Name</div></div>`;
+  }
+  html += `</div></div>`;
+
+  return html;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 //  THERMAL DOCUMENTS (keep existing for 58mm printers)
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -736,14 +1119,20 @@ const PrintEngine = {
    * The HTML is passed to the native H10PPrinterPlugin which renders it to Bitmap.
    */
   generateHtml({ type, data, format = 'thermal', businessInfo = {}, docCode = '' }) {
-    const css = format === 'thermal' ? thermalCSS : fullPageCSS;
+    const css = format === 'thermal' ? thermalCSS
+              : format === 'dot_matrix' ? dotMatrixCSS
+              : fullPageCSS;
     let body = '';
     switch (type) {
       case 'order_slip':
-        body = format === 'thermal' ? orderSlipThermal(data, businessInfo, docCode) : orderSlipFullPage(data, businessInfo, docCode);
+        body = format === 'thermal'     ? orderSlipThermal(data, businessInfo, docCode)
+             : format === 'dot_matrix'  ? orderSlipDotMatrix(data, businessInfo, docCode)
+             :                           orderSlipFullPage(data, businessInfo, docCode);
         break;
       case 'trust_receipt':
-        body = format === 'thermal' ? trustReceiptThermal(data, businessInfo, docCode) : trustReceiptFullPage(data, businessInfo, docCode);
+        body = format === 'thermal'     ? trustReceiptThermal(data, businessInfo, docCode)
+             : format === 'dot_matrix'  ? trustReceiptDotMatrix(data, businessInfo, docCode)
+             :                           trustReceiptFullPage(data, businessInfo, docCode);
         break;
       case 'purchase_order':
         body = format === 'thermal' ? purchaseOrderThermal(data, businessInfo, docCode) : purchaseOrderFullPage(data, businessInfo, docCode);
@@ -761,7 +1150,9 @@ const PrintEngine = {
         body = statementFullPage(data, businessInfo, docCode);
         break;
       default:
-        body = format === 'thermal' ? orderSlipThermal(data, businessInfo, docCode) : orderSlipFullPage(data, businessInfo, docCode);
+        body = format === 'thermal'    ? orderSlipThermal(data, businessInfo, docCode)
+             : format === 'dot_matrix' ? orderSlipDotMatrix(data, businessInfo, docCode)
+             :                          orderSlipFullPage(data, businessInfo, docCode);
     }
     // No window.print() script — the native plugin handles printing
     // Viewport meta: forces CSS viewport = 384px so body width:100% fills the bitmap exactly
@@ -772,15 +1163,21 @@ const PrintEngine = {
   },
 
   print({ type, data, format = 'thermal', businessInfo = {}, docCode = '' }) {
-    const css = format === 'thermal' ? thermalCSS : fullPageCSS;
+    const css = format === 'thermal' ? thermalCSS
+              : format === 'dot_matrix' ? dotMatrixCSS
+              : fullPageCSS;
     let body = '';
 
     switch (type) {
       case 'order_slip':
-        body = format === 'thermal' ? orderSlipThermal(data, businessInfo, docCode) : orderSlipFullPage(data, businessInfo, docCode);
+        body = format === 'thermal'     ? orderSlipThermal(data, businessInfo, docCode)
+             : format === 'dot_matrix'  ? orderSlipDotMatrix(data, businessInfo, docCode)
+             :                           orderSlipFullPage(data, businessInfo, docCode);
         break;
       case 'trust_receipt':
-        body = format === 'thermal' ? trustReceiptThermal(data, businessInfo, docCode) : trustReceiptFullPage(data, businessInfo, docCode);
+        body = format === 'thermal'     ? trustReceiptThermal(data, businessInfo, docCode)
+             : format === 'dot_matrix'  ? trustReceiptDotMatrix(data, businessInfo, docCode)
+             :                           trustReceiptFullPage(data, businessInfo, docCode);
         break;
       case 'purchase_order':
         body = format === 'thermal' ? purchaseOrderThermal(data, businessInfo, docCode) : purchaseOrderFullPage(data, businessInfo, docCode);
@@ -798,7 +1195,9 @@ const PrintEngine = {
         body = statementFullPage(data, businessInfo, docCode);
         break;
       default:
-        body = format === 'thermal' ? orderSlipThermal(data, businessInfo, docCode) : orderSlipFullPage(data, businessInfo, docCode);
+        body = format === 'thermal'    ? orderSlipThermal(data, businessInfo, docCode)
+             : format === 'dot_matrix' ? orderSlipDotMatrix(data, businessInfo, docCode)
+             :                          orderSlipFullPage(data, businessInfo, docCode);
     }
 
     const winWidth = format === 'thermal' ? 400 : 900;
