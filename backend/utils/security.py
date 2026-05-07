@@ -20,6 +20,97 @@ QR_FAIL_LOCK_THRESHOLD   = 10  # lock the doc_code after this many failures
 QR_LOCK_WINDOW_MINUTES   = 15  # rolling window for failure counting
 QR_LOCK_DURATION_MINUTES = 15  # how long a lockout lasts after the last failure
 
+# Draft-QR-specific lockout (stricter — 3 wrong PINs → 3 min; 6 total → permanent disable)
+DRAFT_QR_FAIL_THRESHOLD   = 3   # wrong PINs before lockout
+DRAFT_QR_LOCK_MINUTES     = 3   # lockout duration in minutes
+DRAFT_QR_DISABLE_TOTAL    = 6   # total wrong PINs across all sessions → permanent disable
+
+
+async def check_draft_qr_lockout(doc_code: str) -> dict:
+    """
+    Draft-specific QR lockout: 3 wrong PINs → 3-min lock.
+    Counts all failures with action='update_draft' for this doc_code
+    since the last successful attempt.
+
+    Returns same shape as check_qr_lockout():
+      { locked, failure_count, retry_after, warn, attempts_remaining,
+        permanently_disabled }
+    """
+    from datetime import datetime, timezone, timedelta
+    window_start = (
+        datetime.now(timezone.utc) - timedelta(minutes=60)   # 1-hour rolling window
+    ).isoformat()
+
+    last_success = await db.pin_attempt_log.find_one(
+        {"doc_code": doc_code, "action": "update_draft", "success": True},
+        {"_id": 0, "attempted_at": 1},
+        sort=[("attempted_at", -1)],
+    )
+    count_from = max(window_start, last_success["attempted_at"] if last_success else window_start)
+
+    recent_failures = await db.pin_attempt_log.count_documents({
+        "doc_code":     doc_code,
+        "action":       "update_draft",
+        "success":      False,
+        "attempted_at": {"$gte": count_from},
+    })
+
+    # Lifetime failures check (for permanent disable)
+    lifetime_failures = await db.pin_attempt_log.count_documents({
+        "doc_code": doc_code,
+        "action":   "update_draft",
+        "success":  False,
+    })
+
+    attempts_remaining = max(0, DRAFT_QR_FAIL_THRESHOLD - recent_failures)
+    warn = recent_failures >= (DRAFT_QR_FAIL_THRESHOLD - 1)   # warn on last attempt
+
+    if lifetime_failures >= DRAFT_QR_DISABLE_TOTAL:
+        return {
+            "locked": True, "failure_count": recent_failures,
+            "retry_after": 0, "warn": True, "attempts_remaining": 0,
+            "permanently_disabled": True,
+        }
+
+    if recent_failures < DRAFT_QR_FAIL_THRESHOLD:
+        return {
+            "locked": False, "failure_count": recent_failures,
+            "retry_after": 0, "warn": warn,
+            "attempts_remaining": attempts_remaining,
+            "permanently_disabled": False,
+        }
+
+    # Locked — find most recent failure to compute unlock time
+    latest = await db.pin_attempt_log.find_one(
+        {"doc_code": doc_code, "action": "update_draft", "success": False,
+         "attempted_at": {"$gte": count_from}},
+        {"_id": 0, "attempted_at": 1},
+        sort=[("attempted_at", -1)],
+    )
+    if not latest:
+        return {"locked": False, "failure_count": recent_failures,
+                "retry_after": 0, "warn": True, "attempts_remaining": 0,
+                "permanently_disabled": False}
+
+    ts = latest["attempted_at"]
+    if ts.endswith("Z"):
+        ts = ts[:-1] + "+00:00"
+    latest_time = datetime.fromisoformat(ts)
+    if latest_time.tzinfo is None:
+        latest_time = latest_time.replace(tzinfo=timezone.utc)
+
+    unlock_time = latest_time + timedelta(minutes=DRAFT_QR_LOCK_MINUTES)
+    retry_after = max(0, int((unlock_time - datetime.now(timezone.utc)).total_seconds()))
+
+    if retry_after <= 0:
+        return {"locked": False, "failure_count": recent_failures,
+                "retry_after": 0, "warn": True, "attempts_remaining": 0,
+                "permanently_disabled": False}
+
+    return {"locked": True, "failure_count": recent_failures,
+            "retry_after": retry_after, "warn": True, "attempts_remaining": 0,
+            "permanently_disabled": False}
+
 
 async def log_failed_pin_attempt(user: dict, context: str, attempt_type: str, doc_id: str = "", doc_type: str = ""):
     """

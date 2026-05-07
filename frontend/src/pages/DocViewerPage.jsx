@@ -63,7 +63,236 @@ function LockoutBanner({ retryAfter, onExpired }) {
   );
 }
 
-// ── Web Payment Section — non-terminal payment via TOTP or staff login ─────────
+// ── Draft Adjust Panel — QR-based quantity editing for FOR PREPARATION orders ──
+function DraftAdjustPanel({ basic, docCode, onUpdated }) {
+  const php = v => `₱${(parseFloat(v)||0).toLocaleString('en-PH',{minimumFractionDigits:2})}`;
+  const [stage, setStage] = React.useState(basic.qr_edit_disabled ? 'disabled' : 'idle');
+  const [items, setItems] = React.useState(
+    (basic.items || []).map(item => ({ ...item, actual_qty: item.qty }))
+  );
+  const [pin, setPin] = React.useState('');
+  const [pinError, setPinError] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+  const [lockout, setLockout] = React.useState(null);
+  const [result, setResult] = React.useState(null);
+  const pinRef = React.useRef(null);
+
+  const changedItems = items.filter(it => it.actual_qty !== it.qty);
+  const newTotal = items.reduce((s, it) => s + (it.actual_qty * (parseFloat(it.price)||0)), 0);
+
+  const handleSave = async () => {
+    if (!pin.trim()) { setPinError('PIN is required'); return; }
+    setSaving(true); setPinError('');
+    try {
+      const res = await axios.post(`${BACKEND}/api/qr-actions/${docCode}/update_draft`, {
+        pin,
+        items: items.map(it => ({ product_id: it.product_id, actual_qty: it.actual_qty })),
+      });
+      setResult(res.data);
+      setStage('success');
+      if (onUpdated) onUpdated(res.data);
+    } catch (e) {
+      const detail = e.response?.data?.detail;
+      if (e.response?.status === 429 && detail?.locked) {
+        setLockout({ retryAfter: detail.retry_after });
+        setStage('pin');
+        setPinError('');
+        return;
+      }
+      if (detail?.permanently_disabled) {
+        setStage('disabled');
+        return;
+      }
+      const msg = typeof detail === 'object' ? detail.message : (detail || 'PIN verification failed');
+      const rem = detail?.attempts_remaining;
+      setPinError(rem !== undefined ? `${msg} — ${rem} attempt${rem!==1?'s':''} remaining` : msg);
+    } finally {
+      setSaving(false);
+      setPin('');
+    }
+  };
+
+  if (stage === 'disabled') return (
+    <div className="rounded-xl border-2 border-red-200 bg-red-50 p-5 space-y-2 text-center">
+      <AlertTriangle size={28} className="mx-auto text-red-400" />
+      <p className="font-semibold text-red-700 text-sm">QR Editing Disabled</p>
+      <p className="text-xs text-red-500 leading-relaxed">
+        This draft order's QR editing has been permanently disabled due to too many failed PIN attempts.
+        Please edit this order through the web portal.
+      </p>
+    </div>
+  );
+
+  if (stage === 'idle') return (
+    <div className="rounded-xl border border-amber-200 bg-amber-50 overflow-hidden">
+      <div className="px-5 py-3 bg-amber-100 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <FileEdit size={15} className="text-amber-700" />
+          <span className="font-semibold text-amber-800 text-sm">For Preparation</span>
+        </div>
+        <span className="text-xs text-amber-600 italic">Not yet paid</span>
+      </div>
+      <div className="px-5 py-4 space-y-3">
+        <p className="text-xs text-amber-700 leading-relaxed">
+          This order is saved for preparation. Tap <strong>Adjust Quantities</strong> to update actual quantities before finalizing.
+        </p>
+        <button
+          onClick={() => setStage('adjust')}
+          className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-95 transition-all text-white font-semibold text-sm flex items-center justify-center gap-2"
+          data-testid="adjust-qty-btn"
+        >
+          <FileEdit size={15} /> Adjust Quantities
+        </button>
+      </div>
+    </div>
+  );
+
+  if (stage === 'adjust') return (
+    <div className="rounded-xl border border-amber-200 bg-white overflow-hidden">
+      <div className="px-5 py-3 bg-amber-100 flex items-center gap-2 border-b border-amber-200">
+        <FileEdit size={15} className="text-amber-700" />
+        <span className="font-semibold text-amber-800 text-sm">Adjust Quantities</span>
+      </div>
+      <div className="divide-y divide-slate-100">
+        {items.map((item, i) => (
+          <div key={i} className="px-5 py-3 flex items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-slate-800 truncate">{item.name}</p>
+              <p className="text-xs text-slate-400">Ordered: {item.qty} × {php(item.price)}</p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-xs text-slate-400">Actual:</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={item.actual_qty}
+                onChange={e => {
+                  const copy = [...items];
+                  copy[i] = { ...copy[i], actual_qty: parseFloat(e.target.value) || 0 };
+                  setItems(copy);
+                }}
+                className="w-20 text-right text-sm font-semibold border border-slate-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                data-testid={`actual-qty-${i}`}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="px-5 py-4 bg-slate-50 border-t border-slate-100 space-y-2">
+        <div className="flex justify-between text-sm font-semibold">
+          <span>Revised Total:</span>
+          <span className="text-[#1A4D2E]">{php(newTotal)}</span>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => setStage('idle')} className="flex-1 py-2.5 rounded-xl border border-slate-300 text-slate-600 text-sm font-medium hover:bg-slate-100 active:scale-95 transition-all">Cancel</button>
+          <button onClick={() => setStage('preview')} className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold active:scale-95 transition-all" data-testid="preview-changes-btn">
+            Preview Changes
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  if (stage === 'preview') return (
+    <div className="rounded-xl border border-amber-200 bg-white overflow-hidden">
+      <div className="px-5 py-3 bg-amber-100 flex items-center gap-2 border-b border-amber-200">
+        <CheckCircle2 size={15} className="text-amber-700" />
+        <span className="font-semibold text-amber-800 text-sm">Review Changes</span>
+      </div>
+      <div className="divide-y divide-slate-100">
+        {items.map((item, i) => {
+          const changed = item.actual_qty !== item.qty;
+          const diff = item.actual_qty - item.qty;
+          return (
+            <div key={i} className={`px-5 py-3 flex items-center justify-between ${changed ? 'bg-amber-50' : ''}`}>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-slate-800 truncate">{item.name}</p>
+              </div>
+              <div className="flex items-center gap-3 shrink-0 text-sm">
+                <span className="text-slate-400">{item.qty}</span>
+                <span className="text-slate-300">→</span>
+                <span className={`font-bold ${changed ? (diff < 0 ? 'text-red-600' : 'text-emerald-600') : 'text-slate-500'}`}>{item.actual_qty}</span>
+                {changed && <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${diff < 0 ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>{diff > 0 ? `+${diff}` : diff}</span>}
+                {!changed && <span className="text-xs text-slate-300 italic">no change</span>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="px-5 py-4 bg-slate-50 border-t space-y-2">
+        <div className="flex justify-between text-xs text-slate-500"><span>Original Total</span><span>{php(basic.grand_total)}</span></div>
+        <div className="flex justify-between text-sm font-bold"><span>Revised Total</span><span className="text-[#1A4D2E]">{php(newTotal)}</span></div>
+        {changedItems.length === 0 && <p className="text-xs text-slate-400 text-center italic">No quantities were changed.</p>}
+        <div className="flex gap-2 pt-1">
+          <button onClick={() => setStage('adjust')} className="flex-1 py-2.5 rounded-xl border border-slate-300 text-slate-600 text-sm font-medium hover:bg-slate-100 active:scale-95 transition-all">Back to Edit</button>
+          <button onClick={() => { setStage('pin'); setTimeout(() => pinRef.current?.focus(), 100); }} className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold active:scale-95 transition-all" data-testid="accept-changes-btn">
+            Accept &amp; Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  if (stage === 'pin') return (
+    <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+      <div className="px-5 py-3 bg-slate-50 flex items-center gap-2 border-b">
+        <Lock size={15} className="text-slate-500" />
+        <span className="font-semibold text-slate-700 text-sm">Confirm with PIN</span>
+      </div>
+      <div className="px-5 py-5 space-y-4">
+        {lockout ? (
+          <LockoutBanner retryAfter={lockout.retryAfter} onExpired={() => { setLockout(null); setPinError(''); }} />
+        ) : (
+          <>
+            <p className="text-xs text-slate-500 text-center">Manager PIN · Admin PIN · or TOTP (6-digit)</p>
+            <input
+              ref={pinRef}
+              type="password"
+              inputMode="numeric"
+              placeholder="Enter PIN"
+              value={pin}
+              onChange={e => { setPin(e.target.value); setPinError(''); }}
+              onKeyDown={e => e.key === 'Enter' && !saving && handleSave()}
+              className="w-full text-center text-xl font-bold tracking-[0.5em] border-2 border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400"
+              data-testid="draft-pin-input"
+            />
+            {pinError && (
+              <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                <AlertTriangle size={14} /> {pinError}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button onClick={() => { setStage('preview'); setPin(''); setPinError(''); }} className="flex-1 py-2.5 rounded-xl border border-slate-300 text-slate-600 text-sm font-medium hover:bg-slate-100">Cancel</button>
+              <button onClick={handleSave} disabled={saving || !pin.trim()} className="flex-1 py-2.5 rounded-xl bg-[#1A4D2E] hover:bg-[#14532d] text-white text-sm font-semibold disabled:opacity-50 active:scale-95 transition-all" data-testid="draft-pin-confirm-btn">
+                {saving ? 'Saving…' : 'Confirm'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  if (stage === 'success') return (
+    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 space-y-3 text-center">
+      <CheckCircle2 size={36} className="mx-auto text-emerald-500" />
+      <p className="font-bold text-emerald-700 text-base">Quantities Updated</p>
+      {result && (
+        <>
+          <p className="text-xs text-emerald-600">Updated by <strong>{result.updated_by}</strong></p>
+          <p className="text-xs text-emerald-600">at {result.updated_at?.slice(0,16).replace('T',' ')} UTC</p>
+          <p className="text-sm font-bold text-[#1A4D2E]">New Total: {php(result.new_grand_total)}</p>
+        </>
+      )}
+      <p className="text-xs text-emerald-500 italic">The cashier has been notified of these changes.</p>
+    </div>
+  );
+
+  return null;
+}
+
+
 function WebPaymentSection({ basic, docCode, onPaymentRecorded, onReprintRequested }) {
   const METHODS = ['Cash', 'GCash', 'Maya', 'Bank Transfer', 'Check'];
   const php = v => `₱${(parseFloat(v) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
@@ -1469,7 +1698,7 @@ export default function DocViewerPage() {
 
   if (!basic) return null;
 
-  const statusColor = { 'Fully Paid': 'bg-emerald-100 text-emerald-700', 'Completed': 'bg-emerald-100 text-emerald-700', 'In Transit': 'bg-blue-100 text-blue-700', 'Draft': 'bg-slate-100 text-slate-600', 'On Terminal': 'bg-amber-100 text-amber-700', 'Pending Review': 'bg-yellow-100 text-yellow-700', 'Disputed': 'bg-red-100 text-red-700', 'Cancelled': 'bg-red-100 text-red-600' };
+  const statusColor = { 'Fully Paid': 'bg-emerald-100 text-emerald-700', 'Completed': 'bg-emerald-100 text-emerald-700', 'In Transit': 'bg-blue-100 text-blue-700', 'Draft': 'bg-slate-100 text-slate-600', 'On Terminal': 'bg-amber-100 text-amber-700', 'Pending Review': 'bg-yellow-100 text-yellow-700', 'Disputed': 'bg-red-100 text-red-700', 'Cancelled': 'bg-red-100 text-red-600', 'For Preparation': 'bg-amber-100 text-amber-800 border border-amber-300' };
   const sColor = Object.entries(statusColor).find(([k]) => basic.status?.includes(k))?.[1] || 'bg-slate-100 text-slate-600';
   const effectiveReleaseStatus = releaseStatus || basic.stock_release_status;
 
@@ -1580,6 +1809,25 @@ export default function DocViewerPage() {
             </div>
           )}
         </div>
+
+        {/* Draft Adjust Panel — shown for FOR PREPARATION invoices */}
+        {basic.raw_status === 'for_preparation' && (
+          <DraftAdjustPanel
+            basic={basic}
+            docCode={code?.toUpperCase()}
+            onUpdated={(res) => setBasic(prev => ({
+              ...prev,
+              grand_total: res.new_grand_total,
+              items: res.items.map(i => ({
+                name: i.product_name || prev.items.find(p => p.product_id === i.product_id)?.name || '',
+                product_id: i.product_id,
+                qty: i.quantity,
+                price: i.rate || i.unit_price || i.price || 0,
+                total: i.total,
+              })),
+            }))}
+          />
+        )}
 
         {/* Stock Release Manager (PIN-gated: history + form) — Terminal only */}
         {basic.release_mode === 'partial' && (!isForeignBranch || crossBranchUnlocked) && (

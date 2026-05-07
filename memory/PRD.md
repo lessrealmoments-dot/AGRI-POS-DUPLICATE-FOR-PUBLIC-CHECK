@@ -1,5 +1,55 @@
 # AgriBooks PRD
 
+## Iter 258 — QR-Based Draft Order Quantity Editing (May 2026) ✅
+
+### Problem
+After scanning a draft order's QR code, staff could only view the document. There was no way to update actual quantities during the preparation/checking stage without going back to the POS web portal.
+
+### What was built
+
+**Backend (4 files):**
+- `security.py`: Added `check_draft_qr_lockout()` with draft-specific policy:
+  - `DRAFT_QR_FAIL_THRESHOLD = 3` — 3 wrong PINs → 3-min lockout
+  - `DRAFT_QR_DISABLE_TOTAL = 6` — 6 lifetime failures → `qr_edit_disabled = True`
+- `doc_lookup.py` (`view_document_open`):
+  - Returns `available_actions: ["adjust_draft"]` for `for_preparation` invoices
+  - Returns `qr_edit_disabled` flag
+  - Returns `raw_status` field
+  - Includes `product_id`, `cashier_id`, `cashier_name` in response
+  - Status displayed as `"For Preparation"` (human-readable)
+- `qr_actions.py`: New `POST /{code}/update_draft` endpoint:
+  - Branch-scoped PIN (manager = branch-only, admin/TOTP = any branch)
+  - Runs `check_draft_qr_lockout()` before and after each attempt
+  - On 6th lifetime failure → sets `qr_edit_disabled = True` on invoice
+  - Recalculates subtotal, grand_total, balance from new quantities
+  - Creates in-app notification to cashier who created the draft
+  - Logs action to `pin_attempt_log` with `action: "update_draft"` key
+- `notifications.py`: Added `draft_updated_via_qr` to NOTIFICATION_META
+
+**Frontend (1 file):**
+- `DocViewerPage.jsx`: New `DraftAdjustPanel` component (5 stages):
+  1. **idle** — "For Preparation" info card + "Adjust Quantities" button
+  2. **adjust** — Inline quantity editor (ordered vs actual per item)
+  3. **preview** — Side-by-side diff (ordered → actual, highlight changes, show new total)
+  4. **pin** — PIN prompt with lockout banner + countdown timer
+  5. **success** — Confirmation with verifier name, timestamp, new total + cashier notified message
+  - `disabled` state: "QR editing permanently disabled, use web portal"
+  - `statusColor` map updated with `'For Preparation'` amber badge
+  - Wired into main render: shown when `basic.raw_status === 'for_preparation'`
+  - On success: live-updates `basic` items and grand_total in DocViewerPage state
+
+### QR Editing Lockout Summary
+| Event | Result |
+|---|---|
+| Wrong PIN (1st–2nd) | Warning with remaining attempts count |
+| Wrong PIN (3rd) | 3-minute lockout with countdown |
+| 6th total lifetime failure | `qr_edit_disabled = True` — web-only editing |
+| Locked period expires | Counter resets, 3 more attempts allowed |
+
+### Web portal editing (UnifiedSalesPage draft editing) remains PIN-free — no changes needed.
+
+---
+
 ## Iter 257 — Draft / For Preparation Orders (May 2026) ✅
 
 ### Problem

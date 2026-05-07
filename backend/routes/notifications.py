@@ -35,6 +35,7 @@ NOTIFICATION_META = {
     "transfer_incoming":          {"category": "operations",  "severity": "info"},
     "transfer_accepted":          {"category": "operations",  "severity": "info"},
     "ap_payment":                 {"category": "operations",  "severity": "info"},
+    "draft_updated_via_qr":       {"category": "operations",  "severity": "info"},
     # 🟢 Finance
     "internal_invoice_due":       {"category": "finance",     "severity": "warning"},
     "internal_invoice_overdue":   {"category": "finance",     "severity": "critical"},

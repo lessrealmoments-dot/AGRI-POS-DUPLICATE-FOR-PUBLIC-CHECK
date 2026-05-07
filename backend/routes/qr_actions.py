@@ -15,7 +15,7 @@ Supported actions:
 """
 from fastapi import APIRouter, HTTPException, Request
 from datetime import datetime, timezone, timedelta
-from config import db, _raw_db, set_org_context
+from config import db, _raw_db, set_org_context, get_org_context
 from utils import now_iso, new_id, is_digital_payment, update_cashier_wallet, update_digital_wallet, log_movement, today_local
 from utils.security import (
     check_qr_lockout, log_failed_qr_pin_attempt, log_successful_qr_pin_attempt,
@@ -902,3 +902,206 @@ async def process_expired_reservations():
                 "read_by": [],
                 "created_at": now_iso(),
             })
+
+
+# ── Action: Update Draft Order Quantities via QR ──────────────────────────────
+
+@router.post("/{code}/update_draft")
+async def update_draft_quantities(code: str, data: dict, request: Request):
+    """
+    Adjust item quantities on a for_preparation draft order via QR scan.
+    PIN required (manager PIN = branch-scoped; admin PIN + TOTP = any branch).
+
+    Lockout policy (stricter than global QR lockout):
+      - 3 wrong PINs → 3-minute lock (rolling window)
+      - 6 total lifetime wrong PINs → qr_edit_disabled = True (web-only editing)
+
+    Body:
+      pin: str
+      items: [{ product_id, actual_qty }]   — only items being changed
+    """
+    from utils.security import (
+        check_draft_qr_lockout, DRAFT_QR_DISABLE_TOTAL,
+    )
+    from routes.notifications import create_notification
+
+    code_norm = code.strip().upper()
+    client_ip  = request.client.host if request.client else ""
+    pin        = (data.get("pin") or "").strip()
+    new_items  = data.get("items") or []
+
+    if not pin:
+        raise HTTPException(status_code=400, detail="PIN is required")
+
+    # ── Resolve doc & set tenant context ──────────────────────────────────────
+    doc_ref, doc_type, doc_id = await _resolve_doc(code_norm)
+
+    if doc_type != "invoice":
+        raise HTTPException(status_code=400, detail="QR update only available for draft orders")
+
+    invoice = await db.invoices.find_one({"id": doc_id}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if invoice.get("status") != "for_preparation":
+        raise HTTPException(status_code=400, detail="This order is no longer in preparation status")
+
+    branch_id = invoice.get("branch_id", "")
+
+    # ── QR editing permanently disabled? ─────────────────────────────────────
+    if invoice.get("qr_edit_disabled"):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "message": "QR editing has been permanently disabled for this order due to multiple failed PIN attempts. Please edit via the web portal.",
+                "permanently_disabled": True,
+            },
+        )
+
+    # ── Draft-specific lockout check (3 attempts → 3 min) ─────────────────────
+    lockout = await check_draft_qr_lockout(doc_ref["code"])
+    if lockout.get("permanently_disabled"):
+        # Lockout crossed the permanent threshold — disable now
+        await db.invoices.update_one({"id": doc_id}, {"$set": {"qr_edit_disabled": True}})
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "message": "QR editing has been permanently disabled due to too many failed attempts. Please use the web portal.",
+                "permanently_disabled": True,
+            },
+        )
+    if lockout["locked"]:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "message": f"Too many failed PIN attempts. Try again in {lockout['retry_after']} seconds.",
+                "retry_after": lockout["retry_after"],
+                "locked": True,
+            },
+        )
+
+    # ── PIN verification (branch-scoped for manager PIN) ───────────────────────
+    from routes.verify import verify_pin_for_action
+    verifier = await verify_pin_for_action(pin, "qr_release_stocks", branch_id=branch_id)
+    if not verifier:
+        # Log failure with action="update_draft" for the draft-specific counter
+        await db.pin_attempt_log.insert_one({
+            "doc_code":     doc_ref["code"],
+            "doc_type":     "invoice",
+            "action":       "update_draft",
+            "success":      False,
+            "client_ip":    client_ip,
+            "branch_id":    branch_id,
+            "attempted_at": now_iso(),
+        })
+
+        # Re-check to give accurate remaining count and detect permanent disable
+        fresh_lockout = await check_draft_qr_lockout(doc_ref["code"])
+        if fresh_lockout.get("permanently_disabled"):
+            await db.invoices.update_one({"id": doc_id}, {"$set": {"qr_edit_disabled": True}})
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "message": "QR editing permanently disabled after too many failed attempts. Edit via web portal.",
+                    "permanently_disabled": True,
+                },
+            )
+
+        msg = "Invalid PIN"
+        if fresh_lockout["locked"]:
+            msg = f"Invalid PIN — document locked for {fresh_lockout['retry_after']} seconds."
+            raise HTTPException(
+                status_code=429,
+                detail={"message": msg, "retry_after": fresh_lockout["retry_after"], "locked": True},
+            )
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "message": msg,
+                "attempts_remaining": fresh_lockout["attempts_remaining"],
+                "warn": fresh_lockout["warn"],
+            },
+        )
+
+    # ── PIN passed — log success ───────────────────────────────────────────────
+    await db.pin_attempt_log.insert_one({
+        "doc_code":       doc_ref["code"],
+        "doc_type":       "invoice",
+        "action":         "update_draft",
+        "success":        True,
+        "verifier_name":  verifier.get("verifier_name", ""),
+        "client_ip":      client_ip,
+        "branch_id":      branch_id,
+        "attempted_at":   now_iso(),
+    })
+
+    # ── Apply quantity updates ─────────────────────────────────────────────────
+    existing_items = invoice.get("items") or []
+    qty_map = {row["product_id"]: float(row.get("actual_qty", 0)) for row in new_items if row.get("product_id")}
+
+    updated_items = []
+    for item in existing_items:
+        pid = item.get("product_id", "")
+        if pid in qty_map:
+            new_qty = qty_map[pid]
+            rate = float(item.get("rate") or item.get("unit_price") or item.get("price") or 0)
+            disc = float(item.get("discount_amount") or 0)
+            new_total = max(0, new_qty * rate - disc)
+            updated_items.append({**item, "quantity": new_qty, "total": new_total})
+        else:
+            updated_items.append(item)
+
+    # Recalculate totals
+    new_subtotal    = sum(float(i.get("total", 0)) for i in updated_items)
+    freight         = float(invoice.get("freight") or 0)
+    overall_disc    = float(invoice.get("overall_discount") or 0)
+    new_grand_total = max(0, new_subtotal + freight - overall_disc)
+    updated_at      = now_iso()
+
+    await db.invoices.update_one(
+        {"id": doc_id},
+        {"$set": {
+            "items":            updated_items,
+            "subtotal":         new_subtotal,
+            "grand_total":      new_grand_total,
+            "balance":          new_grand_total,
+            "updated_at":       updated_at,
+            "last_qr_edit_by":  verifier.get("verifier_name", ""),
+            "last_qr_edit_at":  updated_at,
+        }},
+    )
+
+    # ── In-app notification → cashier who created the draft ───────────────────
+    cashier_id   = invoice.get("cashier_id", "")
+    inv_number   = invoice.get("invoice_number", "")
+    verifier_name = verifier.get("verifier_name", "")
+    org_ctx = get_org_context()
+    if cashier_id and org_ctx:
+        try:
+            await create_notification(
+                org_id=org_ctx,
+                type="draft_updated_via_qr",
+                title="Draft Order Updated via QR",
+                message=(
+                    f"Draft {inv_number} quantities were adjusted by "
+                    f"{verifier_name} via QR scan at {updated_at[:16].replace('T', ' ')} UTC."
+                ),
+                branch_id=branch_id,
+                data={
+                    "invoice_id":     doc_id,
+                    "invoice_number": inv_number,
+                    "updated_by":     verifier_name,
+                    "updated_at":     updated_at,
+                },
+                target_user_ids=[cashier_id],
+            )
+        except Exception:
+            pass  # Notification failure must not block the save
+
+    return {
+        "ok": True,
+        "invoice_number": inv_number,
+        "updated_by":     verifier_name,
+        "updated_at":     updated_at,
+        "new_grand_total": new_grand_total,
+        "items":          updated_items,
+    }

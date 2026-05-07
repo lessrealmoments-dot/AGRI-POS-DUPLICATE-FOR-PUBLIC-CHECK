@@ -323,11 +323,19 @@ async def view_document_open(code: str):
         # Available actions based on state
         available_actions = []
         status = doc.get("status", "")
-        if status != "voided":
+        if status == "for_preparation":
+            # Draft order — expose adjust_draft action (unless QR editing disabled)
+            if not doc.get("qr_edit_disabled"):
+                available_actions.append("adjust_draft")
+            human_status = "For Preparation"
+        elif status != "voided":
             if doc.get("release_mode") == "partial" and doc.get("stock_release_status") not in ("fully_released", "expired"):
                 available_actions.append("release_stocks")
             if balance > 0:
                 available_actions.append("receive_payment")
+            human_status = "Fully Paid" if is_paid else f"Balance: ₱{balance:,.2f}"
+        else:
+            human_status = "Voided"
 
         # Fetch reservations for partial-release invoices
         reservations = []
@@ -348,13 +356,25 @@ async def view_document_open(code: str):
             "customer_name": doc.get("customer_name", "Walk-in"),
             "branch_id": doc.get("branch_id", ""),
             "branch_name": branch_name,
-            "items": [{"name": i.get("product_name", ""), "qty": i.get("quantity", 0), "price": i.get("rate") or i.get("unit_price") or i.get("price", 0), "total": i.get("total", 0)} for i in (doc.get("items") or [])],
+            "cashier_id": doc.get("cashier_id", ""),
+            "cashier_name": doc.get("cashier_name", ""),
+            "items": [
+                {
+                    "name": i.get("product_name", ""),
+                    "product_id": i.get("product_id", ""),
+                    "qty": i.get("quantity", 0),
+                    "price": i.get("rate") or i.get("unit_price") or i.get("price", 0),
+                    "total": i.get("total", 0),
+                }
+                for i in (doc.get("items") or [])
+            ],
             "subtotal": doc.get("subtotal", 0),
             "discount": doc.get("overall_discount", 0),
             "grand_total": doc.get("grand_total", 0),
             "amount_paid": doc.get("amount_paid", 0),
             "balance": max(0, balance),
-            "status": "Fully Paid" if is_paid else f"Balance: ₱{balance:,.2f}",
+            "status": human_status,
+            "raw_status": status,
             "payment_status": doc.get("status", ""),
             "payment_method": doc.get("payment_method", "Cash"),
             "payment_type": doc.get("payment_type", "cash"),
@@ -364,6 +384,7 @@ async def view_document_open(code: str):
             "stock_releases": doc.get("stock_releases", []),
             "reservations": reservations,
             "available_actions": available_actions,
+            "qr_edit_disabled": doc.get("qr_edit_disabled", False),
         }
 
     elif doc_type == "purchase_order":
