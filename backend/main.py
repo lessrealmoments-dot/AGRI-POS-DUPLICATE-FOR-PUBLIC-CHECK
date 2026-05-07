@@ -45,6 +45,7 @@ from routes.incident_tickets import router as incident_tickets_router
 from routes.scanner import router as scanner_router, ws_desktop, ws_phone
 from routes.search import router as search_router
 from routes.zreport_pdf import router as zreport_pdf_router
+from routes.zreport_share import router as zreport_share_router
 from routes.journal_entries import router as journal_entries_router
 from routes.doc_lookup import router as doc_lookup_router
 from routes.stock_releases import router as stock_releases_router
@@ -204,6 +205,8 @@ api_router.include_router(roles_router)
 
 # Z-Report PDF
 api_router.include_router(zreport_pdf_router)
+# Z-Report Share Links (Iter 253) — public mobile-first SMS link viewer
+api_router.include_router(zreport_share_router)
 
 # Journal Entries
 api_router.include_router(journal_entries_router)

@@ -1,6 +1,32 @@
 # AgriBooks PRD
 
 
+## Iter 253 — Z-Report SMS Share Links (Feb 2026) ✅
+
+### Goal
+One-tap mobile Z-Report viewing + Detailed PDF download from the closing SMS, no app login (system isn't phone-friendly).
+
+### What was built
+- **Tokenized share links** — 32-char unguessable token per recipient per closing, saved in new `zreport_share_links` collection. 30-day expiration, recipient-bound.
+- **SMS update** — closing SMS now ends with `View Report: https://<host>/zr/<token>`. Each recipient (manager/owner/auditor) gets their own token.
+- **Public mobile-first viewer** at `/zr/:token` — KPI tiles, cash flow detail, credit, expenses, sticky Download Detailed PDF button.
+- **PDF filename** — `Z-Report <BranchName> <YYYY-MM-DD>.pdf` (spaces).
+- **Anomaly auto-revoke** at 5 unique IPs per token + owner-alert SMS. All accesses logged in `zreport_share_access_log`.
+- **Audit Center → Z-Report Links** tab — list/filter/revoke share links.
+
+### Files
+- Backend NEW: `routes/zreport_share.py` + tests `tests/test_zreport_share_iter253.py` (4 PASS)
+- Backend MOD: `routes/close_reminder.py`, `routes/sms.py`, `main.py`
+- Frontend NEW: `pages/ZReportSharePage.js`, `components/audit/ZReportShareLinksTab.js`
+- Frontend MOD: `App.js`, `pages/AuditCenterPage.js`
+
+### Optional config
+Set org `settings.public_app_url` or env `PUBLIC_APP_URL` to override the default `https://www.agri-books.com`.
+
+---
+
+
+
 ## Iter 252 — Linked Offline Draft Finalization (Feb 2026) ✅
 
 ### Problem

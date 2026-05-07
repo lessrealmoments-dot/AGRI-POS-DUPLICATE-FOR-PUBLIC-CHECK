@@ -870,6 +870,27 @@ async def diagnose_for_org(org_id: str) -> dict:
 
 # ── Z-Report Finalized (fired from close endpoint) ───────────────────────────
 
+async def _resolve_public_base_url(organization_id: str) -> str:
+    """Iter 253: returns the public-facing app URL where /zr/{token} resolves.
+
+    Read order: org settings.public_app_url → env PUBLIC_APP_URL → fallback
+    to the production custom domain. SMS recipients tap the link on their
+    phone so this MUST be the externally-reachable app URL, NOT a preview
+    URL or localhost.
+    """
+    import os
+    settings = await db.settings.find_one(
+        {"organization_id": organization_id}, {"_id": 0, "public_app_url": 1}
+    ) or {}
+    val = (settings.get("public_app_url") or "").strip()
+    if val:
+        return val
+    val = (os.environ.get("PUBLIC_APP_URL") or "").strip()
+    if val:
+        return val
+    return "https://www.agri-books.com"
+
+
 async def send_zreport_finalized(close_record: dict, user: Optional[dict] = None):
     """
     Sent the moment a daily close is persisted. Owner/Manager/Auditor get a
@@ -929,6 +950,38 @@ async def send_zreport_finalized(close_record: dict, user: Optional[dict] = None
         ["manager", "owner", "auditor"],
     )
 
+    # ── Iter 253: tokenized share links per recipient ───────────────────
+    # Mint a public-access token for each recipient bound to this closing.
+    # The token is the access credential — recipient taps the SMS link,
+    # views the Z-Report, downloads the Detailed PDF, no login needed.
+    closing_id_for_share = close_record.get("id", "")
+    try:
+        from routes.zreport_share import create_share_link  # local import
+        # We pre-mint per recipient and stash the URL in their SMS variables
+        recipient_links = {}
+        public_base = await _resolve_public_base_url(
+            branch.get("organization_id", "")
+        )
+        for r in recipients:
+            try:
+                tok = await create_share_link(
+                    closing_id=closing_id_for_share,
+                    branch_id=branch_id,
+                    date=close_record.get("date", ""),
+                    organization_id=branch.get("organization_id", ""),
+                    recipient_user_id=r["id"],
+                    recipient_name=r["name"],
+                    recipient_phone=r.get("phone", ""),
+                    recipient_role=r.get("role", ""),
+                )
+                recipient_links[r["id"]] = f"{public_base.rstrip('/')}/zr/{tok}"
+            except Exception as e:
+                sms_log.error(f"create_share_link failed for {r['id']}: {e}")
+                recipient_links[r["id"]] = ""
+    except Exception as e:
+        sms_log.error(f"share-link layer init failed: {e}")
+        recipient_links = {r["id"]: "" for r in recipients}
+
     variables = {
         **snapshot,
         "branch_name": branch.get("name", ""),
@@ -948,7 +1001,7 @@ async def send_zreport_finalized(close_record: dict, user: Optional[dict] = None
                 customer_id=r["id"],
                 customer_name=r["name"],
                 phone=r["phone"],
-                variables=variables,
+                variables={**variables, "zreport_link": recipient_links.get(r["id"], "")},
                 organization_id=branch.get("organization_id", ""),
                 branch_id=branch_id,
                 branch_name=branch.get("name", ""),

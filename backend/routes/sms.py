@@ -712,13 +712,28 @@ DEFAULT_TEMPLATES = [
             "Expenses: <expense_count> (P<expense_total>)\n"
             "Cash drawer: P<cash_actual> vs P<cash_expected> (<over_short>)\n"
             "<late_encode_note>"
-            "Closed by: <closer_name>"
+            "Closed by: <closer_name>\n"
+            "View Report: <zreport_link>"
         ),
         "placeholders": ["branch_name", "date", "closed_time", "sales_total",
                          "sales_count", "cash_total", "credit_total",
                          "digital_total", "credit_count", "expense_count",
                          "expense_total", "cash_actual", "cash_expected",
-                         "over_short", "late_encode_note", "closer_name"],
+                         "over_short", "late_encode_note", "closer_name",
+                         "zreport_link"],
+        "trigger": "auto", "active": True,
+    },
+    {
+        # Iter 253 — owner alert when a Z-Report share link was auto-revoked
+        # because too many unique IPs accessed it (forwarding suspected).
+        "key": "zreport_share_auto_revoked",
+        "name": "Z-Report Share Link Auto-Revoked",
+        "body": (
+            "ALERT: Z-Report share link for <branch_id> on <date> was "
+            "auto-revoked after <ips> unique IPs accessed it. "
+            "Original recipient: <recipient>. Review in Audit Center."
+        ),
+        "placeholders": ["branch_id", "date", "ips", "recipient"],
         "trigger": "auto", "active": True,
     },
 ]
@@ -834,6 +849,17 @@ LEGACY_DEFAULT_BODIES = {
     "close_overdue_multi_day": {
         ("URGENT: <branch_name> is <days_overdue> days overdue on closing <date>. "
          "Sales BLOCKED. Owner action required."),
+    },
+    "zreport_finalized": {
+        # Pre-Iter-253 wording without the share link.
+        ("<branch_name> closed <date> at <closed_time>.\n"
+         "Sales: P<sales_total> (<sales_count> txns)\n"
+         "Cash: P<cash_total> / Credit: P<credit_total> / Digital: P<digital_total>\n"
+         "AR encoded: <credit_count> (P<credit_total>)\n"
+         "Expenses: <expense_count> (P<expense_total>)\n"
+         "Cash drawer: P<cash_actual> vs P<cash_expected> (<over_short>)\n"
+         "<late_encode_note>"
+         "Closed by: <closer_name>"),
     },
 }
 

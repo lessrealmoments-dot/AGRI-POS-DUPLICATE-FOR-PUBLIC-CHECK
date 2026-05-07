@@ -28,6 +28,7 @@ import SignatureVerifyToolbar from '../components/SignatureVerifyToolbar';
 import ReserveTab from '../components/audit/ReserveTab';
 import DateMovesTab from '../components/audit/DateMovesTab';
 import OfflineReconciliationTab from '../components/audit/OfflineReconciliationTab';
+import ZReportShareLinksTab from '../components/audit/ZReportShareLinksTab';
 
 import { Wallet } from 'lucide-react';
 import CalcInput from '../components/CalcInput';
@@ -1175,6 +1176,10 @@ export default function AuditCenterPage() {
           <TabsTrigger value="offline-reconcile" data-testid="offline-reconcile-tab">
             <CircleAlert size={14} className="mr-1.5" />
             Offline Reconcile
+          </TabsTrigger>
+          <TabsTrigger value="zreport-share-links" data-testid="zreport-share-links-trigger">
+            <KeyRound size={14} className="mr-1.5" />
+            Z-Report Links
           </TabsTrigger>
         </TabsList>
 
@@ -2368,6 +2373,11 @@ export default function AuditCenterPage() {
         {/* ── OFFLINE RECONCILE TAB (Iter 252) ─────────────────────────── */}
         <TabsContent value="offline-reconcile" className="mt-4">
           <OfflineReconciliationTab branchId={auditBranchId} />
+        </TabsContent>
+
+        {/* ── Z-REPORT SHARE LINKS (Iter 253) ──────────────────────────── */}
+        <TabsContent value="zreport-share-links" className="mt-4">
+          <ZReportShareLinksTab branchId={auditBranchId} currentUser={user} />
         </TabsContent>
 
         {/* Security Flags Tab */}

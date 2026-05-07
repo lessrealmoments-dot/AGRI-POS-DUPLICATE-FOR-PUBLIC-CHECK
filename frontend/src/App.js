@@ -31,6 +31,7 @@ import PurchaseOrderPage from './pages/PurchaseOrderPage';
 import SuppliersPage from './pages/SuppliersPage';
 import DailyLogPage from './pages/DailyLogPage';
 import CloseWizardPage from './pages/CloseWizardPage';
+import ZReportSharePage from './pages/ZReportSharePage';
 import PaymentsPage from './pages/PaymentsPage';
 import FundManagementPage from './pages/FundManagementPage';
 import AccountingPage from './pages/AccountingPage';
@@ -181,6 +182,7 @@ function AppRoutes() {
   if (setupNeeded && !user) {
     return (
       <Routes>
+        <Route path="/zr/:token" element={<ZReportSharePage />} />
         <Route path="/setup" element={<SetupWizardPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/login" element={<LoginPage />} />
@@ -203,6 +205,7 @@ function AppRoutes() {
       )}
       <Routes>
       {/* Public routes */}
+      <Route path="/zr/:token" element={<ZReportSharePage />} />
       <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <LandingPage />} />
       <Route path="/register" element={user ? <Navigate to="/dashboard" replace /> : <RegisterPage />} />
       <Route path="/setup" element={<Navigate to="/dashboard" replace />} />

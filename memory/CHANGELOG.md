@@ -1,6 +1,39 @@
 # AgriBooks Changelog
 
 
+## Feb 2026 — Z-Report SMS Share Links (Iter 253)
+
+**Goal**: One-tap mobile-friendly Z-Report viewing + Detailed PDF download from the closing SMS, no app login required (the system isn't phone-friendly per user feedback).
+
+**Architecture**:
+- Each closing SMS recipient (manager / owner / auditor) gets a unique 32-char token via `secrets.token_urlsafe(24)`. Saved in new `zreport_share_links` collection with `closing_id`, `branch_id`, `recipient_user_id`, `expires_at` (30 days), `unique_ips[]`, `revoked`.
+- SMS body now ends with `View Report: https://<host>/zr/<token>` via the new `<zreport_link>` placeholder.
+- Frontend public route `/zr/<token>` renders a mobile-first single-column page (4 KPI tiles, Cash Flow detail, Customer Credit, Expenses) with a sticky Download Detailed PDF button at the bottom.
+- PDF endpoint reuses existing `/api/z-report-pdf` Detailed renderer; filename `Z-Report <BranchName> <YYYY-MM-DD>.pdf` (spaces preserved per user choice).
+- Anomaly auto-revoke at 5 unique IPs per token (forwarding heuristic). Owner gets an alert SMS via new `zreport_share_auto_revoked` template.
+- Audit Center → "Z-Report Links" tab lists all tokens with status, recipient, access count, unique-IP indicator, and a Revoke button (admin/owner only).
+- All accesses logged to `zreport_share_access_log` with IP + user-agent.
+
+**Files**:
+- Backend NEW: `routes/zreport_share.py` (266 lines)
+- Backend MOD: `routes/close_reminder.py` (token mint + `_resolve_public_base_url` helper), `routes/sms.py` (new placeholder + auto-revoke template + LEGACY_DEFAULT_BODIES upgrade entry), `main.py` (router registration)
+- Frontend NEW: `pages/ZReportSharePage.js` (mobile viewer), `components/audit/ZReportShareLinksTab.js`
+- Frontend MOD: `App.js` (public `/zr/:token` route in 2 spots), `pages/AuditCenterPage.js` (Z-Report Links tab)
+- Tests NEW: `backend/tests/test_zreport_share_iter253.py` — 4 PASS (idempotent mint, IP tracking, auto-revoke at threshold, 404 on unknown)
+
+**API endpoints**:
+- `GET /api/zreport-share/{token}` (public) — view payload
+- `GET /api/zreport-share/{token}/pdf` (public) — Detailed PDF download
+- `GET /api/zreport-share/links/list` (manager+) — listing
+- `POST /api/zreport-share/links/{token}/revoke` (admin/owner) — revoke
+- `GET /api/zreport-share/links/{token}/access-log` (admin/owner) — audit trail
+
+**Optional config**: org `settings.public_app_url` OR env `PUBLIC_APP_URL` overrides the default `https://www.agri-books.com` for the SMS-link host.
+
+---
+
+
+
 ## Feb 2026 — Linked Offline Draft Finalization (Iter 252)
 
 **Problem**: When a Draft Order (status=for_preparation) was finalized while offline OR when the online `/api/unified-sale` call failed mid-flight, the offline-replay path (`/api/sales/sync`) created a brand-new SI-XX-OFF-NNNNNN invoice instead of completing the existing draft. The original draft remained stuck in `for_preparation`, the customer's printed OFF receipt was orphaned from the books, and inventory/payment got recorded against the wrong invoice.
