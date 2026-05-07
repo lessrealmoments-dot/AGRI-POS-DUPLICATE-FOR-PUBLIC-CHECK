@@ -340,10 +340,19 @@ function buildItemsThermal(items) {
 // ── Order Slip (Sales) ──────────────────────────────────────────────────────
 function orderSlipFullPage(data, biz, docCode) {
   const inv = data;
+  const isDraft = inv.status === 'for_preparation';
   let html = buildPageHeader(biz, 'Order Slip', inv.invoice_number || '', inv.created_at || inv.order_date, [
     inv.cashier_name ? `Cashier: ${inv.cashier_name}` : '',
     inv.release_mode === 'full' ? 'Status: FULLY RELEASED' : inv.release_mode === 'partial' ? 'Status: PARTIAL RELEASE' : '',
   ].filter(Boolean));
+
+  // FOR PREPARATION banner
+  if (isDraft) {
+    html += `<div style="background:#fef3c7;border:3px solid #f59e0b;border-radius:8px;padding:14px 18px;margin:0 0 18px;text-align:center">
+      <div style="font-size:17px;font-weight:900;color:#92400e;letter-spacing:1.5px;margin-bottom:3px">FOR PREPARATION ONLY</div>
+      <div style="font-size:11px;font-weight:700;color:#92400e;letter-spacing:0.5px">NOT YET PAID — NOT A FINAL RECEIPT</div>
+    </div>`;
+  }
 
   // Customer info box (only if not walk-in)
   if (inv.customer_name && inv.customer_name !== 'Walk-in') {
@@ -407,7 +416,13 @@ function orderSlipFullPage(data, biz, docCode) {
   html += `</div></div>`;
 
   // Footer
-  html += `<div class="page-footer"><div class="thank-you">Thank you for your business!</div><div style="font-size:8px;font-style:italic;color:#999;margin-top:4px">${TAX_DISCLAIMER}</div></div>`;
+  html += `<div class="page-footer">`;
+  if (isDraft) {
+    html += `<div style="font-size:12px;font-weight:900;color:#92400e;letter-spacing:1px;margin-bottom:4px">FOR PREPARATION ONLY — NOT YET PAID</div>`;
+  } else {
+    html += `<div class="thank-you">Thank you for your business!</div>`;
+  }
+  html += `<div style="font-size:8px;font-style:italic;color:#999;margin-top:4px">${TAX_DISCLAIMER}</div></div>`;
   return html;
 }
 
@@ -714,9 +729,17 @@ function qrImgTagDM(code, inv) {
 // ── Order Slip — Dot Matrix ─────────────────────────────────────────────────
 function orderSlipDotMatrix(data, biz, docCode) {
   const inv = data;
+  const isDraft = inv.status === 'for_preparation';
   let html = buildDotMatrixHeader(biz);
 
-  html += `<div class="dm-doc-title">ORDER SLIP</div>`;
+  html += `<div class="dm-doc-title">${isDraft ? 'PREPARATION COPY — ORDER SLIP' : 'ORDER SLIP'}</div>`;
+
+  // FOR PREPARATION banner
+  if (isDraft) {
+    html += `<div class="dm-warning" style="font-size:13px;padding:10px 8px;margin-bottom:10px;">
+      *** FOR PREPARATION ONLY — NOT YET PAID ***<br/>*** NOT A FINAL RECEIPT ***
+    </div>`;
+  }
 
   // Meta: receipt no, date, cashier, payment method
   html += `<table class="dm-meta-table">`;
@@ -815,7 +838,11 @@ function orderSlipDotMatrix(data, biz, docCode) {
 
   // Footer
   html += `<div class="dm-footer">`;
-  html += `<div class="dm-thankyou">Thank you for your business!</div>`;
+  if (isDraft) {
+    html += `<div class="dm-thankyou" style="font-size:13px;">FOR PREPARATION ONLY — NOT YET PAID</div>`;
+  } else {
+    html += `<div class="dm-thankyou">Thank you for your business!</div>`;
+  }
   html += `<div class="dm-disclaimer">${TAX_DISCLAIMER}</div>`;
   html += `</div>`;
 

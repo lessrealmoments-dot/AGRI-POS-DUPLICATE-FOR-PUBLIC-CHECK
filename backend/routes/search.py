@@ -76,7 +76,7 @@ async def search_transactions(
 
     # ── Invoices / Sales ─────────────────────────────────────────────────
     if type in ("all", "invoice", "sale"):
-        query = {"status": {"$ne": "voided"}}
+        query = {"status": {"$nin": ["voided", "cancelled_draft"]}}
         query = apply_branch_filter(query, branch_filter)
         if text_conditions:
             query["$or"] = [

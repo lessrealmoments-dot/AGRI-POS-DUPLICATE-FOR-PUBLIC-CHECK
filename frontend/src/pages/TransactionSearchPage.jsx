@@ -49,7 +49,17 @@ function ResultRow({ item, branches, onClick }) {
         <div className="flex items-center gap-3 mt-0.5 text-xs text-slate-400">
           {item.date && <span>{item.date}</span>}
           {branchName && <span>{branchName}</span>}
-          {item.status && <span className="capitalize">{item.status}</span>}
+          {item.status && (
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold capitalize ${
+              item.status === 'for_preparation'
+                ? 'bg-amber-100 text-amber-700 border border-amber-300'
+                : item.status === 'voided' || item.status === 'cancelled_draft'
+                  ? 'bg-red-100 text-red-600'
+                  : 'text-slate-400'
+            }`}>
+              {item.status === 'for_preparation' ? 'FOR PREPARATION' : item.status}
+            </span>
+          )}
         </div>
       </div>
       <div className="text-right shrink-0">

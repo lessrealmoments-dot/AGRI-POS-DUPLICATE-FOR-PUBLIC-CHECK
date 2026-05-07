@@ -283,9 +283,29 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
     # Get prefix settings
     settings = await db.settings.find_one({"key": "invoice_prefixes"}, {"_id": 0})
     prefix = data.get("prefix", settings.get("value", {}).get("sales_invoice", "SI") if settings else "SI")
-    
-    # Generate invoice number (atomic, branch-specific)
-    inv_number = await generate_next_number(prefix, branch_id)
+
+    # ── Draft finalization: reuse existing invoice number + id ───────────────
+    # When a cashier finalizes a "for_preparation" draft, the frontend passes
+    # draft_invoice_id so we UPDATE the existing invoice instead of creating
+    # a fresh one, preserving the reserved invoice number.
+    draft_invoice_id = (data.get("draft_invoice_id") or "").strip()
+    draft_doc = None
+    if draft_invoice_id:
+        draft_doc = await db.invoices.find_one(
+            {"id": draft_invoice_id, "status": "for_preparation"},
+            {"_id": 0, "id": 1, "invoice_number": 1, "doc_code": 1},
+        )
+        if not draft_doc:
+            raise HTTPException(
+                status_code=404,
+                detail="Draft order not found or already finalized.",
+            )
+
+    # Generate invoice number (atomic, branch-specific) — or reuse draft's number
+    if draft_doc:
+        inv_number = draft_doc["invoice_number"]
+    else:
+        inv_number = await generate_next_number(prefix, branch_id)
     
     # ── Batch-fetch all products upfront — eliminates N+1 queries ─────────────
     product_ids = list({item["product_id"] for item in items})
@@ -722,7 +742,7 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
 
     # Create invoice record
     invoice = {
-        "id": data.get("id", new_id()),
+        "id": draft_doc["id"] if draft_doc else data.get("id", new_id()),
         "invoice_number": inv_number,
         "prefix": prefix,
         "customer_id": customer_id,
@@ -875,15 +895,19 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
 
     # Race-safe insert: if a parallel retry already inserted (idempotency_key
     # unique index trips), return the previously-saved invoice instead of 500.
-    try:
-        await db.invoices.insert_one(invoice)
-    except Exception as ins_err:
-        from pymongo.errors import DuplicateKeyError
-        if isinstance(ins_err, DuplicateKeyError) and idem_key:
-            existing = await check_idempotency("invoices", idem_key)
-            if existing:
-                return existing
-        raise
+    # When finalizing a draft: replace the existing for_preparation record.
+    if draft_doc:
+        await db.invoices.replace_one({"id": draft_doc["id"]}, invoice)
+    else:
+        try:
+            await db.invoices.insert_one(invoice)
+        except Exception as ins_err:
+            from pymongo.errors import DuplicateKeyError
+            if isinstance(ins_err, DuplicateKeyError) and idem_key:
+                existing = await check_idempotency("invoices", idem_key)
+                if existing:
+                    return existing
+            raise
     invoice.pop("_id", None)
 
     # ── Link pre-commit signature session (Terminal credit/partial flow) ──────

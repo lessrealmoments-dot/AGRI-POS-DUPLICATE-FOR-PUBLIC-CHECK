@@ -621,6 +621,12 @@ export default function UnifiedSalesPage() {
   const [parkPromptOpen, setParkPromptOpen] = useState(false);
   const [discardPinPrompt, setDiscardPinPrompt] = useState({ open: false, parkId: null, pin: '' });
 
+  // Draft / For Preparation orders
+  const [activeDraftId, setActiveDraftId] = useState(null);
+  const [draftOrders, setDraftOrders] = useState([]);
+  const [draftOrdersOpen, setDraftOrdersOpen] = useState(false);
+  const [preparingOrder, setPreparingOrder] = useState(false);
+
   // ── PIN Session: cache a successful PIN for 3 min (per-sale scope) ────────
   // Once verified, subsequent PIN gates auto-bypass or auto-fill the cached PIN
   // so cashiers/managers aren't re-prompted for every action in the same sale.
@@ -1367,6 +1373,158 @@ export default function UnifiedSalesPage() {
     setPriceMatchError('');
     // Reset PIN session (per-sale scope)
     clearPinSession();
+  };
+
+  // ── Draft / For Preparation orders ─────────────────────────────────────────
+  const refreshDraftOrders = useCallback(async () => {
+    if (!currentBranch?.id || !isOnline) return;
+    try {
+      const res = await api.get(`/draft-orders?branch_id=${currentBranch.id}`);
+      setDraftOrders(res.data.drafts || []);
+    } catch (err) {
+      console.error('Failed to load draft orders', err);
+    }
+  }, [currentBranch?.id, isOnline]);
+
+  useEffect(() => { refreshDraftOrders(); }, [refreshDraftOrders]);
+
+  const handlePrepareOrder = async () => {
+    const hasItems = mode === 'quick' ? cart.length > 0 : lines.some(l => l.product_id);
+    if (!hasItems) { toast.error('Cart is empty — add items first'); return; }
+    if (!currentBranch?.id) { toast.error('No active branch'); return; }
+    if (!isOnline) { toast.error('Prepare Order requires an internet connection'); return; }
+
+    setPreparingOrder(true);
+    try {
+      const draftItems = mode === 'quick'
+        ? cart.map(c => ({
+            product_id: c.product_id, product_name: c.product_name, sku: c.sku || '',
+            quantity: c.quantity, rate: c.price, unit_price: c.price, price: c.price,
+            total: c.total, discount_amount: 0, is_repack: c.is_repack || false,
+          }))
+        : lines.filter(l => l.product_id).map(l => ({
+            product_id: l.product_id, product_name: l.product_name,
+            description: l.description || '', sku: l.sku || '',
+            quantity: parseFloat(l.quantity) || 0, rate: parseFloat(l.rate) || 0,
+            unit_price: parseFloat(l.rate) || 0, price: parseFloat(l.rate) || 0,
+            total: lineTotal ? lineTotal(l) : ((parseFloat(l.quantity) || 0) * (parseFloat(l.rate) || 0)),
+            discount_amount: l.discount_type === 'percent'
+              ? (parseFloat(l.quantity) || 0) * (parseFloat(l.rate) || 0) * (parseFloat(l.discount_value) || 0) / 100
+              : (parseFloat(l.discount_value) || 0) * (parseFloat(l.quantity) || 0),
+            is_repack: l.is_repack || false,
+          }));
+
+      const payload = {
+        branch_id: currentBranch.id,
+        items: draftItems,
+        customer_id: selectedCustomer?.id || null,
+        customer_name: selectedCustomer?.name || 'Walk-in',
+        customer_phone: selectedCustomer?.phone || '',
+        customer_address: selectedCustomer?.address || '',
+        subtotal,
+        freight: parseFloat(freight) || 0,
+        overall_discount: parseFloat(overallDiscount) || 0,
+        grand_total: grandTotal,
+        sale_mode: mode,
+        active_scheme: activeScheme,
+        notes: header?.notes || '',
+        prefix: header?.prefix || undefined,
+        order_date: header?.order_date || undefined,
+      };
+
+      let draft;
+      if (activeDraftId) {
+        const res = await api.patch(`/draft-orders/${activeDraftId}`, payload);
+        draft = res.data;
+        toast.success(`Draft ${draft.invoice_number} updated`);
+      } else {
+        const res = await api.post('/draft-orders', payload);
+        draft = res.data;
+        setActiveDraftId(draft.id);
+        toast.success(`Order saved — Ref: ${draft.invoice_number}`);
+      }
+
+      refreshDraftOrders();
+
+      // Show the same print prompt as a regular sale with the reserved invoice number
+      setRefPrompt({
+        open: true,
+        number: draft.invoice_number,
+        title: draft.customer_name || 'Walk-in',
+        invoiceData: {
+          ...draft,
+          cashier_name: user?.full_name || user?.username || '',
+        },
+      });
+    } catch (e) {
+      toast.error('Failed to save draft: ' + (e?.response?.data?.detail || e?.message || ''));
+    } finally {
+      setPreparingOrder(false);
+    }
+  };
+
+  const loadDraftIntoCart = (draft) => {
+    // Restore mode first
+    if (draft.sale_mode === 'order') {
+      setMode('order');
+      setLines(draft.items.map((item, idx) => ({
+        id: idx + 1,
+        product_id: item.product_id,
+        product_name: item.product_name,
+        description: item.description || '',
+        sku: item.sku || '',
+        quantity: item.quantity,
+        rate: item.rate || item.unit_price || 0,
+        discount_type: 'amount',
+        discount_value: item.discount_amount || 0,
+        total: item.total,
+        is_repack: item.is_repack || false,
+        needs_jit_retail: false,
+      })));
+      setCart([]);
+    } else {
+      setMode('quick');
+      setCart(draft.items.map(item => ({
+        product_id: item.product_id,
+        product_name: item.product_name,
+        sku: item.sku || '',
+        price: item.rate || item.unit_price || 0,
+        quantity: item.quantity,
+        total: item.total,
+        is_repack: item.is_repack || false,
+        cost_price: 0,
+        original_price: item.rate || item.unit_price || 0,
+      })));
+      setLines([]);
+    }
+    // Restore customer
+    if (draft.customer_id) {
+      setSelectedCustomer({
+        id: draft.customer_id, name: draft.customer_name,
+        phone: draft.customer_phone, address: draft.customer_address,
+      });
+    } else {
+      setSelectedCustomer(null);
+    }
+    setFreight(draft.freight || 0);
+    setOverallDiscount(draft.overall_discount || 0);
+    setActiveDraftId(draft.id);
+    setDraftOrdersOpen(false);
+    toast.success(`Draft ${draft.invoice_number} loaded — edit and pay when ready`);
+  };
+
+  const cancelDraftOrder = async (draftId) => {
+    try {
+      await api.delete(`/draft-orders/${draftId}`);
+      toast.success('Draft cancelled');
+      refreshDraftOrders();
+      if (activeDraftId === draftId) {
+        setActiveDraftId(null);
+        setCart([]); setLines([]); setSelectedCustomer(null);
+      }
+    } catch (e) {
+      toast.error('Failed to cancel draft');
+    }
   };
 
   // ── Parked / Draft sales ────────────────────────────────────────────────
@@ -2262,6 +2420,9 @@ export default function UnifiedSalesPage() {
       // Backend /sales/sync preserves this via sale.get("invoice_number") so
       // the receipt handed to the customer never renumbers on sync.
       invoice_number: offlineInvoiceNumber || undefined,
+      // Draft finalization: when paying a "for_preparation" draft, pass its ID
+      // so the backend updates the existing invoice (preserving invoice number).
+      draft_invoice_id: activeDraftId || undefined,
     };
 
     if (isOnline) {
@@ -2275,6 +2436,7 @@ export default function UnifiedSalesPage() {
         );
         setRefPrompt({ open: true, number: invoiceNum, title: saleData.customer_name || 'Walk-in', invoiceData: { ...saleData, ...res.data, invoice_number: invoiceNum } });
         clearCart();
+        setActiveDraftId(null);
         setCheckoutDialog(false);
         setPendingCreditSale(null);
 
@@ -2698,6 +2860,24 @@ export default function UnifiedSalesPage() {
             {parkedSales.length > 0 && (
               <Badge variant="secondary" className="ml-1.5 text-[10px] h-4" data-testid="parked-count-badge">
                 {parkedSales.length}
+              </Badge>
+            )}
+          </Button>
+
+          {/* Draft Orders — for_preparation invoices awaiting final payment */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => { setDraftOrdersOpen(true); refreshDraftOrders(); }}
+            data-testid="draft-orders-btn"
+            title="View and manage draft/preparation orders"
+            className={draftOrders.length > 0 ? 'border-amber-400 text-amber-700 hover:bg-amber-50' : ''}
+          >
+            <ClipboardList size={14} className="mr-1" />
+            Draft Orders
+            {draftOrders.length > 0 && (
+              <Badge className="ml-1.5 text-[10px] h-4 bg-amber-100 text-amber-700 border-amber-300" data-testid="draft-orders-count-badge">
+                {draftOrders.length}
               </Badge>
             )}
           </Button>
@@ -3342,13 +3522,29 @@ export default function UnifiedSalesPage() {
                   <div className="flex justify-between text-sm"><span>Subtotal</span><span>{formatPHP(subtotal)}</span></div>
                   <Separator />
                   <div className="flex justify-between font-bold"><span>Total</span><span className="text-lg">{formatPHP(grandTotal)}</span></div>
+                  {activeDraftId && (
+                    <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700 font-medium">
+                      <ClipboardList size={11} />
+                      Editing Draft: <span className="font-mono font-bold">{draftOrders.find(d => d.id === activeDraftId)?.invoice_number || '...'}</span>
+                    </div>
+                  )}
+                  <Button
+                    data-testid="prepare-order-btn"
+                    variant="outline"
+                    className="w-full border-amber-400 text-amber-700 hover:bg-amber-50"
+                    onClick={handlePrepareOrder}
+                    disabled={cart.length === 0 || preparingOrder}
+                  >
+                    <ClipboardList size={15} className="mr-1.5" />
+                    {preparingOrder ? 'Saving...' : activeDraftId ? 'Update Draft' : 'Prepare Order'}
+                  </Button>
                   <Button 
                     data-testid="checkout-btn"
                     className="w-full bg-[#1A4D2E] hover:bg-[#14532d] text-white"
                     onClick={openCheckout}
                     disabled={cart.length === 0}
                   >
-                    <CreditCard size={16} className="mr-2" /> Checkout
+                    <CreditCard size={16} className="mr-2" /> {activeDraftId ? 'Finalize & Pay' : 'Checkout'}
                   </Button>
                 </div>
               </CardContent>
@@ -3594,13 +3790,29 @@ export default function UnifiedSalesPage() {
                         <div className="flex justify-between font-bold text-base" style={{ fontFamily: 'Manrope' }}>
                           <span>Total</span><span className="text-[#1A4D2E]">{formatPHP(grandTotal)}</span>
                         </div>
+                        {activeDraftId && (
+                          <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700 font-medium">
+                            <ClipboardList size={11} />
+                            Editing Draft: <span className="font-mono font-bold">{draftOrders.find(d => d.id === activeDraftId)?.invoice_number || '...'}</span>
+                          </div>
+                        )}
+                        <Button
+                          data-testid="prepare-order-btn"
+                          variant="outline"
+                          className="w-full border-amber-400 text-amber-700 hover:bg-amber-50"
+                          onClick={handlePrepareOrder}
+                          disabled={!lines.some(l => l.product_id) || preparingOrder}
+                        >
+                          <ClipboardList size={15} className="mr-1.5" />
+                          {preparingOrder ? 'Saving...' : activeDraftId ? 'Update Draft' : 'Prepare Order'}
+                        </Button>
                         <Button
                           data-testid="checkout-btn"
                           className="w-full bg-[#1A4D2E] hover:bg-[#14532d] text-white mt-1"
                           onClick={openCheckout}
                           disabled={items.length === 0}
                         >
-                          <CreditCard size={15} className="mr-2" /> Complete & Pay
+                          <CreditCard size={15} className="mr-2" /> {activeDraftId ? 'Finalize & Pay' : 'Complete & Pay'}
                         </Button>
                       </div>
                     </div>
@@ -5075,6 +5287,118 @@ export default function UnifiedSalesPage() {
 
       {/* ── Unsaved-changes leave guard ───────────────────────────────────── */}
       {/* Dialog is rendered by UnsavedChangesProvider — we only register here. */}
+
+      {/* ── Draft Orders panel ────────────────────────────────────────────── */}
+      <Dialog open={draftOrdersOpen} onOpenChange={setDraftOrdersOpen}>
+        <DialogContent data-testid="draft-orders-dialog" className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ClipboardList size={18} className="text-amber-600" />
+              Draft Orders
+              {draftOrders.length > 0 && (
+                <Badge className="ml-1 bg-amber-100 text-amber-700 border-amber-300">{draftOrders.length}</Badge>
+              )}
+            </DialogTitle>
+            <DialogDescription>
+              Orders saved for preparation — not yet paid. Invoice numbers are already reserved.
+            </DialogDescription>
+          </DialogHeader>
+
+          {draftOrders.length === 0 ? (
+            <div className="text-center py-8 text-slate-400">
+              <ClipboardList size={32} className="mx-auto mb-2 opacity-40" />
+              <p className="text-sm">No draft orders right now.</p>
+              <p className="text-xs mt-1">Use "Prepare Order" on the sales screen to create one.</p>
+            </div>
+          ) : (
+            <div className="divide-y">
+              {draftOrders.map(draft => (
+                <div key={draft.id} className="py-4 space-y-2.5" data-testid={`draft-order-row-${draft.id}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono font-bold text-sm text-slate-800">{draft.invoice_number}</span>
+                        <Badge className="bg-amber-100 text-amber-800 border-amber-300 text-[10px] px-1.5">
+                          FOR PREPARATION
+                        </Badge>
+                        {draft.id === activeDraftId && (
+                          <Badge className="bg-blue-100 text-blue-700 border-blue-300 text-[10px] px-1.5">
+                            Currently Editing
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="text-sm text-slate-600 mt-0.5 truncate">
+                        {draft.customer_name && draft.customer_name !== 'Walk-in' ? draft.customer_name : 'Walk-in Customer'}
+                      </div>
+                      <div className="text-xs text-slate-400 mt-0.5">
+                        {draft.items?.length || 0} item{draft.items?.length !== 1 ? 's' : ''} &middot; {fmtDate(draft.order_date)} &middot; {draft.cashier_name}
+                      </div>
+                    </div>
+                    <div className="text-sm font-bold text-[#1A4D2E] whitespace-nowrap">{formatPHP(draft.grand_total)}</div>
+                  </div>
+
+                  <div className="flex gap-2 flex-wrap">
+                    <Button
+                      size="sm" variant="outline"
+                      className="text-slate-700"
+                      onClick={() => loadDraftIntoCart(draft)}
+                      data-testid={`draft-open-${draft.id}`}
+                    >
+                      <ClipboardList size={13} className="mr-1" /> Open / Edit
+                    </Button>
+                    <Button
+                      size="sm" variant="outline"
+                      className="text-emerald-700 border-emerald-300 hover:bg-emerald-50"
+                      onClick={() => { loadDraftIntoCart(draft); setTimeout(() => openCheckout(), 300); }}
+                      data-testid={`draft-pay-${draft.id}`}
+                    >
+                      <CreditCard size={13} className="mr-1" /> Pay Now
+                    </Button>
+                    <Button
+                      size="sm" variant="outline"
+                      className="text-blue-600 border-blue-200 hover:bg-blue-50"
+                      onClick={async () => {
+                        let docCode = draft.doc_code || '';
+                        if (!docCode && draft.id) {
+                          try {
+                            const r = await api.post('/doc/generate-code', { doc_type: 'invoice', doc_id: draft.id });
+                            docCode = r.data?.code || '';
+                          } catch { /* print without QR */ }
+                        }
+                        PrintEngine.print({
+                          type: 'order_slip',
+                          data: { ...draft, cashier_name: user?.full_name || user?.username || '' },
+                          format: 'full_page',
+                          businessInfo: businessInfo || {},
+                          docCode,
+                        });
+                      }}
+                      data-testid={`draft-print-${draft.id}`}
+                    >
+                      Print Copy
+                    </Button>
+                    <Button
+                      size="sm" variant="outline"
+                      className="text-red-500 border-red-200 hover:bg-red-50"
+                      onClick={() => cancelDraftOrder(draft.id)}
+                      data-testid={`draft-cancel-${draft.id}`}
+                    >
+                      <X size={13} className="mr-1" /> Cancel
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex justify-between items-center pt-2 border-t">
+            <Button variant="outline" size="sm" onClick={refreshDraftOrders} disabled={!isOnline}>
+              <RefreshCw size={13} className="mr-1" /> Refresh
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setDraftOrdersOpen(false)}>Close</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
     </div>
   );

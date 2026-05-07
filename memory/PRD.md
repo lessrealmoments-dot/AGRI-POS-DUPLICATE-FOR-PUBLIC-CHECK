@@ -1,5 +1,57 @@
 # AgriBooks PRD
 
+## Iter 257 — Draft / For Preparation Orders (May 2026) ✅
+
+### Problem
+Cashiers encode a sale, complete payment, then discover wrong quantities or unavailable items. The only fix was to void and re-create — generating a new invoice number each time, causing duplicate AR records and customer confusion.
+
+### What was built
+
+**Backend (4 files):**
+- `NEW /app/backend/routes/draft_orders.py` — 5 endpoints:
+  - `POST /api/draft-orders` — creates invoice with `status: for_preparation`, generates invoice number + QR code atomically
+  - `GET /api/draft-orders?branch_id=X` — lists all draft orders for a branch
+  - `GET /api/draft-orders/{id}` — get single draft  
+  - `PATCH /api/draft-orders/{id}` — update items/customer/totals (invoice number preserved)
+  - `DELETE /api/draft-orders/{id}` — cancel draft (sets `status: cancelled_draft, voided: true`)
+- `/app/backend/routes/sales.py` — `draft_invoice_id` handling: when finalizing, reuses existing invoice number and REPLACES the draft record instead of INSERT
+- `/app/backend/routes/search.py` — excludes `cancelled_draft` from search results; `for_preparation` still appears
+- `/app/backend/routes/dashboard.py` — excludes `for_preparation` + `cancelled_draft` from today's revenue totals
+- `/app/backend/main.py` — registers `draft_orders_router`
+
+**Frontend (4 files):**
+- `UnifiedSalesPage.js` — added:
+  - `activeDraftId`, `draftOrders`, `draftOrdersOpen`, `preparingOrder` state
+  - `refreshDraftOrders()`, `handlePrepareOrder()`, `loadDraftIntoCart()`, `cancelDraftOrder()` handlers
+  - "Prepare Order" button (amber outline) above Checkout in Quick and Order modes
+  - "Draft Orders" toolbar button with count badge
+  - Full Draft Orders dialog: Open/Edit, Pay Now, Print Copy, Cancel per draft
+  - `draft_invoice_id` injected into `processSale()` payload for finalization
+  - `activeDraftId` cleared on successful sale
+- `PrintEngine.js` — FOR PREPARATION banner on `orderSlipFullPage` and `orderSlipDotMatrix` when `status === for_preparation`
+- `TransactionSearchPage.jsx` — amber "FOR PREPARATION" badge for `for_preparation` status
+- `ReferenceNumberPrompt.js` — unchanged; print options (Inkjet, Dot Matrix, Thermal, Send to Branch) shown after Prepare Order as usual
+
+### Key behaviors
+- Invoice number + QR reserved immediately on "Prepare Order"
+- Draft appears in Find Transaction (Ctrl+K) with FOR PREPARATION badge
+- QR scan shows document in DocViewer with FOR PREPARATION status
+- Stock NOT deducted until "Finalize & Pay" / "Pay Now"
+- Draft excluded from Z-Report totals and Dashboard revenue
+- Cancelled drafts excluded from search
+
+### Files changed
+- `/app/backend/routes/draft_orders.py` (NEW)
+- `/app/backend/main.py`
+- `/app/backend/routes/sales.py`
+- `/app/backend/routes/search.py`
+- `/app/backend/routes/dashboard.py`
+- `/app/frontend/src/pages/UnifiedSalesPage.js`
+- `/app/frontend/src/lib/PrintEngine.js`
+- `/app/frontend/src/pages/TransactionSearchPage.jsx`
+
+---
+
 ## Iter 256 — 8.5×11 Dot Matrix Print Format (May 2026) ✅
 
 ### Problem

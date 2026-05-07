@@ -140,7 +140,7 @@ async def dashboard_stats(
     effective_branch_id = branch_id or (user.get("branch_id") if user.get("role") != "admin" else None)
 
     # ── Today's invoices ─────────────────────────────────────────────────────
-    invoice_query = {"status": {"$ne": "voided"}, "order_date": today}
+    invoice_query = {"status": {"$nin": ["voided", "for_preparation", "cancelled_draft"]}, "order_date": today}
     invoice_query = apply_branch_filter(invoice_query, branch_filter)
     today_invoices = await db.invoices.find(invoice_query, {"_id": 0}).to_list(10000)
     today_revenue = round(sum(inv.get("grand_total", 0) for inv in today_invoices), 2)
