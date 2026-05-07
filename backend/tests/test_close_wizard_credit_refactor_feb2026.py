@@ -34,7 +34,7 @@ def raw_db():
 
 
 async def _seed(db):
-    """Insert: 1 partial (today) + 1 full credit (today) + 1 older credit paid today."""
+    """Insert: 1 partial (today) + 1 full credit (today) + 1 older credit paid today + 1 CASH today (must NOT leak)."""
     await db.invoices.delete_many({"branch_id": TEST_BRANCH})
 
     await db.invoices.insert_one({
@@ -78,6 +78,22 @@ async def _seed(db):
              "recorded_by": "cashier1", "recorded_at": f"{TEST_DATE}T14:00:00+00:00"},
         ],
     })
+    # Regression guard: full-cash sale today. Its payment record is dated today
+    # so the AR pipeline MUST exclude it (otherwise cash sales double-count).
+    await db.invoices.insert_one({
+        "id": "inv-4", "branch_id": TEST_BRANCH,
+        "invoice_number": "TEST-CASH-004",
+        "customer_name": "Cash Customer", "customer_id": "cust-4",
+        "order_date": TEST_DATE, "payment_type": "cash", "status": "paid",
+        "grand_total": 7000.0, "amount_paid": 7000.0, "balance": 0.0,
+        "created_at": f"{TEST_DATE}T12:00:00+00:00",
+        "payments": [
+            {"id": "p4", "amount": 7000.0, "date": TEST_DATE,
+             "method": "Cash", "fund_source": "cashier",
+             "applied_to_principal": 7000.0, "applied_to_interest": 0,
+             "recorded_by": "cashier1", "recorded_at": f"{TEST_DATE}T12:00:00+00:00"},
+        ],
+    })
 
 
 async def _cleanup(db):
@@ -85,15 +101,43 @@ async def _cleanup(db):
 
 
 async def _run_pipeline(db):
-    """Mirrors the new AR pipeline in daily_operations._closing_summary."""
+    """Mirrors the new AR pipeline in daily_operations._closing_summary
+    (with the AR-semantic invoice filter that prevents cash sales leaking)."""
     pipe = [
-        {"$match": {"branch_id": TEST_BRANCH, "status": {"$ne": "voided"}}},
+        {"$match": {
+            "branch_id": TEST_BRANCH,
+            "status": {"$ne": "voided"},
+            "$or": [
+                {"payment_type": {"$in": ["credit", "partial"]}},
+                {"sale_type": {"$in": ["interest_charge", "penalty_charge"]}},
+            ],
+        }},
         {"$unwind": "$payments"},
         {"$match": {"payments.date": TEST_DATE, "payments.voided": {"$ne": True}}},
         {"$project": {"_id": 0, "id": 1, "invoice_number": 1, "order_date": 1,
                       "payment_type": 1, "payment": "$payments"}},
     ]
     return await db.invoices.aggregate(pipe).to_list(50)
+
+
+def test_cash_sales_do_not_leak_into_ar(raw_db):
+    """REGRESSION GUARD: full-cash sales also have payment records dated
+    today. The AR pipeline must filter them out via payment_type/sale_type.
+    Without this guard, total_cash_sales gets double-counted into total_cash_ar
+    and inflates expected_counter (live bug observed at Sampoli 2026-05-07)."""
+    async def go():
+        await _seed(raw_db)
+        try:
+            rows = await _run_pipeline(raw_db)
+            invoice_numbers = {r["invoice_number"] for r in rows}
+            assert "TEST-CASH-004" not in invoice_numbers, \
+                "Cash sale leaked into AR pipeline — would cause double-count"
+            # Should only be the 3 AR-semantic invoices: partial (2 payments) + older (1)
+            assert len(rows) == 3
+        finally:
+            await _cleanup(raw_db)
+
+    asyncio.run(go())
 
 
 def test_ar_pipeline_includes_same_day_partials(raw_db):

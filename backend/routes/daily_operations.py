@@ -670,8 +670,22 @@ async def get_daily_close_preview(
     # Each payment is tagged `is_same_day` so the UI can split the display
     # into "Same-Day Credit Payments" vs "Older Credit Payments" without
     # affecting the underlying cash-in math.
+    #
+    # CRITICAL FILTER: only include invoices with AR semantics (credit /
+    # partial / interest / penalty). Pure cash, digital, and split sales
+    # also push a payment record with today's date but they are NOT AR
+    # collections — they are already counted in Step 1's `total_cash_sales`
+    # (and `total_split_cash`). Without this filter every full-cash invoice
+    # would double-count into `total_cash_ar` and inflate `expected_counter`.
     ar_pipeline = [
-        {"$match": {"branch_id": branch_id, "status": {"$ne": "voided"}}},
+        {"$match": {
+            "branch_id": branch_id,
+            "status": {"$ne": "voided"},
+            "$or": [
+                {"payment_type": {"$in": ["credit", "partial"]}},
+                {"sale_type": {"$in": ["interest_charge", "penalty_charge"]}},
+            ],
+        }},
         {"$unwind": "$payments"},
         {"$match": {
             "payments.date": date,
@@ -1557,8 +1571,19 @@ async def batch_close_preview(
     # batch, even on invoices created within the batch (initial partial-sale
     # cash legs). The expanded `total_cash_ar` subsumes `partial_total`,
     # which is dropped from the cash_in math below.
+    # CRITICAL FILTER: restrict to AR-semantic invoices only (credit /
+    # partial / interest / penalty). Pure cash/digital/split sales also push
+    # payment records dated today but those are already in `total_cash_sales`
+    # / `total_split_cash`; including them here would double-count.
     ar_pipeline = [
-        {"$match": {"branch_id": branch_id, "status": {"$ne": "voided"}}},
+        {"$match": {
+            "branch_id": branch_id,
+            "status": {"$ne": "voided"},
+            "$or": [
+                {"payment_type": {"$in": ["credit", "partial"]}},
+                {"sale_type": {"$in": ["interest_charge", "penalty_charge"]}},
+            ],
+        }},
         {"$unwind": "$payments"},
         {"$match": {
             "payments.date": date_filter,
@@ -1791,8 +1816,19 @@ async def close_day(data: dict, user=Depends(get_current_user)):
     # on older credit invoices. The expanded `total_cash_ar` now subsumes
     # what `partial_total` used to represent (we drop partial_total from the
     # cash_in math below to avoid double-counting).
+    # CRITICAL FILTER: restrict to AR-semantic invoices only. Pure cash /
+    # digital / split sales push payments dated today but those are already
+    # in `total_cash_sales` / `total_split_cash`; including them here would
+    # double-count and inflate `expected_counter`.
     ar_pipeline = [
-        {"$match": {"branch_id": branch_id, "status": {"$ne": "voided"}}},
+        {"$match": {
+            "branch_id": branch_id,
+            "status": {"$ne": "voided"},
+            "$or": [
+                {"payment_type": {"$in": ["credit", "partial"]}},
+                {"sale_type": {"$in": ["interest_charge", "penalty_charge"]}},
+            ],
+        }},
         {"$unwind": "$payments"},
         {"$match": {
             "payments.date": date,
@@ -2169,8 +2205,18 @@ async def batch_close_days(data: dict, user=Depends(get_current_user)):
     # the batch — same-day partial-sale cash legs and same-day extra
     # payments. The expanded `total_cash_ar` subsumes `partial_total`,
     # which is dropped from the cash_in math below.
+    # CRITICAL FILTER: restrict to AR-semantic invoices only. Pure cash /
+    # digital / split sales would otherwise leak in via their payment record
+    # and double-count against `total_cash_sales`.
     ar_pipeline = [
-        {"$match": {"branch_id": branch_id, "status": {"$ne": "voided"}}},
+        {"$match": {
+            "branch_id": branch_id,
+            "status": {"$ne": "voided"},
+            "$or": [
+                {"payment_type": {"$in": ["credit", "partial"]}},
+                {"sale_type": {"$in": ["interest_charge", "penalty_charge"]}},
+            ],
+        }},
         {"$unwind": "$payments"},
         {"$match": {
             "payments.date": date_filter,
