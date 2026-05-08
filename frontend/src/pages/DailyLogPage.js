@@ -16,7 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import {
   ClipboardList, TrendingUp, Lock, Printer, Calendar,
   DollarSign, ArrowDown, ArrowUp, AlertTriangle, Plus, CheckCircle, FileWarning,
-  Archive, Eye, RefreshCw, Building2
+  Archive, Eye, RefreshCw, Building2, MessageSquare
 } from 'lucide-react';
 import { toast } from 'sonner';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
@@ -242,7 +242,7 @@ function ClosingAdjustmentsPanel({ closing, isAdmin, onAdjusted }) {
   );
 }
 
-function ZReport({ data, branchName, onPrint, onDownloadPdf }) {
+function ZReport({ data, branchName, onPrint, onDownloadPdf, onResendSms }) {
   if (!data) return null;
   const r2 = n => Math.round((parseFloat(n) || 0) * 100) / 100;
   return (
@@ -261,6 +261,9 @@ function ZReport({ data, branchName, onPrint, onDownloadPdf }) {
           <Button variant="outline" size="sm" onClick={onDownloadPdf} data-testid="z-normal-download-btn">
             <ArrowDown size={14} className="mr-1" /> Download PDF
           </Button>
+          {onResendSms && <Button variant="outline" size="sm" onClick={onResendSms} data-testid="z-resend-sms-btn">
+            <MessageSquare size={14} className="mr-1" /> Resend SMS
+          </Button>}
         </div>
       </div>
 
@@ -417,7 +420,7 @@ function ZReport({ data, branchName, onPrint, onDownloadPdf }) {
 // Data source: `/daily-close-preview` which recomputes from sales_log +
 // invoices + fund_transfers for any date (also works for already-closed days).
 // Read-only — no input fields, no close actions.
-function ZReportDetailed({ preview, closing, branchName, onPrint, onDownloadPdf }) {
+function ZReportDetailed({ preview, closing, branchName, onPrint, onDownloadPdf, onResendSms }) {
   if (!preview) return null;
   const total_ar_payments = (preview.ar_payments || [])
     .filter(p => p.fund_source !== 'discount')
@@ -441,6 +444,9 @@ function ZReportDetailed({ preview, closing, branchName, onPrint, onDownloadPdf 
           <Button variant="outline" size="sm" onClick={onDownloadPdf} data-testid="z-detailed-download-btn">
             <ArrowDown size={14} className="mr-1" /> Download PDF
           </Button>
+          {onResendSms && <Button variant="outline" size="sm" onClick={onResendSms} data-testid="z-detailed-resend-sms-btn">
+            <MessageSquare size={14} className="mr-1" /> Resend SMS
+          </Button>}
         </div>
       </div>
 
@@ -994,6 +1000,16 @@ export default function DailyLogPage() {
       toast.error(e.response?.data?.detail || 'Could not download Z-Report PDF', { id: toastId });
     }
   }, [fetchZReportBlob, companyName]);
+
+  const handleResendSms = useCallback(async (closingId) => {
+    const toastId = toast.loading('Resending Z-Report SMS…');
+    try {
+      await api.post(`/daily-close/${closingId}/resend-sms`);
+      toast.success('Z-Report SMS re-sent to all recipients', { id: toastId });
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Could not resend SMS', { id: toastId });
+    }
+  }, []);
 
   // Lazy-loads the rich preview payload used by the "Detailed" Z-Report view.
   // Same endpoint Close Wizard Step 7 uses — recomputes from sales_log +
@@ -1646,6 +1662,7 @@ export default function DailyLogPage() {
               branchName={currentBranch?.name}
               onPrint={() => printZReportPdf(closing.date, closing.branch_id || currentBranch?.id, false)}
               onDownloadPdf={() => downloadZReportPdf(closing.date, closing.branch_id || currentBranch?.id, currentBranch?.name, false)}
+              onResendSms={() => handleResendSms(closing.id)}
             />
           ) : (
             /* ── OPEN: Cash Reconciliation Form ── */
@@ -2269,6 +2286,7 @@ export default function DailyLogPage() {
                         branchName={zreportData.branch_name || currentBranch?.name}
                         onPrint={() => printZReportPdf(zreportData.date, zreportData.branch_id, true)}
                         onDownloadPdf={() => downloadZReportPdf(zreportData.date, zreportData.branch_id, zreportData.branch_name || currentBranch?.name, true)}
+                        onResendSms={() => handleResendSms(zreportData.id)}
                       />
                     ) : (
                       <p className="text-center py-8 text-slate-400">Could not load detailed breakdown.</p>
@@ -2279,6 +2297,7 @@ export default function DailyLogPage() {
                       branchName={zreportData.branch_name || currentBranch?.name}
                       onPrint={() => printZReportPdf(zreportData.date, zreportData.branch_id, false)}
                       onDownloadPdf={() => downloadZReportPdf(zreportData.date, zreportData.branch_id, zreportData.branch_name || currentBranch?.name, false)}
+                      onResendSms={() => handleResendSms(zreportData.id)}
                     />
                   )}
                 </>

@@ -1,6 +1,30 @@
 # AgriBooks PRD
 
 
+## Iter 259 — Z-Report SMS Share Link Fix + Resend Button (May 2026) ✅
+
+### Problem
+Z-Report closing SMS was sent to recipients (managers/owners/auditors) but the tokenized share link (`View Report: https://...`) was missing. Users received the summary text but no link to view/download the Z-Report.
+
+### Root Cause
+The `DEFAULT_TEMPLATES["zreport_finalized"]` body (in `sms.py`) was never updated to include the `<zreport_link>` placeholder. The backend correctly generated share tokens, created URLs, and passed them as `zreport_link` in the template variables — but the template body didn't reference it, so the link was silently dropped by the renderer.
+
+### What was fixed
+1. **`sms.py` — `DEFAULT_TEMPLATES`**: Updated `zreport_finalized` body to append `\nView Report: <zreport_link>` at the end. Added `zreport_link` to the placeholders list.
+2. **`sms.py` — `LEGACY_DEFAULT_BODIES`**: Added the old template body (without link) so the `_ensure_templates` self-healing mechanism will auto-detect and upgrade existing tenant templates that haven't been customized.
+3. **`daily_operations.py`**: New `POST /api/daily-close/{closing_id}/resend-sms` endpoint — admin-only, re-fires the Z-Report finalized SMS for any past closed day. Useful for testing SMS content without waiting for a new closing.
+4. **`DailyLogPage.js`**: Added "Resend SMS" button to both the normal and detailed Z-Report views (visible on all closed-day Z-Reports).
+
+### Files
+- `/app/backend/routes/sms.py` — template body + legacy body
+- `/app/backend/routes/daily_operations.py` — resend endpoint
+- `/app/frontend/src/pages/DailyLogPage.js` — Resend SMS button on Z-Report views
+
+---
+
+
+
+
 ## Iter 253 — Z-Report SMS Share Links (Feb 2026) ✅
 
 ### Goal

@@ -851,7 +851,7 @@ LEGACY_DEFAULT_BODIES = {
          "Sales BLOCKED. Owner action required."),
     },
     "zreport_finalized": {
-        # Pre-Iter-253 wording without the share link.
+        # Pre-Iter-259: old default WITHOUT the share link
         ("<branch_name> closed <date> at <closed_time>.\n"
          "Sales: P<sales_total> (<sales_count> txns)\n"
          "Cash: P<cash_total> / Credit: P<credit_total> / Digital: P<digital_total>\n"

@@ -2664,3 +2664,28 @@ async def get_supplier_payables(
         x["days_until_due"] if x["days_until_due"] is not None else 9999
     ))
     return result
+
+
+# ── Resend Z-Report SMS for a previously closed day ──────────────────────
+@router.post("/daily-close/{closing_id}/resend-sms")
+async def resend_zreport_sms(closing_id: str, user=Depends(get_current_user)):
+    """Admin-only: re-fire the Z-Report finalized SMS for a past closing.
+
+    Useful for testing the SMS content (especially the share link) without
+    waiting for a new closing day.
+    """
+    check_perm(user, "daily_operations", "close")
+
+    close_record = await db.daily_closings.find_one(
+        {"id": closing_id, "status": "closed"}, {"_id": 0}
+    )
+    if not close_record:
+        raise HTTPException(status_code=404, detail="Closed day record not found")
+
+    from routes.close_reminder import send_zreport_finalized
+    await send_zreport_finalized(close_record, user=user)
+
+    return {
+        "ok": True,
+        "message": f"Z-Report SMS re-sent for {close_record.get('branch_id')} / {close_record.get('date')}",
+    }
