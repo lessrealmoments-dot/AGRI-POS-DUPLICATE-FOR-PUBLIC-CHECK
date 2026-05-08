@@ -1937,12 +1937,15 @@ async def send_manual_sms(data: dict, user=Depends(get_current_user)):
 
     if not message:
         raise HTTPException(status_code=400, detail="Message is required")
-    # Minimum length guard — prevents accidental "A"/"J"/"Sup" sends from the
-    # cashier UI that otherwise burn carrier rate limits and clog the gateway.
-    if len(message.strip()) < 5:
+    # Minimum length guard — prevents truly empty / single-keystroke sends
+    # from the cashier UI that burn carrier rate limits. Two characters is
+    # the floor: short conversational replies like "ok", "hi", "no", "sige"
+    # are LEGITIMATE in chat threads (and the server appends a non-trivial
+    # auto-signature anyway, so the gateway never ships a 2-byte SMS).
+    if len(message.strip()) < 2:
         raise HTTPException(
             status_code=400,
-            detail="Message is too short (min 5 characters). Please type a complete message.",
+            detail="Message is too short. Please type at least 2 characters.",
         )
 
     # Resolve phones — all registered numbers when customer_id given

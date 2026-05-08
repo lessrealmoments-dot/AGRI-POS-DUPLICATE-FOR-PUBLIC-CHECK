@@ -447,7 +447,7 @@ export default function MessagesPage() {
         ? `Message queued to ${activeConvo.phones.length} numbers`
         : 'Message queued');
       openConversation(activeConvo);
-    } catch (e) { toast.error('Failed to send'); }
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed to send'); }
     setReplying(false);
   };
 
