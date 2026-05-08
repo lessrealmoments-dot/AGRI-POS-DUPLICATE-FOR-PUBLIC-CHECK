@@ -1948,7 +1948,14 @@ async def send_manual_sms(data: dict, user=Depends(get_current_user)):
             detail="Message is too short. Please type at least 2 characters.",
         )
 
-    # Resolve phones — all registered numbers when customer_id given
+    # Resolve phones — all registered numbers when customer_id given.
+    # Important: `customer_id` here may also be a USER id (e.g. when the
+    # cashier replies in a conversation thread that was created by an
+    # outbound SMS like `zreport_finalized` to an admin/owner — the
+    # conversation aggregator stamps the recipient user-id into
+    # `customer_id` for grouping). Without the users-fallback the reply
+    # would 400 with "No phone numbers to send to" even though the
+    # conversation thread clearly shows their phone.
     if customer_id:
         customer_doc = await db.customers.find_one(
             {"id": customer_id}, {"_id": 0, "phones": 1, "phone": 1, "name": 1, "branch_id": 1}
@@ -1960,7 +1967,21 @@ async def send_manual_sms(data: dict, user=Depends(get_current_user)):
             customer_name = customer_name or customer_doc.get("name", "")
             branch_id = branch_id or customer_doc.get("branch_id", "")
         else:
-            phones_to_send = [data.get("phone", "")] if data.get("phone") else []
+            # Fall back to internal users table (admin/owner/manager/auditor/cashier)
+            user_doc = await db.users.find_one(
+                {"id": customer_id},
+                {"_id": 0, "phone": 1, "phones": 1, "full_name": 1, "username": 1, "branch_id": 1}
+            )
+            if user_doc:
+                phones_to_send = user_doc.get("phones") or (
+                    [user_doc["phone"]] if user_doc.get("phone") else []
+                )
+                customer_name = customer_name or user_doc.get("full_name") \
+                    or user_doc.get("username", "")
+                branch_id = branch_id or user_doc.get("branch_id", "")
+            else:
+                # Final fallback — caller-supplied phone (e.g. unknown-number reply)
+                phones_to_send = [data.get("phone", "")] if data.get("phone") else []
     else:
         phones_to_send = [data.get("phone", "")] if data.get("phone") else []
 

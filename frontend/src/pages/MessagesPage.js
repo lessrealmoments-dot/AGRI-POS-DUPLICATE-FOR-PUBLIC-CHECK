@@ -436,6 +436,11 @@ export default function MessagesPage() {
         // Registered customer — backend sends to ALL their phones
         payload.customer_id = activeConvo.customer_id;
         payload.customer_name = activeConvo.customer_name;
+        // Belt-and-suspenders: include the conversation's known phone too
+        // so the backend can still send when `customer_id` resolves to a
+        // user (admin/owner Z-Report recipient) instead of a customer.
+        const fallbackPhone = (activeConvo.phones && activeConvo.phones[0]) || activeConvo.phone || '';
+        if (fallbackPhone) payload.phone = fallbackPhone;
       } else {
         // Unknown number — send to specific phone only
         payload.phone = activeConvo.phone;
