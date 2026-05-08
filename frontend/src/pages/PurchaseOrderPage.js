@@ -296,11 +296,20 @@ export default function PurchaseOrderPage() {
   }, []);
 
   // ── Computed totals ────────────────────────────────────────────────────
+  // Per-line discount semantics (Iter 254):
+  //   * `amount` type   = discount PER UNIT (multiplied by quantity).
+  //                       Matches how invoices typically read on a
+  //                       supplier slip ("we knocked P50 off each bag").
+  //   * `percent` type  = percent of (qty × unit_price). Mathematically
+  //                       identical to per-unit since pct * unit * qty.
   const computed = useMemo(() => {
     const lineDiscounts = lines.map(l => {
-      const base = (parseFloat(l.quantity) || 0) * (parseFloat(l.unit_price) || 0);
+      const qty = parseFloat(l.quantity) || 0;
+      const price = parseFloat(l.unit_price) || 0;
+      const base = qty * price;
       if (l.discount_type === 'percent') return Math.round(base * (parseFloat(l.discount_value) || 0) / 100 * 100) / 100;
-      return parseFloat(l.discount_value) || 0;
+      // amount = per-unit discount. Total discount = qty × disc_value.
+      return Math.round(qty * (parseFloat(l.discount_value) || 0) * 100) / 100;
     });
     const lineTotals = lines.map((l, i) => Math.max(0,
       (parseFloat(l.quantity) || 0) * (parseFloat(l.unit_price) || 0) - lineDiscounts[i]
@@ -1210,7 +1219,7 @@ export default function PurchaseOrderPage() {
                       <th className="text-left px-2 py-2.5 text-[10px] uppercase tracking-widest text-slate-500 font-semibold min-w-[120px]">Description</th>
                       <th className="text-right px-2 py-2.5 text-[10px] uppercase tracking-widest text-slate-500 font-semibold w-20">Qty</th>
                       <th className="text-right px-2 py-2.5 text-[10px] uppercase tracking-widest text-slate-500 font-semibold w-28">Unit Price</th>
-                      <th className="text-right px-2 py-2.5 text-[10px] uppercase tracking-widest text-slate-500 font-semibold w-32">Discount</th>
+                      <th className="text-right px-2 py-2.5 text-[10px] uppercase tracking-widest text-slate-500 font-semibold w-32" title="Per-unit discount: amount value is multiplied by quantity">Discount<span className="text-slate-400 ml-0.5 normal-case">/unit</span></th>
                       <th className="text-right px-2 py-2.5 text-[10px] uppercase tracking-widest text-slate-500 font-semibold w-28">Sub-Total</th>
                       <th className="w-10"></th>
                     </tr>

@@ -507,7 +507,14 @@ async def create_purchase_order(data: dict, user=Depends(get_current_user)):
         unit_price = _safe_float(i.get("unit_price"), 0)
         disc_type = i.get("discount_type", "amount") or "amount"
         disc_val = _safe_float(i.get("discount_value"), 0)
-        disc_amt = round(qty * unit_price * disc_val / 100, 2) if disc_type == "percent" else round(disc_val, 2)
+        # Iter 254 — `amount` discount is now PER UNIT (was previously a
+        # flat line-total amount). Owners typically read supplier slips
+        # as "P50 off each bag", so qty × disc_val matches their mental
+        # model. `percent` is unchanged (pct of qty × unit_price).
+        if disc_type == "percent":
+            disc_amt = round(qty * unit_price * disc_val / 100, 2)
+        else:
+            disc_amt = round(qty * disc_val, 2)
         total = round(qty * unit_price - disc_amt, 2)
         items.append({
             "product_id": i.get("product_id", ""),

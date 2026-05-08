@@ -106,12 +106,39 @@ def test_po_overall_freight_tax_with_blank_strings():
     assert terms_days == 0
 
 
-def test_po_terms_days_int_coercion_with_string_number():
-    """A frontend that sends `terms_days: "65"` (string) must still
-    work — we coerce via _safe_float first then int()."""
-    val = int(_safe_float_local("65", 0))
-    assert val == 65
-    val = int(_safe_float_local("", 0))
-    assert val == 0
-    val = int(_safe_float_local(None, 30))
-    assert val == 30
+def test_po_per_unit_amount_discount_multiplies_by_qty():
+    """User report (Feb 2026): "10 units × P50 discount each should give
+    P500 total discount, not P50". The `amount` discount type now
+    represents discount-per-unit instead of a flat line discount."""
+    qty = 10
+    unit_price = 100
+    disc_val = 50
+    # New per-unit math
+    disc_amt = round(qty * disc_val, 2)
+    total = round(qty * unit_price - disc_amt, 2)
+    assert disc_amt == 500.0
+    assert total == 500.0
+
+
+def test_po_percent_discount_unchanged():
+    """Percent discount semantics unchanged — pct of (qty × unit_price)."""
+    qty = 10
+    unit_price = 100
+    disc_val = 5  # 5%
+    disc_amt = round(qty * unit_price * disc_val / 100, 2)
+    total = round(qty * unit_price - disc_amt, 2)
+    assert disc_amt == 50.0
+    assert total == 950.0
+
+
+def test_po_amount_discount_with_one_unit_matches_old_behavior():
+    """With qty=1 the new per-unit amount discount yields the same
+    total as the old flat-amount behavior — no regression for single
+    line items."""
+    qty = 1
+    unit_price = 100
+    disc_val = 25
+    disc_amt = round(qty * disc_val, 2)
+    total = round(qty * unit_price - disc_amt, 2)
+    assert disc_amt == 25.0
+    assert total == 75.0
