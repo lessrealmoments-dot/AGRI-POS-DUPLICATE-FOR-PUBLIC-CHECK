@@ -968,6 +968,58 @@ async def queue_sms(
         sms_log.warning(f"queue_sms skipped — {reason} | template={template_key} org={organization_id} customer={customer_id} ref={trigger_ref}")
         return None
 
+    # ── Legacy-body self-heal (Iter 260) ────────────────────────────────────
+    # If the org's stored template body matches a known legacy default
+    # (e.g. the pre-share-link `zreport_finalized` body), upgrade to the
+    # current factory body before render. Without this, every send
+    # silently drops new placeholders like `<zreport_link>` because the
+    # OLD body never references them. _ensure_templates() does this
+    # globally but is only triggered by a few admin paths (Settings →
+    # Messages list, backfill); the close-day SMS used to be queued
+    # before the operator ever opened those screens, so the upgrade
+    # never landed in time. Idempotent and per-key so we don't pay an
+    # ALL-templates pass on every queue.
+    try:
+        current_body = template.get("body", "") or ""
+        new_default = next(
+            (t for t in DEFAULT_TEMPLATES if t["key"] == template_key), None
+        )
+        if new_default:
+            new_body = new_default["body"]
+            stale_set = LEGACY_DEFAULT_BODIES.get(template_key, set())
+            stored_default = template.get("default_body")
+            should_upgrade = (
+                # Body matches a known legacy default → unedited, safe to upgrade
+                (current_body in stale_set and current_body != new_body)
+                # Or default_body anchor says they're on a stale factory build
+                or (stored_default in stale_set and current_body == stored_default
+                    and stored_default != new_body)
+            )
+            if should_upgrade:
+                await _raw_db.sms_templates.update_one(
+                    {"id": template["id"]},
+                    {"$set": {
+                        "body": new_body,
+                        "default_body": new_body,
+                        "name": new_default.get("name", template.get("name", "")),
+                        "placeholders": new_default.get(
+                            "placeholders", template.get("placeholders", [])
+                        ),
+                        "updated_at": now_iso(),
+                    }},
+                )
+                sms_log.info(
+                    f"queue_sms auto-upgraded legacy template body | "
+                    f"key={template_key} org={organization_id}"
+                )
+                template["body"] = new_body
+                template["default_body"] = new_body
+    except Exception as upg_err:
+        sms_log.error(
+            f"queue_sms legacy self-heal failed | key={template_key} "
+            f"org={organization_id}: {upg_err}"
+        )
+
     # Check per-trigger setting — STRICTLY org-scoped to prevent cross-org bleed.
     # Previously this fell back to ANY org's sms_settings if the scoped lookup
     # failed; that caused another tenant's enable/disable flags to be honored

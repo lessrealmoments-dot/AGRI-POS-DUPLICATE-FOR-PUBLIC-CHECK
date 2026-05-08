@@ -891,6 +891,31 @@ async def _resolve_public_base_url(organization_id: str) -> str:
     return "https://www.agri-books.com"
 
 
+def _format_sms_link(full_url: str) -> str:
+    """Make a share URL friendlier for PH carrier SMS filters.
+
+    Globe / Smart / DITO P2P SMS gateways aggressively drop messages
+    containing `https://` or `://` and the `www.` subdomain prefix —
+    they are heuristic markers for phishing scans, even on legitimate
+    domains. Stripping those tokens dramatically improves delivery
+    while keeping the URL tappable on modern Android (the SMS app
+    auto-detects `<domain>.<tld>/<path>` as a link).
+
+    Example:
+      https://www.agri-books.com/zr/ABC123 → agri-books.com/zr/ABC123
+    """
+    if not full_url:
+        return ""
+    s = full_url.strip()
+    for prefix in ("https://", "http://"):
+        if s.lower().startswith(prefix):
+            s = s[len(prefix):]
+            break
+    if s.lower().startswith("www."):
+        s = s[4:]
+    return s
+
+
 async def send_zreport_finalized(
     close_record: dict,
     user: Optional[dict] = None,
@@ -988,7 +1013,11 @@ async def send_zreport_finalized(
                     recipient_phone=r.get("phone", ""),
                     recipient_role=r.get("role", ""),
                 )
-                recipient_links[r["id"]] = f"{public_base.rstrip('/')}/zr/{tok}"
+                # SMS-friendly form: strip https:// + www. so PH carrier
+                # filters don't auto-drop the message. Auto-detected as a
+                # tappable link on every modern Android SMS reader.
+                full_url = f"{public_base.rstrip('/')}/zr/{tok}"
+                recipient_links[r["id"]] = _format_sms_link(full_url)
             except Exception as e:
                 sms_log.error(f"create_share_link failed for {r['id']}: {e}")
                 recipient_links[r["id"]] = ""

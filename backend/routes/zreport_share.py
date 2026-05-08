@@ -38,7 +38,12 @@ log = logging.getLogger("zreport_share")
 
 LINK_EXPIRY_DAYS = 30
 ANOMALY_UNIQUE_IP_THRESHOLD = 5
-TOKEN_BYTES = 24  # → 32 URL-safe chars
+# Shorter tokens reduce SMS-filter false positives (PH carriers heuristically
+# treat 32+ char random strings in SMS as phishing). 12 bytes → 16 URL-safe
+# chars is still 96 bits of entropy — way more than needed for a 30-day
+# revocable link. Existing 32-char tokens issued before this change keep
+# working; only new mints are shorter.
+TOKEN_BYTES = 12  # → 16 URL-safe chars
 
 
 # ─────────────────────────────────────────────────────────────────────────────
