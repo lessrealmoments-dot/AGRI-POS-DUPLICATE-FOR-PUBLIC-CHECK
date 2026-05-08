@@ -20,6 +20,8 @@ export default function ZReportSharePage() {
   const [error, setError] = useState('');
   const [downloading, setDownloading] = useState(false);
 
+  const [downloadError, setDownloadError] = useState('');
+
   useEffect(() => {
     let canc = false;
     async function load() {
@@ -40,9 +42,11 @@ export default function ZReportSharePage() {
 
   const downloadPdf = async () => {
     setDownloading(true);
+    setDownloadError('');
     try {
       const res = await axios.get(`${API}/api/zreport-share/${token}/pdf`, {
         responseType: 'blob',
+        timeout: 60_000,
       });
       const cd = res.headers['content-disposition'] || '';
       const m = cd.match(/filename="([^"]+)"/);
@@ -56,8 +60,22 @@ export default function ZReportSharePage() {
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
     } catch (e) {
-      const msg = e?.response?.data?.detail || e.message || 'Download failed';
-      setError(msg);
+      // If the failure is a 410 (revoked/expired) we bubble it up to the
+      // full-page error state — that's a permanent state. Otherwise we
+      // keep the summary visible and surface an inline error so the
+      // operator can retry without losing the loaded report.
+      const status = e?.response?.status;
+      let msg = e?.response?.data?.detail || '';
+      // Blob responses may carry the JSON detail as text in e.response.data
+      if (!msg && e?.response?.data instanceof Blob) {
+        try { msg = JSON.parse(await e.response.data.text())?.detail || ''; } catch { /* ignore */ }
+      }
+      msg = msg || e.message || 'Download failed';
+      if (status === 410) {
+        setError(msg);
+      } else {
+        setDownloadError(msg);
+      }
     } finally {
       setDownloading(false);
     }
@@ -217,6 +235,21 @@ export default function ZReportSharePage() {
             <Download size={18} />
             {downloading ? 'Preparing PDF…' : 'Download Detailed PDF'}
           </button>
+          {downloadError && (
+            <div
+              className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 flex items-start gap-2"
+              data-testid="zr-share-download-error"
+            >
+              <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
+              <div className="flex-1">
+                <p className="font-semibold">Download failed</p>
+                <p className="leading-snug">{downloadError}</p>
+                <p className="text-[10px] text-red-500 mt-0.5">
+                  The report above is still valid — tap the button to retry.
+                </p>
+              </div>
+            </div>
+          )}
           <p className="text-[10px] text-slate-400 text-center mt-1.5">
             File: <span className="font-mono">Z-Report {data.branch_name} {data.date}.pdf</span>
           </p>

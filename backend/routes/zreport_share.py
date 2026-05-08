@@ -29,7 +29,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from config import db, _raw_db
+from config import db, _raw_db, set_org_context
 from utils import new_id, now_iso
 from utils.auth import get_current_user
 
@@ -279,6 +279,11 @@ async def download_zreport_share_pdf(token: str, request: Request):
 
     # Construct a synthetic read-only user with reports.view permission so
     # generate_z_report_pdf's check_perm() passes. Tied to the recipient.
+    # Permissions dict shape MUST be {module: {action: bool}} — the previous
+    # `{"reports": ["view"]}` (list) crashed check_perm with
+    # AttributeError: 'list' object has no attribute 'get', which surfaced
+    # to the share-link viewer as a generic "Network Error" on the PDF
+    # download button.
     fake_user = {
         "id": link.get("recipient_user_id", "share-link"),
         "username": link.get("recipient_name", "share-link"),
@@ -287,10 +292,18 @@ async def download_zreport_share_pdf(token: str, request: Request):
         "branch_id": branch_id,
         "branch_ids": [branch_id],
         "organization_id": org_id,
-        "permissions": {"reports": ["view"]},
+        "permissions": {"reports": {"view": True}},
     }
 
     from routes.zreport_pdf import generate_z_report_pdf
+    # The public share endpoint has no JWT, so `get_current_user` never runs
+    # and the per-task org context is unset. The TenantDB wrapper then
+    # injects a sentinel `organization_id` and every lookup returns nothing
+    # — which previously surfaced to the user as a 404 ("Closing record not
+    # found"), then as a generic "Network Error" on the share page. Bind
+    # the org context from the (already-validated) share-link doc so all
+    # downstream tenant-scoped reads land in the correct tenant.
+    set_org_context(org_id)
     response = await generate_z_report_pdf(
         date=date, branch_id=branch_id,
         closing_id=closing_id or None,
