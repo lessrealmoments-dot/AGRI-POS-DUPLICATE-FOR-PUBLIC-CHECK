@@ -484,11 +484,29 @@ async def create_purchase_order(data: dict, user=Depends(get_current_user)):
     items_raw = data.get("items", [])
     items = []
     line_subtotal = 0.0
+
+    def _safe_float(val, default=0.0):
+        """Coerce '' / None / 'abc' / '12.5' all into a clean float.
+
+        The frontend's CalcInput component can emit blank strings when an
+        editor clears a field, and parked PO snapshots restored after a
+        deploy may carry over fields that were never re-coerced. Without
+        this guard, `float('')` raises `ValueError` which propagates up to
+        the global 500 handler and surfaces as the cryptic "An unexpected
+        server error" toast in the PO Receive flow.
+        """
+        if val is None or val == "":
+            return float(default)
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return float(default)
+
     for i in items_raw:
-        qty = float(i.get("quantity", 0))
-        unit_price = float(i.get("unit_price", 0))
-        disc_type = i.get("discount_type", "amount")
-        disc_val = float(i.get("discount_value", 0))
+        qty = _safe_float(i.get("quantity"), 0)
+        unit_price = _safe_float(i.get("unit_price"), 0)
+        disc_type = i.get("discount_type", "amount") or "amount"
+        disc_val = _safe_float(i.get("discount_value"), 0)
         disc_amt = round(qty * unit_price * disc_val / 100, 2) if disc_type == "percent" else round(disc_val, 2)
         total = round(qty * unit_price - disc_amt, 2)
         items.append({
@@ -506,20 +524,23 @@ async def create_purchase_order(data: dict, user=Depends(get_current_user)):
         line_subtotal += total
 
     # ── Overall discount ───────────────────────────────────────────────────
-    od_type = data.get("overall_discount_type", "amount")
-    od_val = float(data.get("overall_discount_value", 0))
+    od_type = data.get("overall_discount_type", "amount") or "amount"
+    od_val = _safe_float(data.get("overall_discount_value"), 0)
     overall_disc_amt = round(line_subtotal * od_val / 100, 2) if od_type == "percent" else round(od_val, 2)
     after_discount = round(line_subtotal - overall_disc_amt, 2)
 
     # ── Freight + Tax ──────────────────────────────────────────────────────
-    freight = float(data.get("freight", 0))
+    freight = _safe_float(data.get("freight"), 0)
     pre_tax = round(after_discount + freight, 2)
-    tax_rate = float(data.get("tax_rate", 0))
+    tax_rate = _safe_float(data.get("tax_rate"), 0)
     tax_amount = round(pre_tax * tax_rate / 100, 2) if tax_rate > 0 else 0.0
     grand_total = round(pre_tax + tax_amount, 2)
 
     # ── Due date ───────────────────────────────────────────────────────────
-    terms_days = int(data.get("terms_days", 0))
+    try:
+        terms_days = int(_safe_float(data.get("terms_days"), 0))
+    except (TypeError, ValueError):
+        terms_days = 0
     if terms_days > 0:
         pd = datetime.strptime(purchase_date, "%Y-%m-%d")
         due_date = (pd + timedelta(days=terms_days)).strftime("%Y-%m-%d")

@@ -1254,7 +1254,7 @@ export default function PurchaseOrderPage() {
                             </select>
                             <CalcInput className="flex-1 h-8 px-2 text-xs text-right font-mono border border-slate-200 hover:border-slate-300 focus:border-[#1A4D2E] focus:outline-none rounded"
  value={line.discount_value || ''} placeholder="0"
- onChange={(v) => updateLine(i, 'discount_value', v)} />
+ onChange={(v) => updateLine(i, 'discount_value', parseFloat(v) || 0)} />
                           </div>
                           {computed.lineDiscounts[i] > 0 && (
                             <p className="text-[9px] text-emerald-600 text-right mt-0.5">-{formatPHP(computed.lineDiscounts[i])}</p>
