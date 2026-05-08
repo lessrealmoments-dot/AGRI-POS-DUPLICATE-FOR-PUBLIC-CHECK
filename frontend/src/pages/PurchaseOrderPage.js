@@ -544,6 +544,17 @@ export default function PurchaseOrderPage() {
 
   const handleReceiveOnTerms = async (lateEncodePayload = null) => {
     const valid = validate(); if (!valid) return;
+    // Defensive guard — if a click handler accidentally passes the React
+    // SyntheticEvent (a DOM-backed object with circular references) as the
+    // first arg, ignore it. Without this, axios → JSON.stringify crashes
+    // with "Converting circular structure to JSON" pointing at HTMLButtonElement.
+    const safeLatePayload = (
+      lateEncodePayload
+      && typeof lateEncodePayload === 'object'
+      && !lateEncodePayload.nativeEvent
+      && !lateEncodePayload._reactName
+      && !(lateEncodePayload.target instanceof Element)
+    ) ? lateEncodePayload : null;
     setSaving(true);
     try {
       const res = await api.post('/purchase-orders', buildPayload(valid, {
@@ -551,10 +562,10 @@ export default function PurchaseOrderPage() {
         terms_days: termsForm.terms_days,
         terms_label: termsForm.terms_label,
         due_date: termsForm.due_date,
-        ...(lateEncodePayload ? { late_encode: lateEncodePayload } : {}),
+        ...(safeLatePayload ? { late_encode: safeLatePayload } : {}),
       }));
       toast.success(
-        lateEncodePayload
+        safeLatePayload
           ? `PO ${res.data.po_number} created (late-encoded — will appear on next open Z-Report)`
           : `PO ${res.data.po_number} created — inventory updated, payable created (due ${termsForm.due_date || 'on receipt'})`
       );
@@ -1710,7 +1721,7 @@ export default function PurchaseOrderPage() {
             </div>
             <div className="flex gap-2">
               <Button variant="outline" className="flex-1" onClick={() => setTermsDialog(false)}>Cancel</Button>
-              <Button onClick={handleReceiveOnTerms} disabled={saving}
+              <Button onClick={() => handleReceiveOnTerms()} disabled={saving}
                 className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
                 data-testid="confirm-terms-btn">
                 {saving ? <RefreshCw size={14} className="animate-spin mr-1.5" /> : <Check size={14} className="mr-1.5" />}
