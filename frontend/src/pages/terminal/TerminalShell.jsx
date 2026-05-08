@@ -996,7 +996,14 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
                       data-testid={`doc-search-result-${r.doc_code}`}
                     >
                       <div className="min-w-0">
-                        <p className="text-xs font-bold text-slate-800 truncate">{r.number}</p>
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-xs font-bold text-slate-800 truncate">{r.number}</p>
+                          {r.is_offline_receipt && (
+                            <span className="text-[8px] font-bold uppercase tracking-wider px-1 py-0.5 rounded bg-amber-100 text-amber-700 shrink-0" data-testid={`offline-badge-${r.doc_code}`}>
+                              Offline
+                            </span>
+                          )}
+                        </div>
                         <p className="text-[10px] text-slate-400 truncate">{r.label}</p>
                       </div>
                       <div className="text-right ml-2 shrink-0">

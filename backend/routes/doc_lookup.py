@@ -500,23 +500,68 @@ async def search_documents(q: str = "", branch_id: str = "", user=Depends(get_cu
     q_stripped = q.strip()
     results = []
 
-    # Search invoices by invoice_number
+    # Search invoices by invoice_number OR by linked_offline_receipt_number.
+    # Offline receipts (synced from terminal pending sale) carry their
+    # OFF-NNNNNN ticket number on `linked_offline_receipt_number`, not on
+    # `invoice_number`. Without this branch, a cashier scanning a paper
+    # offline ticket from the customer's wallet got "no results" even
+    # though the canonical invoice was already in the cloud.
+    rx = {"$regex": q_stripped, "$options": "i"}
     invoices = await db.invoices.find(
-        {"branch_id": branch_id, "invoice_number": {"$regex": q_stripped, "$options": "i"}},
+        {"branch_id": branch_id, "$or": [
+            {"invoice_number": rx},
+            {"linked_offline_receipt_number": rx},
+            {"original_draft_invoice_number": rx},
+        ]},
         {"_id": 0, "id": 1, "invoice_number": 1, "doc_code": 1,
-         "customer_name": 1, "grand_total": 1, "status": 1}
-    ).sort("created_at", -1).limit(5).to_list(5)
+         "customer_name": 1, "grand_total": 1, "status": 1,
+         "organization_id": 1,
+         "linked_offline_receipt_number": 1,
+         "original_draft_invoice_number": 1,
+         "kind": 1}
+    ).sort("created_at", -1).limit(8).to_list(8)
 
     for inv in invoices:
-        if inv.get("doc_code"):
-            results.append({
-                "doc_type": "invoice",
-                "number": inv.get("invoice_number", ""),
-                "doc_code": inv["doc_code"],
-                "label": inv.get("customer_name", "Walk-in"),
-                "status": inv.get("status", ""),
-                "amount": inv.get("grand_total", 0),
-            })
+        # Mint a doc_code on demand if missing — older invoices and freshly
+        # synced offline receipts can land without one, and previously the
+        # search dropped them entirely so the cashier saw a blank result.
+        code = inv.get("doc_code")
+        if not code:
+            try:
+                code = await auto_generate_doc_code(
+                    "invoice", inv["id"], inv.get("organization_id", "")
+                )
+            except Exception:
+                code = ""
+        if not code:
+            continue
+        # Decide which number to display. If the user typed the OFF
+        # ticket, surface that as the primary line; otherwise use the
+        # canonical invoice_number. The official record always wins on
+        # navigation; we just want recognition.
+        primary_num = inv.get("invoice_number", "")
+        off_num = inv.get("linked_offline_receipt_number") or ""
+        draft_num = inv.get("original_draft_invoice_number") or ""
+        # Use a normalized lowercase compare so "off-12" matches "OFF-12"
+        ql = q_stripped.lower()
+        is_offline_hit = bool(off_num and ql in off_num.lower() and ql not in primary_num.lower())
+        is_draft_hit = bool(draft_num and ql in draft_num.lower() and ql not in primary_num.lower())
+        display_num = off_num if is_offline_hit else (draft_num if is_draft_hit else primary_num)
+        sublabel = inv.get("customer_name", "Walk-in")
+        if is_offline_hit:
+            sublabel = f"{sublabel} · linked to {primary_num}"
+        elif is_draft_hit:
+            sublabel = f"{sublabel} · finalized as {primary_num}"
+        results.append({
+            "doc_type": "invoice",
+            "number": display_num,
+            "doc_code": code,
+            "label": sublabel,
+            "status": inv.get("status", ""),
+            "amount": inv.get("grand_total", 0),
+            "is_offline_receipt": is_offline_hit,
+            "linked_invoice_number": primary_num if is_offline_hit or is_draft_hit else "",
+        })
 
     # Search purchase orders by po_number
     pos = await db.purchase_orders.find(
