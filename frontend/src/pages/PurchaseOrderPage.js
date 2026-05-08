@@ -917,8 +917,18 @@ export default function PurchaseOrderPage() {
       toast.error(typeof msg === 'string' ? msg : 'Failed to resume parked PO');
       return;
     }
-    // Rehydrate state
-    if (snapshot.header) setHeader(h => ({ ...h, ...snapshot.header }));
+    // Rehydrate state. We deliberately RESET `purchase_date` to today —
+    // a PO parked yesterday (or earlier) carries a stale purchase_date in
+    // its snapshot; if that day has since been closed, the closed-day
+    // guard will 4xx every Confirm & Receive attempt with a confusing
+    // "late-encode required" error. The buyer's intent on resume is
+    // always "buy this today", so this is the safe default.
+    const today = new Date().toISOString().slice(0, 10);
+    if (snapshot.header) {
+      setHeader(h => ({ ...h, ...snapshot.header, purchase_date: today }));
+    } else {
+      setHeader(h => ({ ...h, purchase_date: today }));
+    }
     const filled = (snapshot.lines || []).filter(l => l.product_id);
     setLines(filled.length ? [...filled, { ...EMPTY_LINE }] : [{ ...EMPTY_LINE }]);
     setSupplierSearch(snapshot.vendor || '');
