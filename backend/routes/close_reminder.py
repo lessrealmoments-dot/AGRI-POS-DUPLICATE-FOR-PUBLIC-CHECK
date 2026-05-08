@@ -891,10 +891,24 @@ async def _resolve_public_base_url(organization_id: str) -> str:
     return "https://www.agri-books.com"
 
 
-async def send_zreport_finalized(close_record: dict, user: Optional[dict] = None):
+async def send_zreport_finalized(
+    close_record: dict,
+    user: Optional[dict] = None,
+    is_resend: bool = False,
+):
     """
     Sent the moment a daily close is persisted. Owner/Manager/Auditor get a
     human-readable daily summary on their phone without opening the app.
+
+    When `is_resend=True` (admin-triggered re-fire from the Daily Log UI),
+    the dedup_key gets a fresh timestamp suffix and the trigger is flipped
+    to "manual" so:
+      • the original `zreport:{branch}:{date}:{recipient}` queue row no
+        longer collides with the new one,
+      • the 10-min per-recipient throttle and per-phone daily cap don't
+        silently swallow the re-fire (those guards only apply to `auto`).
+    Returns a dict summarizing per-recipient queue results so the API
+    can surface a real count to the operator.
     """
     from routes.sms import queue_sms
 
@@ -994,9 +1008,39 @@ async def send_zreport_finalized(close_record: dict, user: Optional[dict] = None
         "closer_name": (user or {}).get("full_name") or (user or {}).get("username") or "",
     }
 
+    results = {
+        "queued": 0,
+        "skipped": 0,
+        "total_recipients": len(recipients),
+        "is_resend": is_resend,
+        "recipients": [],
+    }
+    if not recipients:
+        sms_log.warning(
+            f"zreport_finalized — no recipients (manager/owner/auditor with phone) "
+            f"for branch={branch_id} date={close_record.get('date', '')}"
+        )
+
     for r in recipients:
         try:
-            await queue_sms(
+            base_dedup = f"zreport:{branch_id}:{close_record.get('date', '')}:{r['id']}"
+            if is_resend:
+                # Bypass the original dedup row + the per-phone/throttle
+                # guards (those are scoped to trigger=auto). We still
+                # leave `template_key` unchanged so the rendered body
+                # carries the share link as designed. Suffix with a
+                # short UUID so back-to-back admin clicks each enqueue a
+                # distinct row (timestamp alone collided when clicked
+                # within the same second).
+                dedup_key = f"{base_dedup}:resend:{new_id()[:8]}"
+                trigger_kind = "manual"
+                trigger_ref = f"zreport:{branch_id}:{close_record.get('date', '')}:resend"
+            else:
+                dedup_key = base_dedup
+                trigger_kind = "auto"
+                trigger_ref = f"zreport:{branch_id}:{close_record.get('date', '')}"
+
+            queued = await queue_sms(
                 template_key="zreport_finalized",
                 customer_id=r["id"],
                 customer_name=r["name"],
@@ -1005,12 +1049,28 @@ async def send_zreport_finalized(close_record: dict, user: Optional[dict] = None
                 organization_id=branch.get("organization_id", ""),
                 branch_id=branch_id,
                 branch_name=branch.get("name", ""),
-                trigger="auto",
-                trigger_ref=f"zreport:{branch_id}:{close_record.get('date', '')}",
-                dedup_key=f"zreport:{branch_id}:{close_record.get('date', '')}:{r['id']}",
+                trigger=trigger_kind,
+                trigger_ref=trigger_ref,
+                dedup_key=dedup_key,
             )
+            if queued:
+                results["queued"] += 1
+                results["recipients"].append(
+                    {"name": r["name"], "phone": r["phone"], "status": "queued"}
+                )
+            else:
+                results["skipped"] += 1
+                results["recipients"].append(
+                    {"name": r["name"], "phone": r["phone"], "status": "skipped"}
+                )
         except Exception as e:
             sms_log.error(f"zreport_finalized dispatch failed: {e}")
+            results["skipped"] += 1
+            results["recipients"].append(
+                {"name": r.get("name"), "phone": r.get("phone"), "status": "error", "error": str(e)}
+            )
+
+    return results
 
 
 # ── Background loop & start hook ─────────────────────────────────────────────

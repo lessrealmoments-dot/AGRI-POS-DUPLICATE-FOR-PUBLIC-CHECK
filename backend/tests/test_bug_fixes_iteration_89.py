@@ -24,7 +24,7 @@ import os
 from datetime import datetime, timedelta
 
 # Use environment variable for API URL
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://po-discount-align.preview.emergentagent.com")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://pos-sms-resend.preview.emergentagent.com")
 
 # Test data prefix for cleanup
 TEST_PREFIX = "TEST_BUG89_"

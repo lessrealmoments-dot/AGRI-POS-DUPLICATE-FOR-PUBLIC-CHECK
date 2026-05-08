@@ -1004,8 +1004,16 @@ export default function DailyLogPage() {
   const handleResendSms = useCallback(async (closingId) => {
     const toastId = toast.loading('Resending Z-Report SMS…');
     try {
-      await api.post(`/daily-close/${closingId}/resend-sms`);
-      toast.success('Z-Report SMS re-sent to all recipients', { id: toastId });
+      const res = await api.post(`/daily-close/${closingId}/resend-sms`);
+      const { queued = 0, skipped = 0, total_recipients = 0, message } = res.data || {};
+      if (queued > 0) {
+        toast.success(message || `Z-Report SMS re-queued for ${queued}/${total_recipients} recipient(s).`, { id: toastId });
+      } else {
+        toast.error(message || 'No SMS were re-queued. Check Settings → Messages and the SMS queue.', { id: toastId, duration: 6000 });
+      }
+      if (skipped > 0 && queued > 0) {
+        toast.message(`${skipped} recipient(s) skipped (throttle / disabled trigger / no phone).`, { duration: 5000 });
+      }
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Could not resend SMS', { id: toastId });
     }

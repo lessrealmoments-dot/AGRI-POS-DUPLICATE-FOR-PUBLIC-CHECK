@@ -594,7 +594,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         const val URL_PRODUCTION = "https://agri-books.com"
-        const val URL_PREVIEW    = "https://po-discount-align.preview.emergentagent.com"
+        const val URL_PREVIEW    = "https://pos-sms-resend.preview.emergentagent.com"
     }
 
     private lateinit var prefs: SharedPreferences

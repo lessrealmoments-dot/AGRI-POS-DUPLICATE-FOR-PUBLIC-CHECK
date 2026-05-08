@@ -2683,9 +2683,24 @@ async def resend_zreport_sms(closing_id: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Closed day record not found")
 
     from routes.close_reminder import send_zreport_finalized
-    await send_zreport_finalized(close_record, user=user)
+    results = await send_zreport_finalized(close_record, user=user, is_resend=True)
+
+    queued = results.get("queued", 0)
+    skipped = results.get("skipped", 0)
+    total = results.get("total_recipients", 0)
+
+    if total == 0:
+        msg = "No recipients with phone numbers (manager/owner/auditor) configured for this branch — nothing was sent."
+    elif queued == 0:
+        msg = f"All {total} recipient(s) were skipped — check Settings → Messages and the SMS queue for details."
+    else:
+        msg = f"Z-Report SMS re-queued for {queued}/{total} recipient(s) on {close_record.get('date')}."
 
     return {
-        "ok": True,
-        "message": f"Z-Report SMS re-sent for {close_record.get('branch_id')} / {close_record.get('date')}",
+        "ok": queued > 0,
+        "queued": queued,
+        "skipped": skipped,
+        "total_recipients": total,
+        "recipients": results.get("recipients", []),
+        "message": msg,
     }
