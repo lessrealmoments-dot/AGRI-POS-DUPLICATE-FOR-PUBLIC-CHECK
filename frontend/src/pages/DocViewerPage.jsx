@@ -550,7 +550,17 @@ function buildTier1PrintData(basic) {
       order_date: basic.order_date || basic.date,
       created_at: basic.order_date || basic.date,
       items: (basic.items || []).map(i => ({
-        product_name: i.name, quantity: i.qty, rate: i.price, total: i.total, discount_amount: 0,
+        product_name: i.name,
+        quantity: i.qty,
+        rate: i.price,
+        total: i.total,
+        // Per-line discount from public /doc/view — must flow into the
+        // PrintEngine so the 58 mm receipt + Tier-1 reprint show the same
+        // line discounts the web view does. Fixes the silent-drop bug
+        // where the grand total was correct but discounts were invisible.
+        discount_amount: parseFloat(i.discount_amount || 0) || 0,
+        discount_value: parseFloat(i.discount_value || 0) || 0,
+        discount_type: i.discount_type || 'amount',
       })),
       subtotal: basic.subtotal || basic.grand_total,
       overall_discount: basic.discount || 0,
@@ -1772,15 +1782,36 @@ export default function DocViewerPage() {
             )}
           </div>
           <div className="divide-y divide-slate-50">
-            {basic.items.map((item, i) => (
-              <div key={i} className="px-5 py-3 flex items-center justify-between">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-slate-800 truncate">{item.name}</p>
-                  <p className="text-xs text-slate-400">Qty: {item.qty} × {php(item.price)}</p>
+            {basic.items.map((item, i) => {
+              const discAmt = parseFloat(item.discount_amount || 0) || 0;
+              const discVal = parseFloat(item.discount_value || 0) || 0;
+              const discType = item.discount_type || 'amount';
+              const qty = parseFloat(item.qty || 0) || 0;
+              const rate = parseFloat(item.price || 0) || 0;
+              const grossLine = qty * rate;
+              return (
+                <div key={i} className="px-5 py-3 flex items-start justify-between" data-testid={`doc-item-${i}`}>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-800 truncate">{item.name}</p>
+                    <p className="text-xs text-slate-400">Qty: {item.qty} × {php(item.price)}</p>
+                    {discAmt > 0 && (
+                      <p className="text-xs text-rose-600 mt-0.5" data-testid={`doc-item-discount-${i}`}>
+                        Less {discType === 'percent'
+                          ? `${discVal}%`
+                          : (discVal > 0 ? `${php(discVal)}/unit` : 'discount')}
+                        : −{php(discAmt)}
+                      </p>
+                    )}
+                  </div>
+                  <div className="shrink-0 ml-3 text-right">
+                    {discAmt > 0 && (
+                      <p className="text-[11px] text-slate-400 line-through font-mono" data-testid={`doc-item-gross-${i}`}>{php(grossLine)}</p>
+                    )}
+                    <span className="text-sm font-semibold font-mono text-slate-800">{php(item.total)}</span>
+                  </div>
                 </div>
-                <span className="text-sm font-semibold font-mono text-slate-800 shrink-0 ml-3">{php(item.total)}</span>
-              </div>
-            ))}
+              );
+            })}
           </div>
           <div className="px-5 py-4 bg-slate-50 border-t border-slate-100">
             <div className="flex items-center justify-between">

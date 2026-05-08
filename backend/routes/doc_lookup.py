@@ -365,6 +365,13 @@ async def view_document_open(code: str):
                     "qty": i.get("quantity", 0),
                     "price": i.get("rate") or i.get("unit_price") or i.get("price", 0),
                     "total": i.get("total", 0),
+                    # Per-line discount (web shows it; terminal viewer & 58 mm
+                    # receipt previously dropped these silently — totals were
+                    # right but the discount itself was invisible to the
+                    # cashier on reprints).
+                    "discount_amount": float(i.get("discount_amount", 0) or 0),
+                    "discount_value": float(i.get("discount_value", 0) or 0),
+                    "discount_type": i.get("discount_type", "amount"),
                 }
                 for i in (doc.get("items") or [])
             ],

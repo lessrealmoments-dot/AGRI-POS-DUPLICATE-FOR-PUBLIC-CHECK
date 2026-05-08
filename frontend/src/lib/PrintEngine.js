@@ -71,11 +71,13 @@ const thermalCSS = `
   .meta-row > span:last-child { text-align: right; }
   .meta-row .label { color: #000; flex-shrink: 0; }
   .sep { border-top: 1px solid #000; margin: 4px 0; }
-  .items-table { width: 100%; table-layout: fixed; font-size: 11px; border-collapse: collapse; }
+  .items-table { width: 100%; table-layout: fixed; font-size: 12px; border-collapse: collapse; }
   .items-table td { padding: 2px 0; vertical-align: top; word-break: break-word; }
-  .items-table .item-name { font-weight: bold; font-size: 12px; }
-  .items-table .item-detail { width: 58%; padding-left: 4px; font-size: 10px; color: #000; }
-  .items-table .item-total { width: 42%; text-align: right; font-weight: bold; white-space: nowrap; }
+  .items-table .item-name { font-weight: bold; font-size: 13px; }
+  .items-table .item-detail { width: 58%; padding-left: 4px; font-size: 11px; color: #000; }
+  .items-table .item-total { width: 42%; text-align: right; font-weight: bold; font-size: 12px; white-space: nowrap; }
+  .items-table .item-discount { padding-left: 4px; font-size: 11px; color: #000; font-style: italic; }
+  .items-table .item-disc-val { text-align: right; font-size: 11px; color: #000; white-space: nowrap; }
   .totals { margin-top: 5px; }
   .totals .row { display: flex; justify-content: space-between; gap: 4px; font-size: 11px; padding: 2px 0; }
   .totals .row > span:last-child { text-align: right; white-space: nowrap; }
@@ -325,9 +327,28 @@ function buildItemsThermal(items) {
   for (const item of items) {
     const qty = parseFloat(item.quantity || item.qty) || 0;
     const rate = parseFloat(item.rate || item.unit_price || item.price || item.transfer_capital) || 0;
-    const total = parseFloat(item.total) || (qty * rate);
+    const discAmt = parseFloat(item.discount_amount) || 0;
+    const discVal = parseFloat(item.discount_value) || 0;
+    const discType = item.discount_type || 'amount';
+    const grossLine = qty * rate;
+    // Total: prefer stored line_total, else compute from gross − discount
+    const total = (item.total !== undefined && item.total !== null && item.total !== '')
+      ? parseFloat(item.total)
+      : (grossLine - discAmt);
     html += `<tr><td class="item-name" colspan="2">${item.product_name || item.description || ''}</td></tr>`;
-    html += `<tr><td class="item-detail">${qty} x ${formatPHP(rate)}</td><td class="item-total">${formatPHP(total)}</td></tr>`;
+    if (discAmt > 0) {
+      // Show pre-discount line, then the discount line, then the net line.
+      // Cashiers asked for this so the receipt no longer "lies": web view
+      // shows the discount, the printed/thermal copy must too.
+      const discLabel = discType === 'percent'
+        ? `Less ${discVal}%`
+        : (discVal > 0 ? `Less ${formatPHP(discVal)}/unit` : 'Less Discount');
+      html += `<tr><td class="item-detail">${qty} x ${formatPHP(rate)}</td><td class="item-total">${formatPHP(grossLine)}</td></tr>`;
+      html += `<tr><td class="item-discount">${discLabel}</td><td class="item-disc-val">-${formatPHP(discAmt)}</td></tr>`;
+      html += `<tr><td class="item-detail" style="text-align:right;font-weight:bold">Line Total</td><td class="item-total">${formatPHP(total)}</td></tr>`;
+    } else {
+      html += `<tr><td class="item-detail">${qty} x ${formatPHP(rate)}</td><td class="item-total">${formatPHP(total)}</td></tr>`;
+    }
   }
   html += '</table>';
   return html;

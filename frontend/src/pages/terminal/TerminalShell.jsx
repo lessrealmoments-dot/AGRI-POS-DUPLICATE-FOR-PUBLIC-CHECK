@@ -131,7 +131,16 @@ function basicDocToPrintData(basic) {
       order_date: basic.order_date || basic.date,
       created_at: basic.date,
       items: (basic.items || []).map(i => ({
-        product_name: i.name, quantity: i.qty, rate: i.price, total: i.total, discount_amount: 0,
+        product_name: i.name,
+        quantity: i.qty,
+        rate: i.price,
+        total: i.total,
+        // Per-line discount carried from /api/doc/view — was previously
+        // hardcoded to 0 here, which silently dropped line discounts from
+        // the terminal reprint even when the totals were right.
+        discount_amount: parseFloat(i.discount_amount || 0) || 0,
+        discount_value: parseFloat(i.discount_value || 0) || 0,
+        discount_type: i.discount_type || 'amount',
       })),
       subtotal: basic.subtotal,
       overall_discount: basic.discount || 0,
