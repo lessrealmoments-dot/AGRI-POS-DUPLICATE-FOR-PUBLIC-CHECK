@@ -197,7 +197,11 @@ async def record_invoice_payment(inv_id: str, data: dict, user=Depends(get_curre
     inv = await db.invoices.find_one({"id": inv_id}, {"_id": 0})
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
-    
+
+    # C-9 (Audit 2026-02): refuse payments on voided/cancelled/in-flight invoices.
+    from utils.helpers import assert_invoice_payable
+    assert_invoice_payable(inv)
+
     amount = float(data["amount"])
     fund_source = data.get("fund_source", "cashier")
     branch_id = inv.get("branch_id", "")

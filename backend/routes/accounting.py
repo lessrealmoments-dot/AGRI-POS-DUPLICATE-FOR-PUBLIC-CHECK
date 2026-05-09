@@ -1345,6 +1345,9 @@ async def pay_receivable(rec_id: str, data: dict, user=Depends(get_current_user)
     inv = await db.invoices.find_one({"id": rec_id}, {"_id": 0})
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice/Receivable not found")
+    # C-9 (Audit 2026-02): refuse payments on voided/cancelled/in-flight invoices.
+    from utils.helpers import assert_invoice_payable
+    assert_invoice_payable(inv)
     if inv.get("balance", 0) <= 0:
         raise HTTPException(status_code=400, detail="Already fully paid")
 
@@ -2105,6 +2108,21 @@ async def receive_customer_payment(customer_id: str, data: dict, user=Depends(ge
             continue
         inv = await db.invoices.find_one({"id": alloc["invoice_id"], "customer_id": customer_id}, {"_id": 0})
         if not inv or inv.get("balance", 0) <= 0:
+            continue
+        # C-9 (Audit 2026-02): skip voided/cancelled/in-flight invoices.
+        # Multi-allocation flow — silently skip these instead of 400'ing
+        # the whole batch (one bad row should not reject good rows). The
+        # response surfaces the skip via `skipped_invoices`.
+        from utils.helpers import NON_PAYABLE_INVOICE_STATUSES
+        _inv_status = (inv.get("status") or "").lower()
+        if _inv_status in NON_PAYABLE_INVOICE_STATUSES:
+            applied_invoices.append({
+                "invoice_id": inv["id"],
+                "invoice_number": inv.get("invoice_number"),
+                "applied": 0, "discount": 0,
+                "new_balance": inv.get("balance", 0),
+                "skipped_reason": f"invoice_status_{_inv_status}",
+            })
             continue
 
         # Only allow discounts on interest/penalty invoices

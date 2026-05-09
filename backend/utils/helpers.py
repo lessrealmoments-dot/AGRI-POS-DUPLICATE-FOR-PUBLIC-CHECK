@@ -3,7 +3,46 @@ Common helper functions used across the application.
 """
 import uuid
 from datetime import datetime, timezone, timedelta
+from fastapi import HTTPException
 from config import db, _raw_db, get_org_context, set_org_context
+
+
+# ── C-9 (Audit 2026-02): central voided-invoice payment guard ────────────────
+# A payment must not be applied to an invoice in any of these statuses. Three
+# routes used to allow this (record_invoice_payment, pay_receivable,
+# receive_customer_payment), causing customer.balance to silently go negative
+# and the wallet to receive cash for a sale that was already reversed.
+#
+# `for_preparation` / `processing` / `error_partial_write` are in-flight states
+# (drafts, mid-finalize, partial-write tombstones) and also reject payments —
+# a finalized status is required first.
+NON_PAYABLE_INVOICE_STATUSES = {
+    "voided",
+    "cancelled",
+    "deleted",
+    "for_preparation",
+    "processing",
+    "error_partial_write",
+}
+
+
+def assert_invoice_payable(inv: dict) -> None:
+    """Raise HTTPException 400 when the invoice cannot accept a payment.
+
+    Used by every payment-write route so the rule is enforced regardless of
+    which entry point a caller hits (terminal, web POS, accounting page, or a
+    direct API request bypassing the frontend).
+    """
+    status = (inv.get("status") or "").lower()
+    if status in NON_PAYABLE_INVOICE_STATUSES:
+        inv_no = inv.get("invoice_number") or inv.get("id") or "?"
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Cannot record payment on invoice {inv_no}: status is '{status}'. "
+                f"Only finalized open/partial/credit invoices can receive payments."
+            ),
+        )
 
 
 def now_iso():

@@ -457,9 +457,13 @@ async def reconcile_orphan_offline_draft(body: dict, user=Depends(get_current_us
     cust_id = off_inv.get("customer_id")
     bal_owed = float(off_inv.get("balance", 0))
     if cust_id and bal_owed > 0:
+        # C-7 (Audit 2026-02): the canonical customer-AR field is `balance`
+        # everywhere else in the codebase. The previous `$inc current_balance`
+        # was a silent no-op (no such field) which left the customer's AR
+        # inflated after orphan-offline reconciliation.
         await db.customers.update_one(
             {"id": cust_id},
-            {"$inc": {"current_balance": -bal_owed},
+            {"$inc": {"balance": -bal_owed},
              "$set": {"updated_at": now_iso()}},
         )
 
