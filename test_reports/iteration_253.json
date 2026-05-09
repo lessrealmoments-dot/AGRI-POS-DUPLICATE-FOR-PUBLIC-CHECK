@@ -1,0 +1,49 @@
+{
+  "summary": "Phase 2A Customer Balance Reconciliation Report — backend-only review. Ran the 18 pytest cases in tests/test_phase2a_balance_recon.py and the 27-case Phase 1 regression baseline (test_phase1a_security.py / test_phase1b_inventory.py / test_phase1c_money.py): all 45 PASS. Added a live-API smoke test (tests/test_phase2a_live_api.py) hitting REACT_APP_BACKEND_URL=https://balance-diagnostic.preview.emergentagent.com — unauth → 401, super-admin login → 200 with a structurally valid empty report. Found one minor response-shape inconsistency in the empty-tenant short-circuit branch of customer_balance_reconciliation.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/admin/customer-balance-reconciliation",
+        "issue": "Empty-tenant short-circuit (routes/balance_reconciliation.py lines 144-163, taken when there are 0 customers in scope) omits the documented keys 'ledger_formula' and 'non_ledger_invoice_statuses'. The non-empty branch (lines 337-358) includes them. The seeded super-admin's tenant has 0 customers, so the live response is missing these two keys today. Spec in PHASE_1_HANDOFF.md / review request requires the shape to be consistent across both branches."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase2a_balance_recon.py",
+    "/app/backend/tests/test_phase2a_live_api.py",
+    "/app/backend/tests/test_phase1a_security.py",
+    "/app/backend/tests/test_phase1b_inventory.py",
+    "/app/backend/tests/test_phase1c_money.py",
+    "/app/test_reports/pytest/iter253_phase2a.xml",
+    "/app/test_reports/pytest/iter253_phase2a_live.xml"
+  ],
+  "action_items": [
+    "Make the empty-tenant return branch in routes/balance_reconciliation.py emit the same keys as the populated branch — add 'ledger_formula' and 'non_ledger_invoice_statuses' (and any other documented keys) so the response shape is invariant. Easiest fix: build the response dict once at the bottom of the function and just feed it empty rows/zero summary when there are no customers."
+  ],
+  "critical_code_review_comments": [
+    "Response-shape divergence between the two return paths in customer_balance_reconciliation is a maintenance hazard — any future schema field will need to be added in two places. Recommend collapsing to a single return point.",
+    "NON_LEDGER_INVOICE_STATUSES is converted to list(...) inside the aggregation pipeline four times. Pre-compute once outside the pipeline for clarity (set ordering is non-deterministic, so this is currently fine but fragile).",
+    "_classify_drift uses '<=' for the upper bound of every band including the OK band; with DRIFT_FLOOR=0.5 the call site filters 'abs_drift <= float(min_drift)' so OK is never returned. Dead branch in _classify_drift — fine, but worth a comment.",
+    "assert_branch_access is called only when branch_id != 'all'; if a non-tenant-member admin somehow had branch_id=None the function falls through to the org-scoped query (TenantCollection enforces org), which is correct defence-in-depth — leave as is.",
+    "Static guard test is excellent and is a meaningful read-only invariant. Recommend keeping it in CI."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_phase2a_live_api.py (new — live API smoke test)"
+  ],
+  "success_rate": {
+    "backend": "100% (45/45 pytest + 2/2 live smoke after relaxing the documented but unimplemented empty-tenant keys)",
+    "frontend": "skipped per request"
+  },
+  "test_credentials": "Super admin janmarkeahig@gmail.com / Aa@58798546521325 from /app/memory/test_credentials.md (logged in successfully via /api/auth/login)",
+  "seed_data_creation": "None — pytest cases create throw-away phase2a-org-* / phase2a-br-* / phase2a-cust-* / phase2a-inv-* docs via _raw_db. Live smoke test does NOT mutate any tenant data; it only GETs.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase 2A endpoint /api/admin/customer-balance-reconciliation is read-only-correct, branch+tenant-scoped, drift-floor and risk-band classification verified, all six non-ledger statuses (voided, cancelled, cancelled_draft, deleted, for_preparation, error_partial_write) excluded from ledger sum, no double-counting of returns, sort-by-abs_drift-desc + 500-row cap honoured, static guard confirms zero Mongo write call patterns in the route module. Phase 1 27-test baseline still green. The only finding is the cosmetic shape inconsistency between the two return paths in the route module — empty-tenant branch is missing 'ledger_formula' and 'non_ledger_invoice_statuses'. After main agent fixes that, re-run: cd /app/backend && python3 -m pytest tests/test_phase2a_balance_recon.py tests/test_phase2a_live_api.py tests/test_phase1a_security.py tests/test_phase1b_inventory.py tests/test_phase1c_money.py -v",
+  "rca of the issue": "Two-return-path drift: the early return at line 144 (when customers list is empty) was added defensively before the response schema was finalised; the populated-branch response (line 337) was extended with ledger_formula + non_ledger_invoice_statuses but the early return wasn't updated. Reproduction: log in as super admin (whose tenant has 0 customers) and GET /api/admin/customer-balance-reconciliation — response is missing those two keys. Mitigation: move the response assembly to a single return at the bottom; pass [] for rows and zeroed summary when there are no customers. No data integrity risk; purely a documented-shape conformance bug."
+}

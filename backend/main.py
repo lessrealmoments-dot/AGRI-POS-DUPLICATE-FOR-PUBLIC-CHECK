@@ -64,6 +64,7 @@ from routes.draft_orders import router as draft_orders_router
 from routes.admin_backfill_240 import router as admin_backfill_240_router
 from routes.close_reminder import start_scheduler_on_startup as _start_close_reminder
 from routes.print_jobs import router as print_jobs_router
+from routes.balance_reconciliation import router as balance_reconciliation_router
 
 # =============================================================================
 # APP SETUP
@@ -241,6 +242,9 @@ api_router.include_router(admin_backfill_240_router)
 
 # Remote Branch Print Terminal
 api_router.include_router(print_jobs_router)
+
+# Phase 2A — Customer Balance Reconciliation Report (READ-ONLY diagnostic)
+api_router.include_router(balance_reconciliation_router)
 
 # =============================================================================
 # WEBSOCKET ROUTES (must be on app directly with /api prefix)

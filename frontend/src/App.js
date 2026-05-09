@@ -50,6 +50,7 @@ import CustomerDedupeManager from './components/CustomerDedupeManager';
 import ImpersonationBanner from './components/ImpersonationBanner';
 import ReturnRefundWizard from './pages/ReturnRefundWizard';
 import AuditCenterPage from './pages/AuditCenterPage';
+import BalanceReconciliationPage from './pages/BalanceReconciliationPage';
 import TeamPage from './pages/TeamPage';
 import UploadPage from './pages/UploadPage';
 import DocUploadPage from './pages/DocUploadPage';
@@ -266,6 +267,7 @@ function AppRoutes() {
       <Route path="/reports" element={<ProtectedRoute><FeatureGate featureKey="advanced_reports"><ReportsPage /></FeatureGate></ProtectedRoute>} />
       <Route path="/returns" element={<ProtectedRoute><ReturnRefundWizard /></ProtectedRoute>} />
       <Route path="/audit" element={<ProtectedRoute><FeatureGate featureKey="audit_center"><AuditCenterPage /></FeatureGate></ProtectedRoute>} />
+      <Route path="/audit/balance-reconciliation" element={<ProtectedRoute><FeatureGate featureKey="audit_center"><BalanceReconciliationPage /></FeatureGate></ProtectedRoute>} />
       <Route path="/incident-tickets" element={<ProtectedRoute><IncidentTicketsPage /></ProtectedRoute>} />
       <Route path="/backups" element={<ProtectedRoute><BackupManagementPage /></ProtectedRoute>} />
       <Route path="/downloads" element={<ProtectedRoute><AppDownloadsPage /></ProtectedRoute>} />

@@ -1107,8 +1107,21 @@ export default function AuditCenterPage() {
             <p className="text-xs text-slate-500">Comprehensive business audit — cash, inventory, sales, AR, payables, activity</p>
           </div>
         </div>
-        {auditData && (
-          <div className="flex items-center gap-5" data-testid="audit-dual-score">
+        <div className="flex items-center gap-3">
+          {isAdmin && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/audit/balance-reconciliation')}
+              data-testid="open-balance-reconciliation-btn"
+              className="border-amber-300 text-amber-800 hover:bg-amber-50"
+            >
+              <ShieldAlert size={14} className="mr-1.5" />
+              Customer Balance Drift
+            </Button>
+          )}
+          {auditData && (
+            <div className="flex items-center gap-5" data-testid="audit-dual-score">
             <div className="text-center">
               <p className={`text-4xl font-bold font-mono ${scoreColor}`}>{overallScore}/100</p>
               <p className="text-xs text-slate-500 mt-0.5">
@@ -1133,6 +1146,7 @@ export default function AuditCenterPage() {
             })()}
           </div>
         )}
+        </div>
       </div>
 
       {/* ── Signature Verification Toolbar ──────────────────────────────── */}
