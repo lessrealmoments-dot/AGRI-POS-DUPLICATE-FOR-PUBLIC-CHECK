@@ -1,6 +1,39 @@
 # AgriBooks PRD
 
 
+## Phase 2B — Core POS Business Flow Verification Matrix (Audit 2026-02, May 2026) ✅
+
+### Goal
+Verification-first pass over the core POS business flows. No fixes, no
+rebuilds. Build a controlled-fixture pytest harness that exercises the
+actual route handlers and produces a consolidated matrix report.
+
+### What was built
+- Shared fixture builder `backend/tests/phase2b/_fixtures.py` (throw-away org/branch/customer/products/wallets per test).
+- 7 group test files covering Sales, Payments, Inventory, Purchase, Returns/Voids, Reports, POS-surface comparison.
+- Consolidated matrix report at `/app/memory/PHASE_2B_FLOW_MATRIX.md`.
+
+### Headline results
+- **31 / 33 PASS · 2 SKIP · 0 FAIL**.
+- Phase 1 + 2A regression intact: 45/45 still green (76 total tests).
+- Zero production-data mutations.
+- POS surface convergence verified — Quick / Advanced / Terminal-online / Terminal-offline-sync all funnel through `POST /unified-sale` with identical contract.
+
+### Findings (deferred to Phase 2C — owner approval pending)
+- **P1** Payment idempotency missing on `record_invoice_payment` and `pay_receivable` — duplicate identical bodies double-record.
+- **P1 (H-4)** Returns credit applies to OLDEST open invoice when `invoice_number` omitted.
+- **P1** `modify-payment` / `void-payment` not guarded by `assert_invoice_payable`.
+- **P2** Overpayment quietly creates negative `customer.balance` (informal credit).
+- **P3** PO direct-call tests need heavier fixture (closed-day + fund balances) — 2 tests skipped.
+
+### Files
+- NEW `backend/tests/phase2b/_fixtures.py`
+- NEW `backend/tests/phase2b/test_g{1..7}_*.py`
+- NEW `memory/PHASE_2B_FLOW_MATRIX.md`
+
+---
+
+
 ## Phase 2A — Customer Balance Reconciliation Report (Audit 2026-02, May 2026) ✅
 
 ### Goal
