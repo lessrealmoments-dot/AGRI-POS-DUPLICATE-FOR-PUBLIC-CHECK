@@ -163,34 +163,88 @@ def user_branch_ids(user: dict) -> list:
     return ids
 
 
+_PRIVILEGED_ROLES = {"admin", "owner"}
+
+
+def is_privileged(user: dict) -> bool:
+    """Roles that legitimately have org-wide access (admin / owner / super-admin)."""
+    if not user:
+        return False
+    if user.get("is_super_admin"):
+        return True
+    return (user.get("role") or "") in _PRIVILEGED_ROLES
+
+
+def assert_admin_or_owner(user: dict) -> None:
+    """Raise 403 unless `user` is admin / owner / super-admin.
+
+    Use on endpoints that legitimately need org-wide reach (Audit Center,
+    cross-branch tooling, settings) where neither branch scoping nor
+    delegation makes sense.
+    """
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not is_privileged(user):
+        raise HTTPException(
+            status_code=403,
+            detail="Admin or owner role required.",
+        )
+
+
 def assert_branch_access(user: dict, branch_id) -> None:
     """Raise 403 if `user` is not allowed to operate on `branch_id`.
 
-    Rules:
-      * admins (role=admin) and super-admins → allowed everywhere
-      * users with no branch assignment at all (legacy unscoped) → allowed
-        everywhere within their org (preserves pre-multi-branch behaviour)
-      * everyone else → branch_id MUST be in `user.branch_ids` (or equal
-        to legacy `user.branch_id`)
-      * empty / None / 'all' branch_id → no-op (caller is asking for a
-        consolidated view; the org-scope tenant proxy will still gate
-        cross-org access)
+    Rules (Phase 2D — H-5 hardened):
+      * admins / owners / super-admins → allowed everywhere within their
+        org (their tenant scope is enforced separately by TenantCollection)
+      * non-privileged users with `branch_ids` set → branch_id MUST be in
+        that whitelist (or equal to legacy `user.branch_id`)
+      * non-privileged users with NO branch assignment (empty branch_ids
+        AND no legacy branch_id) → 403. Previously this slid through to
+        full-org access; that was the H-5 bypass surfaced by the audit.
+      * empty / None / 'all' branch_id → for privileged users this is a
+        legitimate "consolidated view" request and is allowed. For
+        non-privileged users, a missing branch_id still requires the user
+        to have at least one assigned branch (otherwise 403 — the route
+        is asked to filter by *something* and we have nothing to scope to).
 
     Use this in any endpoint that accepts a branch_id from the client
     (query param, body field, or path) and would otherwise expose another
     branch's data on a forged request.
     """
-    if not branch_id or branch_id == "all":
-        return
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
-    if user.get("role") == "admin" or user.get("is_super_admin"):
-        return
+
+    privileged = is_privileged(user)
     allowed = user_branch_ids(user)
-    if not allowed:
-        # Legacy unscoped user — no assignment list. Don't block; org
-        # tenant proxy already prevents cross-org leak.
+
+    # Empty / 'all' → consolidated view. Privileged users pass; non-privileged
+    # users must still have at least one assigned branch (otherwise their
+    # request can't be scoped safely).
+    if not branch_id or branch_id == "all":
+        if privileged:
+            return
+        if not allowed:
+            raise HTTPException(
+                status_code=403,
+                detail="No branch assignment. Ask an administrator to assign "
+                       "you to a branch under Team → Edit User.",
+            )
         return
+
+    if privileged:
+        return
+
+    if not allowed:
+        # Phase 2D (H-5): legacy non-privileged user with no branch_ids.
+        # Previously fell through to "allowed everywhere within org" which
+        # leaked cross-branch data on forged requests. Now blocked.
+        raise HTTPException(
+            status_code=403,
+            detail="No branch assignment. Ask an administrator to assign "
+                   "you to a branch under Team → Edit User.",
+        )
+
     if branch_id not in allowed:
         raise HTTPException(
             status_code=403,

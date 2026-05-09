@@ -1,0 +1,39 @@
+{
+  "summary": "Phase 2D Branch/Tenant Permission Hardening - backend-only verification PASSED. Phase 2D pytest suite: 17/17 PASSED. Full regression suite (phase1a + phase1b + phase1c + phase2a + phase2c + phase2d + phase2b/): 103 passed, 2 skipped, 0 failed (matches spec). Created live smoke (test_phase2d_live_smoke.py): 12/12 passed against REACT_APP_BACKEND_URL, including a real cross-branch cashier scenario: created throw-away cashier scoped to branch B1, logged in, /api/sync/pos-data?branch_id=B2 -> 403, ?branch_id=B1 -> 200, then deleted the cashier. Admin paths preserved: /api/products, /api/customers, /api/invoices, /api/sync/pos-data (with and without branch_id), /api/sync/inventory-pulse (with and without branch_id, items=[] preserved), /api/admin/customer-balance-reconciliation?limit=5 all return 200 for the org-admin token. Super-admin (janmarkeahig) login works; tenant-scoped endpoints correctly remain blocked under iter180 cross-tenant privacy rule (documented in test_credentials.md - NOT a Phase 2D regression).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase2d_permissions.py",
+    "/app/backend/tests/test_phase2d_live_smoke.py",
+    "/app/test_reports/pytest/iter255_phase2d.xml",
+    "/app/test_reports/pytest/iter255_full_regression.xml",
+    "/app/test_reports/pytest/iter255_phase2d_live.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "utils/branch.py::get_branch_filter raises 403 'No branch access assigned' whenever get_user_branches returns []. For super-admin (role=admin + is_super_admin=true + organization_id=null) the branch list ends up empty whenever there are no global active branches, which yields 403 on tenant-scoped endpoints like /api/invoices. This is the documented iter180 cross-tenant privacy behaviour and is NOT a Phase 2D regression, but the error message could be clearer (e.g. 'super-admin cannot access tenant-scoped endpoint') so future agents do not misread it as a permission bug.",
+    "Phase 2D's assert_branch_access in utils/auth.py and the existing get_branch_filter in utils/branch.py operate on slightly different contracts (the former takes a branch_id and is_privileged() role check, the latter constructs a Mongo filter and hard-codes role=='admin' or is_owner). Worth a follow-up consolidation so role-privilege rules live in exactly one place; today the same 'admin/owner/super_admin' definition is implemented in two files.",
+    "test_phase2d_live_smoke.py performs a real create->login->cross-branch-403->cleanup loop; the cashier delete uses best-effort fallbacks across /api/users, /api/admin/users, /api/staff, /api/employees. If main agent later renames the user CRUD route, the cleanup may silently no-op and leave throw-away docs. Recommend exposing a canonical user-delete endpoint or extending the cleanup helper.",
+    "Phase 2D suite uses raw_db throw-away docs with prefixes p2d-org-* / p2d-cashier-*; no production data mutation observed. test_static_guard_raw_db_callsites_on_tenant_cols also enforces no future raw collection writes can bypass the org filter, which is a strong regression-fence."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_phase2d_live_smoke.py (new - 12 live API smoke cases including cross-branch cashier 403 and cleanup)"
+  ],
+  "success_rate": {
+    "backend": "100% (17/17 phase2d unit + 103 passed/2 skipped/0 failed full regression + 12/12 live smoke)",
+    "frontend": "skipped per request (testing_type=backend only)"
+  },
+  "test_credentials": "Super admin janmarkeahig@gmail.com / Aa@58798546521325 (platform-level, blocked from tenant data per iter180); Org admin test_org_admin@regression.local / RegressionPass!2026 (used for tenant-scoped live smoke). Both from /app/memory/test_credentials.md.",
+  "seed_data_creation": "Live cross-branch test creates a throw-away cashier (email p2d_throwaway_<8-hex>@regression.local) inside the regression org, then deletes it after the assertion. Pytest unit tests use _raw_db with prefix p2d-org-*/p2d-cashier-* on a fixture DB. No production tenant data was mutated.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase 2D ships clean. Re-run commands: (1) cd /app/backend && python3 -m pytest tests/test_phase2d_permissions.py -v  -> expect 17 passed. (2) cd /app/backend && python3 -m pytest tests/test_phase1a_security.py tests/test_phase1b_inventory.py tests/test_phase1c_money.py tests/test_phase2a_balance_recon.py tests/test_phase2c_pos_hardening.py tests/test_phase2d_permissions.py tests/phase2b/ -> expect 103 passed, 2 skipped. (3) cd /app/backend && python3 -m pytest tests/test_phase2d_live_smoke.py -v -> expect 12 passed. NOTE: super-admin (janmarkeahig) MUST be blocked from tenant-scoped endpoints like /api/invoices (iter180 cross-tenant privacy fix); use test_org_admin@regression.local for tenant flow validation. Out-of-scope items per handoff: Phase 2E, Phase 3, Phase 4, and the 11 known hardcoded-date legacy test failures in unrelated files.",
+  "rca of the issue": "No Phase 2D regression observed. During live smoke an apparent 403 on /api/invoices for the super-admin token surfaced; root cause is the pre-existing iter180 cross-tenant privacy rule in utils/branch.py::get_branch_filter (super-admin without an organization_id has no branch_ids and is denied tenant-scoped reads). Resolved the test by routing tenant-scoped assertions through the seeded regression org-admin (test_org_admin@regression.local) per /app/memory/test_credentials.md guidance, while still asserting that super-admin login itself succeeds. Phase 2D's new gates (assert_branch_access, assert_admin_or_owner, /sync/pos-data branch validation, /sync/inventory-pulse branch validation, JWT org_id alignment) all behave as specified."
+}

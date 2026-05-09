@@ -4,7 +4,12 @@ Sync routes: Offline POS data sync.
 from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone, timedelta
 from config import db, _raw_db
-from utils import get_current_user, now_iso, new_id, log_movement, log_sale_items, update_cashier_wallet, get_active_date, today_local
+from utils import (
+    get_current_user, now_iso, new_id,
+    log_movement, log_sale_items,
+    update_cashier_wallet, get_active_date, today_local,
+    assert_branch_access, user_branch_ids, is_privileged,
+)
 
 router = APIRouter(tags=["Sync"])
 
@@ -541,10 +546,41 @@ async def get_sync_estimate(user=Depends(get_current_user), branch_id: str = Non
 async def get_pos_sync_data(user=Depends(get_current_user), branch_id: str = None, last_sync: str = None):
     """Get data for offline POS sync — includes branch-specific prices.
     If last_sync is provided, only returns records updated since that timestamp (delta sync).
+
+    Phase 2D (H-5 hardening):
+      * branch_id (when supplied) is validated against the user's
+        `branch_ids` whitelist via `assert_branch_access`.
+      * For non-privileged users, the `customers` payload is filtered to
+        the user's assigned branches (previously returned all org
+        customers regardless of branch).
+      * For non-privileged users with NO branch_id query param, the
+        cross-branch inventory aggregation is restricted to their
+        assigned branches.
     """
+    # H-5: validate branch_id against the caller's whitelist
+    if branch_id:
+        assert_branch_access(user, branch_id)
+
+    privileged = is_privileged(user)
+    user_branches = user_branch_ids(user) if not privileged else []
+    if not privileged and not user_branches:
+        # Non-privileged user with no branch assignment — nothing to sync.
+        raise HTTPException(
+            status_code=403,
+            detail="No branch assignment. Ask an administrator to assign "
+                   "you to a branch under Team → Edit User.",
+        )
+
     is_delta = bool(last_sync)
     product_query = {"active": True}
     customer_query = {"active": True}
+
+    # H-5: scope customers to the caller's branches when not privileged.
+    if not privileged:
+        if branch_id:
+            customer_query["branch_id"] = branch_id
+        else:
+            customer_query["branch_id"] = {"$in": user_branches}
 
     # Delta sync: only fetch records updated since last_sync
     time_filter = None
@@ -574,7 +610,14 @@ async def get_pos_sync_data(user=Depends(get_current_user), branch_id: str = Non
         inventory = await db.inventory.find(inv_query, {"_id": 0}).to_list(10000)
     elif not is_delta:
         # Full sync without branch — aggregate total stock across all branches
+        # (privileged users only; for non-privileged users we already short-
+        # circuited above by either restricting to branch_id or to
+        # user_branches).
+        agg_match = {}
+        if not privileged and user_branches:
+            agg_match = {"branch_id": {"$in": user_branches}}
         agg = await db.inventory.aggregate([
+            *([{"$match": agg_match}] if agg_match else []),
             {"$group": {"_id": "$product_id", "quantity": {"$sum": "$quantity"}}}
         ]).to_list(10000)
         inventory = [{"product_id": r["_id"], "quantity": r["quantity"]} for r in agg]
@@ -844,6 +887,8 @@ async def get_inventory_pulse(user=Depends(get_current_user), branch_id: str = N
     """
     if not branch_id:
         return {"items": [], "pulse_time": now_iso()}
+    # Phase 2D: validate the requested branch is in the caller's whitelist
+    assert_branch_access(user, branch_id)
     
     query = {"branch_id": branch_id}
     if since:
