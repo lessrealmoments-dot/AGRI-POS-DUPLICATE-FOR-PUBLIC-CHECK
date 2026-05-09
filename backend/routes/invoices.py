@@ -193,19 +193,35 @@ async def get_invoice_by_number(invoice_number: str, user=Depends(get_current_us
 async def record_invoice_payment(inv_id: str, data: dict, user=Depends(get_current_user)):
     """Record a payment on an invoice."""
     check_perm(user, "accounting", "create")
-    
+
     inv = await db.invoices.find_one({"id": inv_id}, {"_id": 0})
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
 
     # C-9 (Audit 2026-02): refuse payments on voided/cancelled/in-flight invoices.
-    from utils.helpers import assert_invoice_payable
+    from utils.helpers import (
+        assert_invoice_payable, assert_payment_within_balance,
+        payment_idempotency_lookup_or_reserve, payment_idempotency_record,
+        payment_idempotency_release,
+    )
     assert_invoice_payable(inv)
 
     amount = float(data["amount"])
+
+    # Phase 2C.4: reject overpayment beyond ₱0.50 tolerance.
+    assert_payment_within_balance(inv, amount)
+
+    # Phase 2C.1: idempotency — replay cached response if same key already done.
+    idem_key = (data.get("idempotency_key") or "").strip()
+    org_id = user.get("organization_id") or ""
+    route_tag = "record_invoice_payment"
+    replay = await payment_idempotency_lookup_or_reserve(idem_key, org_id, route_tag)
+    if replay:
+        return replay["response"]
+
     fund_source = data.get("fund_source", "cashier")
     branch_id = inv.get("branch_id", "")
-    
+
     # Interest & penalties first, then principal
     interest_owed = inv.get("interest_accrued", 0) + inv.get("penalties", 0)
     applied_interest = min(amount, interest_owed)
@@ -214,7 +230,7 @@ async def record_invoice_payment(inv_id: str, data: dict, user=Depends(get_curre
     new_balance = round(inv["balance"] - amount, 2)
     new_paid = round(inv["amount_paid"] + amount, 2)
     new_status = "paid" if new_balance <= 0 else "partial"
-    
+
     payment = {
         "id": new_id(),
         "amount": amount,
@@ -226,46 +242,55 @@ async def record_invoice_payment(inv_id: str, data: dict, user=Depends(get_curre
         "applied_to_principal": applied_principal,
         "recorded_by": user.get("full_name", user["username"]),
         "recorded_at": now_iso(),
+        "idempotency_key": idem_key or None,
     }
-    
-    await db.invoices.update_one({"id": inv_id}, {
-        "$set": {
-            "balance": max(0, new_balance),
-            "amount_paid": new_paid,
-            "interest_accrued": new_interest,
-            "status": new_status
-        },
-        "$push": {"payments": payment}
-    })
-    
-    # Add to wallet
-    wallet = await db.fund_wallets.find_one({"branch_id": branch_id, "type": fund_source}, {"_id": 0})
-    if wallet:
-        if fund_source == "safe":
-            await db.safe_lots.insert_one({
-                "id": new_id(),
-                "branch_id": branch_id,
-                "wallet_id": wallet["id"],
-                "date_received": data.get("date") or await today_local(user.get("organization_id") or ""),
-                "original_amount": amount,
-                "remaining_amount": amount,
-                "source_reference": f"Payment from {inv.get('customer_name', '')} - {inv['invoice_number']}",
-                "created_by": user["id"],
-                "created_at": now_iso()
-            })
-        else:
-            await db.fund_wallets.update_one({"id": wallet["id"]}, {"$inc": {"balance": amount}})
-    
-    # Update customer balance
-    if inv.get("customer_id"):
-        await db.customers.update_one({"id": inv["customer_id"]}, {"$inc": {"balance": -amount}})
-    
-    return {
+
+    try:
+        await db.invoices.update_one({"id": inv_id}, {
+            "$set": {
+                "balance": max(0, new_balance),
+                "amount_paid": new_paid,
+                "interest_accrued": new_interest,
+                "status": new_status
+            },
+            "$push": {"payments": payment}
+        })
+
+        # Add to wallet
+        wallet = await db.fund_wallets.find_one({"branch_id": branch_id, "type": fund_source}, {"_id": 0})
+        if wallet:
+            if fund_source == "safe":
+                await db.safe_lots.insert_one({
+                    "id": new_id(),
+                    "branch_id": branch_id,
+                    "wallet_id": wallet["id"],
+                    "date_received": data.get("date") or await today_local(user.get("organization_id") or ""),
+                    "original_amount": amount,
+                    "remaining_amount": amount,
+                    "source_reference": f"Payment from {inv.get('customer_name', '')} - {inv['invoice_number']}",
+                    "created_by": user["id"],
+                    "created_at": now_iso()
+                })
+            else:
+                await db.fund_wallets.update_one({"id": wallet["id"]}, {"$inc": {"balance": amount}})
+
+        # Update customer balance
+        if inv.get("customer_id"):
+            await db.customers.update_one({"id": inv["customer_id"]}, {"$inc": {"balance": -amount}})
+    except Exception:
+        # Phase 2C.1: release the idempotency reservation so legitimate retries
+        # are not permanently blocked by a transient failure.
+        await payment_idempotency_release(idem_key, org_id, route_tag)
+        raise
+
+    response = {
         "message": "Payment recorded",
         "new_balance": max(0, new_balance),
         "status": new_status,
-        "payment": payment
+        "payment": payment,
     }
+    await payment_idempotency_record(idem_key, org_id, route_tag, response)
+    return response
 
 
 @router.post("/invoices/{inv_id}/compute-interest")
@@ -1306,6 +1331,28 @@ async def void_invoice_payment(inv_id: str, payment_id: str, data: dict, user=De
 
     check_perm(user, "accounting", "edit_expense")
 
+    # Phase 2C.2 — fetch + status-guard FIRST so we don't even prompt PIN on a
+    # defunct invoice. Log the blocked attempt for audit.
+    inv = await db.invoices.find_one({"id": inv_id}, {"_id": 0})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    from utils.helpers import assert_invoice_payment_modifiable
+    try:
+        assert_invoice_payment_modifiable(inv, action="void")
+    except HTTPException:
+        await db.audit_logs.insert_one({
+            "id": new_id(),
+            "type": "blocked_void_payment_on_bad_invoice",
+            "actor_id": user.get("id"),
+            "actor_name": user.get("full_name", user.get("username", "")),
+            "invoice_id": inv_id, "payment_id": payment_id,
+            "invoice_status": inv.get("status"),
+            "branch_id": inv.get("branch_id", ""),
+            "organization_id": user.get("organization_id") or "",
+            "created_at": now_iso(),
+        })
+        raise
+
     # Verify manager PIN
     manager_pin = data.get("manager_pin", "")
     if not manager_pin:
@@ -1315,10 +1362,6 @@ async def void_invoice_payment(inv_id: str, payment_id: str, data: dict, user=De
     if not verifier:
         raise HTTPException(status_code=403, detail="Invalid manager PIN")
     authorized_manager = {"id": verifier["verifier_id"], "full_name": verifier["verifier_name"], "username": verifier["verifier_name"]}
-
-    inv = await db.invoices.find_one({"id": inv_id}, {"_id": 0})
-    if not inv:
-        raise HTTPException(status_code=404, detail="Invoice not found")
 
     payment = next((p for p in inv.get("payments", []) if p.get("id") == payment_id), None)
     if not payment:

@@ -110,49 +110,70 @@ async def test_g2_payment_does_not_touch_inventory():
 
 
 # ───────────────────────────────────────────────────────────────────────────
-# 2.5 Overpayment behaviour — route caps balance at 0
+# 2.5 Overpayment now REJECTED (Phase 2C.4 fix)
 # ───────────────────────────────────────────────────────────────────────────
 @pytest.mark.asyncio
-async def test_g2_overpayment_caps_balance_but_credits_full_amount():
-    """
-    BUG-CANDIDATE: route caps invoice.balance at 0 but credits the full
-    overpayment amount to amount_paid AND debits customer.balance by the full
-    overpayment. Result: customer can end with NEGATIVE balance (a credit
-    they can re-use). Document expected behaviour in matrix.
-    """
+async def test_g2_overpayment_rejected_phase2c4():
+    """Phase 2C.4: overpayment beyond ₱0.50 tolerance must be rejected.
+    Customer.balance must NOT go negative; cashier wallet must NOT be credited."""
+    from fastapi import HTTPException
     org_id, branch_id, _, cid, inv_id, user = await _create_open_credit_invoice(300.0)
-    res = await record_invoice_payment(inv_id, {"amount": 500.0, "method": "Cash"}, user=user)
+    cashier_before = await snapshot_wallet(branch_id, "cashier")
+    with pytest.raises(HTTPException) as exc:
+        await record_invoice_payment(inv_id, {"amount": 500.0, "method": "Cash"}, user=user)
+    assert exc.value.status_code == 400
+    assert "overpayment" in (exc.value.detail or "").lower()
 
-    # Per current code: balance is max(0, ...) → invoice closes at 0
-    assert res["new_balance"] == 0
+    # Customer balance still 300 (not negative), wallet unchanged
     cust = await snapshot_customer(cid)
-    # Customer ends at -200 (overpayment becomes credit)
-    assert cust["balance"] == -200.0, (
-        f"P2B G2 OBSERVATION: overpayment leaves customer.balance at "
-        f"{cust['balance']} (expected -200 by current behaviour). "
-        "Document in matrix as 'credit-on-overpayment' design choice."
-    )
+    assert cust["balance"] == 300.0
+    assert await snapshot_wallet(branch_id, "cashier") == cashier_before
+
+
+@pytest.mark.asyncio
+async def test_g2_overpayment_within_tolerance_accepted():
+    """Within ₱0.50 tolerance still flows through (rounding allowance)."""
+    org_id, branch_id, _, cid, inv_id, user = await _create_open_credit_invoice(300.0)
+    res = await record_invoice_payment(inv_id, {"amount": 300.30, "method": "Cash"}, user=user)
+    assert res["new_balance"] == 0
 
 
 # ───────────────────────────────────────────────────────────────────────────
-# 2.6 Idempotency on payments — current behaviour
+# 2.6 Idempotent payment retries (Phase 2C.1 fix)
 # ───────────────────────────────────────────────────────────────────────────
 @pytest.mark.asyncio
-async def test_g2_payment_retry_observation():
-    """
-    BUG-CANDIDATE: record_invoice_payment has NO idempotency_key support.
-    Two successive calls with the same body each create a payment entry —
-    customer balance decremented twice. Document in matrix as P1 risk.
-    """
+async def test_g2_payment_idempotency_blocks_duplicate():
+    """Phase 2C.1: same idempotency_key on retry returns the cached response;
+    customer.balance is decremented ONCE, payment row recorded ONCE."""
     org_id, branch_id, _, cid, inv_id, user = await _create_open_credit_invoice(1000.0)
-    await record_invoice_payment(inv_id, {"amount": 100.0}, user=user)
-    await record_invoice_payment(inv_id, {"amount": 100.0}, user=user)
+    body = {"amount": 100.0, "method": "Cash", "idempotency_key": "p2c-test-1"}
+    res1 = await record_invoice_payment(inv_id, body, user=user)
+    res2 = await record_invoice_payment(inv_id, body, user=user)
+    # Same response replayed
+    assert res1 == res2
+    # Customer balance decremented ONCE
     cust = await snapshot_customer(cid)
+    assert cust["balance"] == 900.0
+    # Only one payment row
     inv = await _raw_db.invoices.find_one({"id": inv_id}, {"_id": 0})
-    # Currently: balance = 800 (both went through). This documents the gap.
-    assert cust["balance"] == 800.0, (
-        f"P2B G2 OBSERVATION: two identical payments are NOT deduplicated "
-        f"(customer balance ended at {cust['balance']}). Idempotency missing. "
-        "Document in matrix as P1 risk."
-    )
-    assert len(inv["payments"]) == 2
+    assert len(inv["payments"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_g2_different_idempotency_keys_allow_separate_payments():
+    """Different keys must allow legitimate separate payments."""
+    org_id, branch_id, _, cid, inv_id, user = await _create_open_credit_invoice(1000.0)
+    await record_invoice_payment(inv_id, {"amount": 100.0, "idempotency_key": "p2c-a"}, user=user)
+    await record_invoice_payment(inv_id, {"amount": 100.0, "idempotency_key": "p2c-b"}, user=user)
+    cust = await snapshot_customer(cid)
+    assert cust["balance"] == 800.0
+
+
+@pytest.mark.asyncio
+async def test_g2_no_idempotency_key_still_works_back_compat():
+    """Callers that don't send a key still record the payment normally."""
+    org_id, branch_id, _, cid, inv_id, user = await _create_open_credit_invoice(1000.0)
+    res = await record_invoice_payment(inv_id, {"amount": 100.0}, user=user)
+    assert res["new_balance"] == 900.0
+    cust = await snapshot_customer(cid)
+    assert cust["balance"] == 900.0

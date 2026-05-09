@@ -462,6 +462,17 @@ async def startup():
         )
     except Exception:
         pass
+    # Phase 2C.1 (Audit 2026-02): payment idempotency table — unique key per
+    # (org, route, idempotency_key) so duplicate payments cannot land twice.
+    try:
+        await _raw_db.payment_idempotency.create_index(
+            [("organization_id", 1), ("route", 1), ("key", 1)],
+            unique=True,
+            partialFilterExpression={"key": {"$exists": True, "$type": "string"}},
+            name="uniq_payment_idempotency",
+        )
+    except Exception:
+        pass
     logger.info("Database indexes created")
 
     # ── Provision 4-wallet system for all existing branches ──────────────────

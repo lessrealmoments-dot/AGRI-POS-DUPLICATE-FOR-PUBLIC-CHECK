@@ -45,6 +45,130 @@ def assert_invoice_payable(inv: dict) -> None:
         )
 
 
+# ── Phase 2C.2 (Audit 2026-02): guard payment edit/void on bad invoice ──────
+def assert_invoice_payment_modifiable(inv: dict, action: str = "modify") -> None:
+    """Raise HTTPException 400 when an existing payment record on this invoice
+    cannot be modified or voided through the normal flow.
+
+    Used by void_invoice_payment and modify-payment routes. A payment that
+    belongs to a now-voided/cancelled/deleted invoice MUST NOT be silently
+    mutated — restoring AR for a defunct invoice corrupts customer.balance.
+    Operators must reconcile via the audit / reopen flow first.
+    """
+    status = (inv.get("status") or "").lower()
+    if status in NON_PAYABLE_INVOICE_STATUSES:
+        inv_no = inv.get("invoice_number") or inv.get("id") or "?"
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Cannot {action} payment on invoice {inv_no}: status is '{status}'. "
+                f"Reopen / restore the invoice via the audit flow before editing payments."
+            ),
+        )
+
+
+# ── Phase 2C.4 (Audit 2026-02): overpayment guard ───────────────────────────
+OVERPAYMENT_TOLERANCE = 0.50  # ₱
+
+
+def assert_payment_within_balance(inv: dict, amount: float) -> None:
+    """Reject payments greater than the outstanding balance + tolerance.
+
+    Prevents informal credits accumulating on customer.balance (negative AR).
+    Tolerance covers rounding artefacts in cashier UIs.
+    """
+    bal = float(inv.get("balance") or 0)
+    interest = float(inv.get("interest_accrued") or 0) + float(inv.get("penalties") or 0)
+    payable = bal + interest
+    if amount > payable + OVERPAYMENT_TOLERANCE:
+        inv_no = inv.get("invoice_number") or inv.get("id") or "?"
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Overpayment rejected on invoice {inv_no}: amount ₱{amount:,.2f} "
+                f"exceeds outstanding balance ₱{payable:,.2f} (tolerance ₱{OVERPAYMENT_TOLERANCE:.2f}). "
+                f"Reduce the amount or use a separate credit-memo flow."
+            ),
+        )
+
+
+# ── Phase 2C.1 (Audit 2026-02): payment idempotency helpers ─────────────────
+async def payment_idempotency_lookup_or_reserve(
+    key: str, organization_id: str, route_tag: str
+):
+    """Atomic lookup-or-reserve for a payment idempotency key.
+
+    Returns:
+      None                    — first caller, proceed with the payment.
+      {"replay": True, ...}   — a previous identical request already completed;
+                                caller MUST return that cached response.
+
+    Raises HTTPException 409 if an in-flight request is still being processed.
+    """
+    if not key:
+        return None
+    from pymongo import ReturnDocument
+    res = await _raw_db.payment_idempotency.find_one_and_update(
+        {"key": key, "organization_id": organization_id, "route": route_tag},
+        {"$setOnInsert": {
+            "key": key,
+            "organization_id": organization_id,
+            "route": route_tag,
+            "status": "in_flight",
+            "response": None,
+            "created_at": now_iso(),
+        }},
+        upsert=True,
+        return_document=ReturnDocument.BEFORE,
+    )
+    if res is None:
+        # We just inserted the marker → first caller.
+        return None
+    status = (res.get("status") or "").lower()
+    if status == "completed":
+        return {"replay": True, "response": res.get("response")}
+    # in_flight from a concurrent caller — reject as 409.
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            "A payment with this idempotency_key is already in flight. "
+            "Wait for the original request to complete and retry."
+        ),
+    )
+
+
+async def payment_idempotency_record(
+    key: str, organization_id: str, route_tag: str, response: dict
+) -> None:
+    """Persist the completed response for a reserved idempotency key."""
+    if not key:
+        return
+    await _raw_db.payment_idempotency.update_one(
+        {"key": key, "organization_id": organization_id, "route": route_tag},
+        {"$set": {
+            "status": "completed",
+            "response": response,
+            "completed_at": now_iso(),
+        }},
+    )
+
+
+async def payment_idempotency_release(
+    key: str, organization_id: str, route_tag: str
+) -> None:
+    """Release a reservation if the payment failed before recording.
+
+    Without this, an exception during the payment write would leave the
+    key locked in-flight forever. Routes call this in their except block.
+    """
+    if not key:
+        return
+    await _raw_db.payment_idempotency.delete_one(
+        {"key": key, "organization_id": organization_id,
+         "route": route_tag, "status": "in_flight"},
+    )
+
+
 def now_iso():
     """Return current UTC timestamp in ISO format.
 

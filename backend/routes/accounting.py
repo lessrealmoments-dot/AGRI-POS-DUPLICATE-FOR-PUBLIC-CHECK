@@ -1346,14 +1346,28 @@ async def pay_receivable(rec_id: str, data: dict, user=Depends(get_current_user)
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice/Receivable not found")
     # C-9 (Audit 2026-02): refuse payments on voided/cancelled/in-flight invoices.
-    from utils.helpers import assert_invoice_payable
+    # Phase 2C.1/2C.4: idempotency + overpayment guard (reuse central helpers).
+    from utils.helpers import (
+        assert_invoice_payable, assert_payment_within_balance,
+        payment_idempotency_lookup_or_reserve, payment_idempotency_record,
+        payment_idempotency_release,
+    )
     assert_invoice_payable(inv)
     if inv.get("balance", 0) <= 0:
         raise HTTPException(status_code=400, detail="Already fully paid")
 
     amount = float(data["amount"])
-    if amount > inv["balance"]:
-        raise HTTPException(status_code=400, detail=f"Amount ₱{amount:,.2f} exceeds balance ₱{inv['balance']:,.2f}")
+    # Phase 2C.4 — single overpayment rule across all payment-write routes.
+    assert_payment_within_balance(inv, amount)
+
+    # Phase 2C.1 — idempotency replay.
+    idem_key = (data.get("idempotency_key") or "").strip()
+    org_id = user.get("organization_id") or ""
+    route_tag = "pay_receivable"
+    replay = await payment_idempotency_lookup_or_reserve(idem_key, org_id, route_tag)
+    if replay:
+        return replay["response"]
+
     new_balance = max(0, round(inv["balance"] - amount, 2))
     new_paid = round(inv.get("amount_paid", 0) + amount, 2)
     new_status = "paid" if new_balance <= 0 else "partial"
@@ -1379,30 +1393,37 @@ async def pay_receivable(rec_id: str, data: dict, user=Depends(get_current_user)
         "applied_to_principal": applied_principal,
         "recorded_by": user.get("full_name", user["username"]),
         "recorded_at": now_iso(),
+        "idempotency_key": idem_key or None,
     }
 
-    await db.invoices.update_one({"id": rec_id}, {
-        "$set": {"balance": new_balance, "amount_paid": new_paid, "status": new_status, "interest_accrued": new_interest},
-        "$push": {"payments": payment_record}
-    })
+    try:
+        await db.invoices.update_one({"id": rec_id}, {
+            "$set": {"balance": new_balance, "amount_paid": new_paid, "status": new_status, "interest_accrued": new_interest},
+            "$push": {"payments": payment_record}
+        })
 
-    # Update customer balance
-    if inv.get("customer_id"):
-        await db.customers.update_one({"id": inv["customer_id"]}, {"$inc": {"balance": -amount}})
+        # Update customer balance
+        if inv.get("customer_id"):
+            await db.customers.update_one({"id": inv["customer_id"]}, {"$inc": {"balance": -amount}})
 
-    # Route to correct wallet based on payment method
-    branch_id = inv.get("branch_id", "")
-    if branch_id:
-        ref_text = f"Receivable payment {inv.get('invoice_number', '')} — {inv.get('customer_name', '')}"
-        if digital:
-            await update_digital_wallet(
-                branch_id, amount, reference=ref_text,
-                platform=method, ref_number=data.get("reference", ""),
-            )
-        else:
-            await update_cashier_wallet(branch_id, amount, ref_text)
+        # Route to correct wallet based on payment method
+        branch_id = inv.get("branch_id", "")
+        if branch_id:
+            ref_text = f"Receivable payment {inv.get('invoice_number', '')} — {inv.get('customer_name', '')}"
+            if digital:
+                await update_digital_wallet(
+                    branch_id, amount, reference=ref_text,
+                    platform=method, ref_number=data.get("reference", ""),
+                )
+            else:
+                await update_cashier_wallet(branch_id, amount, ref_text)
+    except Exception:
+        await payment_idempotency_release(idem_key, org_id, route_tag)
+        raise
 
-    return {"message": "Payment recorded", "new_balance": new_balance, "status": new_status, "fund_source": fund_source}
+    response = {"message": "Payment recorded", "new_balance": new_balance, "status": new_status, "fund_source": fund_source}
+    await payment_idempotency_record(idem_key, org_id, route_tag, response)
+    return response
 
 
 # ==================== PAYABLES ====================
@@ -2075,6 +2096,18 @@ async def receive_customer_payment(customer_id: str, data: dict, user=Depends(ge
     pay_date = data.get("date") or await today_local(user.get("organization_id") or "")
     branch_id = data.get("branch_id", "")
 
+    # Phase 2C.1 — idempotency replay for batch payment.
+    from utils.helpers import (
+        payment_idempotency_lookup_or_reserve, payment_idempotency_record,
+        payment_idempotency_release,
+    )
+    idem_key = (data.get("idempotency_key") or "").strip()
+    org_id = user.get("organization_id") or ""
+    route_tag = "receive_customer_payment"
+    replay = await payment_idempotency_lookup_or_reserve(idem_key, org_id, route_tag)
+    if replay:
+        return replay["response"]
+
     # ── Date guard (closed-day + forward-cap + late-encode) ─────────────────
     if branch_id:
         from utils.closed_day_guard import resolve_business_date
@@ -2179,6 +2212,7 @@ async def receive_customer_payment(customer_id: str, data: dict, user=Depends(ge
                                   "applied": actual_apply, "discount": actual_discount, "new_balance": new_balance})
 
     if total_applied <= 0 and total_discounted <= 0:
+        await payment_idempotency_release(idem_key, org_id, route_tag)
         raise HTTPException(status_code=400, detail="No payment could be applied")
 
     # Update customer balance (both payment + discount reduce AR)
@@ -2210,8 +2244,10 @@ async def receive_customer_payment(customer_id: str, data: dict, user=Depends(ge
         next_due_info = f"Next due: {next_inv['due_date']}. " if next_inv else ""
         await on_payment_received(customer_id, total_applied, remaining, branch_id, next_due_info)
 
-    return {"message": "Payment applied", "total_applied": total_applied, "total_discounted": total_discounted,
-            "applied_invoices": applied_invoices, "deposited_to": deposited_to}
+    response = {"message": "Payment applied", "total_applied": total_applied, "total_discounted": total_discounted,
+                "applied_invoices": applied_invoices, "deposited_to": deposited_to}
+    await payment_idempotency_record(idem_key, org_id, route_tag, response)
+    return response
 
 
 @router.get("/customers/{customer_id}/payment-history")
@@ -2384,6 +2420,10 @@ async def modify_customer_payment(customer_id: str, data: dict, user=Depends(get
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
 
+    # Phase 2C.2 (Audit 2026-02): refuse to mutate payments on bad invoices.
+    from utils.helpers import assert_invoice_payment_modifiable
+    assert_invoice_payment_modifiable(inv, action="modify")
+
     payment = next((p for p in inv.get("payments", []) if p.get("id") == payment_id), None)
     if not payment:
         raise HTTPException(status_code=404, detail="Payment record not found")
@@ -2527,6 +2567,10 @@ async def edit_customer_payment_date(customer_id: str, data: dict, user=Depends(
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
 
+    # Phase 2C.2 (Audit 2026-02): refuse to mutate payments on bad invoices.
+    from utils.helpers import assert_invoice_payment_modifiable
+    assert_invoice_payment_modifiable(inv, action="edit")
+
     payment = next((p for p in inv.get("payments", []) if p.get("id") == payment_id), None)
     if not payment:
         raise HTTPException(status_code=404, detail="Payment record not found")
@@ -2625,6 +2669,10 @@ async def void_customer_payment(customer_id: str, data: dict, user=Depends(get_c
     inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
+
+    # Phase 2C.2 (Audit 2026-02): refuse to mutate payments on bad invoices.
+    from utils.helpers import assert_invoice_payment_modifiable
+    assert_invoice_payment_modifiable(inv, action="void")
 
     payment = next((p for p in inv.get("payments", []) if p.get("id") == payment_id), None)
     if not payment:

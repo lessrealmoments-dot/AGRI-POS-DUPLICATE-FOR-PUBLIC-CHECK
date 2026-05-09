@@ -203,27 +203,51 @@ async def create_return(data: dict, user=Depends(get_current_user)):
             # Resolve the target customer
             cust = await db.customers.find_one({"id": customer_id}, {"_id": 0})
             if cust:
-                # Try to apply to the linked invoice first, then to the oldest open invoice
+                # ── Phase 2C.3 (Audit 2026-02 H-4): require explicit invoice link.
+                # Old behaviour silently fell back to the OLDEST open invoice for
+                # this customer, which could land credit on a completely
+                # unrelated transaction. We now require the caller to either:
+                #   1. Pass `invoice_number` of an open invoice this credit
+                #      should reduce, OR
+                #   2. Refund the full retail value as cash (so credit_applied
+                #      becomes 0 and this branch is skipped), OR
+                #   3. Mark the credit `pending_review` for an admin to assign.
                 remaining_to_apply = credit_applied
                 target_invs = []
                 linked_inv_num = (data.get("invoice_number") or "").strip()
+                allow_pending = bool(data.get("allow_pending_credit"))
+
                 if linked_inv_num:
                     linked = await db.invoices.find_one(
-                        {"invoice_number": linked_inv_num, "balance": {"$gt": 0},
-                         "status": {"$nin": ["voided", "paid"]}},
+                        {"invoice_number": linked_inv_num, "customer_id": customer_id,
+                         "balance": {"$gt": 0},
+                         "status": {"$nin": ["voided", "paid", "cancelled",
+                                              "cancelled_draft", "deleted",
+                                              "for_preparation", "error_partial_write"]}},
                         {"_id": 0, "id": 1, "invoice_number": 1, "balance": 1}
                     )
-                    if linked:
-                        target_invs.append(linked)
-                # Fall back to oldest open invoices for this customer
-                fallback = await db.invoices.find(
-                    {"customer_id": customer_id, "balance": {"$gt": 0},
-                     "status": {"$nin": ["voided", "paid"]}},
-                    {"_id": 0, "id": 1, "invoice_number": 1, "balance": 1}
-                ).sort("order_date", 1).to_list(50)
-                for f in fallback:
-                    if not any(t["id"] == f["id"] for t in target_invs):
-                        target_invs.append(f)
+                    if not linked:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=(
+                                f"Return credit cannot be applied: invoice "
+                                f"'{linked_inv_num}' is not an open AR invoice "
+                                f"for this customer. Provide a different open "
+                                f"invoice_number, refund as cash, or set "
+                                f"allow_pending_credit=true to mark for review."
+                            ),
+                        )
+                    target_invs.append(linked)
+                elif not allow_pending:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "Return credit requires invoice_number for credit "
+                            "customers. Provide the original invoice this credit "
+                            "should reduce, refund as cash, or set "
+                            "allow_pending_credit=true to mark for admin review."
+                        ),
+                    )
 
                 for tgt in target_invs:
                     if remaining_to_apply <= 0:
@@ -264,20 +288,28 @@ async def create_return(data: dict, user=Depends(get_current_user)):
                         {"id": customer_id},
                         {"$inc": {"balance": -applied_total}}
                     )
-                # If remaining_to_apply > 0, customer has an overpayment
-                # (returned more retail value than they owed) — log it.
+                # If pending or excess remains, log to admins for manual handling.
                 if remaining_to_apply > 0.005:
                     await db.notifications.insert_one({
                         "id": new_id(),
-                        "type": "return_overcredit",
-                        "title": "Customer return exceeded AR balance",
+                        "type": "return_overcredit"
+                                if not allow_pending else "return_pending_credit",
+                        "title": (
+                            "Customer return exceeded AR balance"
+                            if not allow_pending
+                            else "Return credit pending admin assignment"
+                        ),
                         "message": (
                             f"Customer {cust.get('name','')} returned ₱{credit_applied:.2f} worth of goods "
-                            f"but only ₱{applied_total:.2f} could be applied to their open AR. "
-                            f"Excess ₱{remaining_to_apply:.2f} — consider a cash refund or credit memo."
+                            f"but only ₱{applied_total:.2f} was applied. "
+                            f"Pending ₱{remaining_to_apply:.2f} — assign to a specific open invoice or refund as cash."
                         ),
                         "branch_id": branch_id,
-                        "metadata": {"rma_number": rma_number, "excess": round(remaining_to_apply, 2)},
+                        "metadata": {
+                            "rma_number": rma_number,
+                            "pending_amount": round(remaining_to_apply, 2),
+                            "customer_id": customer_id,
+                        },
                         "target_user_ids": [
                             a["id"] for a in await db.users.find(
                                 {"role": "admin", "active": True}, {"_id": 0, "id": 1}

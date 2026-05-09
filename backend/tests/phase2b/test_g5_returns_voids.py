@@ -181,28 +181,24 @@ async def test_g5_credit_return_reduces_customer_balance_and_invoice():
 
 
 # ───────────────────────────────────────────────────────────────────────────
-# 5.5 H-4 OBSERVATION — credit return falls back to ANY open invoice
+# 5.5 Phase 2C.3 fix — credit return REQUIRES invoice_number for credit cust.
 # ───────────────────────────────────────────────────────────────────────────
 @pytest.mark.asyncio
-async def test_g5_credit_return_fallback_unrelated_invoice():
-    """
-    BUG-CANDIDATE (H-4 in audit, deferred to Phase 2C): if invoice_number
-    is omitted (or doesn't match), the route applies the credit to the
-    OLDEST open invoice for that customer. This may not be the invoice the
-    customer actually returned items from. Document in matrix as P1.
-    """
+async def test_g5_credit_return_requires_invoice_number_phase2c3():
+    """Phase 2C.3 (Audit H-4 fix): credit return without invoice_number must
+    be rejected (or marked pending), NEVER auto-applied to oldest open invoice."""
+    from fastapi import HTTPException
     org_id, branch_id, admin_id = await make_tenant()
     await seed_wallets(org_id, branch_id)
     pid = await seed_product(org_id, branch_id, stock=20, price=100)
     cid = await seed_customer(org_id, branch_id, balance=900.0)
-    # Two open invoices
     await _raw_db.invoices.insert_many([
-        {"id": "p2b-old-1", "invoice_number": "OLD-1",
+        {"id": "p2c-old-1", "invoice_number": "OLD-1",
          "organization_id": org_id, "branch_id": branch_id,
          "customer_id": cid, "status": "open",
          "balance": 400.0, "amount_paid": 0, "grand_total": 400.0,
          "payments": [], "items": [], "order_date": "2026-01-01"},
-        {"id": "p2b-new-1", "invoice_number": "NEW-1",
+        {"id": "p2c-new-1", "invoice_number": "NEW-1",
          "organization_id": org_id, "branch_id": branch_id,
          "customer_id": cid, "status": "open",
          "balance": 500.0, "amount_paid": 0, "grand_total": 500.0,
@@ -214,22 +210,99 @@ async def test_g5_credit_return_fallback_unrelated_invoice():
         "branch_id": branch_id,
         "customer_name": "Cust", "customer_type": "credit",
         "customer_id": cid,
-        # Note: no invoice_number → fallback to oldest
+        # No invoice_number → MUST be rejected
         "items": [{
             "product_id": pid, "product_name": "X", "quantity": 1,
             "condition": "sellable", "inventory_action": "shelf",
             "refund_price": 100, "cost_price": 60,
         }],
         "refund_amount": 0.0, "fund_source": "cashier",
-        "reason": "fallback test",
+        "reason": "p2c.3 reject test",
+    }
+    with pytest.raises(HTTPException) as exc:
+        await create_return(payload, user=user)
+    assert exc.value.status_code == 400
+    assert "invoice_number" in exc.value.detail.lower()
+
+    # No invoice was touched
+    old = await _raw_db.invoices.find_one({"id": "p2c-old-1"}, {"_id": 0})
+    new = await _raw_db.invoices.find_one({"id": "p2c-new-1"}, {"_id": 0})
+    assert old["balance"] == 400.0
+    assert new["balance"] == 500.0
+
+
+@pytest.mark.asyncio
+async def test_g5_credit_return_with_invoice_number_applied_correctly():
+    """When invoice_number IS provided, credit applies to that specific invoice only."""
+    org_id, branch_id, admin_id = await make_tenant()
+    await seed_wallets(org_id, branch_id)
+    pid = await seed_product(org_id, branch_id, stock=20, price=100)
+    cid = await seed_customer(org_id, branch_id, balance=900.0)
+    await _raw_db.invoices.insert_many([
+        {"id": "p2c-old-2", "invoice_number": "OLD-2",
+         "organization_id": org_id, "branch_id": branch_id,
+         "customer_id": cid, "status": "open",
+         "balance": 400.0, "amount_paid": 0, "grand_total": 400.0,
+         "payments": [], "items": [], "order_date": "2026-01-01"},
+        {"id": "p2c-new-2", "invoice_number": "NEW-2",
+         "organization_id": org_id, "branch_id": branch_id,
+         "customer_id": cid, "status": "open",
+         "balance": 500.0, "amount_paid": 0, "grand_total": 500.0,
+         "payments": [], "items": [], "order_date": "2026-02-01"},
+    ])
+    user = fake_user(org_id, admin_id, branch_id=branch_id)
+
+    payload = {
+        "branch_id": branch_id,
+        "customer_name": "Cust", "customer_type": "credit",
+        "customer_id": cid,
+        "invoice_number": "NEW-2",  # explicit linkage
+        "items": [{
+            "product_id": pid, "product_name": "X", "quantity": 1,
+            "condition": "sellable", "inventory_action": "shelf",
+            "refund_price": 100, "cost_price": 60,
+        }],
+        "refund_amount": 0.0, "fund_source": "cashier",
+        "reason": "p2c.3 explicit linkage",
     }
     await create_return(payload, user=user)
 
-    old = await _raw_db.invoices.find_one({"id": "p2b-old-1"}, {"_id": 0})
-    new = await _raw_db.invoices.find_one({"id": "p2b-new-1"}, {"_id": 0})
-    # Credit landed on the OLDEST invoice (not necessarily the right one!)
-    assert old["balance"] == 300.0, (
-        "P2B G5 OBSERVATION (H-4): return credit applied to OLDEST open invoice "
-        "regardless of which invoice the goods came from. Phase 2C scope."
+    old = await _raw_db.invoices.find_one({"id": "p2c-old-2"}, {"_id": 0})
+    new = await _raw_db.invoices.find_one({"id": "p2c-new-2"}, {"_id": 0})
+    # Credit landed on the SPECIFIED invoice, NOT the older one
+    assert old["balance"] == 400.0, "Phase 2C.3: must NOT auto-apply to older invoice"
+    assert new["balance"] == 400.0, "Phase 2C.3: credit applied to specified NEW-2"
+
+
+@pytest.mark.asyncio
+async def test_g5_credit_return_pending_review_when_explicitly_allowed():
+    """allow_pending_credit=true → no rejection; logs notification for admin."""
+    org_id, branch_id, admin_id = await make_tenant()
+    await seed_wallets(org_id, branch_id)
+    pid = await seed_product(org_id, branch_id, stock=20, price=100)
+    cid = await seed_customer(org_id, branch_id, balance=500.0)
+    user = fake_user(org_id, admin_id, branch_id=branch_id)
+
+    payload = {
+        "branch_id": branch_id,
+        "customer_name": "Cust", "customer_type": "credit",
+        "customer_id": cid,
+        "items": [{
+            "product_id": pid, "product_name": "X", "quantity": 1,
+            "condition": "sellable", "inventory_action": "shelf",
+            "refund_price": 100, "cost_price": 60,
+        }],
+        "refund_amount": 0.0, "fund_source": "cashier",
+        "allow_pending_credit": True,
+        "reason": "p2c.3 pending review",
+    }
+    await create_return(payload, user=user)
+
+    # Customer balance UNCHANGED (no auto-apply)
+    cust = await snapshot_customer(cid)
+    assert cust["balance"] == 500.0
+    # A pending notification should exist
+    note = await _raw_db.notifications.find_one(
+        {"type": "return_pending_credit", "branch_id": branch_id}, {"_id": 0}
     )
-    assert new["balance"] == 500.0
+    assert note is not None
