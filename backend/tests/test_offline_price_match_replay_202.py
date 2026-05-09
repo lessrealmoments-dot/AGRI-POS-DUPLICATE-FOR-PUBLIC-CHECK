@@ -15,7 +15,7 @@ import requests
 import uuid
 
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://pos-bugfix-sprint.preview.emergentagent.com")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://balance-diagnostic.preview.emergentagent.com")
 API = f"{BASE_URL}/api"
 
 

@@ -14,7 +14,7 @@ import pytest
 import requests
 import os
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://pos-bugfix-sprint.preview.emergentagent.com')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://balance-diagnostic.preview.emergentagent.com')
 
 # Test credentials
 SUPER_ADMIN_EMAIL = "janmarkeahig@gmail.com"
