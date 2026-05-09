@@ -73,6 +73,6 @@
       "password": "Aa@58798546521325",
       "role": "Super Admin"
     },
-    "test_url": "https://pos-sms-resend.preview.emergentagent.com/sales-new"
+    "test_url": "https://pos-bugfix-sprint.preview.emergentagent.com/sales-new"
   }
 }
