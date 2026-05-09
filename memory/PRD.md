@@ -1,6 +1,72 @@
 # AgriBooks PRD
 
 
+## Phase 2D.5 — Terminal POS Built-in Printer Receipt Layout Hotfix (Feb 2026) ✅
+
+### Goal
+Operational hotfix for the H10P / Terminal POS built-in printer thermal
+receipt: long product names appeared to "bleed" into the next item, and the
+qty × price line was too small to read at arm's length on 58mm paper. CSS-
+only change in `PrintEngine.js`. **Zero changes** to sales, payment,
+inventory, sync, reports, totals math, the print pipeline, PrintBridge,
+PrintEngine plumbing, or H10PPrinterPlugin.
+
+### What changed (one CSS block in `PrintEngine.js`)
+- `.items-table td` padding `2px 0` → `3px 0` (more breathing room).
+- `.items-table .item-name` keeps 13px bold but adds `line-height: 1.4` and
+  `padding-top: 4px`.
+- New rule `.items-table tr + tr .item-name { padding-top: 6px;
+  border-top: 1px dashed #000; }` — every item after the first gets a
+  dashed separator above its name, so wrapped product names never run
+  into the next item visually.
+- `.item-detail` (qty × rate) `11px` → `12px`.
+- `.item-total` `12px` → `13px` (matches name weight at the right edge).
+- `.item-discount` and `.item-disc-val` `11px` → `12px`.
+
+### Files changed
+- **UPDATED** `frontend/src/lib/PrintEngine.js` (lines 74–85, thermal CSS
+  block only).
+
+### Coverage
+The change rides through `buildItemsThermal()` (`PrintEngine.js:325-355`),
+so it applies to **every** thermal document type that uses that helper:
+- Sale receipt (`saleThermal`)
+- Trust receipt (`trustReceiptThermal`)
+- Order slip (`orderSlipThermal`)
+- Return slip (`returnSlipThermal`)
+- Purchase order (`purchaseOrderThermal`)
+
+Other thermal documents that build their own item table (transfer slip,
+journal entry, etc.) intentionally untouched per scope.
+
+### Verification
+- ESLint clean.
+- Backend regression suite still 103 PASS / 2 SKIP / 0 FAIL.
+- Visual preview generated at 384px viewport (mirrors the H10P bitmap
+  width) with 5 sample item shapes:
+    1. Short name — clean, bold, separated.
+    2. Long name (wraps to 2 lines) — bounded above + below by dashed
+       rule, no overlap.
+    3. High qty (`120 x ₱1,495.00 → ₱179,400.00`) — readable at 12px.
+    4. Large unit price (`1 x ₱48,750.00`) — single line, clear.
+    5. Discounted item — gross / less / Line Total rows all distinct.
+
+### Risks closed
+- Product-name visual bleed eliminated (dashed border + 6px top padding).
+- Qty × price font size now matches readable threshold for thermal print.
+
+### Risks remaining
+- Real H10P bitmap render quality is a function of the device WebView, the
+  Senraise SrPrinter SDK binarisation, and physical paper/heat. The CSS
+  change uses pure-black 12–13px Courier (no greys, no bold-on-bold), all
+  print-friendly per the existing H10 coordination doc, but final
+  validation requires a tap-to-print test on the H10 hardware. Suggest the
+  cashier prints one sale receipt and one return slip to confirm.
+
+---
+
+
+
 ## Phase 2D — Branch / Tenant Permission Hardening (Audit H-5, Feb 2026) ✅
 
 ### Goal

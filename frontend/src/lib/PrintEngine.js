@@ -72,12 +72,17 @@ const thermalCSS = `
   .meta-row .label { color: #000; flex-shrink: 0; }
   .sep { border-top: 1px solid #000; margin: 4px 0; }
   .items-table { width: 100%; table-layout: fixed; font-size: 12px; border-collapse: collapse; }
-  .items-table td { padding: 2px 0; vertical-align: top; word-break: break-word; }
-  .items-table .item-name { font-weight: bold; font-size: 13px; }
-  .items-table .item-detail { width: 58%; padding-left: 4px; font-size: 11px; color: #000; }
-  .items-table .item-total { width: 42%; text-align: right; font-weight: bold; font-size: 12px; white-space: nowrap; }
-  .items-table .item-discount { padding-left: 4px; font-size: 11px; color: #000; font-style: italic; }
-  .items-table .item-disc-val { text-align: right; font-size: 11px; color: #000; white-space: nowrap; }
+  .items-table td { padding: 3px 0; vertical-align: top; word-break: break-word; }
+  .items-table .item-name { font-weight: bold; font-size: 13px; line-height: 1.4; padding-top: 4px; }
+  /* Visually separate one item from the next so wrapped product names
+     don't appear to bleed into the row below. The first item row keeps
+     no top border so the items table flows cleanly from the heading
+     above it. */
+  .items-table tr + tr .item-name { padding-top: 6px; border-top: 1px dashed #000; margin-top: 2px; }
+  .items-table .item-detail { width: 58%; padding-left: 4px; font-size: 12px; color: #000; }
+  .items-table .item-total { width: 42%; text-align: right; font-weight: bold; font-size: 13px; white-space: nowrap; }
+  .items-table .item-discount { padding-left: 4px; font-size: 12px; color: #000; font-style: italic; }
+  .items-table .item-disc-val { text-align: right; font-size: 12px; color: #000; white-space: nowrap; }
   .totals { margin-top: 5px; }
   .totals .row { display: flex; justify-content: space-between; gap: 4px; font-size: 11px; padding: 2px 0; }
   .totals .row > span:last-child { text-align: right; white-space: nowrap; }
