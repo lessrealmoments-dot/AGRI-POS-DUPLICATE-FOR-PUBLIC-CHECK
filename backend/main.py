@@ -10,7 +10,7 @@ Version: 3.0 (Dec 2025) - Complete Modular Refactor
 ================================================================================
 """
 
-from fastapi import FastAPI, APIRouter, HTTPException, WebSocket
+from fastapi import FastAPI, APIRouter, HTTPException, WebSocket, Depends
 from fastapi.responses import FileResponse
 from starlette.middleware.cors import CORSMiddleware
 import os
@@ -1213,4 +1213,41 @@ async def download_test_report_v2():
         media_type="application/pdf",
         filename="AgriBooks_SaaS_Test_Report_v2.pdf",
         headers={"Content-Disposition": "attachment; filename=AgriBooks_SaaS_Test_Report_v2.pdf"}
+    )
+
+
+# =============================================================================
+# AUDIT REPORT DOWNLOADS (Feb 2026 — read-only system audit deliverable)
+# =============================================================================
+# Auth-gated to admin / super-admin so the report (which lists every critical
+# vulnerability) cannot be scraped by a cashier or anonymous probe.
+
+from utils import get_current_user as _audit_get_current_user
+
+_AUDIT_DIR = "/app/uploads/audit"
+_AUDIT_FILES = {
+    "pdf":  ("AGRI-POS_Audit_Report_2026-02.pdf",  "application/pdf"),
+    "html": ("AGRI-POS_Audit_Report_2026-02.html", "text/html"),
+    "md":   ("AGRI-POS_Audit_Report_2026-02.md",   "text/markdown"),
+}
+
+
+@app.get("/api/reports/audit-2026-02/{fmt}")
+async def download_audit_report_2026_02(fmt: str, user=Depends(_audit_get_current_user)):
+    """Download the AGRI-POS read-only system audit (Feb 2026).
+    Allowed formats: pdf | html | md. Restricted to admin / super-admin.
+    """
+    if not (user.get("is_super_admin") or user.get("role") in ("admin", "owner")):
+        raise HTTPException(status_code=403, detail="Admin or owner access required")
+    if fmt not in _AUDIT_FILES:
+        raise HTTPException(status_code=400, detail=f"Unsupported format '{fmt}'. Use one of: {list(_AUDIT_FILES)}")
+    fname, mime = _AUDIT_FILES[fmt]
+    path = os.path.join(_AUDIT_DIR, fname)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"Audit report file not found: {fname}")
+    return FileResponse(
+        path,
+        media_type=mime,
+        filename=fname,
+        headers={"Content-Disposition": f"attachment; filename={fname}"},
     )

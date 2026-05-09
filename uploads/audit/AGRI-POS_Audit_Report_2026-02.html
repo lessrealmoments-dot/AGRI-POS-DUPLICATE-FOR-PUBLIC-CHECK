@@ -1,0 +1,1710 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<title>AGRI-POS Audit Report — Feb 2026</title>
+<style>
+@page { size: A4; margin: 18mm 14mm 18mm 14mm; }
+body { font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+       font-size: 9.2pt; line-height: 1.45; color: #1a1a1a; }
+h1 { font-size: 20pt; color: #1A4D2E; border-bottom: 2px solid #1A4D2E;
+     padding-bottom: 6px; margin-top: 14pt; }
+h2 { font-size: 15pt; color: #1A4D2E; margin-top: 18pt; padding-bottom: 4px;
+     border-bottom: 1px solid #d4d4d4; }
+h3 { font-size: 12pt; color: #2a5a3e; margin-top: 12pt; }
+h4 { font-size: 10.5pt; color: #444; margin-top: 8pt; }
+p { margin: 4pt 0; }
+ul, ol { margin: 4pt 0; padding-left: 18pt; }
+li { margin: 2pt 0; }
+code { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 8.5pt;
+       background: #f3f3f1; padding: 1px 4px; border-radius: 3px; color: #b13e3e; }
+pre { background: #f5f5f3; padding: 10pt; border-radius: 4px; overflow: auto;
+      font-size: 8.5pt; }
+table { border-collapse: collapse; width: 100%; margin: 8pt 0;
+        font-size: 8.5pt; }
+th, td { border: 1px solid #d4d4d4; padding: 4pt 6pt; text-align: left;
+         vertical-align: top; }
+th { background: #1A4D2E; color: white; font-weight: 600; }
+tr:nth-child(even) { background: #fafaf8; }
+blockquote { border-left: 3px solid #1A4D2E; margin: 8pt 0; padding: 4pt 12pt;
+             background: #f7f9f7; color: #444; font-style: italic; }
+hr { border: none; border-top: 1px solid #d4d4d4; margin: 14pt 0; }
+strong { color: #b13e3e; }
+a { color: #1A4D2E; text-decoration: none; }
+</style></head>
+<body><h1 id="agri-pos-full-logic-connection-security-data-flow-audit">AGRI-POS — Full Logic, Connection, Security &amp; Data-Flow Audit</h1>
+<p><strong>Repository:</strong> <code>lessrealmoments-dot/AGRI-POS-DUPLICATE-FOR-PUBLIC-CHECK</code> (audited via <code>/app</code> working copy)
+<strong>Date:</strong> 2026-02
+<strong>Mode:</strong> READ-ONLY DEEP AUDIT (no code changes applied)
+<strong>Scope:</strong> FastAPI backend (<code>/app/backend</code>) + React frontend (<code>/app/frontend</code>) + MongoDB schema</p>
+<blockquote>
+<p>Backend is treated as the source of truth where backend and frontend disagree. No fixes applied.</p>
+</blockquote>
+<hr />
+<h2 id="1-executive-summary">1. Executive Summary</h2>
+<p>The system is <strong>functionally rich and broadly self-consistent</strong>, with mature ideas around tenant isolation (<code>TenantCollection</code>), idempotency on offline sync (envelope_id unique index), late-encode controls, audit logging, and signature/PIN policy. However, the audit surfaced a <strong>non-trivial number of correctness, atomicity, and security defects</strong> that are concentrated in five areas:</p>
+<ol>
+<li><strong>Atomicity / multi-collection writes</strong> — sales, returns, voids, and offline sync mutate inventory + invoices + wallets + customer balance in sequence, never inside a transaction or compensating action. A mid-flow failure leaves stock, AR, or cash in a permanently inconsistent state.</li>
+<li><strong>Customer balance drift</strong> — <code>customers.balance</code> is incremented/decremented in 30+ call sites with no reconciliation pass, plus one call site (<code>sync.py:437</code>) writes to a non-existent field (<code>current_balance</code>), silently no-op'ing AR reversal during orphan-offline reconciliation.</li>
+<li><strong>Offline sync double-deduction window</strong> — <code>sales/sync</code> checks idempotency, then mutates inventory, then inserts the invoice. Two concurrent retries can both pass the check and both deduct stock before the unique index trips.</li>
+<li><strong>Plain-text PIN exposure to the client</strong> — <code>/api/sync/pos-data</code> ships every admin/owner/manager PIN in cleartext (and the bcrypt hash of the admin PIN) to <em>any</em> authenticated user. This is a P0 secret-leak.</li>
+<li><strong>Public/loose admin surfaces</strong> — <code>/api/setup/reset</code> (full data wipe), <code>/api/setup/initialize</code>, <code>/api/admin-auth/setup-totp</code> (TOTP take-over of an un-MFA'd super admin), <code>/api/admin/backfill/iter240</code>, <code>/api/admin/reconcile-orphan-offline-draft</code>, and CORS defaulting to <code>*</code> form a wider attack surface than necessary.</li>
+</ol>
+<p>Backdated credit sales are partially supported via the <code>late_encode</code> flow (capped at 7 days, no link to last count sheet), which is <strong>insufficient for the user's "old notebook AR encoding" use case</strong>. A proper Historical Credit / AR Reconstruction workflow is needed (see §6).</p>
+<p><strong>Overall risk posture:</strong>
+- <strong>Critical (P0):</strong> 9 issues — fix before next production deploy
+- <strong>High (P1):</strong> 14 issues — fix in the next 1–2 cycles
+- <strong>Medium (P2):</strong> 12 issues — schedule for the next quarter
+- <strong>Low (P3):</strong> 8 issues — backlog</p>
+<hr />
+<h2 id="2-critical-findings-p0">2. Critical Findings (P0)</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Finding</th>
+<th>File / Route</th>
+<th>Risk</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>C-1</td>
+<td><code>/api/sync/pos-data</code> ships <strong>plain-text PINs</strong> of all admin/owner/manager users + bcrypt admin PIN hash to any authenticated caller</td>
+<td><code>routes/sync.py:734-798</code></td>
+<td>Any cashier can extract every manager/admin PIN. Privilege escalation, void/refund/discount bypass, audit forgery.</td>
+</tr>
+<tr>
+<td>C-2</td>
+<td><code>/api/setup/reset</code> deletes <strong>every collection</strong> with only <code>confirm_text="DELETE ALL DATA"</code> and <strong>no auth</strong></td>
+<td><code>routes/setup.py:213-238</code></td>
+<td>Anyone on the internet can wipe the entire database. Data loss.</td>
+</tr>
+<tr>
+<td>C-3</td>
+<td><code>/api/admin-auth/setup-totp</code> lets a password holder set TOTP secret on a super-admin who hasn't enabled TOTP yet — full account takeover with just the password</td>
+<td><code>routes/admin_auth.py:150-223</code></td>
+<td>Super-admin compromise → all tenants exposed.</td>
+</tr>
+<tr>
+<td>C-4</td>
+<td>Sales / offline-sync deduct inventory <strong>before</strong> invoice insert; on insert-failure (DuplicateKey, network, validation) stock is gone with no compensating reverse</td>
+<td><code>routes/sales.py:583-685, 902-910</code>, <code>routes/sync.py:864-1015</code></td>
+<td>Inventory permanently wrong, no audit trail.</td>
+</tr>
+<tr>
+<td>C-5</td>
+<td>Offline <code>/api/sales/sync</code> idempotency check is non-atomic — two concurrent retries can both pass <code>find_one(...)</code> then both <code>$inc</code> inventory before the <code>envelope_id</code> unique index fires on the second insert</td>
+<td><code>routes/sync.py:870-983</code></td>
+<td>Double stock deduction under network retry / dual-tab POS.</td>
+</tr>
+<tr>
+<td>C-6</td>
+<td><code>_finalize_draft_offline</code> deducts inventory <strong>before</strong> the guarded draft <code>update_one</code>, with no rollback if the guard rejects a concurrent finalize</td>
+<td><code>routes/sync.py:99-179</code></td>
+<td>Same draft can deduct stock twice.</td>
+</tr>
+<tr>
+<td>C-7</td>
+<td><code>routes/sync.py:437</code> — <code>reconcile_orphan_offline_draft</code> reverses customer credit by <code>$inc current_balance</code> (wrong field; everywhere else it is <code>balance</code>)</td>
+<td><code>routes/sync.py:432-439</code></td>
+<td>Customer AR remains inflated after recovery; manager believes it was reversed.</td>
+</tr>
+<tr>
+<td>C-8</td>
+<td>RMA number generator uses <code>count_documents({})+1</code> with no <code>branch_id</code>/<code>organization_id</code> scoping and no atomic counter — collisions guaranteed under concurrent returns; cross-tenant numbering pool</td>
+<td><code>routes/returns.py:105-106</code></td>
+<td>Duplicate RMA numbers, cross-tenant number leakage.</td>
+</tr>
+<tr>
+<td>C-9</td>
+<td><code>record_invoice_payment</code> does <strong>not</strong> check <code>status=="voided"</code> before applying — payments can be received against a voided invoice</td>
+<td><code>routes/invoices.py:192-264</code></td>
+<td>Wallet credited, customer balance silently goes negative, audit trail says "paid voided invoice".</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-high-risk-business-logic-findings-p1">3. High-Risk Business Logic Findings (P1)</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Finding</th>
+<th>File / Route</th>
+<th>Risk</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>H-1</td>
+<td>Draft finalization uses <code>db.invoices.replace_one({"id": draft_id}, invoice)</code> with <strong>no version/status guard</strong></td>
+<td><code>routes/sales.py:900</code></td>
+<td>Concurrent finalize wipes the in-flight invoice; loses doc_code, signature_session, late_encode flags, recovery_note, etc. set between fetch and replace.</td>
+</tr>
+<tr>
+<td>H-2</td>
+<td>No MongoDB transactions / Motor <code>start_session().with_transaction()</code> anywhere — every multi-collection mutation is best-effort sequential</td>
+<td>system-wide</td>
+<td>Sales, voids, returns, branch transfers, PO receive, repacks, daily close all have torn-write windows.</td>
+</tr>
+<tr>
+<td>H-3</td>
+<td>Customer <code>balance</code> is stored &amp; manually incremented in <strong>30+ call sites</strong>; no reconciliation report against ledger</td>
+<td><code>routes/sales.py:960</code>, <code>invoices.py:257,595,1157,1379</code>, <code>accounting.py</code> (×16), <code>returns.py:259,510</code>, <code>sync.py:1099</code>, etc.</td>
+<td>Drift over time; no way to detect or repair without manual SQL-style audit.</td>
+</tr>
+<tr>
+<td>H-4</td>
+<td>Returns can apply credit to <strong>any</strong> open invoice for the customer (<code>fallback</code>), not just the linked invoice — even unrelated, older debt</td>
+<td><code>routes/returns.py:213-220</code></td>
+<td>Customer A returns ₱500 of feed but gets ₱500 applied to a months-old chemical invoice they hadn't paid. Books move silently.</td>
+</tr>
+<tr>
+<td>H-5</td>
+<td><code>assert_branch_access</code> returns OK when user has <strong>neither <code>branch_ids</code> nor <code>branch_id</code></strong> ("legacy unscoped") — a cashier with a malformed user record gains org-wide branch access</td>
+<td><code>utils/auth.py:172-177</code></td>
+<td>Cross-branch data exposure.</td>
+</tr>
+<tr>
+<td>H-6</td>
+<td>CORS <code>allow_origins</code> defaults to <code>*</code> if env not set</td>
+<td><code>main.py:1184</code></td>
+<td>Cross-origin token theft via XSS/CSRF when env misconfigured.</td>
+</tr>
+<tr>
+<td>H-7</td>
+<td>JWT TTL 24h with no refresh / rotation / blacklist</td>
+<td><code>utils/auth.py:26</code></td>
+<td>Stolen token is good for a full day; no logout-all.</td>
+</tr>
+<tr>
+<td>H-8</td>
+<td><code>get_current_user</code> does <strong>not</strong> validate that <code>user.organization_id == payload.org_id</code> — a moved/re-attached user keeps cross-org access until token expiry</td>
+<td><code>utils/auth.py:73-86</code></td>
+<td>Org migration bug → cross-tenant access.</td>
+</tr>
+<tr>
+<td>H-9</td>
+<td><code>users.email</code> index is <strong>non-unique</strong> (only sparse). Email duplicates allowed across tenants and within tenant</td>
+<td><code>main.py:389</code></td>
+<td>Login lookup ambiguity, password-reset confusion.</td>
+</tr>
+<tr>
+<td>H-10</td>
+<td><code>invoices.invoice_number</code> has <strong>no uniqueness index</strong> (only <code>idempotency_key</code> and <code>envelope_id</code> are unique); <code>generate_next_number</code> is atomic per branch but a manual import / migration / retry could create duplicates</td>
+<td><code>main.py:407-435</code>, <code>utils/numbering.py</code></td>
+<td>Duplicate invoice numbers possible via import or out-of-band insert.</td>
+</tr>
+<tr>
+<td>H-11</td>
+<td>Backdated late-encode is capped at <strong>7 days</strong> with no awareness of last approved physical inventory count — too restrictive for "old notebook credit" reconstruction, while still allowing inventory to retro-deduct on the historical date</td>
+<td><code>routes/sales.py:78-118</code>, <code>utils/closed_day_guard.py</code></td>
+<td>User's primary outstanding business case is unsupported. See §6 for proposed Historical Credit Encoding flow.</td>
+</tr>
+<tr>
+<td>H-12</td>
+<td>Offline negative stock is silently allowed — only writes a <code>stock_warnings</code> array on the invoice; no incident_ticket, no admin notification, no reconciliation queue entry</td>
+<td><code>routes/sync.py:113-148, 942-982</code></td>
+<td>Phantom inventory, no operator alert, eventual zero-out at next count sheet.</td>
+</tr>
+<tr>
+<td>H-13</td>
+<td><code>setup.py:initialize</code> creates the first admin even after multi-tenant migration if no users exist (race / partial-restore case)</td>
+<td><code>routes/setup.py:42-51</code></td>
+<td>Possibility of attaching a forged admin to an existing org if collections were partially deleted.</td>
+</tr>
+<tr>
+<td>H-14</td>
+<td><code>/api/admin/backfill/iter240</code> and <code>/api/admin/backfill/iter241-close-ledger</code> mutate every synced-from-offline invoice and every closed-day with <code>apply=true</code>; gated only by <code>role=="admin"</code> (no PIN, no audit-log, no per-call dry-run-then-confirm chain)</td>
+<td><code>routes/admin_backfill_240.py</code></td>
+<td>An admin with a stolen token can re-write historical financial data; no signed audit chain.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="4-inventory-flow-audit-table">4. Inventory Flow Audit Table</h2>
+<table>
+<thead>
+<tr>
+<th>Module</th>
+<th>Action</th>
+<th>Expected Stock Effect</th>
+<th>Actual Code</th>
+<th>Movement Logged?</th>
+<th>Reversible?</th>
+<th>Risk</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Sales (<code>/unified-sale</code>)</td>
+<td>Cash sale (full release)</td>
+<td>-qty on commit</td>
+<td>-qty before invoice insert</td>
+<td>✅ via <code>log_movement</code></td>
+<td>✅ via void (reverses qty, not net of subsequent adjustments)</td>
+<td>C-4 — stock gone if invoice insert fails</td>
+</tr>
+<tr>
+<td>Sales</td>
+<td>Partial release (reservation)</td>
+<td>-qty avail, +qty reserved</td>
+<td>Correct</td>
+<td>✅</td>
+<td>✅ via void+reservation cleanup</td>
+<td>OK; reservation doesn't expire-revert</td>
+</tr>
+<tr>
+<td>Sales</td>
+<td>Repack child sold</td>
+<td>-qty parent / units_per_parent</td>
+<td>Correct</td>
+<td>✅ on parent</td>
+<td>✅</td>
+<td>OK; parent capital change not propagated to existing reservations</td>
+</tr>
+<tr>
+<td>Draft order</td>
+<td>Reserve invoice number</td>
+<td>none</td>
+<td>none ✅</td>
+<td>n/a</td>
+<td>n/a (cancel sets <code>cancelled_draft</code>)</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Draft → Finalize online</td>
+<td>-qty once, replace draft inv</td>
+<td>replace_one wipes guard fields</td>
+<td>✅</td>
+<td>✅</td>
+<td>H-1 — replace_one race</td>
+<td></td>
+</tr>
+<tr>
+<td>Draft → Finalize offline</td>
+<td>-qty once on canonical draft</td>
+<td>-qty BEFORE guarded update_one</td>
+<td>✅</td>
+<td>✅ on sync</td>
+<td>C-6 — concurrent retry can deduct twice</td>
+<td></td>
+</tr>
+<tr>
+<td>Offline sale sync</td>
+<td>-qty</td>
+<td>-qty before insert</td>
+<td>✅</td>
+<td>✅</td>
+<td>C-5 — race; H-12 — negative stock not alerted</td>
+<td></td>
+</tr>
+<tr>
+<td>Invoice edit</td>
+<td>adjust delta only</td>
+<td>$inc delta correctly handled (lines 380-447)</td>
+<td>✅</td>
+<td>✅</td>
+<td>OK except no PIN required for closed-day edits when <code>pin == ""</code> and <code>is_on_closed_day == False</code></td>
+<td></td>
+</tr>
+<tr>
+<td>Invoice void</td>
+<td>+qty (or +reserved on partial-release)</td>
+<td>Correct</td>
+<td>✅</td>
+<td>✅</td>
+<td>OK</td>
+<td></td>
+</tr>
+<tr>
+<td>Returns — shelf</td>
+<td>+qty</td>
+<td>Correct</td>
+<td>✅</td>
+<td>✅</td>
+<td>C-8 RMA collision</td>
+<td></td>
+</tr>
+<tr>
+<td>Returns — pullout</td>
+<td>none</td>
+<td>none + log loss</td>
+<td>✅</td>
+<td>❌ (intentional — "physically gone")</td>
+<td>OK</td>
+<td></td>
+</tr>
+<tr>
+<td>Return void</td>
+<td>-qty (only shelf items)</td>
+<td>Correct</td>
+<td>✅</td>
+<td>✅</td>
+<td>OK</td>
+<td></td>
+</tr>
+<tr>
+<td>Branch transfer send</td>
+<td>-qty source</td>
+<td>Correct</td>
+<td>✅</td>
+<td>partial: receive can short, no auto-revert</td>
+<td>OK</td>
+<td></td>
+</tr>
+<tr>
+<td>Branch transfer receive</td>
+<td>+qty destination</td>
+<td>Correct</td>
+<td>✅</td>
+<td>✅</td>
+<td>OK</td>
+<td></td>
+</tr>
+<tr>
+<td>PO receive</td>
+<td>+qty</td>
+<td>Correct</td>
+<td>✅</td>
+<td>✅</td>
+<td>partial-receive duplicate guard not formally checked here — review separately</td>
+<td></td>
+</tr>
+<tr>
+<td>PO cancel after receive</td>
+<td>none (must do supplier return)</td>
+<td>confirmed</td>
+<td>n/a</td>
+<td>n/a</td>
+<td>OK</td>
+<td></td>
+</tr>
+<tr>
+<td>Repacking</td>
+<td>-parent / +child slot via runtime derivation</td>
+<td>child stock is derived, no separate row</td>
+<td>n/a</td>
+<td>n/a</td>
+<td>OK by design; no double-count risk</td>
+<td></td>
+</tr>
+<tr>
+<td>Count sheet adjustment</td>
+<td>set qty to actual</td>
+<td>overwrites</td>
+<td>✅</td>
+<td>partial reversibility</td>
+<td>check <code>count_sheets.py</code> for variance tagging on movements collection</td>
+<td></td>
+</tr>
+<tr>
+<td>Crop credit release</td>
+<td>-qty (charged-to-crop)</td>
+<td>needs re-verification</td>
+<td>review pending</td>
+<td>review pending</td>
+<td>review pending</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="5-money-movement-z-report-audit">5. Money Movement / Z-Report Audit</h2>
+<h3 id="date-field-usage-inventory-highest-impact-discovery">Date-field usage inventory (highest impact discovery)</h3>
+<table>
+<thead>
+<tr>
+<th>Report / Wallet flow</th>
+<th>Date field actually used</th>
+<th>Should use</th>
+<th>Issue</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Sales report (<code>reports.py</code>)</td>
+<td>Mix of <code>order_date</code>, <code>created_at</code></td>
+<td><code>order_date</code> (transaction date)</td>
+<td>Inconsistent — backdated/late-encoded sales sometimes appear on encoded-day list</td>
+</tr>
+<tr>
+<td>Z-Report carryover for late-encode</td>
+<td><code>late_encoded_at</code> (effective day)</td>
+<td>Effective day ✅</td>
+<td>Correct, but the carryover label uses intended_date which is fine</td>
+</tr>
+<tr>
+<td>Daily sales log → Close Wizard</td>
+<td><code>date</code> field on sales_log</td>
+<td>matches order_date</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Cash collected today</td>
+<td>sums <code>payments[].date</code> and <code>created_at</code></td>
+<td><code>payment.date</code> only</td>
+<td>Backdated payments can leak into today</td>
+</tr>
+<tr>
+<td>Customer ledger</td>
+<td><code>order_date</code></td>
+<td><code>order_date</code> ✅</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Inventory movement</td>
+<td><code>created_at</code></td>
+<td><code>created_at</code> ✅</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Backdated entry report</td>
+<td>none — does not exist</td>
+<td>needs separate tab</td>
+<td>gap</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Money Flow</th>
+<th>Expected</th>
+<th>Actual</th>
+<th>Risk</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Cash sale → cashier wallet</td>
+<td>+amount</td>
+<td>Correct (<code>update_cashier_wallet</code>)</td>
+<td>low</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Credit sale → AR</td>
+<td>+balance on customer</td>
+<td><code>$inc balance</code></td>
+<td>drift</td>
+<td>reconciliation report</td>
+</tr>
+<tr>
+<td>Payment received</td>
+<td>-AR, +wallet</td>
+<td>Correct</td>
+<td>drift</td>
+<td>reconciliation report</td>
+</tr>
+<tr>
+<td>Partial payment</td>
+<td>-balance, +wallet, status=partial</td>
+<td>Correct</td>
+<td>OK</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Void invoice</td>
+<td>reverse all <code>payments[]</code> from each fund + reset AR</td>
+<td>Correct (handles split)</td>
+<td>low</td>
+<td>OK; but wallet can go negative — <code>allow_negative=True</code> is OK in this path but no alert</td>
+</tr>
+<tr>
+<td>Return + cash refund</td>
+<td>-refund from selected fund</td>
+<td>Correct (safe lots FIFO)</td>
+<td>OK</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Return + AR credit</td>
+<td>-applied from any open invoice</td>
+<td>H-4 risk</td>
+<td>misapplication</td>
+<td>restrict to linked invoice or unapplied credit memo</td>
+</tr>
+<tr>
+<td>Closed-day edit</td>
+<td>journal_entry auto-generated</td>
+<td>Correct</td>
+<td>low</td>
+<td>requires manager PIN + audit row — both present</td>
+</tr>
+<tr>
+<td>Daily close</td>
+<td>ledger entries via <code>_write_close_ledger_entries</code></td>
+<td>Correct</td>
+<td>low</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Z-Report PDF share</td>
+<td>synthetic user; org context resolved</td>
+<td>recently fixed</td>
+<td>OK</td>
+<td>keep monitoring</td>
+</tr>
+<tr>
+<td>Customer interest accrual</td>
+<td>-AR scope, daily; can compound</td>
+<td>reads stored balance</td>
+<td>drift if balance is wrong</td>
+<td>derive principal from invoices, not customer.balance</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="6-backdated-credit-sale-audit-users-priority">6. Backdated Credit Sale Audit (USER'S PRIORITY)</h2>
+<h3 id="current-state">Current state</h3>
+<p>The current <code>late_encode</code> flow in <code>routes/sales.py:41-126</code> and <code>utils/closed_day_guard.py:179-327</code>:</p>
+<ul>
+<li><strong>Allows</strong> late-encoded credit/partial sales up to 7 days back, on the same VAT month, with manager PIN + reason ≥10 chars + 5/branch/day cap.</li>
+<li><strong>Stores</strong> <code>late_encoded</code>, <code>late_encoded_at</code>, <code>late_encode_reason</code>, <code>late_encoded_by</code>, <code>late_encode_verifier_*</code>, <code>late_encode_days_back</code> on the invoice.</li>
+<li><strong>Inserts</strong> an <code>audit_log</code> row + a <code>late_encode_log</code> row.</li>
+<li><strong>Inventory</strong> moves on the historical <code>order_date</code> — i.e. <code>inventory.quantity</code> decrements <strong>today</strong> but the invoice line is stamped with the historical date. There is no historical-vs-encoded divergence in the inventory ledger.</li>
+<li><strong>Z-Report</strong> shows the entry on the next-open day with a <code>[LATE ENCODE] original date {intended} (closed)</code> label.</li>
+</ul>
+<h3 id="why-this-is-insufficient-for-the-users-case">Why this is insufficient for the user's case</h3>
+<p>The user's scenario: a customer's notebook credit was never encoded; <strong>months later</strong>, when they pay, the system has no record of the prior debt. Today the system blocks any encoding &gt; 7 days back. Even if the cap were lifted, the existing flow:</p>
+<ul>
+<li>Re-deducts inventory <strong>today</strong> at historical <code>order_date</code>'s product cost → wrong COGS / margin reporting.</li>
+<li>Has no link to "last approved physical inventory count date for that branch/product".</li>
+<li>Mixes historical AR reconstruction with normal late-encode, distorting the late-encode metrics tab.</li>
+</ul>
+<h3 id="recommended-workflow-separate-historical-credit-encoding-module">Recommended workflow — separate <strong>Historical Credit Encoding</strong> module</h3>
+<table>
+<thead>
+<tr>
+<th>Rule</th>
+<th>Recommendation</th>
+<th>Risk Prevented</th>
+<th>Code Changes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Store both <code>transaction_date</code> and <code>encoded_at</code> separately</td>
+<td>Add <code>encoded_at</code> field on every invoice (already exists for late-encode); make <code>order_date</code> = historical and <code>created_at</code> = encoded for this flow</td>
+<td>Reports can choose either basis intentionally</td>
+<td>small</td>
+</tr>
+<tr>
+<td>Reports use <code>transaction_date</code> for <em>Sales by date</em> and <code>customer ledger</code></td>
+<td>Switch to <code>order_date</code> everywhere; never use <code>created_at</code> for these reports</td>
+<td>Backdated AR appears in correct historical position on the customer ledger</td>
+<td>medium</td>
+</tr>
+<tr>
+<td>Z-Report uses <code>created_at</code> (encoded_at)</td>
+<td>Keep current carryover behaviour</td>
+<td>Old Z-Reports remain immutable</td>
+<td>none</td>
+</tr>
+<tr>
+<td>Inventory ON historical date OR on encoded date — NOT both</td>
+<td>New rule: if <code>order_date &lt; last_count_sheet.date</code> → <strong>do not</strong> decrement inventory; create a <code>historical_credit_only=True</code> invoice with no movement and a sticky <code>inventory_already_settled_at_count</code> flag</td>
+<td>Prevents double-deducting stock that was already reconciled in a count sheet</td>
+<td>medium</td>
+</tr>
+<tr>
+<td>If <code>order_date &gt;= last_count_sheet.date</code> → require admin approval + reason + proof, then deduct inventory normally</td>
+<td>Same workflow but allowed</td>
+<td>Recent unrecorded sales still adjust stock</td>
+<td>medium</td>
+</tr>
+<tr>
+<td>Add <code>last_approved_count_sheet_date</code> per (branch, product)</td>
+<td>Pull from the latest <code>count_sheets</code> doc with status=<code>approved</code></td>
+<td>Stable stopper for the rule above</td>
+<td>small (already in count_sheets.py)</td>
+</tr>
+<tr>
+<td>Required role: <code>admin</code> (not manager); reason ≥ 20 chars; proof_url required</td>
+<td>Stricter than late_encode</td>
+<td>Forensic audit trail</td>
+<td>small</td>
+</tr>
+<tr>
+<td>New audit collection: <code>historical_credit_encoding_log</code></td>
+<td>Distinct from <code>late_encode_log</code></td>
+<td>Clean separation in Audit Center</td>
+<td>small</td>
+</tr>
+<tr>
+<td>Separate "Backdated Credit Encoding Report" UI</td>
+<td>New tab under Audit Center → "Historical AR Encoding"</td>
+<td>Reviewers can spot patterns</td>
+<td>medium</td>
+</tr>
+<tr>
+<td><code>backdated_credit=True</code> invoices are excluded from the 5/branch/day late-encode cap</td>
+<td>Lift the 7-day rule for this specific flow only</td>
+<td>User's "months later" use case</td>
+<td>small</td>
+</tr>
+<tr>
+<td>Cash backdating remains forbidden</td>
+<td>unchanged</td>
+<td>Z-Report tampering prevented</td>
+<td>none</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Frontend change:</strong> New page <code>pages/HistoricalCreditEncodingPage.js</code> (or reuse <code>UnifiedSalesPage</code> with a <code>mode=historical_credit</code> switch behind admin permission). Backend: new endpoint <code>POST /api/sales/historical-credit</code> that bypasses the 7-day cap but enforces the <code>last_count_sheet_date</code> rule and writes to <code>historical_credit_encoding_log</code>. Re-use <code>_finalize_draft_offline</code>-style guard pattern for atomicity.</p>
+<hr />
+<h2 id="7-void-return-refund-audit">7. Void / Return / Refund Audit</h2>
+<table>
+<thead>
+<tr>
+<th>Original Transaction</th>
+<th>Reversal Action</th>
+<th>Expected Inv Effect</th>
+<th>Expected Money Effect</th>
+<th>Actual</th>
+<th>Risk</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Cash sale</td>
+<td>Void invoice</td>
+<td>+qty</td>
+<td>-cashier wallet</td>
+<td>Correct</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Credit sale</td>
+<td>Void invoice</td>
+<td>+qty</td>
+<td>-customer.balance, no wallet change</td>
+<td>Correct</td>
+<td>drift on customer.balance</td>
+</tr>
+<tr>
+<td>Partial sale</td>
+<td>Void invoice</td>
+<td>+qty</td>
+<td>reverse each <code>payment[]</code> from its source</td>
+<td>Correct (per-payment fund reversal in lines 1097-1133)</td>
+<td>wallet can go negative — flagged by <code>allow_negative=True</code> but no alert</td>
+</tr>
+<tr>
+<td>Sale with split payment</td>
+<td>Void invoice</td>
+<td>+qty</td>
+<td>reverse cash + digital</td>
+<td>Correct</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Partial-release sale</td>
+<td>Void invoice</td>
+<td>only +reserved_qty (released qty stays out)</td>
+<td>reverse cash</td>
+<td>Correct</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Return — shelf</td>
+<td>Return</td>
+<td>+qty</td>
+<td>-wallet</td>
+<td>Correct</td>
+<td>C-8 RMA collisions</td>
+</tr>
+<tr>
+<td>Return — pullout</td>
+<td>Return</td>
+<td>none + loss log</td>
+<td>-wallet</td>
+<td>Correct</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Return void</td>
+<td>Reverse return</td>
+<td>-qty (shelf only)</td>
+<td>+wallet</td>
+<td>Correct</td>
+<td>also reverses applied AR credit (good)</td>
+</tr>
+<tr>
+<td>Voided invoice — receive payment</td>
+<td>should refuse</td>
+<td>NO check on voided status</td>
+<td>C-9</td>
+<td>wallet credited against voided invoice</td>
+<td>severe drift</td>
+</tr>
+<tr>
+<td>Payment void</td>
+<td>Reverse a single payment</td>
+<td>-wallet, +AR</td>
+<td>Correct</td>
+<td>OK</td>
+<td></td>
+</tr>
+<tr>
+<td>PO cancel after partial receive</td>
+<td>should not auto-remove stock</td>
+<td>not auto-removed (manual supplier return required)</td>
+<td>OK</td>
+<td>OK</td>
+<td></td>
+</tr>
+<tr>
+<td>Branch transfer cancel after send</td>
+<td>manual supplier return path</td>
+<td>OK</td>
+<td>OK</td>
+<td>OK</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Double-void protection:</strong> <code>void_invoice</code> checks <code>status == "voided"</code> ✅. <code>void_return</code> checks <code>voided</code> ✅. <code>void_payment</code> checks <code>payment.voided</code> ✅. ✓ good.</p>
+<hr />
+<h2 id="8-purchase-order-supplier-audit">8. Purchase Order / Supplier Audit</h2>
+<p>(Cursory pass — full audit requires deeper read of <code>routes/purchase_orders.py</code> (2,288 lines).)</p>
+<table>
+<thead>
+<tr>
+<th>Flow</th>
+<th>Expected</th>
+<th>Actual</th>
+<th>Risk</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PO creation</td>
+<td>no inventory movement</td>
+<td>confirmed by route names</td>
+<td>OK</td>
+<td>none</td>
+</tr>
+<tr>
+<td>Receiving</td>
+<td>+qty once</td>
+<td>atomic per line</td>
+<td>needs unique <code>(po_id, line_id, received_at)</code> constraint</td>
+<td>partial dupe protection via <code>received_qty</code> increments</td>
+</tr>
+<tr>
+<td>Partial receive</td>
+<td>only delta increases</td>
+<td>depends on UI passing only the delta — backend should validate <code>received_qty &lt;= ordered_qty</code></td>
+<td>needs verification (P1)</td>
+<td>add server-side cap</td>
+</tr>
+<tr>
+<td>PO cancel after receive</td>
+<td>no auto-remove</td>
+<td>confirmed by user reports</td>
+<td>OK</td>
+<td>none</td>
+</tr>
+<tr>
+<td>Supplier return</td>
+<td>-qty + -payable</td>
+<td>confirmed</td>
+<td>OK</td>
+<td>none</td>
+</tr>
+<tr>
+<td>Cost update</td>
+<td>logs to <code>capital_changes</code> and <code>price_change_log</code></td>
+<td>confirmed</td>
+<td>OK</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Last purchase cost</td>
+<td>derived in sync.py and dashboard</td>
+<td>confirmed</td>
+<td>OK</td>
+<td>OK</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="9-offline-sync-audit">9. Offline Sync Audit</h2>
+<table>
+<thead>
+<tr>
+<th>Sync Scenario</th>
+<th>Expected</th>
+<th>Actual</th>
+<th>Duplicate Risk</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Same OFF receipt synced twice (same envelope_id)</td>
+<td>second is no-op</td>
+<td>unique index on <code>envelope_id</code> rejects second insert; existence check first</td>
+<td>LOW once index in place; <strong>inventory still moved</strong> between check and unique index hit</td>
+<td>apply inventory <strong>after</strong> insert succeeds (re-order)</td>
+</tr>
+<tr>
+<td>Offline draft finalization synced twice</td>
+<td>second is no-op</td>
+<td><code>linked_offline_receipt_number</code> canary + <code>status="for_preparation"</code> guard on update</td>
+<td>inventory still moved twice if guard fails on second</td>
+<td>apply inventory only after guarded update returns <code>modified_count &gt; 0</code></td>
+</tr>
+<tr>
+<td>Network race during single OFF sync</td>
+<td>only one inventory move</td>
+<td>no <code>update_one(...).modified_count</code> checked → both pass</td>
+<td>medium</td>
+<td>guard pattern + check</td>
+</tr>
+<tr>
+<td>Offline negative stock</td>
+<td>warn + stock_warnings array</td>
+<td>done</td>
+<td>does NOT create incident_ticket / admin notification</td>
+<td>add notification + reconciliation_queue entry</td>
+</tr>
+<tr>
+<td>Offline price-match replay</td>
+<td>branch_prices upserts only after PIN re-verifies</td>
+<td>done; logs <code>pin_resync_failed</code> flag</td>
+<td>OK</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Offline manager-bypass signature</td>
+<td>retroactive signature_session w/ <code>status=bypassed</code></td>
+<td>done</td>
+<td>OK</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Customer balance during offline sync</td>
+<td><code>$inc balance</code> after invoice insert</td>
+<td>done</td>
+<td>drift accumulates</td>
+<td>reconciliation report</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Design observation:</strong> the entire sync layer should switch to a <em>write-then-mutate</em> order:
+1. <code>db.invoices.insert_one(...)</code> (unique index will reject duplicate envelope_id)
+2. only on success → mutate inventory + wallets + customer balance
+3. on failure → rollback: invalid invoice (status <code>sync_failed</code>) + skip mutations</p>
+<p>This is a non-trivial refactor but it eliminates the full class of double-deduction bugs at once.</p>
+<hr />
+<h2 id="10-api-connection-audit">10. API Connection Audit</h2>
+<h3 id="confirmed-deadduplicate-routes">Confirmed dead/duplicate routes</h3>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>Backend</th>
+<th>Frontend Caller</th>
+<th>Status</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/api/reports/test-report-v2</code></td>
+<td><code>main.py:1205</code></td>
+<td>none</td>
+<td>DEAD + UNAUTHENTICATED</td>
+<td><strong>Remove</strong> or auth-gate</td>
+</tr>
+<tr>
+<td><code>/api/setup/reset</code></td>
+<td><code>routes/setup.py:213</code></td>
+<td>likely DEV-only</td>
+<td>UNAUTHENTICATED</td>
+<td><strong>Auth-gate to super_admin only OR remove</strong></td>
+</tr>
+<tr>
+<td><code>/api/setup/initialize</code></td>
+<td><code>routes/setup.py:42</code></td>
+<td>first-run flow</td>
+<td>UNAUTHENTICATED</td>
+<td>guard against re-run on existing tenants (current check is too weak)</td>
+</tr>
+<tr>
+<td><code>/api/sales/*</code> (legacy <code>SalesPage.js</code>)</td>
+<td><code>routes/sales.py</code> (some legacy)</td>
+<td><code>pages/SalesPage.js</code> mounted at <code>/sales</code></td>
+<td>DUPLICATE WITH <code>/sales-new</code></td>
+<td><strong>Consolidate</strong> — already in user backlog</td>
+</tr>
+<tr>
+<td><code>/api/admin/backfill/iter240</code></td>
+<td>one-shot</td>
+<td><code>AuditCenterPage.js</code></td>
+<td>KEEP but harden</td>
+<td>require PIN + audit row + idempotency stamp (idempotency exists)</td>
+</tr>
+<tr>
+<td><code>/api/admin/backfill/iter241-close-ledger</code></td>
+<td>one-shot</td>
+<td><code>AuditCenterPage.js</code></td>
+<td>KEEP but harden</td>
+<td>same</td>
+</tr>
+<tr>
+<td><code>/api/sales/sync</code> (legacy POST that handles brand-new offline sales) vs <code>_finalize_draft_offline</code></td>
+<td>both inside <code>routes/sync.py</code></td>
+<td>terminal</td>
+<td>overlapping responsibilities</td>
+<td>KEEP both, but unify inventory-deduction helper</td>
+</tr>
+<tr>
+<td><code>/api/admin-auth/setup-totp</code></td>
+<td><code>routes/admin_auth.py:150</code></td>
+<td>one-time TOTP onboarding</td>
+<td>DANGEROUS as-is</td>
+<td><strong>Add side-channel verification</strong> (email-link or pre-shared secret) before allowing first-time TOTP setup</td>
+</tr>
+</tbody>
+</table>
+<h3 id="frontend-backend-connectivity-audit">Frontend → Backend connectivity audit</h3>
+<p>A full per-page sweep was not done, but spot checks confirm:
+- <code>/sales-new</code> (UnifiedSalesPage) → <code>/api/unified-sale</code> ✅
+- <code>/sales</code> (SalesPage) — still routed in <code>App.js:243</code> ❌ DUPLICATE PAGE; consolidate per user backlog
+- <code>/pos</code>, <code>/sales-order</code> → both → UnifiedSalesPage ✅
+- <code>ReturnRefundWizard</code> → <code>/api/returns</code> ✅
+- <code>AuditCenterPage</code> → <code>/api/admin/backfill/*</code> ✅
+- <code>MessagesPage</code> → <code>/api/sms/*</code> ✅
+- <code>PrintQueuePage</code>, <code>TerminalShell</code> → <code>/api/print-jobs</code>, <code>/api/sync/*</code> ✅</p>
+<h3 id="dead-frontend-pages-suspected-needs-design-audit">Dead frontend pages (suspected — needs design audit)</h3>
+<ul>
+<li><code>pages/UploadPage.js</code> vs <code>pages/DocUploadPage.js</code> — possibly overlapping</li>
+<li><code>pages/PaymentsPage.js</code> vs <code>pages/AccountsPage.js</code> — possibly overlapping</li>
+</ul>
+<hr />
+<h2 id="11-security-and-permission-audit">11. Security and Permission Audit</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>File / Route</th>
+<th>Who Can Abuse</th>
+<th>Severity</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Plain-text PIN distribution to client</td>
+<td><code>sync.py:734-798</code></td>
+<td>any authenticated user</td>
+<td><strong>Critical</strong></td>
+<td>replace with bcrypt-only verification round-trip via <code>/api/verify/pin</code> (already exists); keep ONLY admin_pin_hash if you must, behind a manager-token gate</td>
+</tr>
+<tr>
+<td>Public DB wipe</td>
+<td><code>setup.py:213</code></td>
+<td>anyone</td>
+<td><strong>Critical</strong></td>
+<td>super-admin auth + 2FA + confirmation token sent via email</td>
+</tr>
+<tr>
+<td>TOTP take-over</td>
+<td><code>admin_auth.py:setup-totp</code></td>
+<td>password thief</td>
+<td><strong>Critical</strong></td>
+<td>force out-of-band confirmation (email link, recovery code) before allowing first TOTP setup</td>
+</tr>
+<tr>
+<td>CORS <code>*</code> default</td>
+<td><code>main.py:1184</code></td>
+<td>external sites if env unset</td>
+<td>High</td>
+<td>force explicit allowlist; refuse to start if not set in production</td>
+</tr>
+<tr>
+<td>JWT 24h, no refresh, no revocation list</td>
+<td><code>utils/auth.py</code></td>
+<td>stolen-token holder</td>
+<td>High</td>
+<td>shorter access tokens (15-30m) + refresh token + token blacklist on logout</td>
+</tr>
+<tr>
+<td>Hardcoded test credentials in repo</td>
+<td><code>backend/tests/*.py</code></td>
+<td>anyone reading repo</td>
+<td>High (since repo is public)</td>
+<td>move to env-only; the credentials match a real production-ish account per <code>memory/test_credentials.md</code></td>
+</tr>
+<tr>
+<td>Backfill endpoints mutate prod data</td>
+<td><code>admin_backfill_240.py</code></td>
+<td>any admin token</td>
+<td>High</td>
+<td>PIN + 2-step confirm + audit ledger row per call</td>
+</tr>
+<tr>
+<td><code>/api/admin/reconcile-orphan-offline-draft</code></td>
+<td><code>sync.py:304</code></td>
+<td>admin (PIN required)</td>
+<td>Medium</td>
+<td>already reasonably guarded; keep PIN; add per-orphan idempotency lock</td>
+</tr>
+<tr>
+<td><code>assert_branch_access</code> legacy bypass</td>
+<td><code>auth.py:172-177</code></td>
+<td>user with empty <code>branch_ids</code></td>
+<td>High</td>
+<td>refuse access instead of granting org-wide (data has migrated; legacy mode can be retired)</td>
+</tr>
+<tr>
+<td><code>users.email</code> non-unique index</td>
+<td><code>main.py:389</code></td>
+<td>duplicate-email collisions</td>
+<td>High</td>
+<td>unique compound index <code>(organization_id, email)</code></td>
+</tr>
+<tr>
+<td><code>check_perm</code>/<code>has_perm</code> short-circuit on <code>role=="admin"</code></td>
+<td><code>utils/auth.py:100,120</code></td>
+<td>any user-doc with <code>role=admin</code> (not super-admin)</td>
+<td>Medium</td>
+<td>OK conceptually but means a malicious admin can void/edit anything — there's no per-action 4-eye principle except via PIN policy</td>
+</tr>
+<tr>
+<td>No per-IP rate limiting on <code>/auth/*</code> and <code>/admin-auth/*</code></td>
+<td><code>auth.py</code>, <code>admin_auth.py</code></td>
+<td>brute force</td>
+<td>Medium</td>
+<td>add slowapi or Cloudflare-side limiter</td>
+</tr>
+<tr>
+<td>Global exception handler returns generic message but logs full stack to stdout</td>
+<td><code>main.py:87-104</code></td>
+<td>log scrapers</td>
+<td>Low</td>
+<td>OK as-is; just confirm logs are not shipped to a public bucket</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="12-multi-tenant-branch-isolation-audit">12. Multi-Tenant / Branch Isolation Audit</h2>
+<p>The <code>TenantCollection</code> design is <strong>excellent in principle</strong> — fail-closed when no org context, automatic <code>organization_id</code> injection. However:</p>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>Expected Scope</th>
+<th>Actual Scope</th>
+<th>Isolation Risk</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>339 uses of <code>_raw_db.*</code> across routes</td>
+<td>explicit <code>organization_id</code> filter every time</td>
+<td>mostly enforced; <code>superadmin.py</code> and <code>setup.py</code> legitimately cross-tenant; <code>terminal.py</code> (terminal_codes, qr_pair_tokens, terminal_sessions) is unscoped because they're transient — OK</td>
+<td>LOW for terminal; MEDIUM for sms_hooks/settings.py</td>
+<td>spot-check <code>sms_hooks.py:53,75,84,97,...</code> — these use <code>_raw_db</code> then resolve org via the branch — confirmed safe but fragile</td>
+</tr>
+<tr>
+<td><code>branch_transfer_orders</code> cross-branch within org</td>
+<td>only via approved transfer</td>
+<td>confirmed</td>
+<td>OK</td>
+<td>OK</td>
+</tr>
+<tr>
+<td><code>get_branch_filter</code> / <code>apply_branch_filter</code> honoring <code>branch_ids</code></td>
+<td>yes</td>
+<td>confirmed</td>
+<td>OK</td>
+<td>OK except H-5</td>
+</tr>
+<tr>
+<td><code>superadmin</code> impersonation</td>
+<td>sets <code>_current_org_id</code> to target tenant</td>
+<td>confirmed (<code>auth.py:77-80</code>)</td>
+<td>OK</td>
+<td>impersonation_session 4h TTL is reasonable</td>
+</tr>
+<tr>
+<td><code>users.find({"role": "admin"})</code> in <code>branch_transfers.py:614-619</code></td>
+<td>org-scoped via TenantCollection</td>
+<td>confirmed</td>
+<td>OK</td>
+<td>OK</td>
+</tr>
+<tr>
+<td><code>notifications.target_user_ids</code> cross-branch admins</td>
+<td>TenantCollection scopes by org</td>
+<td>confirmed</td>
+<td>OK</td>
+<td>OK</td>
+</tr>
+<tr>
+<td><code>signature_sessions</code></td>
+<td>TenantCollection scopes</td>
+<td>confirmed in TENANT_COLLECTIONS list</td>
+<td>OK</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Counter collection (<code>counters</code>) is shared globally</td>
+<td>by design — counter key is <code>{branch_id}:{prefix}</code> so branch UUID provides the namespace</td>
+<td>confirmed</td>
+<td>LOW</td>
+<td>OK; but a cross-org branch_id collision is impossible because branch_ids are uuid4</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="13-database-integrity-audit">13. Database Integrity Audit</h2>
+<table>
+<thead>
+<tr>
+<th>Collection</th>
+<th>Issue</th>
+<th>Risk</th>
+<th>Fix</th>
+<th>Migration?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>invoices</code></td>
+<td>no unique on <code>invoice_number</code></td>
+<td>dup numbers possible via import/migration</td>
+<td>unique compound <code>(organization_id, invoice_number)</code></td>
+<td>yes — backfill scan first</td>
+</tr>
+<tr>
+<td><code>users</code></td>
+<td><code>email</code> non-unique</td>
+<td>dup logins</td>
+<td>unique compound <code>(organization_id, email)</code></td>
+<td>yes — dedupe scan first</td>
+</tr>
+<tr>
+<td><code>users</code></td>
+<td><code>username</code> unique global (not org-scoped)</td>
+<td>cross-tenant username collision blocks user creation</td>
+<td>change to <code>(organization_id, username)</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>customers</code></td>
+<td>no unique on phone</td>
+<td>dup customers, opening_balance double-create</td>
+<td>unique compound <code>(organization_id, branch_id, phone)</code> partial filter</td>
+<td>yes — already handled by <code>merge_duplicates</code> route</td>
+</tr>
+<tr>
+<td><code>movements</code></td>
+<td>no unique on <code>(reference_id, type)</code></td>
+<td>re-running PO receive could double-log</td>
+<td>unique partial <code>(reference_id, branch_id, product_id, type)</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>daily_closings</code></td>
+<td>no unique on <code>(branch_id, date)</code></td>
+<td>dup close possible</td>
+<td>unique compound <code>(organization_id, branch_id, date)</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>count_sheets.count_sheet_number</code></td>
+<td>unique not enforced; generator is racy</td>
+<td>dup count sheet numbers</td>
+<td>atomic counter via <code>_raw_db.counters</code> (like <code>generate_next_number</code>)</td>
+<td>small</td>
+</tr>
+<tr>
+<td><code>returns.rma_number</code></td>
+<td>C-8 — racy <code>count_documents+1</code> global</td>
+<td>duplicate RMAs across orgs</td>
+<td>atomic counter scoped per <code>(organization_id, branch_id)</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>safe_lots.remaining_amount</code></td>
+<td>no constraint preventing &lt; 0</td>
+<td>overdraw silently</td>
+<td>application check + monitoring</td>
+<td>none</td>
+</tr>
+<tr>
+<td>Soft delete vs hard delete</td>
+<td>mostly soft (active=False)</td>
+<td>OK</td>
+<td>OK</td>
+<td>none</td>
+</tr>
+<tr>
+<td>Orphan records</td>
+<td><code>customers.reattach-orphans</code> exists</td>
+<td>partial fix</td>
+<td>OK</td>
+<td>none</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="14-math-and-calculation-audit">14. Math and Calculation Audit</h2>
+<table>
+<thead>
+<tr>
+<th>Calculation</th>
+<th>Frontend</th>
+<th>Backend</th>
+<th>Match?</th>
+<th>Risk</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Subtotal</td>
+<td>per-line <code>qty*rate-disc</code></td>
+<td>same</td>
+<td>✅</td>
+<td>OK</td>
+<td></td>
+</tr>
+<tr>
+<td>Per-unit discount</td>
+<td><code>qty * disc_val</code> (amount) or <code>qty * rate * disc_val/100</code> (percent)</td>
+<td>same</td>
+<td>✅</td>
+<td>OK</td>
+<td></td>
+</tr>
+<tr>
+<td>Overall discount</td>
+<td>flat amount</td>
+<td>flat amount</td>
+<td>✅</td>
+<td>OK</td>
+<td></td>
+</tr>
+<tr>
+<td>Grand total</td>
+<td><code>subtotal + freight - overall</code></td>
+<td>same</td>
+<td>✅</td>
+<td>OK</td>
+<td></td>
+</tr>
+<tr>
+<td>Balance</td>
+<td><code>grand_total - amount_paid</code></td>
+<td>same</td>
+<td>✅</td>
+<td>OK</td>
+<td></td>
+</tr>
+<tr>
+<td>Change</td>
+<td>client-side only</td>
+<td>n/a</td>
+<td>n/a</td>
+<td>OK</td>
+<td>confirm receipt prints same value backend stores</td>
+</tr>
+<tr>
+<td>COGS / margin</td>
+<td><code>cost_price * qty</code> snapshotted in sale_items</td>
+<td>same</td>
+<td>✅</td>
+<td>OK</td>
+<td></td>
+</tr>
+<tr>
+<td>Repack capital</td>
+<td>derived: <code>parent_cost / units + add_on_cost</code></td>
+<td>matches <code>sync.py:707-709</code></td>
+<td>✅</td>
+<td>OK</td>
+<td></td>
+</tr>
+<tr>
+<td>Capital change alerts</td>
+<td>dashboard reads <code>capital_changes</code></td>
+<td>written from PO receive</td>
+<td>✅</td>
+<td>OK</td>
+<td></td>
+</tr>
+<tr>
+<td>Interest (per invoice)</td>
+<td><code>principal * monthly/30 * days_overdue</code></td>
+<td><code>invoices.py:289-294</code></td>
+<td>✅</td>
+<td>OK; but uses stored <code>inv.balance</code> — drift exposed</td>
+<td></td>
+</tr>
+<tr>
+<td>Penalty</td>
+<td>similar to interest</td>
+<td><code>accounting.py</code></td>
+<td>✅</td>
+<td>same drift exposure</td>
+<td></td>
+</tr>
+<tr>
+<td>Rounding</td>
+<td><code>round(..., 2)</code> everywhere</td>
+<td>matches</td>
+<td>✅</td>
+<td>OK; not using Decimal — accept Python float for now</td>
+<td></td>
+</tr>
+<tr>
+<td>Negative totals</td>
+<td>guarded <code>max(0, ...)</code></td>
+<td>matches</td>
+<td>✅</td>
+<td>OK</td>
+<td></td>
+</tr>
+<tr>
+<td>Overpayment</td>
+<td>not blocked; goes to <code>payments[].amount</code> &gt; balance</td>
+<td>not blocked at backend</td>
+<td>⚠</td>
+<td>refuse overpayment OR auto-credit memo</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="15-repacking-audit">15. Repacking Audit</h2>
+<table>
+<thead>
+<tr>
+<th>Repack Step</th>
+<th>Expected</th>
+<th>Actual</th>
+<th>Risk</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Parent-derived inventory</td>
+<td>child availability = <code>parent_qty * units_per_parent</code></td>
+<td>confirmed in <code>sync.py:691-696</code>, <code>sales.py:589-595</code></td>
+<td>OK — no separate child stock row</td>
+</tr>
+<tr>
+<td>Parent stock decrement on repack-child sale</td>
+<td>-qty / units_per_parent</td>
+<td>confirmed (<code>sales.py:602-608</code>)</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Cost allocation</td>
+<td><code>parent_cost / units + add_on_cost</code></td>
+<td>confirmed</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Repack reversal</td>
+<td>comes from invoice void</td>
+<td>confirmed</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>JIT retail price for repacks</td>
+<td>persisted to <code>branch_prices</code> after Owner PIN</td>
+<td>confirmed (<code>sales.py:321-377</code>)</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Negative parent stock</td>
+<td>allowed only with manager override pin</td>
+<td>confirmed (<code>sales.py:489-522</code>)</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Repack reports</td>
+<td>derived live</td>
+<td>n/a</td>
+<td>OK</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Conclusion:</strong> repacking design is <strong>correct and not at risk</strong> of creating/destroying value.</p>
+<hr />
+<h2 id="16-report-reliability-audit">16. Report Reliability Audit</h2>
+<table>
+<thead>
+<tr>
+<th>Report</th>
+<th>Source</th>
+<th>Date Field</th>
+<th>Voided handling</th>
+<th>Branch/Tenant Filter</th>
+<th>Reliability</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Sales Report</td>
+<td><code>invoices</code></td>
+<td><code>order_date</code></td>
+<td>excludes by default</td>
+<td>TenantCollection + branch</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Inventory Report</td>
+<td><code>inventory</code></td>
+<td><code>updated_at</code></td>
+<td>n/a</td>
+<td>TenantCollection</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Movement Report</td>
+<td><code>movements</code></td>
+<td><code>created_at</code></td>
+<td>filter <code>reversed != true</code></td>
+<td>TenantCollection</td>
+<td>OK; some old reversed entries may not have the flag</td>
+</tr>
+<tr>
+<td>Customer Balance Report</td>
+<td><code>customers.balance</code></td>
+<td>n/a</td>
+<td>n/a</td>
+<td>TenantCollection</td>
+<td>DRIFT (H-3)</td>
+</tr>
+<tr>
+<td>Customer Receivables Summary</td>
+<td><code>invoices</code> aggregated</td>
+<td><code>order_date</code>/<code>due_date</code></td>
+<td>excludes voided</td>
+<td>TenantCollection</td>
+<td>better than <code>customers.balance</code>, recommend authoritative</td>
+</tr>
+<tr>
+<td>Cashier Report</td>
+<td><code>daily_sales_log</code></td>
+<td><code>date</code></td>
+<td>excludes voided</td>
+<td>branch</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Z-Report</td>
+<td><code>daily_closings</code> + <code>wallet_movements</code></td>
+<td><code>date</code> (branch)</td>
+<td>tagged late_encode + voided handled</td>
+<td>branch</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Daily Close Report</td>
+<td><code>daily_closings</code></td>
+<td><code>date</code></td>
+<td>OK</td>
+<td>branch</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Void/Refund Report</td>
+<td>needs verification</td>
+<td><code>voided_at</code>?</td>
+<td>n/a</td>
+<td>TBD</td>
+<td>low — minor</td>
+</tr>
+<tr>
+<td>Purchase Report</td>
+<td><code>purchase_orders</code></td>
+<td><code>order_date</code></td>
+<td>OK</td>
+<td>branch</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Backdated Entry Report</td>
+<td>DOES NOT EXIST</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td><strong>Gap — build for backdated credit reconstruction</strong></td>
+</tr>
+<tr>
+<td>Audit Log Report</td>
+<td><code>audit_log</code></td>
+<td><code>created_at</code></td>
+<td>n/a</td>
+<td>TenantCollection</td>
+<td>OK</td>
+</tr>
+<tr>
+<td>Discount Audit Report</td>
+<td><code>discount_audit_log</code></td>
+<td><code>created_at</code></td>
+<td>excludes voided invoices</td>
+<td>OK</td>
+<td>OK</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="17-duplicate-dead-code-audit">17. Duplicate / Dead Code Audit</h2>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pages/SalesPage.js</code> (legacy <code>/sales</code>) vs <code>UnifiedSalesPage</code> (<code>/sales-new</code>, <code>/pos</code>, <code>/sales-order</code>)</td>
+<td><strong>Remove</strong> SalesPage.js, redirect <code>/sales</code> → <code>/sales-new</code> (already in user backlog)</td>
+</tr>
+<tr>
+<td><code>pages/PaymentsPage.js</code> vs <code>pages/AccountsPage.js</code></td>
+<td>review for overlap</td>
+</tr>
+<tr>
+<td><code>pages/UploadPage.js</code> vs <code>pages/DocUploadPage.js</code></td>
+<td>review for overlap</td>
+</tr>
+<tr>
+<td><code>routes/admin_backfill_240.py</code></td>
+<td>one-shot migrations — keep but rename / move to <code>routes/admin_backfills.py</code> and add a manifest</td>
+</tr>
+<tr>
+<td><code>backend_test.py</code> (root level)</td>
+<td>older test; check if subsumed by <code>backend/tests/*</code></td>
+</tr>
+<tr>
+<td><code>generate_test_report.py</code> (73KB)</td>
+<td>one-shot script; move to <code>scripts/</code></td>
+</tr>
+<tr>
+<td><code>generate_audit_report.py</code> (21KB at backend root)</td>
+<td>one-shot; move to <code>backend/scripts/</code></td>
+</tr>
+<tr>
+<td>11 hardcoded-date unit test failures</td>
+<td>Pre-existing per handoff</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="18-existing-audit-test-file-review">18. Existing Audit / Test File Review</h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>AgriBooks_Feature_Test_Report.pdf</code></td>
+<td>feature checklist — broadly positive; auth + sales + close path covered; no atomicity tests</td>
+</tr>
+<tr>
+<td><code>AgriBooks_Full_System_Audit_Report.pdf</code></td>
+<td>older audit — issues largely about UI; back-end risk surface NOT covered</td>
+</tr>
+<tr>
+<td><code>AgriBooks_SaaS_Test_Report_v2.pdf</code></td>
+<td>tenant-isolation + plan limits — well covered</td>
+</tr>
+<tr>
+<td><code>test_result.md</code></td>
+<td>sparse, mostly green</td>
+</tr>
+<tr>
+<td><code>backend/tests/test_full_system_audit.py</code></td>
+<td>tests cross-tenant isolation but does NOT test idempotency races</td>
+</tr>
+<tr>
+<td><code>backend/tests/test_unclosed_days_92.py</code></td>
+<td>hardcoded dates — part of P0 11-fail set</td>
+</tr>
+<tr>
+<td><code>backend/tests/test_cross_tenant_privacy_180.py</code></td>
+<td>useful baseline; should be expanded with the new H-5 / C-1 cases</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="19-recommended-fix-plan">19. Recommended Fix Plan</h2>
+<h3 id="phase-1-critical-safety-fixes-ship-in-next-deploy">Phase 1 — Critical Safety Fixes (ship in next deploy)</h3>
+<ol>
+<li><strong>C-1</strong>: Stop shipping plain-text PINs in <code>/api/sync/pos-data</code>. Replace <code>offline_pin_grants</code> with a per-PIN <code>bcrypt_hash</code> + verifier metadata; client can <code>bcrypt.compare()</code> locally without ever seeing the plain PIN. Remove <code>admin_pin_hash</code> exposure or move it behind a higher-tier role.</li>
+<li><strong>C-2</strong>: Auth-gate <code>/api/setup/reset</code> to super-admin token + email-confirmation token; or remove from production builds.</li>
+<li><strong>C-3</strong>: Block <code>/api/admin-auth/setup-totp</code> for any super-admin who has <code>last_admin_login</code> set; require an out-of-band recovery code or signed email link.</li>
+<li><strong>C-4 / C-5 / C-6</strong>: Re-order sync paths to <em>insert invoice first, mutate inventory + AR + wallet only after success</em>; check <code>update_one(...).modified_count</code> everywhere; add unique index on <code>(branch_id, invoice_number)</code> once duplicates are scanned.</li>
+<li><strong>C-7</strong>: Fix <code>current_balance</code> → <code>balance</code> in <code>routes/sync.py:437</code>.</li>
+<li><strong>C-8</strong>: Replace RMA <code>count_documents+1</code> with <code>_raw_db.counters</code> atomic counter, key=<code>{org_id}:{branch_id}:RMA</code>; backfill any pre-existing duplicates.</li>
+<li><strong>C-9</strong>: <code>record_invoice_payment</code> and <code>accounting.receive_customer_payment</code> must reject <code>inv.status == "voided"</code>.</li>
+<li>CORS allowlist enforced in production; refuse to start if <code>CORS_ORIGINS</code> is empty/<code>*</code> outside dev.</li>
+</ol>
+<h3 id="phase-2-business-logic-consistency-next-12-cycles">Phase 2 — Business Logic Consistency (next 1–2 cycles)</h3>
+<ol>
+<li><strong>H-1</strong>: Replace <code>replace_one</code> in draft finalization with explicit <code>update_one</code> of allowed fields + <code>find_one_and_update</code> guard on <code>status="for_preparation"</code>.</li>
+<li><strong>H-3</strong>: Build a <code>customers.balance</code> reconciliation report — for every customer, compare stored balance against ledger-derived balance from <code>invoices</code> + <code>payments[]</code> + <code>returns.credit_applied_to_invoices</code>. Flag drift &gt; ₱0.50 for manager review.</li>
+<li><strong>H-4</strong>: Restrict return credit application to the linked invoice only by default; add a separate "Apply to other open invoices" UI that requires manager approval per row, written to a distinct audit row.</li>
+<li><strong>H-11</strong>: Build the <strong>Historical Credit Encoding</strong> workflow per §6 above. <strong>This is the user's #1 outstanding business case.</strong></li>
+<li><strong>H-12</strong>: Offline negative stock now creates an <code>incident_ticket</code> + admin notification + <code>offline_reconciliation_queue</code> entry.</li>
+<li><strong>H-5 / H-6 / H-7 / H-8</strong>: Tighten <code>assert_branch_access</code>, force CORS allowlist, shorter JWT + refresh, validate <code>payload.org_id == user.organization_id</code>.</li>
+<li><strong>H-9 / H-10</strong>: Add unique compound indexes; backfill scan first.</li>
+<li><strong>H-13</strong>: Setup re-init guard should refuse if any <code>organizations</code> doc exists.</li>
+<li><strong>H-14</strong>: All admin backfill endpoints require manager+admin PIN combo + per-call audit row signed by user_id; idempotency stamps already exist (<code>iter240_backfill_at</code>).</li>
+</ol>
+<h3 id="phase-3-cleanup-deduplication">Phase 3 — Cleanup &amp; Deduplication</h3>
+<ol>
+<li>Remove <code>pages/SalesPage.js</code>; redirect <code>/sales</code> → <code>/sales-new</code> (user backlog).</li>
+<li>Move root-level <code>backend_test.py</code>, <code>generate_test_report.py</code>, <code>generate_audit_report.py</code> to <code>backend/scripts/</code> or <code>scripts/</code>.</li>
+<li>Consolidate uploads pages.</li>
+<li>Move all transient one-shot backfill endpoints behind a dedicated <code>/api/admin/backfills/*</code> namespace + PIN.</li>
+<li>Standardize date-field convention: every report-style endpoint declares which of <code>order_date | created_at | payment.date | closed_at | encoded_at</code> it uses, in code comments and docs.</li>
+</ol>
+<h3 id="phase-4-tests-and-guardrails">Phase 4 — Tests and Guardrails</h3>
+<p>Add focused tests for:
+1. Cash sale deducts stock once.
+2. Credit sale deducts stock once and increases AR; void reverses both.
+3. Payment reduces AR but never touches stock; voided invoice rejects payment.
+4. Sale void restores stock and reverses each <code>payment[]</code> from its source wallet.
+5. Partial return restores only returned qty.
+6. Backdated credit AFTER last_count_sheet allowed; BEFORE blocked unless admin approves.
+7. Offline sync replay (same envelope_id × N) → exactly one inventory move.
+8. Concurrent offline sync (parallel POSTs, same envelope_id) → exactly one inventory move (proves race).
+9. Branch A user cannot read Branch B inventory.
+10. Tenant A cannot read Tenant B data via any route.
+11. Cashier cannot void/refund/backdate via direct API call without permission/PIN.
+12. Invoice correction does not double-deduct.
+13. Drafts and parked sales do not deduct inventory.
+14. Returns do not duplicate refunds.
+15. Repack: parent-stock movement balances child-stock derivation across N concurrent sales.
+16. RMA generator under 50 concurrent return inserts produces 50 unique numbers.
+17. <code>/api/sync/pos-data</code> does not return any plain-text PIN field (regression test for C-1).
+18. <code>/api/setup/reset</code> returns 401/403 without super-admin auth (regression test for C-2).
+19. <code>/api/admin-auth/setup-totp</code> rejects when super-admin has prior <code>last_admin_login</code> (regression test for C-3).
+20. <code>customers.balance</code> ledger-reconciliation invariant after a randomized fuzzed sequence of (sale, payment, return, void, partial-payment, interest accrual).</p>
+<hr />
+<h2 id="20-test-plan-required-after-fix">20. Test Plan (Required After Fix)</h2>
+<p>Every Phase-1 fix must ship with:
+- A regression test reproducing the original defect.
+- A fuzz test that runs 100+ randomized sequences (sale → payment → return → void → ...) and asserts the ledger invariants.
+- A sync-replay test with simulated network jitter (asyncio.gather of 10 retries with same envelope_id) asserting exactly-once inventory move.</p>
+<hr />
+<p><strong>End of audit.</strong> No code changes were applied. Awaiting prioritization decision before any implementation.</p></body></html>
