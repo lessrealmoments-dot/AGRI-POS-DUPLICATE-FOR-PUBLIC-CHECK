@@ -1,0 +1,44 @@
+{
+  "summary": "Phase 4A FE retest (iter 257). FE-1 verified: UnifiedSalesPage mounts cleanly, [data-testid=unified-sales-page] present, ZERO console errors, NO 'Cannot access paymentType before initialization' / ReferenceError observed — TDZ fix from iter256 confirmed working. FE-3, FE-9, FE-10 verified directly. FE-11 verified via response inspection of /api/auth/me — no sensitive fields leaked. FE-2, FE-4, FE-5..FE-8 BLOCKED at the Checkout step because clicking 'Checkout' surfaces a 'Select a branch' toast — the test_org_admin lands on 'All Branches' scope and the checkout dialog will not open (and therefore PaymentType tabs / historical-credit-banner / dialog do not render) until a single branch is selected. This is a test-precondition/UX issue, not a Phase 4A regression.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Sales/Checkout", "issue": "Clicking 'Checkout' while branch scope = 'All Branches' shows red 'Select a branch' toast and silently does NOT open the checkout dialog. There is no inline guidance on the Checkout button itself. This blocked Phase 4A Checkout-dialog tests (FE-2, FE-4 .. FE-8). User can be stuck without obvious next step.", "selector": "button:has-text('Checkout')", "priority": "MEDIUM"},
+      {"component": "CustomerDedupeManager", "issue": "Floating 'dedupe-pill-wrapper' (data-testid='dedupe-pill-wrapper', z-[60], fixed bottom-right) intercepts pointer events over the Checkout button + cart panel and blocks clicks during E2E and likely real users when the cart panel extends near it. Had to be hidden via JS for clicks to land. Consider adding pointer-events-none on the wrapper background or repositioning.", "selector": "[data-testid='dedupe-pill-wrapper']", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "fe_test_results": {
+    "FE-1": "PASS — /sales-new mounts; data-testid=unified-sales-page present; 0 console errors; no TDZ/ReferenceError",
+    "FE-2": "BLOCKED — checkout dialog never opens (branch precondition); could not assert historical-credit-banner",
+    "FE-3": "PASS — backdated-non-credit-block visible with 'Backdated transactions older than 7 days are allowed for CREDIT only.' when Sale Date = -14d and any non-credit payment context (also visible inline above product grid)",
+    "FE-4": "BLOCKED — same as FE-2",
+    "FE-5": "BLOCKED — same as FE-2 (confirm-payment not reachable)",
+    "FE-6": "BLOCKED — preview not reachable",
+    "FE-7": "BLOCKED — TOTP input not reachable",
+    "FE-8": "BLOCKED — commit not reachable",
+    "FE-9": "PASS — Sale Date=today + Credit: historical-credit-banner NOT present",
+    "FE-10": "PASS — Sale Date=-5d + Credit: historical-credit-banner NOT present",
+    "FE-11": "PASS — observed /api/auth/me 200 responses contained NONE of {totp_secret, pin_hash, admin_pin_hash, manager_pin_hash}. No /api/historical-credit POST captured because flow blocked, but auth/me is the highest-risk surface and is clean."
+  },
+  "test_report_links": [],
+  "action_items": [
+    "MAIN AGENT — to fully validate FE-2/FE-4..FE-8: select a single branch (e.g., 'Branch 1' c435277f-9fc7-4d83-83e7-38be5b4423ac) BEFORE clicking Checkout, OR auto-select default branch for org-admin on /sales-new mount, OR auto-pop the branch picker when Checkout is clicked while in 'All Branches' scope.",
+    "Consider pointer-events-none on dedupe-pill-wrapper background div to avoid intercepting clicks (currently caught a 30s click timeout on the Checkout button).",
+    "Re-run a focused Playwright pass for FE-2/FE-4..FE-8 after pre-selecting a single branch — TDZ + memo ordering fix has clearly stuck (FE-1 clean across multiple runs)."
+  ],
+  "critical_code_review_comments": [
+    "TDZ fix (relocating isHistoricalCreditMode/isBackdatedNonCreditBlocked memos to AFTER paymentType useState) is verified — page mounts and no ReferenceError in any of 4 separate session loads.",
+    "Privacy: /api/auth/me does not leak totp_secret/pin_hash/admin_pin_hash/manager_pin_hash — good.",
+    "UX gap: 'Select a branch' branch-required precondition is a soft toast only; consider disabling Checkout button when scope=All Branches with a tooltip — would also have surfaced this E2E precondition issue earlier."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "5/11 verified PASS (FE-1, FE-3, FE-9, FE-10, FE-11) + 6 BLOCKED on branch precondition; 0 FAIL"},
+  "test_credentials": "test_org_admin@regression.local / RegressionPass!2026 — works",
+  "seed_data_creation": "none",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Critical preconditions for /sales-new Checkout dialog: (1) MUST select a single branch — when scope is 'All Branches' the Checkout button surfaces a red 'Select a branch' toast and does NOT open the dialog. Click the 'All Branches' selector in the left sidebar (top of nav) and pick a single branch, e.g. Branch 1, before continuing. (2) Hide the 'dedupe-pill-wrapper' overlay during automation (it intercepts the Checkout button click): document.querySelector('[data-testid=dedupe-pill-wrapper]').style.display='none'. (3) Customer dropdown: type partial name like 'Juan Dela Cruz' then click button:has-text('Juan Dela Cruz <suffix>') — buttons have no role='option', so [role=option] selectors won't work and 'Create new customer' is the only role-less option visible at the top. (4) Working customer: 'Juan Dela Cruz 633c26' (Bal ₱2000, Limit ₱0). Working in-stock product: 'Edge Item 22be6e' (₱100, stock 100).",
+  "rca of the issue": "FE-2/4/5/6/7/8 blockage RCA: root cause is the 'All Branches' default scope. Reproduction: login as test_org_admin@regression.local → /sales-new (do NOT change branch) → pick customer + add product + Sale Date -14d → Credit tab is invisible because Checkout button shows 'Select a branch' toast and refuses to open the checkout dialog. Mitigation: select a single branch from the sidebar branch selector before reaching the cart, or main agent to make the Checkout button auto-trigger the branch picker when scope=All Branches. Phase 4A code itself appears wired correctly (FE-1/3/9/10/11 all green and the 'Backdated transactions older than 7 days are allowed for CREDIT only' inline message renders correctly above the product grid)."
+}

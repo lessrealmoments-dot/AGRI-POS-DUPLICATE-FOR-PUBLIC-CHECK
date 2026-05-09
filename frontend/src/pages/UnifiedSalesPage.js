@@ -477,25 +477,6 @@ export default function UnifiedSalesPage() {
 
   const HISTORICAL_CREDIT_FLOOR_DAYS = 7;
 
-  // True only when ALL three conditions hold (per handoff §7):
-  //  • transaction_date < today
-  //  • payment_type === 'credit'
-  //  • daysBack > 7
-  // AND the user has the role required by the backend gate.
-  const isHistoricalCreditMode = useMemo(() => (
-    daysBack > HISTORICAL_CREDIT_FLOOR_DAYS
-    && paymentType === 'credit'
-    && isPrivilegedRole
-  ), [daysBack, paymentType, isPrivilegedRole]);
-
-  // True when the cashier picked a past date >7 days back but the payment
-  // type is NOT pure credit. Backdated cash/digital/split/partial-paid
-  // sales must be strictly blocked at this depth — they would change cash
-  // collected today, which is not allowed for AR reconstruction.
-  const isBackdatedNonCreditBlocked = useMemo(() => (
-    daysBack > HISTORICAL_CREDIT_FLOOR_DAYS && paymentType !== 'credit'
-  ), [daysBack, paymentType]);
-
   // Order header collapse
   const [headerCollapsed, setHeaderCollapsed] = useState(true);
 
@@ -535,6 +516,29 @@ export default function UnifiedSalesPage() {
   const [partialPayment, setPartialPayment] = useState(0);
   const [saving, setSaving] = useState(false);
   const [releaseMode, setReleaseMode] = useState('full'); // full | partial
+
+  // ── Phase 4A — Historical Credit mode triggers ─────────────────────
+  // Declared AFTER `paymentType` so the memos do not hit a TDZ on first
+  // render (reported in iter 256 by the testing agent).
+  //
+  // True only when ALL three conditions hold (per handoff §7):
+  //   • transaction_date < today
+  //   • payment_type === 'credit'
+  //   • daysBack > 7
+  // AND the user has the role required by the backend gate.
+  const isHistoricalCreditMode = useMemo(() => (
+    daysBack > HISTORICAL_CREDIT_FLOOR_DAYS
+    && paymentType === 'credit'
+    && isPrivilegedRole
+  ), [daysBack, paymentType, isPrivilegedRole]);
+
+  // True when the cashier picked a past date >7 days back but the payment
+  // type is NOT pure credit. Backdated cash/digital/split/partial-paid
+  // sales must be strictly blocked at this depth — they would change cash
+  // collected today, which is not allowed for AR reconstruction.
+  const isBackdatedNonCreditBlocked = useMemo(() => (
+    daysBack > HISTORICAL_CREDIT_FLOOR_DAYS && paymentType !== 'credit'
+  ), [daysBack, paymentType]);
 
   // ── Phase 4A — Historical Credit / Notebook AR Mode (admin-only) ─────
   // Triggered automatically when transaction_date < today AND payment_type
