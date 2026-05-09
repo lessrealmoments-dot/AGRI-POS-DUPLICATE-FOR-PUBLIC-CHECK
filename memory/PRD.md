@@ -1,6 +1,66 @@
 # AgriBooks PRD
 
 
+## Phase 2C — POS Write-Side Hardening (Audit 2026-02, May 2026) ✅
+
+### Goal
+Repair the 4 P1/P2 risks surfaced by Phase 2B verification:
+- (P1) Payment idempotency missing on the 3 payment-write routes
+- (P1) modify/void-payment routes not guarded against bad invoice statuses
+- (P1, H-4) Returns credit auto-applied to oldest open invoice
+- (P2) Overpayment silently created negative customer.balance
+
+### What was built (4 sub-phases)
+
+**2C.1 — Payment idempotency**
+- New helpers `payment_idempotency_lookup_or_reserve` / `_record` / `_release` in `utils/helpers.py` with atomic upsert + `payment_idempotency` collection (unique index on org+route+key).
+- Wired into `record_invoice_payment` (`POST /api/invoices/{id}/payment`), `pay_receivable` (`POST /api/receivables/{id}/payment`), and `receive_customer_payment` (`POST /api/customers/{id}/receive-payment`).
+- Same key on retry returns the cached response — no double customer.balance debit, no double wallet credit, no duplicate payment row.
+- No `idempotency_key` still works (back-compat).
+
+**2C.2 — modify/void payment guards**
+- New helper `assert_invoice_payment_modifiable` (rejects if invoice is voided / cancelled / cancelled_draft / deleted / for_preparation / error_partial_write).
+- Applied to: `void_invoice_payment`, `modify_customer_payment`, `update_invoice_payment`, `void_customer_payment`.
+- For void: status guard moved BEFORE the manager-PIN check; audit-log row `blocked_void_payment_on_bad_invoice` written when blocked.
+
+**2C.3 — Returns credit fallback removed**
+- Credit-customer returns now REQUIRE `invoice_number` (matched against an open invoice for the same customer) OR `allow_pending_credit=true`.
+- `allow_pending_credit` writes a `return_pending_credit` notification for admin handling and does NOT silently mutate `customer.balance`.
+- The old "fall back to oldest open invoice" branch is deleted.
+
+**2C.4 — Overpayment policy**
+- New helper `assert_payment_within_balance` (₱0.50 tolerance constant `OVERPAYMENT_TOLERANCE`).
+- Applied to `record_invoice_payment` and `pay_receivable`.
+- Rejects with HTTP 400 — `customer.balance` never goes negative; cashier wallet not credited.
+
+### Files changed (this phase only)
+- UPDATED `backend/utils/helpers.py` (3 new guard helpers, 3 new idempotency helpers, `OVERPAYMENT_TOLERANCE`)
+- UPDATED `backend/routes/invoices.py` (record_invoice_payment, void_invoice_payment)
+- UPDATED `backend/routes/accounting.py` (pay_receivable, receive_customer_payment, modify_customer_payment, update_invoice_payment, void_customer_payment)
+- UPDATED `backend/routes/returns.py` (credit-return path)
+- UPDATED `backend/main.py` (payment_idempotency unique index on startup)
+- NEW `backend/tests/test_phase2c_pos_hardening.py` (5 tests)
+- NEW `backend/tests/test_phase2c_live_smoke.py` (added by testing agent — 4 live-API tests)
+- UPDATED `backend/tests/phase2b/test_g2_payments.py` (overpayment + idempotency now verify FIXED behaviour)
+- UPDATED `backend/tests/phase2b/test_g5_returns_voids.py` (returns credit now verifies FIXED behaviour)
+
+### Verification
+- **Backend regression**: 86 passed, 2 skipped (intentional — Group 4 PO fixture cost). 0 failures.
+- **Live API smoke** (testing agent): admin login → 200; products/customers/balance-recon → 200; unauth → 401.
+- **POS surfaces unaffected**: Quick POS, Advanced POS, POS Terminal, offline sync routes (`/unified-sale`, `/sales/sync`) zero changes.
+- Testing agent action items: NONE. Retest needed: NO.
+
+### Remaining risks
+- Phase 2D — Branch/tenant permission hardening (audit H-5)
+- Phase 2B → 2E — Date-basis standardization across reports (audit H-13)
+- Phase 3 — Historical Credit Encoding / notebook AR
+- Phase 4 — Cleanup, dedup (sales/sales-new), UI alignment
+- Phase 5 — Full regression + deployment checklist
+- Pre-existing: 11 hardcoded-date unit-test failures; manual duplicate-RMA cleanup before unique index can enforce
+
+---
+
+
 ## Phase 2B — Core POS Business Flow Verification Matrix (Audit 2026-02, May 2026) ✅
 
 ### Goal
