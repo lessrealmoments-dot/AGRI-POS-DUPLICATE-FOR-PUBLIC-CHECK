@@ -1,11 +1,14 @@
 """Phase 3 — Historical Credit Encoding / Notebook AR tests.
 
 Mirrors the 15 user-required cases. Throw-away fixtures only.
+Phase 4A: every commit-path test now seeds an admin with TOTP enabled
+and provides a fresh `approval_code` from that admin's TOTP secret.
 """
 import os
 import sys
 from datetime import datetime, timezone, timedelta
 
+import pyotp
 import pytest
 from fastapi import HTTPException
 
@@ -16,6 +19,7 @@ if BACKEND not in sys.path:
 from config import _raw_db, set_org_context, db  # noqa: E402
 from tests.phase2b._fixtures import (  # noqa: E402
     make_tenant, _uid, fake_user, seed_customer, seed_product,
+    seed_totp_admin,
 )
 from routes.historical_credit import (  # noqa: E402
     create_historical_credit, preview_historical_credit, list_historical_credits,
@@ -31,8 +35,8 @@ def _days_ago(n: int) -> str:
 
 
 def _good_payload(*, branch_id, customer_id, product_id, transaction_date,
-                   grand_total=1500, allow_inv=False):
-    return {
+                   grand_total=1500, allow_inv=False, approval_code=None):
+    p = {
         "branch_id": branch_id,
         "customer_id": customer_id,
         "transaction_date": transaction_date,
@@ -49,6 +53,13 @@ def _good_payload(*, branch_id, customer_id, product_id, transaction_date,
         "notebook_reference": "Ledger 2025 — Page 12, Row 4",
         "allow_inventory_deduction": allow_inv,
     }
+    if approval_code is not None:
+        p["approval_code"] = approval_code
+    return p
+
+
+def _fresh_totp(secret: str) -> str:
+    return pyotp.TOTP(secret).now()
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -157,6 +168,7 @@ async def test_historical_credit_after_count_deducts_inventory():
     org_id, branch_id, admin_id = await make_tenant()
     cust_id = await seed_customer(org_id, branch_id, balance=0)
     prod_id = await seed_product(org_id, branch_id, stock=50)
+    approver_id, totp_secret = await seed_totp_admin(org_id, branch_id)
     # Approved count sheet 5 days ago
     await db.count_sheets.insert_one({
         "id": _uid("cs"), "branch_id": branch_id, "status": "completed",
@@ -168,11 +180,15 @@ async def test_historical_credit_after_count_deducts_inventory():
     try:
         # Transaction 2 days ago (AFTER the count) — inventory should deduct
         payload = _good_payload(branch_id=branch_id, customer_id=cust_id,
-                                product_id=prod_id, transaction_date=_days_ago(2))
+                                product_id=prod_id, transaction_date=_days_ago(2),
+                                approval_code=_fresh_totp(totp_secret))
         res = await create_historical_credit(payload, user=admin)
         assert res["ok"] is True
         assert res["inventory_action"] == "deducted"
         assert len(res["inventory_movements"]) == 1
+        assert res["approval"]["method"] == "totp"
+        assert res["approval"]["approver_id"] == approver_id
+        assert res["approval"]["approver_role"] == "admin"
         # Verify inventory actually went down
         inv = await db.inventory.find_one({"product_id": prod_id, "branch_id": branch_id}, {"_id": 0})
         assert inv["quantity"] == 49
@@ -187,6 +203,7 @@ async def test_historical_credit_after_count_deducts_inventory():
         await _raw_db.count_sheets.delete_many({"branch_id": branch_id})
         await _raw_db.customers.delete_one({"id": cust_id})
         await _raw_db.products.delete_one({"id": prod_id})
+        await _raw_db.users.delete_many({"id": {"$in": [admin_id, approver_id]}})
         await _raw_db.inventory.delete_many({"branch_id": branch_id})
         await _raw_db.organizations.delete_one({"id": org_id})
         await _raw_db.branches.delete_one({"id": branch_id})
@@ -200,6 +217,7 @@ async def test_historical_credit_before_count_skips_inventory():
     org_id, branch_id, admin_id = await make_tenant()
     cust_id = await seed_customer(org_id, branch_id, balance=0)
     prod_id = await seed_product(org_id, branch_id, stock=50)
+    approver_id, totp_secret = await seed_totp_admin(org_id, branch_id)
     # Approved count sheet 2 days ago
     await db.count_sheets.insert_one({
         "id": _uid("cs"), "branch_id": branch_id, "status": "completed",
@@ -211,7 +229,8 @@ async def test_historical_credit_before_count_skips_inventory():
     try:
         # Transaction 5 days ago (BEFORE the count) — inventory must NOT deduct
         payload = _good_payload(branch_id=branch_id, customer_id=cust_id,
-                                product_id=prod_id, transaction_date=_days_ago(5))
+                                product_id=prod_id, transaction_date=_days_ago(5),
+                                approval_code=_fresh_totp(totp_secret))
         res = await create_historical_credit(payload, user=admin)
         assert res["inventory_action"] == "skipped_count_sheet_lock"
         assert res["inventory_movements"] == []
@@ -225,7 +244,8 @@ async def test_historical_credit_before_count_skips_inventory():
         # With admin override — inventory DOES deduct (test 12 path B)
         payload2 = _good_payload(branch_id=branch_id, customer_id=cust_id,
                                   product_id=prod_id, transaction_date=_days_ago(5),
-                                  grand_total=500, allow_inv=True)
+                                  grand_total=500, allow_inv=True,
+                                  approval_code=_fresh_totp(totp_secret))
         res2 = await create_historical_credit(payload2, user=admin)
         assert res2["inventory_action"] == "deducted_with_admin_acknowledgement"
         inv2 = await db.inventory.find_one({"product_id": prod_id, "branch_id": branch_id}, {"_id": 0})
@@ -238,6 +258,7 @@ async def test_historical_credit_before_count_skips_inventory():
         await _raw_db.count_sheets.delete_many({"branch_id": branch_id})
         await _raw_db.customers.delete_one({"id": cust_id})
         await _raw_db.products.delete_one({"id": prod_id})
+        await _raw_db.users.delete_many({"id": {"$in": [admin_id, approver_id]}})
         await _raw_db.inventory.delete_many({"branch_id": branch_id})
         await _raw_db.organizations.delete_one({"id": org_id})
         await _raw_db.branches.delete_one({"id": branch_id})
@@ -251,26 +272,33 @@ async def test_transaction_date_and_encoded_at_separate():
     org_id, branch_id, admin_id = await make_tenant()
     cust_id = await seed_customer(org_id, branch_id)
     prod_id = await seed_product(org_id, branch_id)
+    approver_id, totp_secret = await seed_totp_admin(org_id, branch_id)
     admin = fake_user(org_id, admin_id, branch_id=branch_id, role="admin")
     set_org_context(org_id)
     try:
         old = _days_ago(7)
         payload = _good_payload(branch_id=branch_id, customer_id=cust_id,
-                                product_id=prod_id, transaction_date=old)
+                                product_id=prod_id, transaction_date=old,
+                                approval_code=_fresh_totp(totp_secret))
         res = await create_historical_credit(payload, user=admin)
         inv = res["invoice"]
         assert inv["order_date"] == old
         assert inv["late_encoded_at"][:10] == _today()
         assert inv["late_encoded"] is True
         assert inv["source"] == "historical_credit_encoding"
-        assert inv["approved_by"] == admin_id
+        # Phase 4A: approver may differ from encoder; both surfaced
+        assert inv["approved_by"] == approver_id
+        assert inv["approval_method"] == "totp"
+        assert inv["approver_role"] == "admin"
         assert inv["approved_at"][:10] == _today()
+        assert inv["late_encoded_by"] == admin_id
     finally:
         await _raw_db.invoices.delete_many({"customer_id": cust_id})
         await _raw_db.late_encode_log.delete_many({"branch_id": branch_id})
         await _raw_db.security_events.delete_many({"branch_id": branch_id})
         await _raw_db.customers.delete_one({"id": cust_id})
         await _raw_db.products.delete_one({"id": prod_id})
+        await _raw_db.users.delete_many({"id": {"$in": [admin_id, approver_id]}})
         await _raw_db.inventory.delete_many({"branch_id": branch_id})
         await _raw_db.organizations.delete_one({"id": org_id})
         await _raw_db.branches.delete_one({"id": branch_id})
@@ -287,12 +315,14 @@ async def test_appears_in_encoded_today_and_ledger():
     org_id, branch_id, admin_id = await make_tenant()
     cust_id = await seed_customer(org_id, branch_id, balance=0)
     prod_id = await seed_product(org_id, branch_id)
+    approver_id, totp_secret = await seed_totp_admin(org_id, branch_id)
     admin = fake_user(org_id, admin_id, branch_id=branch_id, role="admin")
     set_org_context(org_id)
     try:
         old = _days_ago(3)
         payload = _good_payload(branch_id=branch_id, customer_id=cust_id,
-                                product_id=prod_id, transaction_date=old)
+                                product_id=prod_id, transaction_date=old,
+                                approval_code=_fresh_totp(totp_secret))
         res = await create_historical_credit(payload, user=admin)
         inv_no = res["invoice"]["invoice_number"]
 
@@ -316,6 +346,7 @@ async def test_appears_in_encoded_today_and_ledger():
         await _raw_db.security_events.delete_many({"branch_id": branch_id})
         await _raw_db.customers.delete_one({"id": cust_id})
         await _raw_db.products.delete_one({"id": prod_id})
+        await _raw_db.users.delete_many({"id": {"$in": [admin_id, approver_id]}})
         await _raw_db.inventory.delete_many({"branch_id": branch_id})
         await _raw_db.organizations.delete_one({"id": org_id})
         await _raw_db.branches.delete_one({"id": branch_id})
@@ -333,12 +364,14 @@ async def test_old_zreport_regular_section_unaffected():
     org_id, branch_id, admin_id = await make_tenant()
     cust_id = await seed_customer(org_id, branch_id, balance=0)
     prod_id = await seed_product(org_id, branch_id)
+    approver_id, totp_secret = await seed_totp_admin(org_id, branch_id)
     admin = fake_user(org_id, admin_id, branch_id=branch_id, role="admin")
     set_org_context(org_id)
     try:
         old = _days_ago(4)
         payload = _good_payload(branch_id=branch_id, customer_id=cust_id,
-                                product_id=prod_id, transaction_date=old)
+                                product_id=prod_id, transaction_date=old,
+                                approval_code=_fresh_totp(totp_secret))
         await create_historical_credit(payload, user=admin)
 
         # Mirror the daily_operations Z-report query for the OLD date
@@ -356,6 +389,7 @@ async def test_old_zreport_regular_section_unaffected():
         await _raw_db.security_events.delete_many({"branch_id": branch_id})
         await _raw_db.customers.delete_one({"id": cust_id})
         await _raw_db.products.delete_one({"id": prod_id})
+        await _raw_db.users.delete_many({"id": {"$in": [admin_id, approver_id]}})
         await _raw_db.inventory.delete_many({"branch_id": branch_id})
         await _raw_db.organizations.delete_one({"id": org_id})
         await _raw_db.branches.delete_one({"id": branch_id})
@@ -363,20 +397,20 @@ async def test_old_zreport_regular_section_unaffected():
 
 # ─────────────────────────────────────────────────────────────────────
 # 11 — Customer.balance increases correctly
-#       (covered above in test_historical_credit_after_count and
-#        test_historical_credit_before_count; an explicit assert here too)
 # ─────────────────────────────────────────────────────────────────────
 @pytest.mark.asyncio
 async def test_customer_balance_goes_up_by_grand_total():
     org_id, branch_id, admin_id = await make_tenant()
     cust_id = await seed_customer(org_id, branch_id, balance=200)
     prod_id = await seed_product(org_id, branch_id)
+    approver_id, totp_secret = await seed_totp_admin(org_id, branch_id)
     admin = fake_user(org_id, admin_id, branch_id=branch_id, role="admin")
     set_org_context(org_id)
     try:
         payload = _good_payload(branch_id=branch_id, customer_id=cust_id,
                                 product_id=prod_id, transaction_date=_days_ago(1),
-                                grand_total=750)
+                                grand_total=750,
+                                approval_code=_fresh_totp(totp_secret))
         await create_historical_credit(payload, user=admin)
         c = await db.customers.find_one({"id": cust_id}, {"_id": 0})
         assert round(c["balance"], 2) == 950.0
@@ -386,6 +420,7 @@ async def test_customer_balance_goes_up_by_grand_total():
         await _raw_db.security_events.delete_many({"branch_id": branch_id})
         await _raw_db.customers.delete_one({"id": cust_id})
         await _raw_db.products.delete_one({"id": prod_id})
+        await _raw_db.users.delete_many({"id": {"$in": [admin_id, approver_id]}})
         await _raw_db.inventory.delete_many({"branch_id": branch_id})
         await _raw_db.organizations.delete_one({"id": org_id})
         await _raw_db.branches.delete_one({"id": branch_id})
@@ -466,11 +501,13 @@ async def test_list_returns_only_historical_credits():
     org_id, branch_id, admin_id = await make_tenant()
     cust_id = await seed_customer(org_id, branch_id)
     prod_id = await seed_product(org_id, branch_id)
+    approver_id, totp_secret = await seed_totp_admin(org_id, branch_id)
     admin = fake_user(org_id, admin_id, branch_id=branch_id, role="admin")
     set_org_context(org_id)
     try:
         payload = _good_payload(branch_id=branch_id, customer_id=cust_id,
-                                product_id=prod_id, transaction_date=_days_ago(2))
+                                product_id=prod_id, transaction_date=_days_ago(2),
+                                approval_code=_fresh_totp(totp_secret))
         await create_historical_credit(payload, user=admin)
 
         listing = await list_historical_credits(
@@ -484,6 +521,7 @@ async def test_list_returns_only_historical_credits():
         await _raw_db.security_events.delete_many({"branch_id": branch_id})
         await _raw_db.customers.delete_one({"id": cust_id})
         await _raw_db.products.delete_one({"id": prod_id})
+        await _raw_db.users.delete_many({"id": {"$in": [admin_id, approver_id]}})
         await _raw_db.inventory.delete_many({"branch_id": branch_id})
         await _raw_db.organizations.delete_one({"id": org_id})
         await _raw_db.branches.delete_one({"id": branch_id})

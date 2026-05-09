@@ -21,11 +21,13 @@ from utils import (
     assert_branch_access, assert_admin_or_owner,
     generate_next_number,
 )
+from routes.verify import verify_pin_for_action
 
 router = APIRouter(prefix="/historical-credit", tags=["Historical Credit"])
 
 REASON_MIN_LENGTH = 20
 SOURCE_TAG = "historical_credit_encoding"
+APPROVAL_EVENT_KEY = "historical_credit_encoding"
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -245,6 +247,12 @@ async def create_historical_credit(data: dict, user=Depends(get_current_user)):
       3. Apply (or skip) inventory deduction per the count-sheet stopper.
       4. Write `late_encode_log` row + `security_events` row.
       5. Return the created invoice + audit metadata.
+
+    Phase 4A: requires a valid `approval_code` from an allowed approver
+    under the `historical_credit_encoding` event policy in `verify.py`.
+    Default policy = TOTP only, owner/admin/super-admin only. Manager
+    TOTP is rejected. Static admin_pin is rejected. The check happens
+    AFTER all payload validation but BEFORE any DB mutation.
     """
     assert_admin_or_owner(user)
     today = await today_local(user.get("organization_id") or "")
@@ -258,6 +266,32 @@ async def create_historical_credit(data: dict, user=Depends(get_current_user)):
         raise HTTPException(status_code=400,
                             detail="Customer is assigned to a different branch.")
 
+    # Phase 4A — Approval gate (must succeed before any DB mutation)
+    approval_code = str(data.get("approval_code") or "").strip()
+    if not approval_code:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "approval_code_required",
+                "message": "Approval code required. Ask the company owner / "
+                           "admin to enter their Authenticator App (TOTP) code "
+                           "from Settings → Security.",
+            },
+        )
+    verifier = await verify_pin_for_action(
+        approval_code, APPROVAL_EVENT_KEY, branch_id=payload["branch_id"],
+    )
+    if not verifier:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "approval_invalid",
+                "message": "Invalid or unauthorized approval code. This event "
+                           "requires a valid Authenticator App (TOTP) code "
+                           "from an owner / admin / super-admin.",
+            },
+        )
+
     pids = [i.get("product_id") for i in payload["items"] if i.get("product_id")]
     stopper = await _count_sheet_stopper(
         payload["branch_id"], payload["transaction_date"], pids,
@@ -269,6 +303,15 @@ async def create_historical_credit(data: dict, user=Depends(get_current_user)):
     encoded_at = now_iso()
     encoded_by = user.get("id")
     encoded_by_name = user.get("full_name") or user.get("username") or ""
+
+    # Phase 4A — approver identity captured from verify.py result. Approver
+    # may be the same user as `encoded_by` (admin entered own TOTP) or a
+    # different verifier (admin walked over and entered theirs). Either is
+    # explicitly recorded for forensic replay.
+    approval_method = verifier.get("method")  # 'totp' | 'admin_pin' | 'manager_pin' | ...
+    approver_id = verifier.get("verifier_id")
+    approver_name = verifier.get("verifier_name") or ""
+    approver_role = verifier.get("approver_role") or ""
 
     invoice: dict[str, Any] = {
         "id": invoice_id,
@@ -297,9 +340,11 @@ async def create_historical_credit(data: dict, user=Depends(get_current_user)):
         "late_encode_reason": payload["reason"],
         "late_encoded_by": encoded_by,
         "late_encoded_by_name": encoded_by_name,
-        "approved_by": encoded_by,
-        "approved_by_name": encoded_by_name,
+        "approved_by": approver_id,
+        "approved_by_name": approver_name,
         "approved_at": encoded_at,
+        "approval_method": approval_method,
+        "approver_role": approver_role,
         "historical_credit_proof_url": payload["proof_url"],
         "historical_credit_notebook_ref": payload["notebook_reference"],
         "historical_credit_inventory_action": action,
@@ -368,8 +413,10 @@ async def create_historical_credit(data: dict, user=Depends(get_current_user)):
         "reason": payload["reason"],
         "encoded_by": encoded_by,
         "encoded_by_name": encoded_by_name,
-        "verifier_id": encoded_by,
-        "verifier_name": encoded_by_name,
+        "verifier_id": approver_id,
+        "verifier_name": approver_name,
+        "approval_method": approval_method,
+        "approver_role": approver_role,
         "source": SOURCE_TAG,
         "proof_url": payload["proof_url"],
         "notebook_reference": payload["notebook_reference"],
@@ -387,6 +434,10 @@ async def create_historical_credit(data: dict, user=Depends(get_current_user)):
         "encoded_at": encoded_at,
         "encoded_by": encoded_by,
         "encoded_by_name": encoded_by_name,
+        "approved_by": approver_id,
+        "approved_by_name": approver_name,
+        "approval_method": approval_method,
+        "approver_role": approver_role,
         "amount": payload["grand_total"],
         "reason": payload["reason"],
         "proof_url": payload["proof_url"],
@@ -401,6 +452,12 @@ async def create_historical_credit(data: dict, user=Depends(get_current_user)):
         "inventory_action": action,
         "inventory_movements": inventory_movements,
         "count_sheet_stopper": stopper,
+        "approval": {
+            "method": approval_method,
+            "approver_id": approver_id,
+            "approver_name": approver_name,
+            "approver_role": approver_role,
+        },
     }
 
 

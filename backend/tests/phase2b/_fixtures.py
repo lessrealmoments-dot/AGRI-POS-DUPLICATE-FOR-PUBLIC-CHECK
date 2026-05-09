@@ -55,6 +55,60 @@ async def make_tenant():
     return org_id, branch_id, admin_id
 
 
+async def seed_totp_admin(org_id: str, branch_id: str, *, role: str = "admin"):
+    """Create an admin/owner with TOTP enabled and return (user_id, secret).
+
+    Use the returned `secret` with `pyotp.TOTP(secret).now()` to mint a
+    fresh 6-digit code for `approval_code` in Phase 4A tests.
+    """
+    import pyotp
+    user_id = _uid(f"p2b-{role}-totp")
+    secret = pyotp.random_base32()
+    await _raw_db.users.insert_one({
+        "id": user_id, "username": f"{role}-totp-{user_id[-4:]}",
+        "full_name": f"Phase 4A {role.title()} TOTP",
+        "organization_id": org_id, "role": role,
+        "active": True, "branch_ids": [branch_id], "branch_id": branch_id,
+        "totp_secret": secret, "totp_enabled": True, "totp_verified": True,
+    })
+    return user_id, secret
+
+
+async def seed_manager_totp(org_id: str, branch_id: str):
+    """Create a non-privileged manager with TOTP enabled. Used to verify
+    that Phase 4A's allow-list rejects manager TOTP for historical credit
+    encoding even though the TOTP method itself succeeds."""
+    import pyotp
+    user_id = _uid("p2b-mgr-totp")
+    secret = pyotp.random_base32()
+    await _raw_db.users.insert_one({
+        "id": user_id, "username": f"mgr-totp-{user_id[-4:]}",
+        "full_name": "Phase 4A Manager TOTP",
+        "organization_id": org_id, "role": "manager",
+        "active": True, "branch_ids": [branch_id], "branch_id": branch_id,
+        "manager_pin": "8675309",
+        "totp_secret": secret, "totp_enabled": True, "totp_verified": True,
+    })
+    return user_id, secret
+
+
+async def seed_admin_pin(pin: str = "918273"):
+    """Set the system-wide admin_pin (hashed). Used to verify that
+    Phase 4A's TOTP-only default rejects static admin_pin.
+
+    NOTE: caller must have already called `set_org_context(org_id)` so the
+    admin_pin row is inserted under the correct tenant scope (matches
+    production `set_admin_pin` route in verify.py)."""
+    from utils import hash_password
+    from config import db as _db
+    await _db.system_settings.update_one(
+        {"key": "admin_pin"},
+        {"$set": {"key": "admin_pin", "pin_hash": hash_password(pin)}},
+        upsert=True,
+    )
+    return pin
+
+
 async def seed_wallets(org_id: str, branch_id: str):
     """Provision the three fund wallets the sales/payment routes expect."""
     cashier_id = _uid("w-cash")

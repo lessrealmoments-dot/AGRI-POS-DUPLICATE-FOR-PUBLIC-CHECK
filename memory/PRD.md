@@ -1,6 +1,143 @@
 # AgriBooks PRD
 
 
+## Phase 4A — Historical Credit Encoding Approval Gate (Backend, Feb 2026) ✅
+
+### Goal
+Wire the existing per-user **Authenticator App (TOTP)** from Settings →
+Security as the canonical approval factor for Phase 3 historical credit
+commits, via a new policy-based event in `verify.py`. Default policy is
+**TOTP-only** with allow-list **owner / admin / super-admin** —
+explicitly rejecting manager TOTP, manager_pin, and the static
+admin_pin. The design is future-ready: trusted-manager grants can be
+opened later via `allowed_approver_user_ids` without code changes.
+
+### Files changed
+- **UPDATED** `backend/routes/verify.py`
+  - Added `_ACTION_CONFIG` lookup (full per-event row).
+  - New `_verifier_role(verifier_id)` helper — canonical role mapping;
+    `system_admin` → `"admin"`.
+  - Extended `verify_pin_for_action` with optional
+    `allowed_approver_roles` and `allowed_approver_user_ids` filters;
+    fully backwards-compatible (events without those keys behave as
+    before).
+  - Registered `historical_credit_encoding` event:
+    `defaults=["totp"]`,
+    `allowed_approver_roles=["owner","admin","super_admin"]`,
+    `allowed_approver_user_ids=[]`.
+- **UPDATED** `backend/routes/historical_credit.py`
+  - Imports `verify_pin_for_action`.
+  - Commit endpoint now requires `approval_code` in the body. Calls the
+    gate AFTER payload validation but BEFORE any DB mutation. Missing
+    code → 400 `approval_code_required`. Invalid → 403 `approval_invalid`.
+  - Stores `approval_method`, `approver_role`, `approved_by`,
+    `approved_by_name`, `approved_at` on the invoice and on both audit
+    rows (`late_encode_log`, `security_events`). Returns an `approval`
+    block in the response for the frontend to surface.
+- **UPDATED** `backend/tests/phase2b/_fixtures.py`
+  - New helpers: `seed_totp_admin(role="admin"|"owner")`,
+    `seed_manager_totp()`, `seed_admin_pin()`.
+- **UPDATED** `backend/tests/test_phase3_historical_credit.py`
+  - Every commit-path test now seeds a TOTP admin and provides a fresh
+    `approval_code` from `pyotp.TOTP(secret).now()`. **All 13 Phase 3
+    tests still pass.**
+- **NEW** `backend/tests/test_phase4a_approval_gate.py` — 12 tests:
+  1. Event registered with correct defaults + allow-list.
+  2. Missing approval_code → 400.
+  3. Wrong code → 403.
+  4. Valid OWNER TOTP → accepted.
+  5. Valid ADMIN TOTP → accepted.
+  6. MANAGER TOTP → 403 (role allow-list).
+  7. Static manager_pin → 403 (not in defaults).
+  8. Static admin_pin → 403 (not in defaults; sanity asserts the same
+     PIN still works for `credit_sale_approval` — proves the rejection
+     is policy-based).
+  9. Per-user grant escape hatch — adding manager-id to
+     `allowed_approver_user_ids` allows ONLY that manager.
+ 10. `credit_sale_approval` (and by extension all 50+ existing events)
+     remain backwards-compatible.
+ 11. `_verifier_role` canonical mapping for owner / admin / manager /
+     super_admin / unknown.
+ 12. `users.totp_secret` never returned by `/api/auth/me`.
+
+### Approval flow (commit-time)
+1. User builds a historical credit payload in the frontend (Phase 4A
+   frontend integration is the next phase).
+2. Final modal collects a 6-digit `approval_code` (TOTP from owner/admin
+   Authenticator App).
+3. Payload + code POSTed to `/api/historical-credit`.
+4. Backend: `assert_admin_or_owner` → `_validate_payload` →
+   `assert_branch_access` → customer lookup → **approval gate** →
+   count-sheet stopper → invoice insert + AR/inventory + audit rows.
+5. The audit row records WHICH method succeeded (`approval_method`) and
+   WHO the verifier was (`approver_id`, `approver_name`, `approver_role`).
+   The encoder (`late_encoded_by`) and the approver may be different
+   users (cashier prepares + admin enters TOTP from their own phone).
+
+### Forward-compatibility (NO hardcoding of "manager forever blocked")
+Three paths are open for granting manager approval later, none of which
+require code changes — all flow through `system_settings.pin_policies`
+which is already loaded at every gate call:
+
+1. **Per-user grant**: add the trusted manager's user-id to
+   `allowed_approver_user_ids` for `historical_credit_encoding`. Only
+   that one manager can approve via their Authenticator App.
+2. **Role widening**: add `"manager"` to `allowed_approver_roles`. ALL
+   managers in the org can approve via their Authenticator App.
+3. **Method widening**: add `"manager_pin"` or `"admin_pin"` to
+   `defaults`. (Only do this if you accept the lower assurance.)
+
+### Security verification (per the prompt)
+- TOTP secrets / PIN hashes / static PINs **never** exposed to the
+  frontend — `routes/auth.py:60` strips `totp_secret`, `staff_pin`,
+  `manager_pin`, `auditor_pin` from `/me` and `/me/refresh` projections.
+- Frontend only collects the 6-digit code; verification is server-side.
+- Policy is data, not code: tenant-level overrides via
+  `system_settings.pin_policies` honored automatically (existing UI in
+  Settings → Verify Policy can already edit any event's accepted methods).
+
+### Test results
+- **Phase 4A targeted suite**: 12 / 12 PASS.
+- **Phase 3 suite (post-update)**: 13 / 13 PASS.
+- **Combined regression** (1A+1B+1C+2A+2B+2C+2D+2E+3+4A): all **138 + 2
+  skipped** in isolation.
+- **Live API smoke**: `POST /historical-credit` with empty body → 400,
+  with bogus payload + bogus code → 404 customer-not-found (validation
+  layer correct), `/reports/sales` and `/sync/pos-data` → 200.
+- Pre-existing intermittent flakiness on full-suite runs **unchanged**
+  (still ~1-of-3 runs has 1 phase2b/2D/2E test fail; same pattern as
+  before Phase 4A, root cause documented in
+  `PHASE_3_HISTORICAL_CREDIT.md` §14).
+
+### POS surfaces (Quick / Advanced / Terminal / offline → sync)
+**Unaffected.** Zero edits to `/api/unified-sale`, `/api/sales/sync`,
+`/api/invoices/{id}/payment`. Every other event in `verify.py`
+(credit_sale_approval, void_invoice, daily_close, etc.) preserves its
+defaults and accepts the same PINs it did before.
+
+### Tenant / super-admin access rules
+**Unchanged.** Super-admin still cannot read tenant data (per the
+iter180 cross-tenant privacy fix). The `super_admin` allow-list entry
+is forward-compatible only — does nothing today.
+
+### Remaining risks
+- Frontend integration into `UnifiedSalesPage` (the BACKDATED CREDIT /
+  NOTEBOOK AR MODE banner, preview rendering, PIN modal) is the **next
+  phase** and is NOT yet implemented.
+- Phase 4A intentionally did not add a UI toggle for editing the
+  per-event `allowed_approver_user_ids` — the existing Verify Policy
+  Settings UI handles `accepted_methods` only. Adding the role/user-id
+  fields to that UI is a small follow-up when needed.
+- Pre-existing test-infrastructure flakiness — Phase 4 cleanup item.
+
+### Recommendation
+**Backend gate is done. Ready to start the frontend integration into
+`UnifiedSalesPage` whenever you green-light it.**
+
+---
+
+
+
 ## Phase 3 — Historical Credit Encoding / Notebook AR (Feb 2026) ✅
 
 ### Goal

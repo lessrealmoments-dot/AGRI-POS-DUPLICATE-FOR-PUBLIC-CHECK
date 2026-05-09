@@ -246,10 +246,65 @@ PIN_POLICY_ACTIONS = [
     # Date / Closed-day overrides — used by every late-encode and forward-date escape hatch
     {"key": "late_encode",            "label": "Late-Encode (backdate to closed day)", "module": "Daily Operations", "defaults": ["admin_pin", "manager_pin", "totp"]},
     {"key": "forward_date_override",  "label": "Forward-Date Override",           "module": "Daily Operations",  "defaults": ["admin_pin", "manager_pin", "totp"]},
+    # Phase 4A — Historical Credit Encoding / Notebook AR
+    # Default: TOTP only, owner/admin/super_admin only. Manager TOTP and
+    # static admin_pin are explicitly excluded. Trusted-manager approvals
+    # can be granted later by adding their user-id to
+    # `allowed_approver_user_ids` (or by widening `allowed_approver_roles`)
+    # via the system_settings.pin_policies override — no code change needed.
+    {"key": "historical_credit_encoding",
+     "label": "Historical Credit Encoding (Notebook AR)",
+     "module": "Sales",
+     "defaults": ["totp"],
+     "allowed_approver_roles": ["owner", "admin", "super_admin"],
+     "allowed_approver_user_ids": []},
 ]
 
 # Build quick lookup: action_key → default methods
 _ACTION_DEFAULTS = {a["key"]: a["defaults"] for a in PIN_POLICY_ACTIONS}
+# Phase 4A: full per-event config lookup (covers the new optional
+# `allowed_approver_roles` and `allowed_approver_user_ids` fields). Events
+# without those keys behave exactly as before — backwards-compatible for
+# all 50+ existing events.
+_ACTION_CONFIG = {a["key"]: a for a in PIN_POLICY_ACTIONS}
+
+
+# Canonical role buckets used by the per-event approver allow-list.
+# `system_admin` (the static admin PIN verifier) maps to `"admin"` so
+# admin_pin always passes role checks that include "admin".
+_PRIVILEGED_ROLES_CANON = {"owner", "admin", "super_admin"}
+
+
+async def _verifier_role(verifier_id: str) -> str:
+    """Resolve a verifier to a canonical role string.
+
+    Returns one of: ``owner`` / ``admin`` / ``manager`` / ``super_admin`` /
+    ``staff`` / ``auditor`` / ``"unknown"``.
+
+    Special-case: the static system admin PIN resolves to verifier_id
+    ``"system_admin"``; we treat that as ``"admin"``. Auditor PIN matches
+    on `users.is_auditor=True`.
+    """
+    if not verifier_id:
+        return "unknown"
+    if verifier_id == "system_admin":
+        return "admin"
+    user = await db.users.find_one(
+        {"id": verifier_id},
+        {"_id": 0, "role": 1, "is_super_admin": 1, "is_auditor": 1, "pin_tier": 1},
+    )
+    if not user:
+        return "unknown"
+    if user.get("is_super_admin"):
+        return "super_admin"
+    role = (user.get("role") or "").strip().lower()
+    if role in _PRIVILEGED_ROLES_CANON:
+        return role
+    if role == "manager" or user.get("pin_tier") == "manager":
+        return "manager"
+    if user.get("is_auditor"):
+        return "auditor"
+    return role or "unknown"
 
 
 async def _get_pin_policy() -> dict:
@@ -266,14 +321,44 @@ async def verify_pin_for_action(pin: str, action_key: str, branch_id: str = None
 
     branch_id: When provided, manager PINs are restricted to managers
     assigned to that branch (admin/owner/TOTP/auditor still work on all branches).
+
+    Phase 4A: Events may now declare an event-specific approver allow-list
+    via ``allowed_approver_roles`` (e.g. ``["owner", "admin", "super_admin"]``)
+    and/or ``allowed_approver_user_ids`` (e.g. ``["u-trusted-mgr-1"]``).
+    A verifier whose canonical role isn't in the allow-list AND whose
+    user-id isn't in the per-user grant list is rejected EVEN IF their
+    PIN/TOTP code was correct. Events without these fields behave exactly
+    as before — fully backwards-compatible.
     """
     if not pin:
         return None
     custom = await _get_pin_policy()
-    allowed = custom.get(action_key, _ACTION_DEFAULTS.get(action_key))
+    cfg = _ACTION_CONFIG.get(action_key, {})
+    allowed = custom.get(action_key, cfg.get("defaults") or _ACTION_DEFAULTS.get(action_key))
     if not allowed:
         allowed = ["admin_pin", "manager_pin", "totp"]
-    return await _resolve_pin(pin, allowed_methods=allowed, branch_id=branch_id)
+    verifier = await _resolve_pin(pin, allowed_methods=allowed, branch_id=branch_id)
+    if not verifier:
+        return None
+
+    # Phase 4A — per-event approver allow-list (additive, optional)
+    allowed_roles = cfg.get("allowed_approver_roles")
+    allowed_uids = set(cfg.get("allowed_approver_user_ids") or [])
+    if allowed_roles is not None:
+        # Empty list explicitly means "no roles allowed" — only per-user
+        # grants pass. None means "no filter" (legacy default).
+        role = await _verifier_role(verifier["verifier_id"])
+        if role not in set(allowed_roles) and verifier["verifier_id"] not in allowed_uids:
+            logger.warning(
+                "PIN matched but blocked by approver allow-list: "
+                f"action={action_key}, verifier={verifier['verifier_id']}, "
+                f"role={role}, allowed_roles={allowed_roles}, "
+                f"allowed_uids={list(allowed_uids)[:3]}{'...' if len(allowed_uids) > 3 else ''}"
+            )
+            return None
+        # Surface what the policy gate decided so callers can audit it.
+        verifier = {**verifier, "approver_role": role}
+    return verifier
 
 
 
