@@ -1,6 +1,68 @@
 # AgriBooks PRD
 
 
+## Phase 2D — Branch / Tenant Permission Hardening (Audit H-5, Feb 2026) ✅
+
+### Goal
+Close audit finding **H-5: Branch/Tenant access bypass risk** by tightening
+`assert_branch_access`, scoping `/sync/pos-data` and `/sync/inventory-pulse` to
+the caller's branch whitelist, validating JWT `org_id` against
+`user.organization_id`, and adding a static guard against new `_raw_db`
+callsites bypassing tenant scope.
+
+### Owner-approved policy (confirmed at start of fork)
+Non-privileged users (cashier / manager / staff) with **no `branch_ids` and no
+legacy `branch_id`** → **HTTP 403** on branch-scoped endpoints. Admin / owner /
+super-admin retain org-wide access. No auto-assignment, no legacy fallback.
+
+### Files changed
+- **UPDATED** `backend/utils/auth.py` — tightened `assert_branch_access`
+  (legacy unscoped non-privileged users → 403); added `is_privileged()` and
+  `assert_admin_or_owner()` helpers; JWT `org_id` mismatch check already in
+  place (lines 92-102) re-verified.
+- **UPDATED** `backend/utils/__init__.py` — exports the two new helpers.
+- **UPDATED** `backend/routes/sync.py`
+  - `/sync/pos-data`: validates `branch_id` against caller's whitelist;
+    scopes the `customers` payload to `user.branch_ids` for non-privileged
+    users; restricts cross-branch inventory aggregation to the caller's
+    branches when no `branch_id` is supplied.
+  - `/sync/inventory-pulse`: validates `branch_id` against caller's whitelist.
+- **NEW** `backend/tests/test_phase2d_permissions.py` — 17 unit tests covering
+  branch whitelist enforcement, legacy non-privileged 403, admin/owner/super
+  -admin org-wide access, cross-tenant isolation, JWT org-mismatch 401,
+  `/sync/pos-data` scoping, `/sync/inventory-pulse` validation, and a static
+  regex guard against new `_raw_db.<tenant_col>.op(` callsites outside the
+  documented allow-list.
+- **NEW** `backend/tests/test_phase2d_live_smoke.py` — 12 live-API smoke
+  cases (created by the testing agent), including a real cross-branch
+  cashier scenario with throw-away cleanup.
+
+### Test status
+- Phase 2D unit suite: 17 PASS.
+- Full regression: 103 PASS / 2 SKIP / 0 FAIL (Phase 1A+1B+1C, 2A, 2B, 2C, 2D).
+- Live smoke: 12 PASS against the deployed preview URL.
+- Live API smoke: products / customers / invoices / sync/pos-data /
+  sync/inventory-pulse / balance-reconciliation all 200 for admin token.
+
+### Risks closed
+- H-5: Branch/Tenant access bypass risk (legacy unscoped non-privileged
+  users no longer fall through to org-wide access).
+- POS surfaces unaffected (Quick POS, Advanced POS, Terminal online,
+  Terminal offline → sync). All admin-driven paths still 200.
+
+### Follow-up backlog (NOT in 2D scope)
+- Consolidate `assert_branch_access` (utils/auth.py) and `get_branch_filter`
+  (utils/branch.py) so the role-privilege rules live in exactly one helper.
+- Surface a clearer error when super-admin (no organization_id) hits a
+  tenant-scoped endpoint — current 403 from `get_branch_filter` is
+  intentional but could read better.
+- Audit any pre-existing legacy users with empty `branch_ids` and have
+  admins assign them via Team → Edit User.
+
+---
+
+
+
 ## Phase 2C.5 — Frontend UX Compatibility Guards (Audit 2026-02, May 2026) ✅
 
 Three small frontend-only guards that align the UI with the Phase 2C backend safety rules. **Zero backend changes**, **zero POS-flow changes**.
