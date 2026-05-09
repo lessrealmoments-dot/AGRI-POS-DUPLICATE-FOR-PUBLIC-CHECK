@@ -1407,11 +1407,28 @@ export default function AccountingPage() {
             <p className="text-sm">Outstanding Balance: <span className="font-bold">{formatPHP(paymentTarget?.balance || 0)}</span></p>
             <div>
               <Label className="text-xs text-slate-500">Payment Amount (₱)</Label>
-              <CalcInput data-testid="payment-amount-input" className="h-10" value={paymentAmount} onChange={(v) => setPaymentAmount(parseFloat(v) || 0)} />
+              <CalcInput
+                data-testid="payment-amount-input"
+                className={`h-10 ${paymentType === 'receivable' && paymentAmount > (paymentTarget?.balance || 0) + 0.005 ? 'border-red-300' : ''}`}
+                value={paymentAmount}
+                onChange={(v) => setPaymentAmount(parseFloat(v) || 0)}
+              />
+              {paymentType === 'receivable' && paymentAmount > (paymentTarget?.balance || 0) + 0.005 && (
+                <p className="text-[10px] text-red-600 mt-1" data-testid="overpayment-warning">
+                  Payment cannot exceed the outstanding balance of {formatPHP(paymentTarget?.balance || 0)}.
+                </p>
+              )}
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setPaymentDialog(false)}>Cancel</Button>
-              <Button onClick={handlePayment} className="bg-[#1A4D2E] hover:bg-[#14532d] text-white" data-testid="confirm-payment-btn">Record Payment</Button>
+              <Button
+                onClick={handlePayment}
+                className="bg-[#1A4D2E] hover:bg-[#14532d] text-white"
+                disabled={paymentType === 'receivable' && paymentAmount > (paymentTarget?.balance || 0) + 0.005}
+                data-testid="confirm-payment-btn"
+              >
+                Record Payment
+              </Button>
             </div>
           </div>
         </DialogContent>

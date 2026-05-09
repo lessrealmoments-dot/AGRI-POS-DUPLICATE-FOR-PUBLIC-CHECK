@@ -1,6 +1,36 @@
 # AgriBooks PRD
 
 
+## Phase 2C.5 — Frontend UX Compatibility Guards (Audit 2026-02, May 2026) ✅
+
+Three small frontend-only guards that align the UI with the Phase 2C backend safety rules. **Zero backend changes**, **zero POS-flow changes**.
+
+### What was built
+1. **ReturnRefundWizard** — *Original Invoice #* now shown as required + red border + helper text when `customerType === 'credit'`. `canProceed()` blocks Step 1 until the field is filled. Defensive guard in `handleSubmit()` redirects to Step 1 if a cashier toggles customer type after reaching Step 5.
+2. **AccountingPage Pay Receivable** — payment-amount input shows red border + warning when value > balance + ₱0.005 tolerance. "Record Payment" button disabled. `handlePayment()` shows toast and aborts before hitting the backend.
+3. **CloseWizardPage Pay Invoice** — same pattern: red border, warning, disabled button, toast in `quickReceivePayment()`.
+
+### Files changed
+- UPDATED `frontend/src/pages/ReturnRefundWizard.js` (canProceed, label, helper text, submit guard)
+- UPDATED `frontend/src/pages/AccountingPage.js` (handlePayment guard, input red-border, warning, disabled button)
+- UPDATED `frontend/src/pages/CloseWizardPage.js` (quickReceivePayment guard, input red-border, warning, disabled button)
+
+### Backend code: untouched
+- Zero changes to backend routes, helpers, or tests.
+- All 86 existing pytest cases still pass (Phase 1 + 2A + 2B + 2C).
+
+### POS surfaces: untouched
+- Quick POS, Advanced POS, POS Terminal, offline sync — `POST /unified-sale` and `POST /sales/sync` zero changes.
+- `TerminalReturnRefundModal` already passed `invoice_number` correctly — no changes needed.
+
+### Verification
+- Lint: 3 files clean (✅ ESLint pass).
+- Backend regression: 86 PASS / 2 SKIP / 0 FAIL.
+- UI smoke: Returns page renders; admin tenant has no selected branch (expected).
+
+---
+
+
 ## Phase 2C — POS Write-Side Hardening (Audit 2026-02, May 2026) ✅
 
 ### Goal

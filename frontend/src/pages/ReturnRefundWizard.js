@@ -207,6 +207,12 @@ export default function ReturnRefundWizard() {
   // ── Submit ─────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
     if (!currentBranch) { toast.error('Select a branch'); return; }
+    // Phase 2C.5 — backend rejects credit-customer returns without invoice_number
+    if (customerType === 'credit' && !invoiceNumber.trim()) {
+      toast.error('Credit-customer returns require the original Invoice # so the credit applies to the right AR balance.');
+      setStep(1);
+      return;
+    }
     if (refundAmount > 0) {
       const avail = fundSource === 'safe' ? fundBalances.safe : fundBalances.cashier;
       if (refundAmount > avail) {
@@ -349,9 +355,25 @@ export default function ReturnRefundWizard() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label className="text-xs text-slate-500">Original Invoice # (if available)</Label>
-                  <Input className="mt-1 h-9" value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)}
-                    placeholder="e.g. SI-20260222-0001" />
+                  <Label className="text-xs text-slate-500">
+                    {customerType === 'credit' ? (
+                      <span>Original Invoice # <span className="text-red-500">*required for credit customers</span></span>
+                    ) : (
+                      <span>Original Invoice # <span className="text-slate-400">(if available)</span></span>
+                    )}
+                  </Label>
+                  <Input
+                    className={`mt-1 h-9 ${customerType === 'credit' && !invoiceNumber.trim() ? 'border-red-300' : ''}`}
+                    value={invoiceNumber}
+                    onChange={e => setInvoiceNumber(e.target.value)}
+                    placeholder="e.g. SI-20260222-0001"
+                    data-testid="return-invoice-number-input"
+                  />
+                  {customerType === 'credit' && !invoiceNumber.trim() && (
+                    <p className="text-[10px] text-red-600 mt-1">
+                      Required: credit returns must reference the original invoice so the credit applies to the correct AR balance.
+                    </p>
+                  )}
                 </div>
                 <div>
                   <Label className="text-xs text-slate-500">Notes</Label>

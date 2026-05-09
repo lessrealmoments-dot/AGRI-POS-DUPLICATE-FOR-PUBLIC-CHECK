@@ -592,6 +592,12 @@ export default function CloseWizardPage() {
   // ── Quick receive payment ───────────────────────────────────────────────────
   const quickReceivePayment = async () => {
     if (!pmtAmount || !pmtDialog.invoice) { toast.error('Enter amount'); return; }
+    // Phase 2C.5 — block overpayment in the UI before backend (Phase 2C.4) does
+    const balance = parseFloat(pmtDialog.invoice.remaining_balance || 0);
+    if (parseFloat(pmtAmount) > balance + 0.005) {
+      toast.error(`Payment cannot exceed the outstanding balance of ${formatPHP(balance)}.`);
+      return;
+    }
     setPmtSaving(true);
     try {
       // Find invoice by invoice_number if no invoice_id
@@ -2830,10 +2836,21 @@ export default function CloseWizardPage() {
                 <CalcInput value={pmtAmount}
  onChange={(v) => setPmtAmount(v)}
  placeholder={`Max ${formatPHP(pmtDialog.invoice.remaining_balance)}`}
- className="h-9 mt-1 font-mono" autoFocus /></div>
+ className={`h-9 mt-1 font-mono ${parseFloat(pmtAmount || 0) > parseFloat(pmtDialog.invoice.remaining_balance || 0) + 0.005 ? 'border-red-300' : ''}`}
+ autoFocus />
+                {parseFloat(pmtAmount || 0) > parseFloat(pmtDialog.invoice.remaining_balance || 0) + 0.005 && (
+                  <p className="text-[10px] text-red-600 mt-1" data-testid="close-pmt-overpay-warning">
+                    Payment cannot exceed the outstanding balance of {formatPHP(pmtDialog.invoice.remaining_balance)}.
+                  </p>
+                )}
+              </div>
               <div className="flex gap-2 pt-1">
                 <Button variant="outline" className="flex-1" onClick={() => setPmtDialog({ open: false, invoice: null })}>Cancel</Button>
-                <Button className="flex-1 bg-blue-600 text-white" onClick={quickReceivePayment} disabled={pmtSaving}>
+                <Button
+                  className="flex-1 bg-blue-600 text-white"
+                  onClick={quickReceivePayment}
+                  disabled={pmtSaving || parseFloat(pmtAmount || 0) > parseFloat(pmtDialog.invoice.remaining_balance || 0) + 0.005}
+                >
                   {pmtSaving ? <RefreshCw size={13} className="animate-spin mr-1" /> : null} Record Payment
                 </Button>
               </div>
