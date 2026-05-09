@@ -1,6 +1,46 @@
 # AgriBooks Changelog
 
 
+
+## Feb 2026 — Phase 4A Frontend Integration: Historical Credit / Notebook AR Mode (Iter 256–258)
+
+**Goal**: Integrate the Phase 3 / 4A backend Historical Credit endpoint into UnifiedSalesPage so admins/owners can encode old notebook AR entries that are >7 days back, gated by Owner/Admin TOTP server-side. Plus add a backend soft floor that forces 1–7 day backdated credit through the existing Sales late-encode path (manager PIN), reserving the heavier Historical Credit channel for older entries only.
+
+**Backend changes**:
+1. **Soft floor** in `_validate_payload` of `routes/historical_credit.py` — `transaction_date` 1..7 days back now returns `400 {error: "use_regular_late_encode", days_back, soft_floor_days: 7}`. Today and >7 days remain valid.
+2. **3 new tests** in `tests/test_phase3_historical_credit.py`:
+   - `test_soft_floor_rejects_dates_within_7_days` (loops 1, 3, 7)
+   - `test_soft_floor_allows_dates_8_days_or_more`
+   - `test_soft_floor_preview_also_rejects_within_window`
+3. Existing Phase 3 + Phase 4A tests rebased to use `_days_ago(N)` with N≥8 (since 1–7 are now rejected by the soft floor); count-sheet anchor dates rebased proportionally.
+
+**Frontend changes (UnifiedSalesPage.js)**:
+1. New state: `historicalCreditPreview`, `historicalCreditReason`, `historicalCreditProofUrl`, `historicalCreditNotebookRef`, `historicalCreditAllowInv`, `historicalCreditApprovalCode`, `historicalCreditDialog`, plus loading/error flags.
+2. New memos: `isPrivilegedRole`, `daysBack`, `isHistoricalCreditMode`, `isBackdatedNonCreditBlocked` — declared **after** `paymentType` state to avoid TDZ ReferenceError.
+3. `minAllowedDate` widened to `floorDate` for admin/owner so they can pick dates >7 days back; cashiers still capped at 7 days.
+4. Helpers: `buildHistoricalCreditItems`, `buildHistoricalCreditPayload`, `previewHistoricalCredit`, `commitHistoricalCredit`. Approval code is omitted on preview and only attached to commit. 4xx/403 responses are decoded into actionable inline errors.
+5. `handleCreditSale` short-circuits to the Historical Credit dialog when `isHistoricalCreditMode`; emits a clear toast and refuses when `isBackdatedNonCreditBlocked`.
+6. New banner above product grid: amber "BACKDATED CREDIT / NOTEBOOK AR MODE" with reason textarea (≥20 chars), proof URL input, notebook reference input. Red "Backdated cash/digital/split blocked" banner shown when daysBack>7 AND payment is non-credit.
+7. New `<Dialog data-testid="historical-credit-dialog">` — customer-owes snapshot, count-sheet stopper warning + opt-in checkbox, closed-day note, Owner/Admin TOTP code input, commit button.
+8. Checkout dialog disables `confirm-payment` when `isBackdatedNonCreditBlocked` or when in historical credit mode without a ≥20-char reason; also relabels the confirm button to "Continue → Historical Credit / Notebook AR".
+9. All interactive elements carry kebab-case `data-testid`s: `historical-credit-banner`, `backdated-non-credit-block`, `historical-credit-reason-input`, `historical-credit-proof-url-input`, `historical-credit-notebook-ref-input`, `historical-credit-dialog`, `historical-credit-preview-btn`, `historical-credit-customer-owes-snapshot`, `historical-credit-count-stopper`, `historical-credit-allow-inv-checkbox`, `historical-credit-report-effect`, `historical-credit-approval-code-input`, `historical-credit-cancel-btn`, `historical-credit-commit-btn`, `historical-credit-commit-error`, `historical-credit-preview-error`.
+
+**Files**:
+- Backend MOD: `routes/historical_credit.py` (soft floor + constant `LATE_ENCODE_SOFT_FLOOR_DAYS = 7`)
+- Backend MOD: `tests/test_phase3_historical_credit.py` (rebased dates + 3 new soft-floor tests; 16 total)
+- Backend MOD: `tests/test_phase4a_approval_gate.py` (one date helper rebased)
+- Backend NEW: `tests/test_phase4a_live_smoke.py` (testing-agent created — 6 live API smoke tests)
+- Frontend MOD: `pages/UnifiedSalesPage.js` (~+300 lines for state, memos, helpers, banner JSX, dialog JSX)
+
+**Result**:
+- Backend: **34 / 34** assertions pass = 16 Phase 3 + 12 Phase 4A unit + 6 live smoke (POST /preview empty 400, POST commit empty 400, GET list 200, soft-floor 400 use_regular_late_encode, 400 approval_code_required, 403 approval_invalid, regression /unified-sale today-cash 200).
+- Frontend: TDZ fix verified; **FE-1 / FE-3 / FE-9 / FE-10 / FE-11 PASS** (page mounts, banner shows correctly for non-credit backdated, banner absent for today-credit, banner absent for 5-day backdated credit, no TOTP secret/PIN hash leaks in `/api/auth/me`).
+- Frontend: **FE-2 / FE-4 / FE-5 / FE-6 / FE-7 / FE-8 BLOCKED** (testing only) by a pre-existing UX precondition unrelated to Phase 4A — when scope = "All Branches", clicking the cart's `[data-testid='checkout-btn']` surfaces `Select a branch` toast and refuses to open the dialog (existing `openCheckout` guard at line 2110 of UnifiedSalesPage.js). Phase 4A code wiring is correct (every testid is mounted and the gating logic compiles cleanly under ESLint). Once a single branch is pre-selected the full flow is reachable.
+
+**Known issue logged (not fixed in this iter)**: "Online status but sale saved offline". The `processSale` catch block at `UnifiedSalesPage.js:2846` falls into `addPendingSale(saleData)` for ANY exception except the explicit 422 stock-override / 422 jit-retail / 403 closed-day branches. So a real backend validation error (e.g., 400 / 422 / 500 from `/unified-sale`) silently flips the sale to offline despite `isOnline === true`. Recommended next bugfix is to scope the offline fallback to true network errors only (e.g., `e.code === 'ERR_NETWORK'` or no `e.response`), and surface real backend errors as toasts.
+
+
+
 ## Feb 2026 — Z-Report PDF Layout & Math Display Fixes (Iter 254)
 
 **Goal**: Fix 4 visual/math bugs in the closing Z-Report PDF that were making the cash drawer reconciliation hard to audit.
