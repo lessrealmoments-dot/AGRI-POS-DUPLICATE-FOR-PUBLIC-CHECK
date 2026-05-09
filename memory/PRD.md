@@ -1,6 +1,111 @@
 # AgriBooks PRD
 
 
+## Phase 3 — Historical Credit Encoding / Notebook AR (Feb 2026) ✅
+
+### Goal
+Provide an admin-only endpoint to safely reconstruct customer credit sales
+that were originally written in a paper notebook but never encoded in the
+POS. Reuses the existing invoice / customer-ledger / receivables
+infrastructure with a strong audit envelope and a count-sheet stopper to
+prevent silent inventory drift.
+
+### Endpoints (admin / owner only)
+- `POST /api/historical-credit/preview` — dry-run with count-sheet stopper.
+- `POST /api/historical-credit` — commit.
+- `GET /api/historical-credit?branch_id=&customer_id=&limit=` — list.
+
+### Files changed
+- **NEW** `backend/routes/historical_credit.py`
+- **NEW** `backend/tests/test_phase3_historical_credit.py` (13 tests).
+- **NEW** `memory/PHASE_3_HISTORICAL_CREDIT.md` (workflow spec).
+- **UPDATED** `backend/main.py` (router registration).
+- **UPDATED** `backend/routes/daily_operations.py` (Z-report filter:
+  `source != "historical_credit_encoding"` on partial-cash + credit-sales
+  queries so old-day Z-reports stay byte-stable when a historical credit
+  is encoded today against an old date).
+
+### Workflow
+admin → preview (with count-sheet stopper + effects) → confirm → commit.
+Single-step admin approval (the endpoint is admin/owner-gated). Hard-rejects
+`transaction_date == today` (use the regular POS for today's credit sale).
+Reason ≥ 20 chars. Optional `proof_url` and `notebook_reference`.
+
+### Data model (single invoice row + audit envelope)
+Invoice tagged with:
+- `source = "historical_credit_encoding"`, `late_encoded = true`.
+- `late_encoded_at`, `late_encoded_by`, `late_encoded_by_name`.
+- `late_encode_reason`, `historical_credit_proof_url`,
+  `historical_credit_notebook_ref`.
+- `historical_credit_inventory_action` (one of `deducted` /
+  `skipped_count_sheet_lock` / `deducted_with_admin_acknowledgement`).
+- `historical_credit_count_sheet_anchor` (forensic).
+- `approved_by`, `approved_by_name`, `approved_at`.
+- `payment_type = "credit"`, `status = "credit"`, `sale_type = "historical_credit"`.
+
+Plus a `late_encode_log` row (existing audit trail) and a
+`security_events` row (`type: "historical_credit_encoded"`).
+
+### Count-sheet stopper
+- No count sheet OR `transaction_date > completed_at` → inventory deducted.
+- `transaction_date <= completed_at` AND `allow_inventory_deduction=false`
+  (default) → AR-only reconstruction; inventory NOT touched.
+- `transaction_date <= completed_at` AND `allow_inventory_deduction=true`
+  → inventory deducted with explicit audit tag.
+
+### Report behaviour
+- Sales report: surfaces the entry with all Phase 2E transparency fields.
+- `/reports/encoded-today`: surfaces the entry in `invoices[]`.
+- Customer ledger: surfaces `transaction_date`, `late_encoded`,
+  `encoded_today`, `source`.
+- Inventory movements: when deducted, exposes `source_kind =
+  "historical_credit_sale"` and `source_order_date = transaction_date`.
+- **Old-day Z-report regular credit section: UNCHANGED** (filtered out
+  by the new `source != "historical_credit_encoding"` clause).
+- Today's open Z-report late-encoded section: surfaces it (existing
+  behaviour, no new code).
+- Today's cash-collected: **no change** — encoding pure AR creates a
+  credit invoice with `amount_paid = 0`. Payments are a separate flow.
+
+### Tests (results)
+- **Phase 3 suite**: 13 / 13 PASS.
+- **Live API smoke**: `/historical-credit/preview` (empty body) → 400,
+  `/historical-credit` (admin) → 200, `/reports/sales` → 200,
+  `/sync/pos-data` → 200.
+- **Combined regression** (Phase 1A+1B+1C, 2A, 2B, 2C, 2D, 2E, 3): all
+  126 tests pass in isolation. The full-suite run shows occasional
+  intermittent failures of 1-2 phase2b/2D/2E tests on ~1 of every 3
+  runs. **Confirmed pre-existing** (reproducible without Phase 3).
+  Root cause: pytest-asyncio session-scoped event loop + shared Mongo
+  state. Documented in PHASE_3_HISTORICAL_CREDIT.md §14 with a
+  recommended Phase 4 fix. Not a Phase 3 regression.
+
+### POS surfaces (Quick / Advanced / Terminal / offline → sync)
+**Unaffected.** No edits to `/api/unified-sale`, `/api/sales/sync`,
+`/api/invoices/{id}/payment`, or any sales-write path.
+
+### Remaining risks
+- Frontend page is **NOT** implemented (out of Phase 3 scope; Phase 4
+  task).
+- `proof_url` is currently a free-text URL string; tighter integration
+  with the existing object-storage upload flow is a Phase 4 task.
+- Bulk import of historical credits from CSV is a possible Phase 4 add.
+- Test-infrastructure flakiness (pre-existing, unrelated) — Phase 4
+  cleanup item.
+
+### Recommendation
+**✅ Phase 4 (Cleanup / Dedup) is now a clean candidate.**
+Suggested order: (a) build the Historical Credit Encoding admin frontend
+that consumes these endpoints, (b) consolidate `assert_branch_access` +
+`get_branch_filter` into one helper, (c) dedupe `/sales` vs `/sales-new`,
+(d) fix the 11 hardcoded-date legacy unit tests, (e) switch
+pytest-asyncio to function-scoped loops to fix the intermittent
+flakiness.
+
+---
+
+
+
 ## Phase 2E — Report Date-Basis Standardisation (Audit H-13, Feb 2026) ✅
 
 ### Goal

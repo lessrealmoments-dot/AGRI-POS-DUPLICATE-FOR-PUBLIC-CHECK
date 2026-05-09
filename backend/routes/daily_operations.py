@@ -615,9 +615,12 @@ async def get_daily_close_preview(
     total_cash_sales = round(sum(c["total"] for c in cash_sales_by_category), 2)
 
     # Also include partial-sale cash received today (amount_paid from partial invoices)
+    # Phase 3: exclude historical_credit_encoding so re-querying an OLD closed
+    # day's Z-report stays stable when notebook AR is encoded today.
     partial_invoices = await db.invoices.find(
         {"branch_id": branch_id, "order_date": date,
-         "payment_type": "partial", "status": {"$ne": "voided"}},
+         "payment_type": "partial", "status": {"$ne": "voided"},
+         "source": {"$ne": "historical_credit_encoding"}},
         {"_id": 0, "customer_name": 1, "invoice_number": 1, "amount_paid": 1, "grand_total": 1}
     ).to_list(500)
     total_partial_cash = round(sum(float(inv.get("amount_paid", 0)) for inv in partial_invoices), 2)
@@ -626,9 +629,14 @@ async def get_daily_close_preview(
     # Enrich each row with full audit context for the Closing Wizard "Customer
     # Credit Generated Today" section: invoice total, paid_today (cash leg
     # received today on this invoice), remaining balance, and a status badge.
+    # Phase 3: exclude historical_credit_encoding so historical notebook AR
+    # encoded TODAY for an OLD date does NOT show up as "credit generated on
+    # the old date" when re-querying that old day's Z-report. It surfaces in
+    # the late-encoded section of the CURRENT day instead.
     credit_invoices = await db.invoices.find(
         {"branch_id": branch_id, "order_date": date,
-         "payment_type": {"$in": ["credit", "partial"]}, "status": {"$ne": "voided"}},
+         "payment_type": {"$in": ["credit", "partial"]}, "status": {"$ne": "voided"},
+         "source": {"$ne": "historical_credit_encoding"}},
         {"_id": 0, "customer_name": 1, "invoice_number": 1, "grand_total": 1,
          "balance": 1, "payment_type": 1, "amount_paid": 1, "payments": 1, "id": 1}
     ).to_list(500)

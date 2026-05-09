@@ -65,6 +65,7 @@ from routes.admin_backfill_240 import router as admin_backfill_240_router
 from routes.close_reminder import start_scheduler_on_startup as _start_close_reminder
 from routes.print_jobs import router as print_jobs_router
 from routes.balance_reconciliation import router as balance_reconciliation_router
+from routes.historical_credit import router as historical_credit_router
 
 # =============================================================================
 # APP SETUP
@@ -245,6 +246,9 @@ api_router.include_router(print_jobs_router)
 
 # Phase 2A — Customer Balance Reconciliation Report (READ-ONLY diagnostic)
 api_router.include_router(balance_reconciliation_router)
+
+# Phase 3 — Historical Credit Encoding / Notebook AR (admin-only AR reconstruction)
+api_router.include_router(historical_credit_router)
 
 # =============================================================================
 # WEBSOCKET ROUTES (must be on app directly with /api prefix)
