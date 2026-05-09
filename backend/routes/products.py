@@ -4,7 +4,11 @@ Product management routes: CRUD, repacks, pricing, search, barcodes.
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional, List
 from config import db
-from utils import get_current_user, check_perm, has_perm, now_iso, new_id, get_product_price, get_repack_capital, mark_price_reviewed
+from utils import (
+    get_current_user, check_perm, has_perm, now_iso, new_id,
+    get_product_price, get_repack_capital, mark_price_reviewed,
+    enrich_movement_with_source_date,
+)
 import random
 
 router = APIRouter(prefix="/products", tags=["Products"])
@@ -2123,7 +2127,44 @@ async def get_product_movements(product_id: str, branch_id: Optional[str] = None
         query, 
         {"_id": 0}
     ).sort("created_at", -1).limit(limit).to_list(limit)
-    return {"movements": movements, "total": total}
+
+    # Phase 2E: enrich each movement with `source_order_date` so the
+    # inventory report can show the actual stock-event time
+    # (`movement_date` = `created_at`) alongside the source transaction's
+    # business date (`source_order_date` from the referenced invoice/PO).
+    # This is purely additive — no totals changed, no field removed.
+    enriched = []
+    if movements:
+        ref_ids = list({m.get("reference_id") for m in movements if m.get("reference_id")})
+        ref_invs = {}
+        ref_pos = {}
+        if ref_ids:
+            inv_rows = await db.invoices.find(
+                {"id": {"$in": ref_ids}},
+                {"_id": 0, "id": 1, "order_date": 1, "invoice_date": 1},
+            ).to_list(len(ref_ids))
+            ref_invs = {r["id"]: r for r in inv_rows}
+            po_rows = await db.purchase_orders.find(
+                {"id": {"$in": ref_ids}},
+                {"_id": 0, "id": 1, "order_date": 1, "po_date": 1, "created_at": 1},
+            ).to_list(len(ref_ids))
+            ref_pos = {r["id"]: r for r in po_rows}
+        for m in movements:
+            ref = m.get("reference_id") or ""
+            src_date = None
+            src_kind = m.get("type")
+            if ref in ref_invs:
+                row = ref_invs[ref]
+                src_date = row.get("order_date") or row.get("invoice_date")
+                src_kind = src_kind or "sale"
+            elif ref in ref_pos:
+                row = ref_pos[ref]
+                src_date = row.get("order_date") or row.get("po_date") or (row.get("created_at") or "")[:10]
+                src_kind = src_kind or "purchase"
+            enriched.append(enrich_movement_with_source_date(
+                m, source_order_date=src_date, source_kind=src_kind,
+            ))
+    return {"movements": enriched, "total": total}
 
 
 @router.get("/{product_id}/orders")

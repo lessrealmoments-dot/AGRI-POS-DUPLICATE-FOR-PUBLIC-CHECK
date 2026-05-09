@@ -9,7 +9,8 @@ from difflib import SequenceMatcher
 from config import db, _raw_db
 from utils import (
     get_current_user, check_perm, now_iso, new_id,
-    get_default_branch, ensure_branch_access
+    get_default_branch, ensure_branch_access,
+    enrich_invoice_with_date_basis, today_local,
 )
 from routes.verify import verify_pin_for_action
 
@@ -529,7 +530,13 @@ async def get_customer_transactions(customer_id: str, user=Depends(get_current_u
     
     # Add receivables totals
     total_receivables = sum(r.get("balance", 0) for r in receivables if r.get("status") != "paid")
-    
+
+    # Phase 2E: enrich each invoice with the date-basis transparency fields
+    # so the customer ledger UI can show transaction_date vs encoded_today
+    # without re-deriving the rule client-side. Additive only.
+    today_str = await today_local(user.get("organization_id") or "")
+    invoices = [enrich_invoice_with_date_basis(inv, today=today_str) for inv in invoices]
+
     return {
         "customer": customer,
         "invoices": invoices,

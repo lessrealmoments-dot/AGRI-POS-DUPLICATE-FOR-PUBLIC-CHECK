@@ -1,6 +1,93 @@
 # AgriBooks PRD
 
 
+## Phase 2E — Report Date-Basis Standardisation (Audit H-13, Feb 2026) ✅
+
+### Goal
+Standardise the date-basis rules across every report so that historical /
+backdated entries don't silently distort cash, Z-, sales, ledger, or
+inventory-movement reports — and so Phase 3 (Historical Credit Encoding)
+can proceed on a stable, well-understood foundation.
+
+### Deliverables
+1. **Date-basis matrix** — canonical doc at
+   `/app/memory/PHASE_2E_DATE_BASIS_MATRIX.md` cataloguing 14 reports,
+   their current vs recommended date field, risk, and any change made.
+2. **Shared helpers** — `backend/utils/date_basis.py` with
+   `is_encoded_today()`, `enrich_invoice_with_date_basis()`,
+   `enrich_movement_with_source_date()`. Pure functions, no DB writes.
+3. **Additive enrichments** to three existing reports (zero totals
+   altered, zero existing fields removed):
+   - `GET /api/reports/sales` → each transaction now carries
+     `transaction_date`, `created_at`, `late_encoded`, `late_encoded_at`,
+     `late_encode_reason`, `encoded_today`.
+   - `GET /api/customers/{id}/transactions` → each invoice row enriched
+     with the same date-basis fields.
+   - `GET /api/products/{id}/movements` → each movement enriched with
+     `movement_date` (= `created_at`) and `source_order_date` (looked up
+     from the referenced invoice / PO) plus `source_kind`.
+4. **NEW route** `GET /api/reports/encoded-today` — consolidated view of
+   every doc encoded today but business-dated to a different day. Two
+   sections: `invoices` (created today, `order_date != today`) and
+   `payments` (today's payment events on invoices dated earlier). Branch-
+   scoped via `assert_branch_access`. **Read-only**, no mutation.
+5. **Tests** — `backend/tests/test_phase2e_date_basis.py`, 10 cases
+   covering all 9 user-required scenarios + 2 helper unit tests. **All
+   pass** (113 / 2 skip / 0 fail in the full regression).
+
+### Files changed
+- **NEW** `backend/utils/date_basis.py`
+- **NEW** `backend/tests/test_phase2e_date_basis.py`
+- **NEW** `memory/PHASE_2E_DATE_BASIS_MATRIX.md`
+- **UPDATED** `backend/utils/__init__.py` (export 3 helpers)
+- **UPDATED** `backend/routes/reports.py` (sales row enrichment + new
+  `/reports/encoded-today` route)
+- **UPDATED** `backend/routes/customers.py` (ledger row enrichment)
+- **UPDATED** `backend/routes/products.py` (movement enrichment)
+
+### Reports left UNCHANGED (intentionally)
+- **Cash collected today** — already keys off `payments[i].date`. ✅
+- **Z-report regular sales section** — already filters by `order_date`.
+  Late-encoded entries surface on the *current* open Z-report's "since
+  last close" section, never on old closed Z-reports. ✅
+- **Backdated charges audit** — already exposes `gap_days = created_at −
+  order_date`. ✅
+- **Daily profit report** — already uses correct dates per leg. ✅
+- **AR aging** — already prefers `order_date`. ✅
+
+### Totals impact
+**Zero.** Every change is additive (new fields only). No filter, no sort,
+no math was modified. Confirmed by:
+- The full regression suite (Phase 1A+1B+1C, 2A, 2B, 2C, 2D, 2E):
+  **113 passed / 2 skipped / 0 failed**.
+- Live-API smoke: `/api/reports/sales`, `/api/reports/encoded-today`,
+  `/api/daily-report` all return 200 for the regression admin.
+
+### POS surfaces (Quick / Advanced / Terminal / offline → sync)
+**Unaffected.** No changes in the sales/payment/sync write paths. The
+write-side contracts (`POST /api/unified-sale`, `POST /api/sales/sync`,
+`POST /api/invoices/{id}/payment`, etc.) are byte-for-byte unchanged.
+
+### Risks remaining
+- The `/reports/encoded-today` payments section approximates "encoded
+  today" via `payments[i].date == today AND invoice.order_date != today`.
+  A payment whose `date` was itself backdated could slip out. A future
+  iteration could move payment events to a dedicated collection with its
+  own `created_at` for sharper detection. Not a blocker for Phase 3.
+- 11 pre-existing hardcoded-date legacy unit-test failures (out of
+  scope, documented in PHASE_1_HANDOFF.md).
+
+### Recommendation for Phase 3
+**Phase 3 (Historical Credit Encoding / Notebook AR) is now safe to
+begin.** The transparency fields and consolidated audit view give the
+owner a way to inspect every historical encoding action on the day it
+happens, and the date-basis rules for cash / Z / sales reports are
+stable and documented.
+
+---
+
+
+
 ## Phase 2D.5 — Terminal POS Built-in Printer Receipt Layout Hotfix (Feb 2026) ✅
 
 ### Goal

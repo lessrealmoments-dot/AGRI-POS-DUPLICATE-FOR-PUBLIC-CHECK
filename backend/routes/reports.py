@@ -5,7 +5,10 @@ from fastapi import APIRouter, Depends
 from typing import Optional
 from datetime import datetime, timezone, timedelta
 from config import db
-from utils import get_current_user, check_perm, get_branch_filter, apply_branch_filter, today_local
+from utils import (
+    get_current_user, check_perm, get_branch_filter, apply_branch_filter,
+    today_local, is_encoded_today, enrich_invoice_with_date_basis,
+)
 
 router = APIRouter(tags=["Reports"])
 
@@ -181,6 +184,14 @@ async def sales_report(
     invoices = await db.invoices.find(inv_query, {"_id": 0}).sort("order_date", -1).to_list(1000)
     transactions = []
     for inv in invoices:
+        # Phase 2E: surface date-basis transparency fields per row so the UI
+        # can mark backdated/late-encoded entries without changing totals.
+        is_late = bool(inv.get("late_encoded", False))
+        encoded_today_flag = is_encoded_today(
+            today=today,
+            business_date=inv.get("order_date") or inv.get("invoice_date") or "",
+            created_at=inv.get("created_at"),
+        )
         transactions.append({
             "invoice_number": inv.get("invoice_number", ""),
             "date": inv.get("order_date", ""),
@@ -193,6 +204,13 @@ async def sales_report(
             "items_count": len(inv.get("items", [])),
             "cashier_name": inv.get("cashier_name", ""),
             "sale_type": inv.get("sale_type", "walk_in"),
+            # Phase 2E transparency (additive — never alters totals)
+            "transaction_date": inv.get("order_date", ""),
+            "created_at": inv.get("created_at"),
+            "late_encoded": is_late,
+            "late_encoded_at": inv.get("late_encoded_at"),
+            "late_encode_reason": inv.get("late_encode_reason"),
+            "encoded_today": encoded_today_flag,
         })
 
     return {
@@ -511,5 +529,142 @@ async def product_profit_report(
             "overall_margin_pct": grand_margin,
             "product_count": len(rows),
             "loss_making_count": sum(1 for r in rows if r["profit"] < 0),
+        },
+    }
+
+
+
+# ==================== ENCODED-TODAY / BACKDATED CONSOLIDATED ====================
+# Phase 2E (audit H-13 follow-up): one read-only endpoint that lists every
+# document ENCODED today whose business date is NOT today. Powers the
+# "Backdated activity" tab in the Audit Center and is the canonical input
+# for Phase 3 Historical Credit Encoding sign-off.
+@router.get("/reports/encoded-today")
+async def encoded_today_report(
+    branch_id: Optional[str] = None,
+    on_date: Optional[str] = None,
+    user=Depends(get_current_user),
+):
+    """List documents whose `created_at::date == on_date` AND business
+    date != on_date — i.e. encoded today but dated to a different day.
+
+    Returns three sections:
+      * `invoices` — sales / interest / penalty / cash-advance / farm-expense
+                     invoices created today but `order_date != today`.
+      * `payments` — individual payment events `payments[i].date != today`
+                     but the payment row was inserted on an invoice today.
+                     (Approximated by `invoices.late_encoded_at == today` for
+                     payments stored on existing-invoice updates; a future
+                     iteration can move payment events to a dedicated
+                     collection.)
+      * `summary`  — counts and total amount for quick triage.
+
+    READ-ONLY. No mutation. No totals altered. Branch-scoped via
+    `assert_branch_access`. Tenant-scoped via the `db` wrapper.
+    """
+    check_perm(user, "reports", "view")
+
+    today = on_date or await today_local(user.get("organization_id") or "")
+    today_d = today[:10]
+
+    # ── Invoices encoded today, business-dated to another day ─────────────
+    inv_query = {
+        "status": {"$ne": "voided"},
+        "$or": [
+            # Late-encoded (the canonical signal — admin / verifier flow)
+            {"late_encoded": True,
+             "late_encoded_at": {"$gte": f"{today_d}T00:00:00",
+                                 "$lt":  f"{today_d}T23:59:59.999"}},
+            # Created today, dated earlier (covers backdated cash sales /
+            # interest / penalty without the late_encoded flag)
+            {"created_at": {"$gte": f"{today_d}T00:00:00",
+                            "$lt":  f"{today_d}T23:59:59.999"},
+             "order_date": {"$ne": today_d}},
+        ],
+    }
+    if branch_id:
+        from utils import assert_branch_access
+        assert_branch_access(user, branch_id)
+        inv_query["branch_id"] = branch_id
+
+    raw = await db.invoices.find(
+        inv_query,
+        {
+            "_id": 0, "id": 1, "invoice_number": 1, "branch_id": 1,
+            "customer_id": 1, "customer_name": 1, "payment_type": 1,
+            "sale_type": 1, "status": 1, "grand_total": 1, "balance": 1,
+            "order_date": 1, "invoice_date": 1, "created_at": 1,
+            "late_encoded": 1, "late_encoded_at": 1, "late_encode_reason": 1,
+            "late_encoded_by_name": 1, "late_encode_days_back": 1,
+            "cashier_name": 1,
+        },
+    ).sort("created_at", -1).to_list(1000)
+
+    invoices_out = []
+    for inv in raw:
+        invoices_out.append({
+            **inv,
+            "transaction_date": inv.get("order_date") or inv.get("invoice_date") or "",
+            "encoded_today": is_encoded_today(
+                today=today_d,
+                business_date=inv.get("order_date") or inv.get("invoice_date") or "",
+                created_at=inv.get("created_at"),
+            ),
+        })
+
+    # ── Payment events encoded today against invoices dated earlier ───────
+    # Aggregates `invoices.payments[]` for any payment.date == today_d
+    # whose invoice.order_date != today_d. This isolates "old credit paid
+    # today" — visible separately from new same-day cash sales.
+    pay_pipeline = [
+        {"$match": {"status": {"$ne": "voided"}, "payments": {"$exists": True}}},
+        {"$unwind": "$payments"},
+        {"$match": {
+            "payments.date": today_d,
+            "payments.voided": {"$ne": True},
+        }},
+        {"$project": {
+            "_id": 0,
+            "invoice_id": "$id",
+            "invoice_number": 1,
+            "branch_id": 1,
+            "customer_name": 1,
+            "order_date": 1,
+            "payment": "$payments",
+        }},
+    ]
+    if branch_id:
+        pay_pipeline[0]["$match"]["branch_id"] = branch_id
+
+    all_pays = await db.invoices.aggregate(pay_pipeline).to_list(1000)
+    payments_out = []
+    for p in all_pays:
+        if (p.get("order_date") or "") != today_d:
+            payments_out.append({
+                "invoice_id": p.get("invoice_id"),
+                "invoice_number": p.get("invoice_number"),
+                "branch_id": p.get("branch_id"),
+                "customer_name": p.get("customer_name"),
+                "transaction_date": p.get("order_date"),
+                "payment_date": today_d,
+                "amount": float(p.get("payment", {}).get("amount", 0)),
+                "method": p.get("payment", {}).get("method", ""),
+                "recorded_at": p.get("payment", {}).get("recorded_at"),
+                "recorded_by": p.get("payment", {}).get("recorded_by"),
+            })
+
+    inv_total = round(sum(float(i.get("grand_total", 0) or 0) for i in invoices_out), 2)
+    pay_total = round(sum(p["amount"] for p in payments_out), 2)
+
+    return {
+        "on_date": today_d,
+        "branch_filter": branch_id,
+        "invoices": invoices_out,
+        "payments": payments_out,
+        "summary": {
+            "invoice_count": len(invoices_out),
+            "invoice_total": inv_total,
+            "payment_count": len(payments_out),
+            "payment_total": pay_total,
         },
     }
