@@ -71,7 +71,16 @@ async def _finalize_draft_offline(sale: dict, user: dict, envelope_id: str) -> d
             "kind": "draft_finalization_offline",
         }
 
-    # ── Build finalize payload from the offline envelope ──────────────────
+    # ── C-6 (Audit 2026-02): guard the draft FIRST, then deduct inventory ──
+    # The previous order was: deduct inventory → then flip the draft. Two
+    # concurrent sync replays of the same envelope could both pass the
+    # status check at line 64, both deduct stock, and only one would win
+    # the final flip. Reordering closes that window: only the one finalize
+    # that wins the guarded find_one_and_update proceeds with inventory.
+    sale_date = sale.get("date") or draft.get("order_date") \
+        or await today_local(user.get("organization_id") or "")
+
+    # Build the finalize payload up front so we can $set it inside the guard.
     items = sale.get("items", []) or draft.get("items", [])
     subtotal = float(sale.get("subtotal") or sum(float(i.get("total", 0)) for i in items))
     grand_total = float(sale.get("grand_total") or
@@ -81,10 +90,7 @@ async def _finalize_draft_offline(sale: dict, user: dict, envelope_id: str) -> d
     balance = float(sale.get("balance", max(0.0, grand_total - amount_paid)))
     payment_type = sale.get("payment_type", "cash")
     payments = sale.get("payments") or []
-    sale_date = sale.get("date") or draft.get("order_date") \
-        or await today_local(user.get("organization_id") or "")
 
-    # ── Items / payment divergence flags (offline copy wins) ──────────────
     draft_items_sig = _items_signature(draft.get("items", []))
     offline_items_sig = _items_signature(items)
     items_diverged = draft_items_sig != offline_items_sig
@@ -92,9 +98,52 @@ async def _finalize_draft_offline(sale: dict, user: dict, envelope_id: str) -> d
     draft_total = float(draft.get("grand_total", 0))
     payment_diverged = abs(grand_total - draft_total) > 0.01 if draft_total else False
 
-    # ── Apply inventory deduction ONCE (mirrors the offline-sync code path
-    # used for brand-new sales). Stock warnings are appended to the invoice
-    # record so managers can review negative-stock situations afterwards.
+    update_fields = {
+        "items": items,
+        "subtotal": round(subtotal, 2),
+        "freight": float(sale.get("freight", 0)),
+        "overall_discount": float(sale.get("overall_discount", 0)),
+        "grand_total": round(grand_total, 2),
+        "amount_paid": round(amount_paid, 2),
+        "balance": round(balance, 2),
+        "payment_type": payment_type,
+        "payments": payments,
+        "status": _final_status_from_payment_type(payment_type, balance),
+        "envelope_id": envelope_id,
+        "linked_offline_receipt_number": off_num,
+        "finalized_from_draft_offline": True,
+        "offline_completion_synced_at": now_iso(),
+        "original_draft_invoice_number": canonical_num,
+        "synced_from_offline": True,
+        "offline_items_diverged": items_diverged,
+        "payment_diverged": payment_diverged,
+        "finalized_by_id": user["id"],
+        "finalized_by_name": user.get("full_name", user.get("username", "")),
+        "order_date": sale_date,
+        "updated_at": now_iso(),
+    }
+
+    # Atomic guard: only one concurrent sync wins. modified_count==0 means
+    # another finalize already won — return the existing canonical invoice
+    # without any inventory mutation.
+    guard_res = await db.invoices.update_one(
+        {"id": canonical_id, "status": "for_preparation"},
+        {"$set": update_fields},
+    )
+    if guard_res.modified_count == 0:
+        existing = await db.invoices.find_one({"id": canonical_id}, {"_id": 0})
+        return {
+            "id": canonical_id, "envelope_id": envelope_id,
+            "status": "duplicate" if (existing and existing.get("envelope_id") == envelope_id)
+                       else "conflict",
+            "reason": "already_finalized_concurrent",
+            "official_invoice": canonical_num, "off_receipt": off_num,
+            "kind": "draft_finalization_offline",
+        }
+
+    # ── Apply inventory deduction ONLY after the guard win ────────────────
+    # Stock warnings are appended to the invoice record so managers can
+    # review negative-stock situations afterwards.
     stock_warnings = []
     for item in items:
         qty = float(item.get("quantity", 0))
@@ -147,36 +196,12 @@ async def _finalize_draft_offline(sale: dict, user: dict, envelope_id: str) -> d
                 "Offline draft finalization (synced)",
             )
 
-    # ── Flip the draft from for_preparation to paid/credit/partial ────────
-    update_fields = {
-        "items": items,
-        "subtotal": round(subtotal, 2),
-        "freight": float(sale.get("freight", 0)),
-        "overall_discount": float(sale.get("overall_discount", 0)),
-        "grand_total": round(grand_total, 2),
-        "amount_paid": round(amount_paid, 2),
-        "balance": round(balance, 2),
-        "payment_type": payment_type,
-        "payments": payments,
-        "status": _final_status_from_payment_type(payment_type, balance),
-        "envelope_id": envelope_id,
-        "linked_offline_receipt_number": off_num,
-        "finalized_from_draft_offline": True,
-        "offline_completion_synced_at": now_iso(),
-        "original_draft_invoice_number": canonical_num,
-        "synced_from_offline": True,
-        "stock_warnings": stock_warnings,
-        "offline_items_diverged": items_diverged,
-        "payment_diverged": payment_diverged,
-        "finalized_by_id": user["id"],
-        "finalized_by_name": user.get("full_name", user.get("username", "")),
-        "order_date": sale_date,
-        "updated_at": now_iso(),
-    }
-    await db.invoices.update_one(
-        {"id": canonical_id, "status": "for_preparation"},  # guard race condition
-        {"$set": update_fields},
-    )
+    # Stash stock warnings on the canonical invoice for manager review.
+    if stock_warnings:
+        await db.invoices.update_one(
+            {"id": canonical_id},
+            {"$set": {"stock_warnings": stock_warnings}},
+        )
     await log_sale_items(
         branch_id, sale_date, items, canonical_num,
         draft.get("customer_name", "Walk-in"),
@@ -889,6 +914,14 @@ async def sync_offline_sales(data: dict, user=Depends(get_current_user)):
             sale_date = sale.get("date") or await today_local(user.get("organization_id") or "")
             inv_number = sale.get("invoice_number", f"SYNC-{sale_id[:8]}")
             stock_warnings = []
+            # ── C-5 (Audit 2026-02): collect inventory ops; defer mutation ────
+            # Previous order: deduct inventory → insert invoice. A concurrent
+            # retry of the same envelope could pass the existence check at
+            # the top of the function and BOTH replicas would mutate stock
+            # before the unique index on envelope_id rejected the second
+            # insert. Now we only validate + plan the ops; mutation runs
+            # after the invoice insert succeeds.
+            sync_inventory_ops = []
 
             for item in items:
                 qty = float(item.get("quantity", 0))
@@ -920,8 +953,6 @@ async def sync_offline_sales(data: dict, user=Depends(get_current_user)):
                 if product.get("is_repack") and product.get("parent_id"):
                     units_per_parent = product.get("units_per_parent", 1)
                     parent_deduction = qty / units_per_parent
-
-                    # Check stock — warn if would go negative but don't block (offline work must not be lost)
                     parent_inv = await db.inventory.find_one(
                         {"product_id": product["parent_id"], "branch_id": branch_id}, {"_id": 0}
                     )
@@ -931,21 +962,16 @@ async def sync_offline_sales(data: dict, user=Depends(get_current_user)):
                             f"{product['name']}: need {parent_deduction:.4f} boxes, "
                             f"have {current_stock:.4f} — inventory will go negative"
                         )
-
-                    await db.inventory.update_one(
-                        {"product_id": product["parent_id"], "branch_id": branch_id},
-                        {"$inc": {"quantity": -parent_deduction}, "$set": {"updated_at": now_iso()}},
-                        upsert=True
-                    )
-                    # ── FIX: log movement (was missing) ──────────────────────────
-                    await log_movement(
-                        product["parent_id"], branch_id, "sale", -parent_deduction,
-                        sale_id, inv_number, rate * units_per_parent,
-                        user["id"], user.get("full_name", user["username"]),
-                        f"Offline sale (synced): {product['name']} x {qty}"
-                    )
+                    sync_inventory_ops.append({
+                        "kind": "repack",
+                        "parent_product_id": product["parent_id"],
+                        "parent_deduction": parent_deduction,
+                        "child_qty": qty,
+                        "child_rate": rate,
+                        "child_name": product["name"],
+                        "units_per_parent": units_per_parent,
+                    })
                 else:
-                    # Regular product
                     inv = await db.inventory.find_one(
                         {"product_id": item.get("product_id"), "branch_id": branch_id}, {"_id": 0}
                     )
@@ -954,19 +980,12 @@ async def sync_offline_sales(data: dict, user=Depends(get_current_user)):
                         stock_warnings.append(
                             f"{product['name']}: need {qty}, have {current_stock:.2f} — inventory will go negative"
                         )
-
-                    await db.inventory.update_one(
-                        {"product_id": item.get("product_id"), "branch_id": branch_id},
-                        {"$inc": {"quantity": -qty}, "$set": {"updated_at": now_iso()}},
-                        upsert=True
-                    )
-                    # ── FIX: log movement (was missing) ──────────────────────────
-                    await log_movement(
-                        item.get("product_id"), branch_id, "sale", -qty,
-                        sale_id, inv_number, rate,
-                        user["id"], user.get("full_name", user["username"]),
-                        "Offline sale (synced)"
-                    )
+                    sync_inventory_ops.append({
+                        "kind": "simple",
+                        "product_id": item.get("product_id"),
+                        "qty": qty,
+                        "rate": rate,
+                    })
 
             # Create invoice
             invoice = {
@@ -1010,6 +1029,75 @@ async def sync_offline_sales(data: dict, user=Depends(get_current_user)):
                     continue
                 raise
             invoice.pop("_id", None)
+
+            # ── C-5 (Audit 2026-02): apply deferred inventory ops ─────────
+            # The invoice was atomically reserved above. Only the writer
+            # whose insert won the unique index gets here. A concurrent
+            # retry of the same envelope_id was rejected by the unique
+            # index and short-circuited via the "duplicate" branch above
+            # WITHOUT touching inventory.
+            _sync_inv_error = None
+            try:
+                for op in sync_inventory_ops:
+                    if op["kind"] == "repack":
+                        await db.inventory.update_one(
+                            {"product_id": op["parent_product_id"], "branch_id": branch_id},
+                            {"$inc": {"quantity": -op["parent_deduction"]},
+                             "$set": {"updated_at": now_iso()}},
+                            upsert=True,
+                        )
+                        await log_movement(
+                            op["parent_product_id"], branch_id, "sale",
+                            -op["parent_deduction"], sale_id, inv_number,
+                            op["child_rate"] * op["units_per_parent"],
+                            user["id"], user.get("full_name", user["username"]),
+                            f"Offline sale (synced): {op['child_name']} x {op['child_qty']}",
+                        )
+                    else:
+                        await db.inventory.update_one(
+                            {"product_id": op["product_id"], "branch_id": branch_id},
+                            {"$inc": {"quantity": -op["qty"]},
+                             "$set": {"updated_at": now_iso()}},
+                            upsert=True,
+                        )
+                        await log_movement(
+                            op["product_id"], branch_id, "sale", -op["qty"],
+                            sale_id, inv_number, op["rate"],
+                            user["id"], user.get("full_name", user["username"]),
+                            "Offline sale (synced)",
+                        )
+            except Exception as _ee:
+                _sync_inv_error = str(_ee)
+
+            if _sync_inv_error:
+                # Tombstone for Audit Center; do not re-run partial ops.
+                await db.invoices.update_one(
+                    {"id": sale_id},
+                    {"$set": {
+                        "status": "error_partial_write",
+                        "error_detail": _sync_inv_error[:500],
+                        "errored_at": now_iso(),
+                    }},
+                )
+                try:
+                    await db.security_events.insert_one({
+                        "id": new_id(),
+                        "type": "offline_sync_inventory_apply_failed",
+                        "branch_id": branch_id,
+                        "invoice_id": sale_id,
+                        "invoice_number": inv_number,
+                        "envelope_id": envelope_id,
+                        "user_id": user["id"],
+                        "error": _sync_inv_error[:500],
+                        "at": now_iso(),
+                    })
+                except Exception:
+                    pass
+                errors.append({
+                    "id": sale_id, "envelope_id": envelope_id,
+                    "error": f"inventory_apply_failed: {_sync_inv_error}",
+                })
+                continue
 
             # ── Phase 2: Retroactive signature_session for offline credit sales ──
             # When credit sale was captured offline, the cashier could not create a

@@ -11,6 +11,7 @@ Features:
 - Starts at 1000 for professional appearance
 """
 from pymongo import ReturnDocument
+from datetime import datetime, timezone
 from config import db, _raw_db
 
 
@@ -90,6 +91,26 @@ async def generate_next_number(prefix: str, branch_id: str) -> str:
         seq = STARTING_SEQUENCE + 1
 
     return f"{prefix}-{branch_code}-{str(seq).zfill(6)}"
+
+
+async def generate_next_rma_number(branch_id: str, organization_id: str) -> str:
+    """C-8 (Audit 2026-02): atomic, org+branch-scoped RMA generator.
+
+    Replaces the racy `count_documents+1` approach in routes/returns.py
+    that produced duplicate RMA numbers under concurrent return creation
+    AND leaked numbering across tenants. Format remains
+    `RTN-YYYYMMDD-NNNN` for backwards compatibility with existing reports.
+    """
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    counter_key = f"rma:{organization_id or 'global'}:{branch_id or 'all'}:{today}"
+    result = await _raw_db.counters.find_one_and_update(
+        {"_id": counter_key},
+        {"$inc": {"seq": 1}},
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+    )
+    seq = result["seq"]
+    return f"RTN-{today}-{str(seq).zfill(4)}"
 
 
 async def check_idempotency(collection_name: str, idempotency_key: str) -> dict | None:

@@ -465,6 +465,7 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
     subtotal = 0
     reservations_to_create = []   # populated only for partial release
     discount_audit_entries = []   # populated for discount/price override audit trail
+    pending_inventory_ops = []    # C-4 (Audit 2026-02): applied AFTER invoice commit
 
     # ── Manager Override: pre-validate stock before the main loop ─────────────
     # If any item has insufficient stock, return a structured error so the frontend
@@ -581,10 +582,12 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
                     else "discount_and_override",
             })
         
-        # ── Inventory: deduct immediately for BOTH full and partial release ────
-        # Partial release: also moves qty into reserved_qty bucket on same record.
-        # quantity = available to sell. reserved_qty = customer's stock, pending pickup.
-        # quantity + reserved_qty = total physical on shelf (always accurate).
+        # ── C-4 (Audit 2026-02): defer the inventory mutation ──────────────────
+        # Previously the deduction + movement log happened inline here, BEFORE
+        # the invoice was committed. If the invoice insert later failed (dup
+        # key, validation, network drop), stock was permanently gone.
+        # Now we only validate stock here; the actual mutation runs after the
+        # invoice slot is reserved (see "Apply deferred inventory ops" below).
         if product.get("is_repack") and product.get("parent_id"):
             units_per_parent = product.get("units_per_parent", 1)
             parent_deduction = qty / units_per_parent
@@ -598,19 +601,16 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
                     status_code=400,
                     detail=f"Insufficient stock for {product['name']}: have {available:.0f}, need {qty:.0f}"
                 )
-            # Deduct from quantity — same for full and partial
-            inv_update = {"$inc": {"quantity": -parent_deduction}, "$set": {"updated_at": now_iso()}}
-            if release_mode == "partial":
-                inv_update["$inc"]["reserved_qty"] = parent_deduction
-            await db.inventory.update_one(
-                {"product_id": product["parent_id"], "branch_id": branch_id},
-                inv_update, upsert=True
-            )
-            await log_movement(
-                product["parent_id"], branch_id, "sale", -parent_deduction, "", inv_number,
-                rate * units_per_parent, user["id"], user.get("full_name", user["username"]),
-                f"Sold as repack: {product['name']} x {qty}"
-            )
+            pending_inventory_ops.append({
+                "kind": "repack",
+                "parent_product_id": product["parent_id"],
+                "parent_deduction": parent_deduction,
+                "child_qty": qty,
+                "child_rate": rate,
+                "child_name": product["name"],
+                "units_per_parent": units_per_parent,
+                "release_mode": release_mode,
+            })
             if release_mode == "partial":
                 parent = await db.products.find_one({"id": product["parent_id"]}, {"_id": 0})
                 reservations_to_create.append({
@@ -638,17 +638,13 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
                     status_code=400,
                     detail=f"Insufficient stock for {product['name']}: have {current_stock:.0f}, need {qty:.0f}"
                 )
-            inv_update = {"$inc": {"quantity": -qty}, "$set": {"updated_at": now_iso()}}
-            if release_mode == "partial":
-                inv_update["$inc"]["reserved_qty"] = qty
-            await db.inventory.update_one(
-                {"product_id": item["product_id"], "branch_id": branch_id},
-                inv_update, upsert=True
-            )
-            await log_movement(
-                item["product_id"], branch_id, "sale", -qty, "", inv_number,
-                rate, user["id"], user.get("full_name", user["username"])
-            )
+            pending_inventory_ops.append({
+                "kind": "simple",
+                "product_id": item["product_id"],
+                "qty": qty,
+                "rate": rate,
+                "release_mode": release_mode,
+            })
             if release_mode == "partial":
                 reservations_to_create.append({
                     "product_id": item["product_id"],
@@ -893,12 +889,38 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
             "days_back": _le_ctx["days_back"],
         })
 
-    # Race-safe insert: if a parallel retry already inserted (idempotency_key
-    # unique index trips), return the previously-saved invoice instead of 500.
-    # When finalizing a draft: replace the existing for_preparation record.
+    # ── C-4 / C-6 (Audit 2026-02): commit invoice BEFORE inventory mutation ──
+    # Inventory ops were collected into pending_inventory_ops above and will
+    # be applied only after the invoice slot is atomically reserved here.
+    # This eliminates the failure mode where stock was deducted but the
+    # invoice insert later raised (DuplicateKey, validation, network drop).
     if draft_doc:
-        await db.invoices.replace_one({"id": draft_doc["id"]}, invoice)
+        # Guarded draft finalize: only one finalizer wins. If a concurrent
+        # finalize already won, return the persisted invoice without touching
+        # inventory.
+        guard = await db.invoices.find_one_and_update(
+            {"id": draft_doc["id"], "status": "for_preparation"},
+            {"$set": {"status": "processing", "_finalize_started_at": now_iso()}},
+            return_document=False,  # we don't need the pre-image
+        )
+        if guard is None:
+            existing = await db.invoices.find_one(
+                {"id": draft_doc["id"]}, {"_id": 0}
+            )
+            if existing:
+                return existing
+            raise HTTPException(
+                status_code=409,
+                detail="Draft order already finalized by another session.",
+            )
+        # Commit the full computed invoice payload (preserves doc_code etc.
+        # set on the original draft because $set merges; only fields we own
+        # are overwritten).
+        await db.invoices.update_one({"id": draft_doc["id"]}, {"$set": invoice})
     else:
+        # New invoice: insert FIRST. If idempotency_key unique index trips
+        # (concurrent retry of the same client request), return the existing
+        # invoice without touching inventory.
         try:
             await db.invoices.insert_one(invoice)
         except Exception as ins_err:
@@ -909,6 +931,82 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
                     return existing
             raise
     invoice.pop("_id", None)
+
+    # ── Apply deferred inventory ops (C-4) ────────────────────────────────────
+    # Each op is idempotent w.r.t. itself but the loop is NOT transactional.
+    # If an individual op throws, we tag the invoice error_partial_write so
+    # the Audit Center can surface the orphan and the operator can reconcile.
+    # We do NOT roll back already-applied ops (stock is already gone in the
+    # real world) — the invoice tombstone is the audit trail.
+    _inv_apply_error = None
+    try:
+        for op in pending_inventory_ops:
+            if op["kind"] == "repack":
+                inv_update = {
+                    "$inc": {"quantity": -op["parent_deduction"]},
+                    "$set": {"updated_at": now_iso()},
+                }
+                if op["release_mode"] == "partial":
+                    inv_update["$inc"]["reserved_qty"] = op["parent_deduction"]
+                await db.inventory.update_one(
+                    {"product_id": op["parent_product_id"], "branch_id": branch_id},
+                    inv_update, upsert=True,
+                )
+                await log_movement(
+                    op["parent_product_id"], branch_id, "sale",
+                    -op["parent_deduction"], invoice["id"], inv_number,
+                    op["child_rate"] * op["units_per_parent"],
+                    user["id"], user.get("full_name", user["username"]),
+                    f"Sold as repack: {op['child_name']} x {op['child_qty']}",
+                )
+            else:
+                inv_update = {
+                    "$inc": {"quantity": -op["qty"]},
+                    "$set": {"updated_at": now_iso()},
+                }
+                if op["release_mode"] == "partial":
+                    inv_update["$inc"]["reserved_qty"] = op["qty"]
+                await db.inventory.update_one(
+                    {"product_id": op["product_id"], "branch_id": branch_id},
+                    inv_update, upsert=True,
+                )
+                await log_movement(
+                    op["product_id"], branch_id, "sale",
+                    -op["qty"], invoice["id"], inv_number,
+                    op["rate"], user["id"], user.get("full_name", user["username"]),
+                )
+    except Exception as exc:
+        _inv_apply_error = str(exc)
+
+    if _inv_apply_error:
+        # Tombstone the invoice so the Audit Center can surface the broken
+        # state. We deliberately re-raise so the cashier sees the failure and
+        # can ask the manager to reconcile inventory.
+        await db.invoices.update_one(
+            {"id": invoice["id"]},
+            {"$set": {
+                "status": "error_partial_write",
+                "error_detail": _inv_apply_error[:500],
+                "errored_at": now_iso(),
+            }},
+        )
+        try:
+            await db.security_events.insert_one({
+                "id": new_id(),
+                "type": "sale_inventory_apply_failed",
+                "branch_id": branch_id,
+                "invoice_id": invoice["id"],
+                "invoice_number": invoice.get("invoice_number"),
+                "user_id": user["id"],
+                "error": _inv_apply_error[:500],
+                "at": now_iso(),
+            })
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=500,
+            detail=f"Inventory apply failed for invoice {invoice.get('invoice_number')}: {_inv_apply_error}. Invoice marked error_partial_write for reconciliation.",
+        )
 
     # ── Link pre-commit signature session (Terminal credit/partial flow) ──────
     # Terminal/Web captures the signature BEFORE creating the invoice (legal sequence).

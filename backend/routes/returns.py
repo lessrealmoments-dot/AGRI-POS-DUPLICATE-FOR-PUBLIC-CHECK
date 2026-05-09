@@ -101,9 +101,15 @@ async def create_return(data: dict, user=Depends(get_current_user)):
         if fund_source == "cashier" and cashier_balance < refund_amount:
             raise HTTPException(status_code=400, detail=f"Cashier has ₱{cashier_balance:.2f}, need ₱{refund_amount:.2f}")
 
-    # ── Generate RMA number ────────────────────────────────────────────────
-    count = await db.returns.count_documents({})
-    rma_number = f"RTN-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{str(count + 1).zfill(4)}"
+    # ── C-8 (Audit 2026-02): atomic org+branch-scoped RMA number ──────────
+    # Replaces the previous `count_documents({})+1` pattern which produced
+    # duplicate RMAs under concurrent return creation and leaked numbering
+    # across tenants. Counter is keyed by (org, branch, date).
+    from utils.numbering import generate_next_rma_number
+    rma_number = await generate_next_rma_number(
+        branch_id,
+        user.get("organization_id") or user.get("org_id") or "",
+    )
 
     # ── Process each item ──────────────────────────────────────────────────
     processed_items = []

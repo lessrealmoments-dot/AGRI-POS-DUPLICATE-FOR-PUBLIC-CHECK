@@ -445,6 +445,19 @@ async def startup():
     await _raw_db.price_change_log.create_index("created_at")
     await _raw_db.notifications.create_index("created_at")
     await _raw_db.notifications.create_index("target_user_ids")
+    # C-8 (Audit 2026-02): defense-in-depth — RMA numbers must be unique.
+    # Atomic counter generation prevents collisions; the index catches any
+    # legacy duplicates so they cannot replicate.
+    try:
+        await _raw_db.returns.create_index(
+            "rma_number",
+            unique=True,
+            partialFilterExpression={
+                "rma_number": {"$exists": True, "$type": "string"}
+            },
+        )
+    except Exception:
+        pass
     logger.info("Database indexes created")
 
     # ── Provision 4-wallet system for all existing branches ──────────────────
