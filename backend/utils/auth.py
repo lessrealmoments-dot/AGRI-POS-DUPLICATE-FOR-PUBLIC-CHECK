@@ -85,6 +85,22 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     if not user or not user.get("active", True):
         raise HTTPException(status_code=401, detail="User not found or inactive")
 
+    # ── C-1 related (Audit 2026-02): JWT org cross-check ──────────────────
+    # If the user record's organization_id has changed since the token was
+    # issued (org migration, manual move, soft-revoke), refuse the token.
+    # Super-admins are exempt (they intentionally float).
+    if not is_super_admin:
+        token_org = payload.get("org_id")
+        user_org = user.get("organization_id")
+        # Allow legacy tokens that didn't carry org_id IF the user has no
+        # org assignment either (single-tenant mode).
+        if token_org or user_org:
+            if token_org != user_org:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Session organization mismatch — please log in again.",
+                )
+
     # Surface impersonation state to routes (read-only — they cannot change it)
     if impersonating_org_id:
         user["_impersonating_org_id"] = impersonating_org_id

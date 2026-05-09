@@ -731,33 +731,28 @@ async def get_pos_sync_data(user=Depends(get_current_user), branch_id: str = Non
             p["last_purchase_cost"] = ma_lp["last_purchase"]
         enriched_products.append(p)
     
-    # ── Phase 1: Cache admin_pin bcrypt hash for offline manager bypass ──
-    # This is the bcrypt hash (one-way) — even if device is stolen, attacker
-    # cannot reverse it. Local bcrypt.compareSync() validates an entered PIN
-    # without requiring the server.
-    admin_pin_hash = None
-    try:
-        admin_pin_doc = await db.system_settings.find_one(
-            {"key": "admin_pin"}, {"_id": 0, "pin_hash": 1}
-        )
-        if admin_pin_doc:
-            admin_pin_hash = admin_pin_doc.get("pin_hash")
-    except Exception:
-        admin_pin_hash = None
-
-    # ── Phase 1.5: Cache branch-scoped manager + admin/owner PINs ──
-    # Real-world: admin/owner is rarely in-store; managers run the POS.
-    # We ship plain-text PINs for managers assigned to THIS branch + all
-    # admin/owner users in the org (admin PIN works on all branches).
-    # Frontend matches locally when offline. PINs are cached in IndexedDB
-    # under the same trust boundary as customer balances and product
-    # catalog — no additional risk.
+    # ── C-1 (Audit 2026-02): Identity-only manager directory for offline UI ──
+    # PREVIOUSLY this endpoint shipped admin_pin_hash + plain manager PINs to
+    # every authenticated client so the device could verify offline approvals
+    # locally. That leaked accountability credentials to cashier devices,
+    # browser dev tools, and any IndexedDB inspector.
+    #
+    # NEW DESIGN (preserves offline POS workflow, removes leakage):
+    #   • Online: client never holds the PIN. Manager types PIN → /api/verify/pin
+    #     (existing endpoint) verifies server-side and returns approval result.
+    #   • Offline: cashier types Manager PIN → frontend stores it ONLY in the
+    #     queued sale envelope (offline_bypass.pin / price_match_pin / etc.)
+    #     → at sync, the server re-verifies via verify_pin_for_action() exactly
+    #     as it already does for offline_price_changes (sync.py:1124-1140).
+    #     If verification fails, the sale is tagged pin_resync_failed for
+    #     manager review. The cashier device NEVER sees the real PIN.
+    #
+    # We still ship the *identity* of permissible approvers (id, name, role,
+    # method) so the offline UI can show "Manager Smith approved" labels and
+    # so the offline_bypass payload can carry verifier_name without round-trip.
+    admin_pin_hash = None  # DEPRECATED — kept as None for backwards-compatible response shape
     offline_pin_grants = []
     try:
-        # Pull all admin/owner/manager candidates; we apply branch scoping below
-        # to mirror routes/verify.py:_resolve_pin behaviour exactly:
-        #   - admin/owner PINs work on every branch
-        #   - manager PINs work on assigned branch OR if mgr has no branch_id
         users = await db.users.find(
             {
                 "active": True,
@@ -767,32 +762,24 @@ async def get_pos_sync_data(user=Depends(get_current_user), branch_id: str = Non
                     {"pin_tier": "manager"},
                 ],
             },
-            {"_id": 0, "id": 1, "full_name": 1, "username": 1, "role": 1,
-             "manager_pin": 1, "owner_pin": 1, "branch_id": 1},
+            {"_id": 0, "id": 1, "full_name": 1, "username": 1, "role": 1, "branch_id": 1},
         ).to_list(50)
         for u in users:
             role = u.get("role", "")
-            pin_value = ""
             method = "manager_pin"
             if role in ("admin", "owner"):
-                pin_value = str(u.get("owner_pin") or u.get("manager_pin") or "").strip()
                 method = "admin_pin" if role == "admin" else "owner_pin"
             else:
-                pin_value = str(u.get("manager_pin") or u.get("owner_pin") or "").strip()
-                # Manager scoping: if a branch was requested AND this manager
-                # is bound to a different branch, skip them (matches verify.py).
-                # Managers with no branch_id are multi-branch.
+                # Manager branch scoping (mirror routes/verify.py:_resolve_pin)
                 mgr_branch = u.get("branch_id") or ""
                 if branch_id and mgr_branch and mgr_branch != branch_id:
                     continue
-            if not pin_value:
-                continue
             offline_pin_grants.append({
                 "verifier_id": u.get("id"),
                 "verifier_name": u.get("full_name") or u.get("username") or "Manager",
-                "pin": pin_value,
                 "method": method,
                 "role": role,
+                # Note: NO `pin` field. Server-side verification is the only path.
             })
     except Exception:
         offline_pin_grants = []
@@ -1034,6 +1021,38 @@ async def sync_offline_sales(data: dict, user=Depends(get_current_user)):
             # otherwise raise AttributeError below (swallowed but noisy in logs).
             if not isinstance(offline_bypass, dict):
                 offline_bypass = None
+
+            # ── C-1 (Audit 2026-02): server-side PIN re-verification for offline ──
+            # The cashier device no longer holds plain PINs. The PIN typed by
+            # the manager travels with the envelope in offline_bypass.pin and
+            # is RE-VERIFIED here before the signature_session is finalized.
+            # If verification fails, we still keep the sale (goods are gone)
+            # but tag it pin_resync_failed and downgrade the bypass status to
+            # "pending_review" so the Audit Center surfaces it for a manager.
+            bypass_pin_verified = False
+            bypass_resync_failed = False
+            bypass_resolved_verifier = None
+            if offline_bypass:
+                _bp_pin = (offline_bypass.get("pin") or "").strip()
+                if _bp_pin:
+                    try:
+                        from routes.verify import verify_pin_for_action
+                        # Use the most permissive policy that admits managers
+                        # for credit-sale auth ("transaction_verify" mirrors
+                        # the live late-encode policy).
+                        bypass_resolved_verifier = await verify_pin_for_action(
+                            _bp_pin, "transaction_verify", branch_id=branch_id,
+                        )
+                        bypass_pin_verified = bool(bypass_resolved_verifier)
+                    except Exception:
+                        bypass_resolved_verifier = None
+                        bypass_pin_verified = False
+                    bypass_resync_failed = not bypass_pin_verified
+                else:
+                    # No PIN supplied (e.g. legacy envelope). Treat as
+                    # pending_review so it does not silently slip through.
+                    bypass_resync_failed = True
+
             if offline_bypass and invoice.get("balance", 0) > 0 and invoice.get("customer_id"):
                 try:
                     sig_session_id = new_id()
@@ -1057,14 +1076,14 @@ async def sync_offline_sales(data: dict, user=Depends(get_current_user)):
                         },
                         "linked_record_type": "invoice",
                         "linked_record_id": sale_id,
-                        "status": "bypassed",
+                        "status": "bypassed" if bypass_pin_verified else "pending_review",
                         "signature_r2_key": None,
                         "signature_url": None,
                         "signed_at": None,
                         "signer_info": None,
-                        "bypass_method": offline_bypass.get("method", "manager_pin"),
-                        "bypass_by_id": offline_bypass.get("by_id") or user["id"],
-                        "bypass_by_name": offline_bypass.get("by_name") or user.get("full_name", user.get("username", "")),
+                        "bypass_method": (bypass_resolved_verifier or {}).get("method") or offline_bypass.get("method", "manager_pin"),
+                        "bypass_by_id": (bypass_resolved_verifier or {}).get("verifier_id") or offline_bypass.get("by_id") or user["id"],
+                        "bypass_by_name": (bypass_resolved_verifier or {}).get("verifier_name") or offline_bypass.get("by_name") or user.get("full_name", user.get("username", "")),
                         "bypass_reason": (offline_bypass.get("reason") or "Offline credit sale - customer unable to sign").strip(),
                         "bypassed_at": offline_bypass.get("at") or sale.get("timestamp") or now_iso(),
                         "expires_at": now_iso(),
@@ -1072,6 +1091,8 @@ async def sync_offline_sales(data: dict, user=Depends(get_current_user)):
                         "created_by_name": user.get("full_name", user.get("username", "")),
                         "created_at": offline_bypass.get("at") or sale.get("timestamp") or now_iso(),
                         "offline_origin": True,
+                        "pin_resync_failed": bypass_resync_failed,
+                        "pin_verified_at_sync": bypass_pin_verified,
                     }
                     await db.signature_sessions.insert_one(sig_session)
                     # Back-link to invoice
@@ -1083,8 +1104,31 @@ async def sync_offline_sales(data: dict, user=Depends(get_current_user)):
                             "signature_bypass_reason": sig_session["bypass_reason"],
                             "signature_signed_at": sig_session["bypassed_at"],
                             "offline_signature_origin": True,
+                            "pin_resync_failed": bypass_resync_failed,
                         }},
                     )
+                    # C-1: append a security_events row whenever the manager PIN
+                    # supplied with an offline credit sale fails server-side
+                    # re-verification. Audit Center should query this collection.
+                    if bypass_resync_failed:
+                        try:
+                            await db.security_events.insert_one({
+                                "id": new_id(),
+                                "type": "offline_bypass_pin_resync_failed",
+                                "branch_id": branch_id,
+                                "invoice_id": sale_id,
+                                "invoice_number": inv_number,
+                                "cashier_id": user["id"],
+                                "cashier_name": user.get("full_name") or user.get("username", ""),
+                                "claimed_verifier_id": offline_bypass.get("by_id") or "",
+                                "claimed_verifier_name": offline_bypass.get("by_name") or "",
+                                "reason": offline_bypass.get("reason") or "",
+                                "captured_at": offline_bypass.get("at") or sale.get("timestamp") or now_iso(),
+                                "synced_at": now_iso(),
+                                "envelope_id": envelope_id,
+                            })
+                        except Exception:
+                            pass
                 except Exception as _e:
                     # Non-blocking — sale is already saved; log for audit follow-up
                     import logging

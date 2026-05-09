@@ -57,9 +57,15 @@ export default function OfflineCreditBypassDialog({
     }
     onConfirm?.({
       method: result.method || 'admin_pin',
-      by_name: 'Manager',
+      by_id: result.verifier_id || '',
+      by_name: result.verifier_name || 'Manager',
       reason: reason.trim(),
       at: new Date().toISOString(),
+      // C-1: PIN is verified server-side at sync time. Carry the typed
+      // PIN in the envelope so the backend can re-verify via
+      // verify_pin_for_action() and tag the sale pin_resync_failed if wrong.
+      pin: pin.trim(),
+      deferred_verification: result.deferred_verification === true,
     });
   };
 

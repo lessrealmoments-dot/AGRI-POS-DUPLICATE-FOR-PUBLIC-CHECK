@@ -62,6 +62,15 @@ async def admin_login(data: dict):
 
     # Generic error — don't reveal whether user exists
     if not user or not verify_password(password, user.get("password_hash", "")):
+        try:
+            await _raw_db.security_events.insert_one({
+                "id": new_id(),
+                "type": "admin_login_failed",
+                "email_attempted": email,
+                "at": now_iso(),
+            })
+        except Exception:
+            pass
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     totp_ready = bool(user.get("totp_enabled") and user.get("totp_secret"))
@@ -94,6 +103,16 @@ async def admin_totp(data: dict):
 
     totp = pyotp.TOTP(secret)
     if not totp.verify(code, valid_window=1):
+        try:
+            await _raw_db.security_events.insert_one({
+                "id": new_id(),
+                "type": "admin_totp_failed",
+                "actor_user_id": user_id,
+                "actor_email": user.get("email", ""),
+                "at": now_iso(),
+            })
+        except Exception:
+            pass
         raise HTTPException(status_code=401, detail="Invalid code. Check your Google Authenticator.")
 
     # Log the login
@@ -101,6 +120,16 @@ async def admin_totp(data: dict):
         {"id": user_id},
         {"$set": {"last_admin_login": now_iso()}}
     )
+    try:
+        await _raw_db.security_events.insert_one({
+            "id": new_id(),
+            "type": "admin_login_totp_ok",
+            "actor_user_id": user_id,
+            "actor_email": user.get("email", ""),
+            "at": now_iso(),
+        })
+    except Exception:
+        pass
 
     token = create_token(user["id"], "admin", org_id=None, is_super_admin=True)
     safe_user = {k: v for k, v in user.items() if k not in ("password_hash", "totp_secret", "_id")}
@@ -127,6 +156,16 @@ async def admin_recover(data: dict):
     # Find the matching unused backup code
     matched = next((c for c in stored_codes if c["hash"] == code_hash and not c["used"]), None)
     if not matched:
+        try:
+            await _raw_db.security_events.insert_one({
+                "id": new_id(),
+                "type": "admin_recovery_failed",
+                "actor_user_id": user_id,
+                "actor_email": user.get("email", ""),
+                "at": now_iso(),
+            })
+        except Exception:
+            pass
         raise HTTPException(status_code=401, detail="Invalid or already-used recovery code.")
 
     # Mark code as used
@@ -138,6 +177,16 @@ async def admin_recover(data: dict):
         {"id": user_id},
         {"$set": {"backup_codes": updated_codes, "last_admin_login": now_iso()}}
     )
+    try:
+        await _raw_db.security_events.insert_one({
+            "id": new_id(),
+            "type": "admin_recovery_used",
+            "actor_user_id": user_id,
+            "actor_email": user.get("email", ""),
+            "at": now_iso(),
+        })
+    except Exception:
+        pass
 
     token = create_token(user["id"], "admin", org_id=None, is_super_admin=True)
     safe_user = {k: v for k, v in user.items() if k not in ("password_hash", "totp_secret", "_id")}
@@ -149,13 +198,53 @@ async def admin_recover(data: dict):
 # ---------------------------------------------------------------------------
 @router.post("/setup-totp")
 async def setup_totp(data: dict):
-    """Generate TOTP secret and QR code for first-time setup."""
+    """Generate TOTP secret and QR code for first-time setup.
+
+    C-3 (Audit 2026-02): refuse for any super-admin who has previously
+    logged in OR who already has TOTP enabled. Previously a password
+    holder could call this endpoint at any time and silently take over
+    the account by enrolling their own TOTP secret.
+    """
     pending_token = data.get("pending_token", "")
     user_id = _verify_pending_token(pending_token)
 
     user = await _raw_db.users.find_one({"id": user_id, "is_super_admin": True}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="Invalid session")
+
+    # C-3 — bootstrap-only guard: legitimate first-time setup is fine,
+    # subsequent setup attempts must go through the existing recovery flow
+    # (admin_recover) and explicit super-admin reset.
+    if user.get("totp_enabled"):
+        try:
+            await _raw_db.security_events.insert_one({
+                "id": new_id(),
+                "type": "admin_setup_totp_blocked_already_enabled",
+                "actor_user_id": user_id,
+                "actor_email": user.get("email", ""),
+                "at": now_iso(),
+            })
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=403,
+            detail="TOTP is already enabled on this account. To replace it, use a recovery code first or contact platform support.",
+        )
+    if user.get("last_admin_login"):
+        try:
+            await _raw_db.security_events.insert_one({
+                "id": new_id(),
+                "type": "admin_setup_totp_blocked_post_first_login",
+                "actor_user_id": user_id,
+                "actor_email": user.get("email", ""),
+                "at": now_iso(),
+            })
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=403,
+            detail="TOTP can only be enrolled during the bootstrap window before the first super-admin login. Contact platform support to re-enroll.",
+        )
 
     secret = pyotp.random_base32()
     totp = pyotp.TOTP(secret)
@@ -169,13 +258,26 @@ async def setup_totp(data: dict):
         {"id": user_id},
         {"$set": {"totp_secret": secret, "totp_enabled": False, "totp_verified": False}}
     )
+    try:
+        await _raw_db.security_events.insert_one({
+            "id": new_id(),
+            "type": "admin_setup_totp_initiated",
+            "actor_user_id": user_id,
+            "actor_email": user.get("email", ""),
+            "at": now_iso(),
+        })
+    except Exception:
+        pass
 
     return {"secret": secret, "qr_uri": qr_uri, "pending_token": pending_token}
 
 
 @router.post("/verify-setup")
 async def verify_totp_setup(data: dict):
-    """Verify first TOTP code, enable TOTP, generate backup codes."""
+    """Verify first TOTP code, enable TOTP, generate backup codes.
+
+    C-3: same bootstrap-only guard as /setup-totp.
+    """
     pending_token = data.get("pending_token", "")
     code = data.get("code", "").strip()
 
@@ -183,6 +285,25 @@ async def verify_totp_setup(data: dict):
     user = await _raw_db.users.find_one({"id": user_id, "is_super_admin": True}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="Invalid session")
+
+    # C-3 — refuse to (re-)enable TOTP after first login or if already enabled
+    if user.get("totp_enabled") or user.get("last_admin_login"):
+        try:
+            await _raw_db.security_events.insert_one({
+                "id": new_id(),
+                "type": "admin_verify_setup_blocked",
+                "actor_user_id": user_id,
+                "actor_email": user.get("email", ""),
+                "totp_enabled": bool(user.get("totp_enabled")),
+                "had_prior_login": bool(user.get("last_admin_login")),
+                "at": now_iso(),
+            })
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=403,
+            detail="TOTP enrolment is locked. Use a recovery code or contact platform support to reset.",
+        )
 
     secret = user.get("totp_secret")
     if not secret:

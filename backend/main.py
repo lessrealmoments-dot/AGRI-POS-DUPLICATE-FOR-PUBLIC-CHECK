@@ -1178,10 +1178,22 @@ async def shutdown_db_client():
 # INCLUDE ROUTER & MIDDLEWARE
 # =============================================================================
 app.include_router(api_router)
+# C-1 related hardening (Audit 2026-02): in production we refuse to wildcard
+# CORS. The operator must set CORS_ORIGINS explicitly to a comma-separated
+# allowlist. In dev / staging (`ENV` unset or != "production"), wildcard
+# remains the default for ergonomic local testing.
+_env_name = os.environ.get("ENV", "").lower()
+_cors_origins_raw = os.environ.get("CORS_ORIGINS", "*")
+_cors_allowlist = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
+if _env_name == "production" and (not _cors_allowlist or "*" in _cors_allowlist):
+    raise RuntimeError(
+        "CORS_ORIGINS must be an explicit allowlist when ENV=production. "
+        "Wildcard '*' is refused. Set CORS_ORIGINS=https://your.domain.com[,https://other] in env."
+    )
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=_cors_allowlist or ["*"],
     allow_methods=["*"],
     allow_headers=["*"]
 )

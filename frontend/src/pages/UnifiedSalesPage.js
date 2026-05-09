@@ -887,15 +887,18 @@ export default function UnifiedSalesPage() {
         cacheCustomers(custRes.data.customers || posRes.data.customers),
         cachePriceSchemes(schemeRes.data || posRes.data.price_schemes),
       ]);
-      // Cache admin_pin bcrypt hash + branch-scoped manager PIN grants
-      // for offline manager-PIN verification (Iter 192 — Offline Mode
-      // Robustness Overhaul). Managers run the POS, so we ship their
-      // PINs scoped to this branch. Admin PINs work all branches.
-      if (posRes.data.admin_pin_hash) {
-        await setOfflineAdminPinHash(posRes.data.admin_pin_hash);
-      }
+      // C-1 (Audit 2026-02): admin_pin_hash is no longer shipped — null
+      // out any stale value so deferred verification kicks in. Identity-only
+      // grants are persisted for "Approved by …" UI labels.
+      await setOfflineAdminPinHash(null);
       if (Array.isArray(posRes.data.offline_pin_grants)) {
-        await setOfflinePinGrants(posRes.data.offline_pin_grants);
+        const identityOnly = posRes.data.offline_pin_grants.map((g) => ({
+          verifier_id: g.verifier_id,
+          verifier_name: g.verifier_name,
+          method: g.method,
+          role: g.role,
+        }));
+        await setOfflinePinGrants(identityOnly);
       }
       setDataLoaded(true);
     } catch (e) {

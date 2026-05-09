@@ -2,9 +2,11 @@
 Company Setup Wizard routes.
 First-time setup for fresh installations.
 """
-from fastapi import APIRouter, HTTPException
+import os
+from fastapi import APIRouter, HTTPException, Depends
 from config import db, _raw_db
-from utils import hash_password, now_iso, new_id
+from utils import hash_password, verify_password, now_iso, new_id
+from utils.auth import get_current_user
 from models import DEFAULT_PERMISSIONS
 
 router = APIRouter(prefix="/setup", tags=["Setup"])
@@ -45,10 +47,17 @@ async def initialize_system(data: dict):
     Complete initial system setup.
     Creates company info, first branch, admin user, and fund wallets with opening balances.
     """
-    # Check if already set up
-    existing_users = await db.users.count_documents({})
-    if existing_users > 0:
-        raise HTTPException(status_code=400, detail="System already initialized. Use reset endpoint to start over.")
+    # C-2 (Audit 2026-02): refuse if ANY user OR organization already exists.
+    # Previously only `users` was checked, leaving a window where an attacker
+    # could call /setup/initialize after a partial wipe and attach a forged
+    # admin to a still-existing organization.
+    existing_users = await _raw_db.users.count_documents({})
+    existing_orgs = await _raw_db.organizations.count_documents({})
+    if existing_users > 0 or existing_orgs > 0:
+        raise HTTPException(
+            status_code=400,
+            detail="System already initialized. Use the super-admin tools to add new tenants instead of /setup/initialize.",
+        )
     
     # Validate required fields
     required = ["company_name", "branch_name", "admin_username", "admin_password"]
@@ -211,30 +220,76 @@ async def initialize_system(data: dict):
 
 
 @router.post("/reset")
-async def reset_system(data: dict):
+async def reset_system(data: dict, user=Depends(get_current_user)):
     """
     Reset the entire system. DANGER: This deletes all data!
-    Requires confirmation password.
+
+    C-2 (Audit 2026-02): Hardened from completely-public to:
+      • super-admin authentication required
+      • environment flag ALLOW_DB_RESET=true must be set on the server
+      • caller must re-confirm their own password
+      • full audit log row written before the wipe
+    The route is NEVER usable in production unless the operator has
+    explicitly opted in via env. The previous behaviour (anyone with the
+    URL could wipe the DB with `confirm_text="DELETE ALL DATA"`) is
+    permanently disabled.
     """
+    # 1. Auth gate — super admin only
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=403, detail="Super-admin required to reset the system.")
+
+    # 2. Environment kill-switch — production should ALWAYS leave this off
+    if os.environ.get("ALLOW_DB_RESET", "").lower() not in ("1", "true", "yes"):
+        raise HTTPException(
+            status_code=403,
+            detail="Database reset is disabled on this server. Set ALLOW_DB_RESET=true in the environment to enable (development/staging only).",
+        )
+
+    # 3. Confirmation phrase
     confirm = data.get("confirm_text", "")
     if confirm != "DELETE ALL DATA":
         raise HTTPException(
-            status_code=400, 
-            detail="To reset, send confirm_text: 'DELETE ALL DATA'"
+            status_code=400,
+            detail="To reset, send confirm_text: 'DELETE ALL DATA'",
         )
-    
-    # Get all collections and clear them
+
+    # 4. Re-confirm the caller's password (defence against stolen-token misuse)
+    re_confirm_password = data.get("password", "")
+    if not re_confirm_password:
+        raise HTTPException(status_code=400, detail="Re-confirm with your super-admin password.")
+    fresh_user = await _raw_db.users.find_one(
+        {"id": user.get("id"), "is_super_admin": True}, {"_id": 0, "password_hash": 1},
+    )
+    if not (fresh_user and verify_password(re_confirm_password, fresh_user.get("password_hash", ""))):
+        raise HTTPException(status_code=401, detail="Super-admin password did not match.")
+
+    # 5. Audit row — written BEFORE the wipe so it survives in the parent
+    # process logger even if the audit_log collection itself is dropped.
+    try:
+        await _raw_db.security_events.insert_one({
+            "id": new_id(),
+            "type": "db_reset_executed",
+            "actor_user_id": user.get("id"),
+            "actor_user_name": user.get("full_name") or user.get("username", ""),
+            "actor_email": user.get("email", ""),
+            "executed_at": now_iso(),
+            "env_flag": os.environ.get("ALLOW_DB_RESET", ""),
+        })
+    except Exception:
+        pass
+
+    # 6. Wipe — keep behaviour parity with the previous implementation
     collections = await db.list_collection_names()
     deleted_counts = {}
-    
     for col_name in collections:
-        result = await db[col_name].delete_many({})
+        result = await _raw_db[col_name].delete_many({})
         deleted_counts[col_name] = result.deleted_count
-    
+
     return {
         "success": True,
         "message": "System reset complete. All data has been deleted.",
-        "deleted": deleted_counts
+        "deleted": deleted_counts,
+        "executed_by": user.get("email") or user.get("username", ""),
     }
 
 

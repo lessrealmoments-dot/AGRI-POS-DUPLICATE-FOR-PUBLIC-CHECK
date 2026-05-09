@@ -660,12 +660,16 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
 
       // Save sync timestamp
       await setLastSyncTime(posRes.data.sync_time || new Date().toISOString());
-      // Phase 2: cache admin_pin hash for offline manager bypass
-      if (posRes.data.admin_pin_hash) {
-        await setOfflineAdminPinHash(posRes.data.admin_pin_hash);
-      }
+      // C-1 (Audit 2026-02): admin_pin_hash deprecated; cache identity-only grants
+      await setOfflineAdminPinHash(null);
       if (Array.isArray(posRes.data.offline_pin_grants)) {
-        await setOfflinePinGrants(posRes.data.offline_pin_grants);
+        const identityOnly = posRes.data.offline_pin_grants.map((g) => ({
+          verifier_id: g.verifier_id,
+          verifier_name: g.verifier_name,
+          method: g.method,
+          role: g.role,
+        }));
+        await setOfflinePinGrants(identityOnly);
       }
 
       // Sync pending offline sales
@@ -743,12 +747,16 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
           ]);
 
           await setLastSyncTime(posRes.data.sync_time || new Date().toISOString());
-          // Phase 2: cache admin_pin hash for offline manager bypass
-          if (posRes.data.admin_pin_hash) {
-            await setOfflineAdminPinHash(posRes.data.admin_pin_hash);
-          }
+          // C-1 (Audit 2026-02): admin_pin_hash deprecated; identity-only grants
+          await setOfflineAdminPinHash(null);
           if (Array.isArray(posRes.data.offline_pin_grants)) {
-            await setOfflinePinGrants(posRes.data.offline_pin_grants);
+            const identityOnly = posRes.data.offline_pin_grants.map((g) => ({
+              verifier_id: g.verifier_id,
+              verifier_name: g.verifier_name,
+              method: g.method,
+              role: g.role,
+            }));
+            await setOfflinePinGrants(identityOnly);
           }
 
           const count = await getPendingSaleCount();

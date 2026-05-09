@@ -211,13 +211,24 @@ export async function refreshPOSCache(branchId = null) {
     const timestamp = sync_time || new Date().toISOString();
     await setMeta('last_sync', timestamp);
     await setMeta('last_sync_branch', branchId || 'all');
-    // Cache admin_pin hash for offline manager bypass (Phase 2)
-    if (admin_pin_hash) {
-      await setOfflineAdminPinHash(admin_pin_hash);
-    }
-    // Cache branch-scoped manager + admin/owner PIN grants
+    // C-1 (Audit 2026-02): server no longer ships admin_pin_hash. We
+    // proactively NULL out any stale value cached by older builds so the
+    // offline-auth fallback path (lib/offlineAuth.js) drops to deferred
+    // verification within one sync cycle.
+    await setOfflineAdminPinHash(null);
+    // Cache approver IDENTITY directory only — server has stripped any
+    // `pin` field. Used purely for "Approved by …" UI labels; verification
+    // happens server-side at sync time.
     if (Array.isArray(offline_pin_grants)) {
-      await setOfflinePinGrants(offline_pin_grants);
+      const identityOnly = offline_pin_grants.map((g) => ({
+        verifier_id: g.verifier_id,
+        verifier_name: g.verifier_name,
+        method: g.method,
+        role: g.role,
+        // Defensive: never persist a `pin` field even if a legacy server build
+        // sneaks one in. Strip aggressively.
+      }));
+      await setOfflinePinGrants(identityOnly);
     }
     await setMeta('last_sync_counts', {
       // Read live counts from IndexedDB so delta syncs (where the payload is
