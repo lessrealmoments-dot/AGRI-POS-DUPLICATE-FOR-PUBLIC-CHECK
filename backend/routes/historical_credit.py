@@ -10,7 +10,7 @@ required by the Phase 3 business rules.
 
 See `/app/memory/PHASE_3_HISTORICAL_CREDIT.md` for the workflow spec.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from typing import Optional, Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -28,6 +28,10 @@ router = APIRouter(prefix="/historical-credit", tags=["Historical Credit"])
 REASON_MIN_LENGTH = 20
 SOURCE_TAG = "historical_credit_encoding"
 APPROVAL_EVENT_KEY = "historical_credit_encoding"
+# Phase 4A — Soft floor: dates within this many days back must use the
+# regular Sales late-encode flow (manager-PIN approval), NOT the heavier
+# Historical Credit / Notebook AR channel which requires Owner/Admin TOTP.
+LATE_ENCODE_SOFT_FLOOR_DAYS = 7
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -54,6 +58,7 @@ def _validate_payload(data: dict, today: str) -> dict:
         errors.append("customer_id is required")
     if not branch_id:
         errors.append("branch_id is required")
+    soft_floor_violation: Optional[dict] = None
     if not transaction_date:
         errors.append("transaction_date is required")
     elif len(transaction_date) < 10 or transaction_date[4] != "-" or transaction_date[7] != "-":
@@ -64,6 +69,31 @@ def _validate_payload(data: dict, today: str) -> dict:
         errors.append(
             "transaction_date is today — historical credit encoding is for "
             "PAST notebook entries; use the normal POS for today's credit sale.")
+    else:
+        # Phase 4A — soft floor: within the normal late-encode window the
+        # entry must go through the regular Sales late-encode path (which
+        # only needs manager PIN), not Historical Credit / Notebook AR
+        # (which demands Owner/Admin TOTP). This protects the heavier
+        # channel from being misused for routine 1–7 day backdated credit.
+        try:
+            tdate = datetime.strptime(transaction_date[:10], "%Y-%m-%d").date()
+            todate = datetime.strptime(today[:10], "%Y-%m-%d").date()
+            days_back = (todate - tdate).days
+            if 0 < days_back <= LATE_ENCODE_SOFT_FLOOR_DAYS:
+                soft_floor_violation = {
+                    "error": "use_regular_late_encode",
+                    "message": (
+                        "Use the regular Sales late-encode path for dates "
+                        f"within the normal late-encode window "
+                        f"(1–{LATE_ENCODE_SOFT_FLOOR_DAYS} days back). "
+                        "Historical Credit / Notebook AR is for older "
+                        "entries only."
+                    ),
+                    "days_back": days_back,
+                    "soft_floor_days": LATE_ENCODE_SOFT_FLOOR_DAYS,
+                }
+        except ValueError:
+            errors.append("transaction_date must be YYYY-MM-DD")
 
     if len(reason) < REASON_MIN_LENGTH:
         errors.append(
@@ -84,6 +114,11 @@ def _validate_payload(data: dict, today: str) -> dict:
 
     if errors:
         raise HTTPException(status_code=400, detail={"errors": errors})
+
+    # Soft floor takes effect only after the rest of the payload looks
+    # well-formed — otherwise we'd shadow more useful validation errors.
+    if soft_floor_violation is not None:
+        raise HTTPException(status_code=400, detail=soft_floor_violation)
 
     return {
         "customer_id": customer_id,

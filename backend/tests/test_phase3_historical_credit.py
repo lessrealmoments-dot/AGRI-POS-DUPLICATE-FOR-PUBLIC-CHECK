@@ -79,7 +79,7 @@ async def test_cashier_cannot_create_historical_credit():
         with pytest.raises(HTTPException) as ei:
             await create_historical_credit(
                 _good_payload(branch_id=branch_id, customer_id=cust_id,
-                              product_id=prod_id, transaction_date=_days_ago(2)),
+                              product_id=prod_id, transaction_date=_days_ago(10)),
                 user=cashier,
             )
         assert ei.value.status_code == 403
@@ -102,7 +102,7 @@ async def test_missing_reason_rejected():
     set_org_context(org_id)
     try:
         bad = _good_payload(branch_id=branch_id, customer_id=cust_id,
-                            product_id=prod_id, transaction_date=_days_ago(2))
+                            product_id=prod_id, transaction_date=_days_ago(10))
         bad["reason"] = "too short"  # < 20 chars
         with pytest.raises(HTTPException) as ei:
             await create_historical_credit(bad, user=admin)
@@ -123,7 +123,7 @@ async def test_missing_customer_rejected():
     set_org_context(org_id)
     try:
         bad = _good_payload(branch_id=branch_id, customer_id="",
-                            product_id=prod_id, transaction_date=_days_ago(2))
+                            product_id=prod_id, transaction_date=_days_ago(10))
         with pytest.raises(HTTPException) as ei:
             await create_historical_credit(bad, user=admin)
         assert ei.value.status_code == 400
@@ -172,7 +172,7 @@ async def test_historical_credit_after_count_deducts_inventory():
     # Approved count sheet 5 days ago
     await db.count_sheets.insert_one({
         "id": _uid("cs"), "branch_id": branch_id, "status": "completed",
-        "completed_at": (datetime.now(timezone.utc) - timedelta(days=5)).isoformat(),
+        "completed_at": (datetime.now(timezone.utc) - timedelta(days=15)).isoformat(),
         "items": [{"product_id": prod_id}],
     })
     admin = fake_user(org_id, admin_id, branch_id=branch_id, role="admin")
@@ -180,7 +180,7 @@ async def test_historical_credit_after_count_deducts_inventory():
     try:
         # Transaction 2 days ago (AFTER the count) — inventory should deduct
         payload = _good_payload(branch_id=branch_id, customer_id=cust_id,
-                                product_id=prod_id, transaction_date=_days_ago(2),
+                                product_id=prod_id, transaction_date=_days_ago(10),
                                 approval_code=_fresh_totp(totp_secret))
         res = await create_historical_credit(payload, user=admin)
         assert res["ok"] is True
@@ -221,7 +221,7 @@ async def test_historical_credit_before_count_skips_inventory():
     # Approved count sheet 2 days ago
     await db.count_sheets.insert_one({
         "id": _uid("cs"), "branch_id": branch_id, "status": "completed",
-        "completed_at": (datetime.now(timezone.utc) - timedelta(days=2)).isoformat(),
+        "completed_at": (datetime.now(timezone.utc) - timedelta(days=10)).isoformat(),
         "items": [{"product_id": prod_id}],
     })
     admin = fake_user(org_id, admin_id, branch_id=branch_id, role="admin")
@@ -229,7 +229,7 @@ async def test_historical_credit_before_count_skips_inventory():
     try:
         # Transaction 5 days ago (BEFORE the count) — inventory must NOT deduct
         payload = _good_payload(branch_id=branch_id, customer_id=cust_id,
-                                product_id=prod_id, transaction_date=_days_ago(5),
+                                product_id=prod_id, transaction_date=_days_ago(15),
                                 approval_code=_fresh_totp(totp_secret))
         res = await create_historical_credit(payload, user=admin)
         assert res["inventory_action"] == "skipped_count_sheet_lock"
@@ -243,7 +243,7 @@ async def test_historical_credit_before_count_skips_inventory():
 
         # With admin override — inventory DOES deduct (test 12 path B)
         payload2 = _good_payload(branch_id=branch_id, customer_id=cust_id,
-                                  product_id=prod_id, transaction_date=_days_ago(5),
+                                  product_id=prod_id, transaction_date=_days_ago(15),
                                   grand_total=500, allow_inv=True,
                                   approval_code=_fresh_totp(totp_secret))
         res2 = await create_historical_credit(payload2, user=admin)
@@ -276,7 +276,7 @@ async def test_transaction_date_and_encoded_at_separate():
     admin = fake_user(org_id, admin_id, branch_id=branch_id, role="admin")
     set_org_context(org_id)
     try:
-        old = _days_ago(7)
+        old = _days_ago(14)
         payload = _good_payload(branch_id=branch_id, customer_id=cust_id,
                                 product_id=prod_id, transaction_date=old,
                                 approval_code=_fresh_totp(totp_secret))
@@ -319,7 +319,7 @@ async def test_appears_in_encoded_today_and_ledger():
     admin = fake_user(org_id, admin_id, branch_id=branch_id, role="admin")
     set_org_context(org_id)
     try:
-        old = _days_ago(3)
+        old = _days_ago(10)
         payload = _good_payload(branch_id=branch_id, customer_id=cust_id,
                                 product_id=prod_id, transaction_date=old,
                                 approval_code=_fresh_totp(totp_secret))
@@ -368,7 +368,7 @@ async def test_old_zreport_regular_section_unaffected():
     admin = fake_user(org_id, admin_id, branch_id=branch_id, role="admin")
     set_org_context(org_id)
     try:
-        old = _days_ago(4)
+        old = _days_ago(11)
         payload = _good_payload(branch_id=branch_id, customer_id=cust_id,
                                 product_id=prod_id, transaction_date=old,
                                 approval_code=_fresh_totp(totp_secret))
@@ -408,7 +408,7 @@ async def test_customer_balance_goes_up_by_grand_total():
     set_org_context(org_id)
     try:
         payload = _good_payload(branch_id=branch_id, customer_id=cust_id,
-                                product_id=prod_id, transaction_date=_days_ago(1),
+                                product_id=prod_id, transaction_date=_days_ago(8),
                                 grand_total=750,
                                 approval_code=_fresh_totp(totp_secret))
         await create_historical_credit(payload, user=admin)
@@ -450,7 +450,7 @@ async def test_cross_branch_blocked_for_non_privileged_admin_pattern():
     try:
         # Manager → blocked at the assert_admin_or_owner gate
         payload = _good_payload(branch_id=branch_b, customer_id=cust_id,
-                                product_id=prod_id, transaction_date=_days_ago(2))
+                                product_id=prod_id, transaction_date=_days_ago(10))
         with pytest.raises(HTTPException) as ei:
             await create_historical_credit(payload, user=manager)
         assert ei.value.status_code == 403
@@ -473,7 +473,7 @@ async def test_preview_is_read_only():
     set_org_context(org_id)
     try:
         payload = _good_payload(branch_id=branch_id, customer_id=cust_id,
-                                product_id=prod_id, transaction_date=_days_ago(2))
+                                product_id=prod_id, transaction_date=_days_ago(10))
         res = await preview_historical_credit(payload, user=admin)
         assert res["preview"] is True
         # Customer balance unchanged
@@ -506,7 +506,7 @@ async def test_list_returns_only_historical_credits():
     set_org_context(org_id)
     try:
         payload = _good_payload(branch_id=branch_id, customer_id=cust_id,
-                                product_id=prod_id, transaction_date=_days_ago(2),
+                                product_id=prod_id, transaction_date=_days_ago(10),
                                 approval_code=_fresh_totp(totp_secret))
         await create_historical_credit(payload, user=admin)
 
@@ -523,5 +523,103 @@ async def test_list_returns_only_historical_credits():
         await _raw_db.products.delete_one({"id": prod_id})
         await _raw_db.users.delete_many({"id": {"$in": [admin_id, approver_id]}})
         await _raw_db.inventory.delete_many({"branch_id": branch_id})
+        await _raw_db.organizations.delete_one({"id": org_id})
+        await _raw_db.branches.delete_one({"id": branch_id})
+
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Phase 4A — 7-day soft floor (within-window dates rejected)
+# ─────────────────────────────────────────────────────────────────────
+@pytest.mark.asyncio
+async def test_soft_floor_rejects_dates_within_7_days():
+    """Dates 1–7 days back must be rejected with `use_regular_late_encode`
+    so that admins do not accidentally route routine backdated credit
+    through the heavier Owner/Admin-TOTP Historical Credit channel."""
+    org_id, branch_id, admin_id = await make_tenant()
+    cust_id = await seed_customer(org_id, branch_id)
+    prod_id = await seed_product(org_id, branch_id)
+    approver_id, totp_secret = await seed_totp_admin(org_id, branch_id)
+    admin = fake_user(org_id, admin_id, branch_id=branch_id, role="admin")
+    set_org_context(org_id)
+    try:
+        for n in (1, 3, 7):
+            payload = _good_payload(
+                branch_id=branch_id, customer_id=cust_id,
+                product_id=prod_id, transaction_date=_days_ago(n),
+                approval_code=_fresh_totp(totp_secret),
+            )
+            with pytest.raises(HTTPException) as ei:
+                await create_historical_credit(payload, user=admin)
+            assert ei.value.status_code == 400, f"expected 400 for {n} days back"
+            detail = ei.value.detail
+            assert isinstance(detail, dict), f"expected dict detail for {n} days"
+            assert detail.get("error") == "use_regular_late_encode", detail
+            assert detail.get("days_back") == n
+            assert detail.get("soft_floor_days") == 7
+    finally:
+        await _raw_db.invoices.delete_many({"customer_id": cust_id})
+        await _raw_db.late_encode_log.delete_many({"branch_id": branch_id})
+        await _raw_db.security_events.delete_many({"branch_id": branch_id})
+        await _raw_db.customers.delete_one({"id": cust_id})
+        await _raw_db.products.delete_one({"id": prod_id})
+        await _raw_db.users.delete_many({"id": {"$in": [admin_id, approver_id]}})
+        await _raw_db.inventory.delete_many({"branch_id": branch_id})
+        await _raw_db.organizations.delete_one({"id": org_id})
+        await _raw_db.branches.delete_one({"id": branch_id})
+
+
+@pytest.mark.asyncio
+async def test_soft_floor_allows_dates_8_days_or_more():
+    """Boundary check: a transaction 8 days back must be accepted."""
+    org_id, branch_id, admin_id = await make_tenant()
+    cust_id = await seed_customer(org_id, branch_id, balance=0)
+    prod_id = await seed_product(org_id, branch_id)
+    approver_id, totp_secret = await seed_totp_admin(org_id, branch_id)
+    admin = fake_user(org_id, admin_id, branch_id=branch_id, role="admin")
+    set_org_context(org_id)
+    try:
+        payload = _good_payload(
+            branch_id=branch_id, customer_id=cust_id,
+            product_id=prod_id, transaction_date=_days_ago(8),
+            approval_code=_fresh_totp(totp_secret),
+        )
+        res = await create_historical_credit(payload, user=admin)
+        assert res["ok"] is True
+        assert res["invoice"]["source"] == "historical_credit_encoding"
+    finally:
+        await _raw_db.invoices.delete_many({"customer_id": cust_id})
+        await _raw_db.movements.delete_many({"branch_id": branch_id})
+        await _raw_db.late_encode_log.delete_many({"branch_id": branch_id})
+        await _raw_db.security_events.delete_many({"branch_id": branch_id})
+        await _raw_db.customers.delete_one({"id": cust_id})
+        await _raw_db.products.delete_one({"id": prod_id})
+        await _raw_db.users.delete_many({"id": {"$in": [admin_id, approver_id]}})
+        await _raw_db.inventory.delete_many({"branch_id": branch_id})
+        await _raw_db.organizations.delete_one({"id": org_id})
+        await _raw_db.branches.delete_one({"id": branch_id})
+
+
+@pytest.mark.asyncio
+async def test_soft_floor_preview_also_rejects_within_window():
+    """Preview must enforce the soft floor too — UI should never even see
+    a successful preview for a 1–7 day backdated entry."""
+    org_id, branch_id, admin_id = await make_tenant()
+    cust_id = await seed_customer(org_id, branch_id)
+    prod_id = await seed_product(org_id, branch_id)
+    admin = fake_user(org_id, admin_id, branch_id=branch_id, role="admin")
+    set_org_context(org_id)
+    try:
+        payload = _good_payload(
+            branch_id=branch_id, customer_id=cust_id,
+            product_id=prod_id, transaction_date=_days_ago(3),
+        )
+        with pytest.raises(HTTPException) as ei:
+            await preview_historical_credit(payload, user=admin)
+        assert ei.value.status_code == 400
+        assert ei.value.detail.get("error") == "use_regular_late_encode"
+    finally:
+        await _raw_db.customers.delete_one({"id": cust_id})
+        await _raw_db.products.delete_one({"id": prod_id})
         await _raw_db.organizations.delete_one({"id": org_id})
         await _raw_db.branches.delete_one({"id": branch_id})

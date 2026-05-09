@@ -1,0 +1,68 @@
+{
+  "summary": "Phase 4A iter256 — BACKEND fully PASSES (28/28 phase3+phase4a unit + 6/6 new live smoke against the public preview URL = 34 backend test pass). FRONTEND is fully BLOCKED by a Temporal Dead Zone (TDZ) ReferenceError thrown by UnifiedSalesPage.js on mount: 'Cannot access paymentType before initialization'. The whole /sales-new page crashes inside React's first render so no FE-1..FE-11 assertion can be exercised. Root cause is a hook-ordering mistake in the new Phase 4A code: isHistoricalCreditMode (lines 485-489) and isBackdatedNonCreditBlocked (lines 495-497) reference `paymentType` inside their useMemo bodies, but `const [paymentType, setPaymentType] = useState('cash')` is not declared until line 533 — same component scope, JS TDZ raises ReferenceError before the memos can run. Backend soft-floor (BACKEND-1, BACKEND-2), approval gate (BACKEND-3, BACKEND-4), list (BACKEND-5), and unified-sale today-cash regression (BACKEND-6) all behave exactly as specified.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "UnifiedSalesPage",
+        "issue": "Uncaught ReferenceError: Cannot access 'paymentType' before initialization. The `isHistoricalCreditMode` useMemo (line ~485) and `isBackdatedNonCreditBlocked` useMemo (line ~495) read `paymentType`, but `useState('cash')` for paymentType is declared at line ~533 (later in the same function body). JavaScript TDZ rejects the read and React unmounts the entire page tree to the global error overlay. This blocks ALL of FE-1..FE-11. Fix: move the `paymentType` (and any sibling state the memos touch — verify `daysBack` is fine since it is declared at line ~469 BEFORE the memos and works) useState declarations above the new Phase 4A memos, OR move the `isHistoricalCreditMode` / `isBackdatedNonCreditBlocked` memo definitions below the useState block (line ~533+).",
+        "selector": "UnifiedSalesPage.js lines 485-497 vs 533",
+        "priority": "CRITICAL"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Historical Credit / Notebook AR full UI flow (banner → reason → preview → TOTP → commit)",
+        "issue": "Cannot be exercised end-to-end because UnifiedSalesPage crashes before mount. Re-test required after the TDZ fix.",
+        "affected_selectors": [
+          "[data-testid='unified-sales-page']",
+          "[data-testid='historical-credit-banner']",
+          "[data-testid='backdated-non-credit-block']",
+          "[data-testid='historical-credit-reason-input']",
+          "[data-testid='historical-credit-proof-url-input']",
+          "[data-testid='historical-credit-notebook-ref-input']",
+          "[data-testid='historical-credit-dialog']",
+          "[data-testid='historical-credit-preview-btn']",
+          "[data-testid='historical-credit-customer-owes-snapshot']",
+          "[data-testid='historical-credit-approval-code-input']",
+          "[data-testid='historical-credit-commit-btn']",
+          "[data-testid='historical-credit-commit-error']"
+        ]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase4a_live_smoke.py",
+    "/app/backend/tests/test_phase3_historical_credit.py",
+    "/app/backend/tests/test_phase4a_approval_gate.py",
+    "/app/test_reports/pytest/iter256_phase4a_live.xml"
+  ],
+  "action_items": [
+    "P0: Fix the TDZ ordering in /app/frontend/src/pages/UnifiedSalesPage.js. Either (a) move `const [paymentType, setPaymentType] = useState('cash')` (line ~533) and any sibling state read by the new memos to ABOVE the `isHistoricalCreditMode` (line ~485) and `isBackdatedNonCreditBlocked` (line ~495) useMemo blocks, or (b) relocate those two new useMemo blocks to AFTER the entire useState section. Make sure hook-call order remains stable across renders.",
+    "P0: After the TDZ fix lands, re-run the FE-1..FE-11 playbook (login as test_org_admin@regression.local → /sales-new → add cart item → flip date 14 days back → toggle credit/cash/digital/split → verify banner data-testids → run preview → enter wrong TOTP → assert 403 surfaced).",
+    "P1: Add a tiny smoke test (jest/RTL or just a Playwright load assertion) that mounts UnifiedSalesPage and asserts no `Uncaught ReferenceError` is logged — this whole class of bug should fail in CI, not at user-side."
+  ],
+  "critical_code_review_comments": [
+    "Phase 4A frontend regression — the new memos at lines 485-497 of UnifiedSalesPage.js read `paymentType` from a useState declared later in the same component body. This is a TDZ ReferenceError on the very first render. Hook-ordering / declaration-ordering inside a 5,500-line component is fragile; consider extracting Phase 4A state and memos into a custom hook (e.g. useHistoricalCreditMode(transactionDate, paymentType, user)) so the dependency direction is explicit and lint-detectable.",
+    "/app/backend/routes/historical_credit.py soft-floor logic in _validate_payload now correctly raises 400 use_regular_late_encode for days_back 1..7 — verified via live API. Implementation order (errors first, then soft_floor_violation) is the right call since it surfaces grand_total/customer_id problems before the 7-day gate.",
+    "/app/backend/routes/historical_credit.py commit endpoint correctly returns 400 approval_code_required and 403 approval_invalid as specified — verified via live API against the regression admin (no TOTP enrolled) so the wrong-code path was exercised end-to-end.",
+    "Live smoke: GET /api/historical-credit returns 200 (admin-only list) and POST /api/unified-sale today's cash sale still returns 200 — no Phase 4A backend regression on the regular Sales path."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_phase4a_live_smoke.py (NEW — 6 live API smoke tests covering BACKEND-1..BACKEND-6 from the iter256 review request)"
+  ],
+  "success_rate": {
+    "backend": "100% (28/28 phase3+phase4a pytest passing in isolation + 6/6 new live smoke against public preview URL = 34 of 34 backend assertions pass)",
+    "frontend": "0% — UnifiedSalesPage crashes on mount with TDZ ReferenceError before any data-testid can render; FE-1..FE-11 are blocked"
+  },
+  "test_credentials": "test_org_admin@regression.local / RegressionPass!2026 (admin role; no TOTP enrolled — used to exercise the 403 approval_invalid path). Super admin credentials per /app/memory/test_credentials.md were not needed.",
+  "seed_data_creation": "test_phase4a_live_smoke.py picks the first existing customer + product the regression admin can read; no new tenant data was inserted (the soft-floor 400 / approval-gate 400 / approval-invalid 403 paths short-circuit before any DB write). The /api/unified-sale today-cash test inserts one normal invoice with idempotency_key=phase4a-live-smoke-<8-hex>; no cleanup required — it is a valid sale by design.",
+  "retest_needed": true,
+  "main_agent_can_self_test": false,
+  "context_for_next_testing_agent": "Backend Phase 4A is GREEN. The remaining work is purely frontend — once the main agent fixes the paymentType TDZ ordering bug in UnifiedSalesPage.js, re-run the FE-1..FE-11 playbook from the iter256 review request. Re-run cleanups: (1) `python3 -c \"...delete_many(username regex admin-[0-9a-f]{4})...\"` cleared 1,602 leaked test users from previous fork runs — re-run if you see DuplicateKeyError on admin-* in the phase3/phase4a unit suites. (2) Live smoke command: `cd /app/backend && REACT_APP_BACKEND_URL=https://phase4a-frontend.preview.emergentagent.com python3 -m pytest tests/test_phase4a_live_smoke.py -v`. (3) Phase 4A backend pytest: `cd /app/backend && python3 -m pytest tests/test_phase3_historical_credit.py tests/test_phase4a_approval_gate.py -v` → expect 28 passed.",
+  "rca of the issue": "REPRODUCTION: Login as test_org_admin@regression.local at /login, click 'Sales' in the sidebar (route resolves to /sales-new which renders UnifiedSalesPage). Page tree never mounts; React's dev overlay shows: 'ReferenceError: Cannot access paymentType before initialization at UnifiedSalesPage (bundle.js:484544:187)'. ROOT CAUSE: The two new Phase 4A useMemo blocks at lines 485-489 (isHistoricalCreditMode) and 495-497 (isBackdatedNonCreditBlocked) reference `paymentType` inside their bodies and dependency arrays, but `const [paymentType, setPaymentType] = useState('cash')` is hoisted-as-uninitialized at line 533 of the same component scope (TDZ). JavaScript correctly throws ReferenceError on first render, before any memo can compute. MITIGATION: Move the paymentType useState (and verify daysBack/isPrivilegedRole are still resolved earlier — they are at lines 469 and 426 respectively, so they are fine) above the new Phase 4A memos. Alternative: move the two new memos to after the full useState block (~line 533+). Either change preserves React hook-call order across renders. Once landed, FE-1..FE-11 should be re-executed end-to-end."
+}

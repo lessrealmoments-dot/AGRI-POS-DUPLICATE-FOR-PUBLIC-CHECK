@@ -420,18 +420,32 @@ export default function UnifiedSalesPage() {
   const [floorDate, setFloorDate] = useState(null); // earliest operational date — blocks dates before this
   const [dateError, setDateError] = useState(null); // inline error shown below the Sale Date field
 
+  // Phase 4A — admins/owners can encode notebook AR (Historical Credit /
+  // Late-AR) that's older than the 7-day late-encode window. We keep the
+  // existing 7-day cap for everyone else so cashier UX is unchanged.
+  const isPrivilegedRole = useMemo(
+    () => user?.is_super_admin
+      || ['admin', 'owner', 'super_admin'].includes(user?.role || ''),
+    [user?.role, user?.is_super_admin],
+  );
+
   // Min selectable date for the date picker. Iter 243.1: expanded back by 7
   // days so cashiers can pick a closed past day to trigger the Late-Encode
   // flow (credit/partial only — server enforces). Capped at floorDate so
   // dates before the system existed are still blocked.
   const minAllowedDate = useMemo(() => {
     const today = localToday();
+    // Phase 4A: admins/owners may pick any past date (down to floorDate)
+    // for Historical Credit / Notebook AR encoding.
+    if (isPrivilegedRole) {
+      return floorDate || '2000-01-01';
+    }
     const d = new Date(today + 'T12:00:00');
     d.setDate(d.getDate() - 7); // 7-day late-encode window (backend cap)
     let candidate = d.toISOString().slice(0, 10);
     if (floorDate && candidate < floorDate) candidate = floorDate;
     return candidate;
-  }, [floorDate]);
+  }, [floorDate, isPrivilegedRole]);
 
   // Iter 243: Max selectable date = today, OR tomorrow IF today is already
   // closed. This prevents the native date input from dead-locking (min > max
@@ -448,6 +462,39 @@ export default function UnifiedSalesPage() {
     }
     return today;
   }, [lastCloseDate]);
+
+  // ── Phase 4A — Historical Credit / Notebook AR triggers ─────────────
+  // daysBack: positive integer = days the order_date is in the past.
+  //   0 = today, negative would be a future date (handled separately).
+  const daysBack = useMemo(() => {
+    if (!header.order_date) return 0;
+    const today = localToday();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(header.order_date)) return 0;
+    const t1 = new Date(today + 'T00:00:00').getTime();
+    const t2 = new Date(header.order_date + 'T00:00:00').getTime();
+    return Math.round((t1 - t2) / 86400000);
+  }, [header.order_date]);
+
+  const HISTORICAL_CREDIT_FLOOR_DAYS = 7;
+
+  // True only when ALL three conditions hold (per handoff §7):
+  //  • transaction_date < today
+  //  • payment_type === 'credit'
+  //  • daysBack > 7
+  // AND the user has the role required by the backend gate.
+  const isHistoricalCreditMode = useMemo(() => (
+    daysBack > HISTORICAL_CREDIT_FLOOR_DAYS
+    && paymentType === 'credit'
+    && isPrivilegedRole
+  ), [daysBack, paymentType, isPrivilegedRole]);
+
+  // True when the cashier picked a past date >7 days back but the payment
+  // type is NOT pure credit. Backdated cash/digital/split/partial-paid
+  // sales must be strictly blocked at this depth — they would change cash
+  // collected today, which is not allowed for AR reconstruction.
+  const isBackdatedNonCreditBlocked = useMemo(() => (
+    daysBack > HISTORICAL_CREDIT_FLOOR_DAYS && paymentType !== 'credit'
+  ), [daysBack, paymentType]);
 
   // Order header collapse
   const [headerCollapsed, setHeaderCollapsed] = useState(true);
@@ -488,6 +535,23 @@ export default function UnifiedSalesPage() {
   const [partialPayment, setPartialPayment] = useState(0);
   const [saving, setSaving] = useState(false);
   const [releaseMode, setReleaseMode] = useState('full'); // full | partial
+
+  // ── Phase 4A — Historical Credit / Notebook AR Mode (admin-only) ─────
+  // Triggered automatically when transaction_date < today AND payment_type
+  // == credit AND days_back > 7. Backdated cash/digital/split sales are
+  // strictly blocked. Final commit posts to /api/historical-credit and is
+  // gated by an Owner/Admin TOTP approval_code verified server-side.
+  const [historicalCreditPreview, setHistoricalCreditPreview] = useState(null);
+  const [historicalCreditPreviewLoading, setHistoricalCreditPreviewLoading] = useState(false);
+  const [historicalCreditPreviewError, setHistoricalCreditPreviewError] = useState('');
+  const [historicalCreditReason, setHistoricalCreditReason] = useState('');
+  const [historicalCreditProofUrl, setHistoricalCreditProofUrl] = useState('');
+  const [historicalCreditNotebookRef, setHistoricalCreditNotebookRef] = useState('');
+  const [historicalCreditAllowInv, setHistoricalCreditAllowInv] = useState(false);
+  const [historicalCreditApprovalCode, setHistoricalCreditApprovalCode] = useState('');
+  const [historicalCreditDialog, setHistoricalCreditDialog] = useState(false);
+  const [historicalCreditCommitting, setHistoricalCreditCommitting] = useState(false);
+  const [historicalCreditCommitError, setHistoricalCreditCommitError] = useState('');
   
   // Reference number prompt
   const [refPrompt, setRefPrompt] = useState({ open: false, number: '', title: '', invoiceData: null });
@@ -2133,8 +2197,186 @@ export default function UnifiedSalesPage() {
     proceedToCheckoutAfterCustSave();
   };
 
+  // ── Phase 4A — Historical Credit / Notebook AR helpers ─────────────
+  // Build the items[] payload from the active cart (Quick or Order mode)
+  // exactly the way processSale does, but stripped to the minimum the
+  // /api/historical-credit endpoint expects.
+  const buildHistoricalCreditItems = useCallback(() => {
+    if (mode === 'quick') {
+      return cart.map(c => ({
+        product_id: c.product_id,
+        product_name: c.product_name,
+        sku: c.sku,
+        quantity: c.quantity,
+        rate: c.price,
+        price: c.price,
+        total: c.total,
+      }));
+    }
+    return lines.filter(l => l.product_id).map(l => ({
+      product_id: l.product_id,
+      product_name: l.product_name,
+      quantity: l.quantity,
+      rate: l.rate,
+      price: l.rate,
+      total: lineTotal(l),
+    }));
+  }, [mode, cart, lines]);
+
+  // Build the canonical historical-credit payload (used by both the
+  // preview call and the final commit call). Approval code is only ever
+  // attached to the commit payload — the preview must never leak it.
+  const buildHistoricalCreditPayload = useCallback(() => ({
+    customer_id: selectedCustomer?.id || '',
+    branch_id: currentBranch?.id || '',
+    transaction_date: header.order_date,
+    items: buildHistoricalCreditItems(),
+    subtotal,
+    freight,
+    overall_discount: overallDiscount,
+    grand_total: grandTotal,
+    reason: historicalCreditReason.trim(),
+    proof_url: historicalCreditProofUrl.trim() || undefined,
+    notebook_reference: historicalCreditNotebookRef.trim() || undefined,
+    allow_inventory_deduction: !!historicalCreditAllowInv,
+  }), [
+    selectedCustomer?.id, currentBranch?.id, header.order_date,
+    buildHistoricalCreditItems, subtotal, freight, overallDiscount, grandTotal,
+    historicalCreditReason, historicalCreditProofUrl, historicalCreditNotebookRef,
+    historicalCreditAllowInv,
+  ]);
+
+  const previewHistoricalCredit = useCallback(async () => {
+    setHistoricalCreditPreviewError('');
+    setHistoricalCreditPreview(null);
+    if (!selectedCustomer?.id) {
+      setHistoricalCreditPreviewError('Select a customer before preview.');
+      return;
+    }
+    if (historicalCreditReason.trim().length < 20) {
+      setHistoricalCreditPreviewError('Reason must be at least 20 characters.');
+      return;
+    }
+    setHistoricalCreditPreviewLoading(true);
+    try {
+      const res = await api.post('/historical-credit/preview', buildHistoricalCreditPayload());
+      setHistoricalCreditPreview(res.data);
+    } catch (e) {
+      const detail = e?.response?.data?.detail;
+      if (detail && typeof detail === 'object') {
+        if (Array.isArray(detail.errors)) {
+          setHistoricalCreditPreviewError(detail.errors.join(' • '));
+        } else if (detail.message) {
+          setHistoricalCreditPreviewError(detail.message);
+        } else {
+          setHistoricalCreditPreviewError(JSON.stringify(detail));
+        }
+      } else {
+        setHistoricalCreditPreviewError(detail || e.message || 'Preview failed');
+      }
+    } finally {
+      setHistoricalCreditPreviewLoading(false);
+    }
+  }, [
+    selectedCustomer?.id, historicalCreditReason, buildHistoricalCreditPayload,
+  ]);
+
+  const commitHistoricalCredit = useCallback(async () => {
+    setHistoricalCreditCommitError('');
+    if (!historicalCreditPreview) {
+      setHistoricalCreditCommitError('Run preview first.');
+      return;
+    }
+    if (!historicalCreditApprovalCode.trim()) {
+      setHistoricalCreditCommitError('Owner / Admin Authenticator (TOTP) code is required.');
+      return;
+    }
+    setHistoricalCreditCommitting(true);
+    try {
+      const payload = {
+        ...buildHistoricalCreditPayload(),
+        approval_code: historicalCreditApprovalCode.trim(),
+      };
+      const res = await api.post('/historical-credit', payload);
+      const inv = res.data?.invoice || {};
+      const invoiceNum = inv.invoice_number || res.data?.invoice_number || '(unknown)';
+      invalidateBalanceCache();
+      toast.success(`Historical credit recorded — Invoice ${invoiceNum}`, { duration: 5000 });
+      // Clear cart + historical credit state
+      clearCart();
+      setHistoricalCreditDialog(false);
+      setHistoricalCreditPreview(null);
+      setHistoricalCreditReason('');
+      setHistoricalCreditProofUrl('');
+      setHistoricalCreditNotebookRef('');
+      setHistoricalCreditAllowInv(false);
+      setHistoricalCreditApprovalCode('');
+      setHistoricalCreditCommitError('');
+      setPendingCreditSale(null);
+      // Reset order date back to today so next sale is a normal one.
+      setHeader(h => ({ ...h, order_date: localToday() }));
+    } catch (e) {
+      const detail = e?.response?.data?.detail;
+      const status = e?.response?.status;
+      if (detail && typeof detail === 'object') {
+        if (detail.error === 'approval_code_required') {
+          setHistoricalCreditCommitError('Approval code required. Ask the company owner / admin to enter their Authenticator App (TOTP) code.');
+        } else if (detail.error === 'approval_invalid') {
+          setHistoricalCreditCommitError('Invalid or unauthorized approval code. Only Owner / Admin Authenticator App (TOTP) codes are accepted for Historical Credit.');
+        } else if (detail.error === 'use_regular_late_encode') {
+          setHistoricalCreditCommitError(detail.message || 'Use the regular Sales late-encode path for dates within 7 days back.');
+        } else if (Array.isArray(detail.errors)) {
+          setHistoricalCreditCommitError(detail.errors.join(' • '));
+        } else if (detail.message) {
+          setHistoricalCreditCommitError(detail.message);
+        } else {
+          setHistoricalCreditCommitError(JSON.stringify(detail));
+        }
+      } else {
+        setHistoricalCreditCommitError(
+          (typeof detail === 'string' ? detail : null)
+          || (status === 403 ? 'Approval rejected (403). Owner / Admin TOTP required.' : null)
+          || e?.message
+          || 'Commit failed.'
+        );
+      }
+    } finally {
+      setHistoricalCreditCommitting(false);
+    }
+  }, [
+    historicalCreditPreview, historicalCreditApprovalCode,
+    buildHistoricalCreditPayload, clearCart,
+  ]);
+
   // Handle credit sale with approval
   const handleCreditSale = async () => {
+    // Phase 4A — block backdated non-credit sales >7 days back. They
+    // would alter today's cash collected and/or post-event Z-reports,
+    // which is not permitted for old notebook reconstruction.
+    if (isBackdatedNonCreditBlocked) {
+      toast.error(
+        'Backdated transactions older than 7 days are allowed for CREDIT only. '
+        + 'Cash, digital, split, or partially paid transactions must be recorded on the actual payment date.',
+        { duration: 6000 },
+      );
+      return;
+    }
+
+    // Phase 4A — Historical Credit / Notebook AR mode: open the dedicated
+    // confirmation dialog instead of routing through the regular credit-
+    // sale → manager-PIN path. Final commit posts to /api/historical-credit
+    // and is gated by Owner/Admin TOTP server-side.
+    if (isHistoricalCreditMode && selectedCustomer?.id) {
+      setPendingCreditSale({ paymentType, partialPayment: 0, amountTendered: 0 });
+      setCheckoutDialog(false);
+      setHistoricalCreditPreview(null);
+      setHistoricalCreditPreviewError('');
+      setHistoricalCreditCommitError('');
+      setHistoricalCreditApprovalCode('');
+      setHistoricalCreditDialog(true);
+      return;
+    }
+
     // Cash and digital sales — proceed directly (no credit involved)
     if (paymentType === 'cash' || paymentType === 'digital') {
       await processSale();
@@ -3315,6 +3557,93 @@ export default function UnifiedSalesPage() {
         </div>
       )}
 
+      {/* Phase 4A — Historical Credit / Notebook AR Mode banner.
+          Appears only when the cashier (admin/owner) has chosen a date
+          >7 days back AND payment_type === credit AND a customer is set.
+          Also shows a strict block warning for backdated cash/digital/
+          split sales > 7 days, since those would taint today's cash. */}
+      {mainTab === 'sale' && isBackdatedNonCreditBlocked && (
+        <div className="px-1 pb-3" data-testid="backdated-non-credit-block">
+          <Card className="border-2 border-red-300 bg-red-50">
+            <CardContent className="p-3">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="text-red-600 shrink-0 mt-0.5" size={18} />
+                <div className="text-[12px] text-red-800 leading-snug">
+                  <strong>Backdated transactions older than 7 days are allowed for CREDIT only.</strong>{' '}
+                  Cash, digital, split, or paid transactions must be recorded on the actual payment date.
+                  Switch payment type to <em>Credit</em>, or change the Sale Date back to today.
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {mainTab === 'sale' && isHistoricalCreditMode && (
+        <div className="px-1 pb-3" data-testid="historical-credit-banner">
+          <Card className="border-2 border-amber-400 bg-amber-50">
+            <CardContent className="p-3 space-y-2">
+              <div className="flex items-start gap-2">
+                <ShieldAlert className="text-amber-600 shrink-0 mt-0.5" size={20} />
+                <div className="space-y-1">
+                  <p className="text-sm font-bold text-amber-900 tracking-tight">
+                    BACKDATED CREDIT / NOTEBOOK AR MODE — {daysBack} days back
+                  </p>
+                  <p className="text-[11px] text-amber-800 leading-snug">
+                    You are encoding an old credit transaction. This will be
+                    recorded as historical credit / AR reconstruction. It will
+                    not be treated as cash collected today and will not modify
+                    old closed Z-reports. Company Owner / Admin Authenticator
+                    App (TOTP) approval is required.
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-1">
+                <div className="md:col-span-2">
+                  <Label className="text-[11px] font-semibold text-amber-900">
+                    Reason (min 20 characters) <span className="text-red-600">*</span>
+                  </Label>
+                  <textarea
+                    data-testid="historical-credit-reason-input"
+                    value={historicalCreditReason}
+                    onChange={e => setHistoricalCreditReason(e.target.value)}
+                    placeholder="Notebook AR carry-forward verified against ledger page 12, customer countersigned 2026-02-04."
+                    className="w-full text-[12px] rounded border border-amber-300 bg-white px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-400 min-h-[60px] mt-0.5"
+                  />
+                  <p className={`text-[10px] mt-0.5 ${historicalCreditReason.trim().length >= 20 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                    {historicalCreditReason.trim().length} / 20 minimum
+                  </p>
+                </div>
+                <div>
+                  <Label className="text-[11px] font-semibold text-amber-900">
+                    Proof URL (optional)
+                  </Label>
+                  <Input
+                    data-testid="historical-credit-proof-url-input"
+                    value={historicalCreditProofUrl}
+                    onChange={e => setHistoricalCreditProofUrl(e.target.value)}
+                    placeholder="https://… (photo of notebook page)"
+                    className="h-8 text-[12px] mt-0.5 bg-white"
+                  />
+                </div>
+                <div>
+                  <Label className="text-[11px] font-semibold text-amber-900">
+                    Notebook reference (optional)
+                  </Label>
+                  <Input
+                    data-testid="historical-credit-notebook-ref-input"
+                    value={historicalCreditNotebookRef}
+                    onChange={e => setHistoricalCreditNotebookRef(e.target.value)}
+                    placeholder="Ledger 2025 — Page 12, Row 4"
+                    className="h-8 text-[12px] mt-0.5 bg-white"
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {/* Main Content */}
       <div className="flex-1 flex gap-4 px-1 overflow-hidden">
         {mode === 'quick' ? (
@@ -4200,10 +4529,13 @@ export default function UnifiedSalesPage() {
                     !digitalRefNumber.trim() ||
                     Math.abs((parseFloat(splitCash||0) + parseFloat(splitDigital||0)) - grandTotal) > 0.01
                   )) ||
-                  ((paymentType === 'partial' || paymentType === 'credit') && !selectedCustomer)
+                  ((paymentType === 'partial' || paymentType === 'credit') && !selectedCustomer) ||
+                  isBackdatedNonCreditBlocked ||
+                  (isHistoricalCreditMode && historicalCreditReason.trim().length < 20)
                 }
               >
                 {saving ? 'Processing...' : (
+                  isHistoricalCreditMode ? 'Continue → Historical Credit / Notebook AR' :
                   paymentType === 'cash' ? 'Complete Sale' :
                   paymentType === 'digital' ? `Complete — ${digitalPlatform}` :
                   paymentType === 'split' ? `Split: ₱${parseFloat(splitCash||0).toFixed(0)} Cash + ₱${parseFloat(splitDigital||0).toFixed(0)} ${digitalPlatform}` :
@@ -5479,6 +5811,214 @@ export default function UnifiedSalesPage() {
               <RefreshCw size={13} className="mr-1" /> Refresh
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setDraftOrdersOpen(false)}>Close</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Phase 4A — Historical Credit / Notebook AR commit dialog ───
+          Final confirmation modal: shows preview output and gates the
+          commit behind an Owner / Admin Authenticator (TOTP) code that
+          is verified server-side. The frontend never sees the secret. */}
+      <Dialog open={historicalCreditDialog} onOpenChange={(o) => {
+        if (!historicalCreditCommitting) {
+          setHistoricalCreditDialog(o);
+          if (!o) {
+            setHistoricalCreditPreview(null);
+            setHistoricalCreditPreviewError('');
+            setHistoricalCreditCommitError('');
+            setHistoricalCreditApprovalCode('');
+          }
+        }
+      }}>
+        <DialogContent data-testid="historical-credit-dialog" className="max-w-xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-800" style={{ fontFamily: 'Manrope' }}>
+              <ShieldAlert className="text-amber-600" /> Historical Credit / Notebook AR
+            </DialogTitle>
+            <DialogDescription>
+              You are about to create a backdated CREDIT transaction for AR
+              reconstruction. This will not be treated as cash collected
+              today and will not alter old closed Z-reports.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            {/* Snapshot */}
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-2.5 space-y-1 text-[12px]">
+              <div className="flex justify-between">
+                <span className="text-amber-700">Customer</span>
+                <span className="font-medium text-amber-900">{selectedCustomer?.name || '—'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-amber-700">Branch</span>
+                <span className="font-medium text-amber-900">{currentBranch?.name || '—'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-amber-700">Transaction date</span>
+                <span className="font-medium text-amber-900">{header.order_date} ({daysBack} days back)</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-amber-700">Will be encoded today as</span>
+                <span className="font-medium text-amber-900">{localToday()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-amber-700">Items</span>
+                <span className="font-medium text-amber-900">{(buildHistoricalCreditItems() || []).length}</span>
+              </div>
+              <div className="flex justify-between border-t border-amber-200 pt-1 mt-1">
+                <span className="text-amber-700 font-semibold">Grand total (AR)</span>
+                <span className="font-bold text-amber-900">{formatPHP(grandTotal)}</span>
+              </div>
+            </div>
+
+            {/* Preview button */}
+            {!historicalCreditPreview && (
+              <div className="flex justify-end">
+                <Button
+                  data-testid="historical-credit-preview-btn"
+                  size="sm"
+                  variant="outline"
+                  className="border-amber-400 text-amber-800 hover:bg-amber-100"
+                  disabled={historicalCreditPreviewLoading || historicalCreditReason.trim().length < 20}
+                  onClick={previewHistoricalCredit}
+                >
+                  {historicalCreditPreviewLoading ? 'Previewing…' : 'Run Preview'}
+                </Button>
+              </div>
+            )}
+
+            {historicalCreditPreviewError && (
+              <p className="text-[11px] text-red-600 bg-red-50 border border-red-200 rounded p-2" data-testid="historical-credit-preview-error">
+                {historicalCreditPreviewError}
+              </p>
+            )}
+
+            {/* Preview panel */}
+            {historicalCreditPreview && (
+              <div className="space-y-2">
+                {/* Customer Owes Total Snapshot */}
+                <div
+                  data-testid="historical-credit-customer-owes-snapshot"
+                  className={`rounded-md border p-2.5 text-[12px] space-y-1 ${
+                    (historicalCreditPreview.customer?.projected_balance || 0)
+                      - (historicalCreditPreview.customer?.current_balance || 0)
+                      > Math.max(5000, (historicalCreditPreview.customer?.current_balance || 0) * 0.5)
+                      ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-slate-50'
+                  }`}
+                >
+                  <p className="text-[11px] font-semibold text-slate-700 uppercase tracking-wide">Customer Owes</p>
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">Current balance</span>
+                    <span className="font-mono">{formatPHP(historicalCreditPreview.customer?.current_balance || 0)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">+ Historical credit</span>
+                    <span className="font-mono text-amber-700">+ {formatPHP(historicalCreditPreview.grand_total || 0)}</span>
+                  </div>
+                  <div className="flex justify-between border-t pt-1 font-bold">
+                    <span>Projected balance</span>
+                    <span className="font-mono">{formatPHP(historicalCreditPreview.customer?.projected_balance || 0)}</span>
+                  </div>
+                </div>
+
+                {/* Count-sheet stopper */}
+                {historicalCreditPreview.inventory_action === 'skipped_count_sheet_lock' && (
+                  <div className="rounded-md border border-amber-300 bg-amber-50 p-2.5 text-[11px] text-amber-800 space-y-1.5" data-testid="historical-credit-count-stopper">
+                    <p className="font-semibold flex items-center gap-1">
+                      <AlertTriangle size={12} /> Inventory will NOT be deducted
+                    </p>
+                    <p>
+                      This date is on or before the latest approved count
+                      sheet ({historicalCreditPreview.count_sheet_stopper?.latest_count_date || 'n/a'}).
+                      Inventory will not be deducted unless Admin / Owner
+                      explicitly allows it. Otherwise this is recorded as
+                      AR-only reconstruction.
+                    </p>
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        data-testid="historical-credit-allow-inv-checkbox"
+                        checked={historicalCreditAllowInv}
+                        onChange={e => {
+                          setHistoricalCreditAllowInv(e.target.checked);
+                          // Re-preview to refresh inventory_action
+                          setHistoricalCreditPreview(null);
+                        }}
+                      />
+                      <span>Override and deduct inventory anyway (with audit)</span>
+                    </label>
+                  </div>
+                )}
+
+                {/* Closed-day note */}
+                <div className="rounded-md border border-slate-200 bg-slate-50 p-2 text-[11px] text-slate-700" data-testid="historical-credit-report-effect">
+                  <p>
+                    Old closed Z-reports: <strong>not modified</strong>. Today's
+                    encoded-today report: <strong>will appear</strong>.
+                    Today's cash collected: <strong>not changed</strong>.
+                  </p>
+                </div>
+
+                {/* TOTP input + commit */}
+                <div className="rounded-md border-2 border-amber-400 bg-amber-50 p-3 space-y-2">
+                  <Label className="text-[11px] font-bold text-amber-900 uppercase tracking-wide">
+                    Owner / Admin Authenticator (TOTP) Code <span className="text-red-600">*</span>
+                  </Label>
+                  <p className="text-[10px] text-amber-700 leading-snug">
+                    Settings → Security → Authenticator App. Manager PIN and
+                    static admin PIN are <strong>not</strong> accepted for
+                    Historical Credit. Code is verified server-side.
+                  </p>
+                  <Input
+                    data-testid="historical-credit-approval-code-input"
+                    type="password"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    autoFocus
+                    placeholder="6-digit TOTP"
+                    value={historicalCreditApprovalCode}
+                    onChange={e => setHistoricalCreditApprovalCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 8))}
+                    className="text-center text-2xl tracking-widest h-12 bg-white"
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && historicalCreditApprovalCode && !historicalCreditCommitting) {
+                        commitHistoricalCredit();
+                      }
+                    }}
+                  />
+                  {historicalCreditCommitError && (
+                    <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded p-1.5" data-testid="historical-credit-commit-error">
+                      {historicalCreditCommitError}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 border-t">
+            <Button
+              variant="ghost"
+              size="sm"
+              data-testid="historical-credit-cancel-btn"
+              disabled={historicalCreditCommitting}
+              onClick={() => setHistoricalCreditDialog(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              data-testid="historical-credit-commit-btn"
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              disabled={
+                !historicalCreditPreview
+                || !historicalCreditApprovalCode.trim()
+                || historicalCreditReason.trim().length < 20
+                || historicalCreditCommitting
+              }
+              onClick={commitHistoricalCredit}
+            >
+              {historicalCreditCommitting ? 'Committing…' : 'Commit Historical Credit'}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

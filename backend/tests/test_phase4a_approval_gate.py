@@ -47,7 +47,7 @@ def _payload(*, branch_id, customer_id, product_id, approval_code=None,
     p = {
         "branch_id": branch_id,
         "customer_id": customer_id,
-        "transaction_date": transaction_date or _days_ago(2),
+        "transaction_date": transaction_date or _days_ago(10),
         "items": [{"product_id": product_id, "quantity": 1, "rate": 1500, "total": 1500}],
         "subtotal": 1500, "grand_total": 1500,
         "reason": "Phase 4A approval-gate fixture exercising the verify.py policy",
