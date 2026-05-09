@@ -704,6 +704,12 @@ DEFAULT_TEMPLATES = [
     {
         "key": "zreport_finalized",
         "name": "Z-Report Finalized",
+        # Iter 261 — link removed from SMS body. PH carriers (Globe / Smart /
+        # DITO) silently drop P2P SMS containing URLs regardless of format
+        # (https://, bare domain, spaced — all blocked at the carrier MMC).
+        # The share-link infrastructure stays intact; recipients access the
+        # full report via the Audit Center → Z-Report Share Links tab, or
+        # via the upcoming email/WhatsApp share channels.
         "body": (
             "<branch_name> closed <date> at <closed_time>.\n"
             "Sales: P<sales_total> (<sales_count> txns)\n"
@@ -712,15 +718,13 @@ DEFAULT_TEMPLATES = [
             "Expenses: <expense_count> (P<expense_total>)\n"
             "Cash drawer: P<cash_actual> vs P<cash_expected> (<over_short>)\n"
             "<late_encode_note>"
-            "Closed by: <closer_name>\n"
-            "View Report: <zreport_link>"
+            "Closed by: <closer_name>"
         ),
         "placeholders": ["branch_name", "date", "closed_time", "sales_total",
                          "sales_count", "cash_total", "credit_total",
                          "digital_total", "credit_count", "expense_count",
                          "expense_total", "cash_actual", "cash_expected",
-                         "over_short", "late_encode_note", "closer_name",
-                         "zreport_link"],
+                         "over_short", "late_encode_note", "closer_name"],
         "trigger": "auto", "active": True,
     },
     {
@@ -851,7 +855,12 @@ LEGACY_DEFAULT_BODIES = {
          "Sales BLOCKED. Owner action required."),
     },
     "zreport_finalized": {
-        # Pre-Iter-259: old default WITHOUT the share link
+        # Iter 261: link-bearing factory variants are now legacy. PH carrier
+        # filters silently drop SMS containing URLs (no matter the format),
+        # so the new default body has no `<zreport_link>` line. Any tenant
+        # whose body still references the old "View Report: <zreport_link>"
+        # gets auto-downgraded to the no-link body on the next send.
+        # Form A — original (Iter 259) full-URL with `https://www.` prefix.
         ("<branch_name> closed <date> at <closed_time>.\n"
          "Sales: P<sales_total> (<sales_count> txns)\n"
          "Cash: P<cash_total> / Credit: P<credit_total> / Digital: P<digital_total>\n"
@@ -859,7 +868,8 @@ LEGACY_DEFAULT_BODIES = {
          "Expenses: <expense_count> (P<expense_total>)\n"
          "Cash drawer: P<cash_actual> vs P<cash_expected> (<over_short>)\n"
          "<late_encode_note>"
-         "Closed by: <closer_name>"),
+         "Closed by: <closer_name>\n"
+         "View Report: <zreport_link>"),
     },
 }
 
