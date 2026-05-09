@@ -1,6 +1,43 @@
 # AgriBooks PRD
 
 
+## Phase 2A — Customer Balance Reconciliation Report (Audit 2026-02, May 2026) ✅
+
+### Goal
+Read-only diagnostic to detect customer AR balance drift caused by historical
+bugs (especially the C-7 `current_balance` typo before Phase 1). No mutations.
+
+### What was built
+- **Endpoint** `GET /api/admin/customer-balance-reconciliation?branch_id=&min_drift=&limit=` — admin/owner/super-admin only, tenant + branch scoped.
+- **Ledger formula** (verified against schema): `ledger(c) = Σ inv.balance` for non-void invoices owned by `c`. Returns/credit memos/payments are already reflected in `inv.balance` and are NOT subtracted again.
+- **Excluded invoice statuses** (NON_LEDGER): voided, cancelled, cancelled_draft, deleted, for_preparation, error_partial_write.
+- **Risk bands**: OK ≤₱0.50 (filtered) · Minor ≤₱100 · Needs Review ≤₱5,000 · Critical >₱5,000. Sorted by |drift| desc, capped 500.
+- **Flags**: active_crop_credits, involved_in_customer_merge, customer_inactive — surfaced not subtracted.
+- **Read-only Admin UI** at `/audit/balance-reconciliation` (linked from Audit Center header) — filters (branch / min drift / risk / search), summary cards, table, detail drawer, CSV export. Zero mutation controls.
+- **Tests**: 18 pytest cases in `tests/test_phase2a_balance_recon.py` covering all 9 required scenarios + parametrised non-ledger statuses + read-only invariant + static write-call guard.
+
+### Files
+- NEW `/app/backend/routes/balance_reconciliation.py`
+- NEW `/app/backend/tests/test_phase2a_balance_recon.py`
+- NEW `/app/frontend/src/pages/BalanceReconciliationPage.js`
+- UPDATED `/app/backend/main.py` (router include)
+- UPDATED `/app/frontend/src/App.js` (route)
+- UPDATED `/app/frontend/src/pages/AuditCenterPage.js` (header link)
+
+### Verification
+- 45/45 pytest pass (18 Phase 2A + 27 Phase 1 regression).
+- Live API smoke (testing agent): unauth → 401; admin → 200 with consistent shape (`ledger_formula`, `non_ledger_invoice_statuses`, summary, rows).
+- Quick POS / Advanced POS / POS Terminal / offline sync untouched (zero changes to sales, sync, invoices, payments, returns code paths).
+
+### Risks remaining (handed to Phase 2B+)
+- Date-basis standardization across reports (2B)
+- Returns credit-application behavior (2C)
+- Branch/tenant permission hardening (2D)
+- Historical credit encoding / notebook AR (Phase 3)
+
+---
+
+
 ## Iter 259 — Z-Report SMS Share Link Fix + Resend Button (May 2026) ✅
 
 ### Problem

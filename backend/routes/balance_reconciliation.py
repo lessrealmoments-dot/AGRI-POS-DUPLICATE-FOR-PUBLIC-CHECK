@@ -141,27 +141,6 @@ async def customer_balance_reconciliation(
         },
     ).to_list(length=None)
 
-    if not customers:
-        return {
-            "generated_at": now_iso(),
-            "branch_filter": branch_id or "all",
-            "summary": {
-                "total_customers_scanned": 0,
-                "total_with_drift": 0,
-                "total_abs_drift_amount": 0.0,
-                "by_risk": {
-                    "Minor Difference": 0,
-                    "Needs Review": 0,
-                    "Critical": 0,
-                },
-            },
-            "rows": [],
-            "row_cap": limit,
-            "drift_floor": min_drift,
-            "phase": "2A",
-            "read_only": True,
-        }
-
     customer_ids = [c["id"] for c in customers]
 
     # ── Aggregate invoice ledger per customer ─────────────────────────────
