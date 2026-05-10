@@ -20,7 +20,7 @@ import {
   Search, Plus, Minus, Trash2, ShoppingCart, CreditCard, X, Wifi, WifiOff,
   RefreshCw, FileText, Lock, Zap, ClipboardList, AlertTriangle, Shield, CheckCircle2, Smartphone, Camera, Check,
   PackageX, ShieldAlert, ChevronDown, Eye, EyeOff, User, Package, PauseCircle, Inbox, RotateCcw,
-  ArrowUpRight, ArrowDownRight, Info, Unlock
+  ArrowUpRight, ArrowDownRight, Info, Unlock, Clock
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -3276,6 +3276,24 @@ export default function UnifiedSalesPage() {
             {connectivityStatus === 'offline' && 'Offline'}
             {pendingCount > 0 && <Badge variant="secondary" className="ml-1 text-[10px] h-4">{pendingCount}</Badge>}
           </div>
+
+          {/* Phase 4A.1.1 — Read-only "waiting to sync" reassurance pill.
+              Visible ONLY when there are unsynced offline sales. Source:
+              existing `pendingCount` state, fed by `getPendingSaleCount()`
+              after every offline save and reset to 0 after `syncPendingSales()`
+              completes. No click target — there is no dedicated pending-
+              sync view yet. Disappears as soon as the queue drains. */}
+          {pendingCount > 0 && (
+            <div
+              data-testid="pending-sync-pill"
+              data-count={pendingCount}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-800 ring-1 ring-amber-200"
+              title="These sales are saved on this device and will sync automatically once the server is reachable."
+            >
+              <Clock size={12} />
+              {pendingCount} {pendingCount === 1 ? 'sale' : 'sales'} waiting to sync
+            </div>
+          )}
 
           {!scannerSession && (
             <Button variant="outline" size="sm" onClick={createScannerSession} disabled={scannerCreating} data-testid="link-scanner-btn">

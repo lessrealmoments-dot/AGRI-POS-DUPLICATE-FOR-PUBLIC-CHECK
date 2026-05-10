@@ -2,6 +2,32 @@
 
 
 
+## Feb 2026 — Phase 4A.1.1: Read-only "Waiting to sync" reassurance pill
+
+**Goal**: Make the offline-queue size visible at a glance instead of hidden inside a tiny secondary badge on the connectivity indicator.
+
+**Files changed**:
+- MOD `frontend/src/pages/UnifiedSalesPage.js` — added `Clock` to lucide imports; added new `[data-testid='pending-sync-pill']` block right after the connectivity indicator. Visible only when `pendingCount > 0`. Plain amber pill with text `"N sale(s) waiting to sync"`. Read-only — no click target. Title attribute explains: "These sales are saved on this device and will sync automatically once the server is reachable."
+
+**Where the count comes from**: existing `pendingCount` React state (line 691). Source of truth = `getPendingSaleCount()` from `frontend/src/lib/offlineDB.js`, queried:
+1. On mount (line 1019).
+2. Immediately after every offline save inside `processSale` (lines ~2993 and ~3020).
+3. After every successful `syncPendingSales()` via `goOnline` (lines 897–898).
+No new state, no new module, no new hooks.
+
+**Updates correctly after offline save?** YES — `processSale` already calls `getPendingSaleCount().then(setPendingCount)` post-save in both the "online-then-fell-back" branch and the "offline-from-start" branch.
+
+**Disappears after sync?** YES — `goOnline` re-queries `getPendingSaleCount()` after `syncPendingSales()`, sets `pendingCount` to the new (typically 0) value, and the conditional `{pendingCount > 0 && (...)}` removes the pill from the DOM.
+
+**Tests / manual checks**:
+- ESLint clean (`mcp_lint_javascript` pass).
+- Live screenshot on the deployed preview confirms the pill is **absent** when `pendingCount=0` (testid count=0 in DOM, regular `Online` indicator visible alone).
+- Phase 4A.1 17 unit tests still pass — no impact on connectivity classifier.
+- Phase 3 + 4A backend regression 28/28 still pass — no backend change.
+
+
+
+
 ## Feb 2026 — Phase 4A.1 Surgical: Online/Offline Routing + 10s Reconnect Grace
 
 **Goal**: Fix the reported "ONLINE but sale saved OFFLINE" bug. Real backend 4xx/5xx errors must surface the actual error and never auto-fallback. True network interruptions get a single-sale 10-second reconnect grace before falling back to offline.
