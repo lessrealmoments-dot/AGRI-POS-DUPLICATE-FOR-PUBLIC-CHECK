@@ -30,6 +30,7 @@ import {
   getNextOfflineReceiptNumber, getPendingDraftCompletions,
 } from '../lib/offlineDB';
 import { syncPendingSales, startAutoSync, stopAutoSync, newEnvelopeId } from '../lib/syncManager';
+import { isTrueNetworkError, pingBackendHealth } from '../lib/connectivity';
 import {
   buildParkPayload, parkSale, discardParkedSale, consumeParkedSale, loadParkedSales, drainSyncQueue as drainParkQueue,
 } from '../lib/parkedSalesSync';
@@ -679,6 +680,14 @@ export default function UnifiedSalesPage() {
   
   // Offline
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  // Phase 4A.1 — Connectivity status distinguishes confirmed-online (browser
+  // says online AND last health probe succeeded), reconnecting (we are
+  // currently retrying after a network error), and offline (browser/health
+  // both say no). Reconnecting drives the "Sale on hold" countdown UI.
+  const [connectivityStatus, setConnectivityStatus] = useState('online'); // 'online' | 'reconnecting' | 'offline'
+  const [reconnectCountdown, setReconnectCountdown] = useState(0);
+  const reconnectCountdownRef = useRef(0);
+  useEffect(() => { reconnectCountdownRef.current = reconnectCountdown; }, [reconnectCountdown]);
   const [pendingCount, setPendingCount] = useState(0);
   const [dataLoaded, setDataLoaded] = useState(false);
 
@@ -881,6 +890,7 @@ export default function UnifiedSalesPage() {
   useEffect(() => {
     const goOnline = async () => {
       setIsOnline(true);
+      setConnectivityStatus('online');
       toast.success('Back online! Syncing...');
       const result = await syncPendingSales();
       if (result?.synced > 0) toast.success(`${result.synced} sale(s) synced!`);
@@ -890,12 +900,38 @@ export default function UnifiedSalesPage() {
     };
     const goOffline = () => {
       setIsOnline(false);
+      setConnectivityStatus('offline');
       toast('Offline Mode - Sales saved locally', { duration: 4000 });
     };
     window.addEventListener('online', goOnline);
     window.addEventListener('offline', goOffline);
     startAutoSync();
+
+    // Phase 4A.1 — Backend reachability probe. The browser online event
+    // only knows about the LAN; it cannot tell the difference between
+    // "WiFi is connected to a router with no internet" and a real
+    // upstream outage. Probe /api/health every 30s while the user is
+    // actively working on this page so the indicator can downgrade from
+    // 'online' to 'offline' without the cashier hitting Submit first.
+    let cancelled = false;
+    const probeNow = async () => {
+      if (cancelled) return;
+      // Skip the probe entirely when we're inside the reconnect retry
+      // loop — that path already pings health on its own cadence.
+      if (reconnectCountdownRef.current > 0) return;
+      const browserOnline = navigator.onLine;
+      if (!browserOnline) {
+        setConnectivityStatus('offline');
+        return;
+      }
+      const healthy = await pingBackendHealth(3000);
+      if (cancelled) return;
+      setConnectivityStatus(healthy ? 'online' : 'offline');
+    };
+    const probeTimer = setInterval(probeNow, 30000);
     return () => {
+      cancelled = true;
+      clearInterval(probeTimer);
       window.removeEventListener('online', goOnline);
       window.removeEventListener('offline', goOffline);
       stopAutoSync();
@@ -2843,6 +2879,89 @@ export default function UnifiedSalesPage() {
           setSaving(false);
           return;
         }
+
+        // ── Phase 4A.1: classify network failures vs real server errors ───
+        // A response object means the server actually answered — surface
+        // the real error to the cashier and KEEP the checkout open. Saving
+        // offline here would silently mask validation/business-rule
+        // failures (e.g., 400 missing field, 403 forbidden, 422 invalid
+        // payload, 500 server bug). The cart stays so the cashier can fix
+        // and retry.
+        if (!isTrueNetworkError(e)) {
+          let serverMsg = '';
+          if (typeof detail === 'string') serverMsg = detail;
+          else if (detail?.message) serverMsg = detail.message;
+          else if (Array.isArray(detail?.errors)) serverMsg = detail.errors.join(' • ');
+          else if (detail) serverMsg = JSON.stringify(detail).slice(0, 240);
+          else serverMsg = e.message || `HTTP ${e?.response?.status || '???'}`;
+          toast.error(`Sale rejected by server: ${serverMsg}`, { duration: 6500 });
+          setSaving(false);
+          return;
+        }
+
+        // ── Phase 4A.1: true network failure → 10s reconnect grace ─────
+        // Same envelope_id is reused on every retry so the backend can
+        // dedupe (Phase 2C payment idempotency). On success during the
+        // grace, finalize as a normal online sale. On timeout, fall
+        // through to the existing offline-save path below — also with
+        // the same envelope_id so a later sync produces exactly one
+        // invoice.
+        setConnectivityStatus('reconnecting');
+        const _retryStart = Date.now();
+        const _retryWindowMs = 10000;
+        const _retryInterval = 3000;
+        let _resolvedRes = null;
+        let _serverErrorDuringRetry = null;
+        while (Date.now() - _retryStart < _retryWindowMs && !_resolvedRes && !_serverErrorDuringRetry) {
+          const _elapsed = Date.now() - _retryStart;
+          setReconnectCountdown(Math.max(0, Math.ceil((_retryWindowMs - _elapsed) / 1000)));
+          await new Promise(r => setTimeout(r, _retryInterval));
+          const healthy = await pingBackendHealth(2500);
+          if (!healthy) continue;
+          try {
+            _resolvedRes = await api.post('/unified-sale', saleData);
+          } catch (e2) {
+            if (!isTrueNetworkError(e2)) { _serverErrorDuringRetry = e2; break; }
+            // else: still flaky, loop and retry
+          }
+        }
+        setReconnectCountdown(0);
+
+        if (_serverErrorDuringRetry) {
+          // Connection came back, but the server rejected the payload.
+          // Treat exactly like the non-network branch above.
+          setConnectivityStatus(navigator.onLine ? 'online' : 'offline');
+          const d2 = _serverErrorDuringRetry?.response?.data?.detail;
+          let msg = '';
+          if (typeof d2 === 'string') msg = d2;
+          else if (d2?.message) msg = d2.message;
+          else if (d2) msg = JSON.stringify(d2).slice(0, 240);
+          else msg = _serverErrorDuringRetry.message || `HTTP ${_serverErrorDuringRetry?.response?.status || '???'}`;
+          toast.error(`Connection restored, but sale rejected: ${msg}`, { duration: 6500 });
+          setSaving(false);
+          return;
+        }
+
+        if (_resolvedRes) {
+          // Online success during the grace window — same finalization
+          // as the happy path below. Backend deduped via envelope_id.
+          setConnectivityStatus('online');
+          const invoiceNum = _resolvedRes.data.invoice_number || _resolvedRes.data.sale_number;
+          invalidateBalanceCache();
+          toast.success(`Connection restored — Sale ${invoiceNum} processed online.`, { duration: 5000 });
+          clearCart();
+          setActiveDraftId(null);
+          setCheckoutDialog(false);
+          setPendingCreditSale(null);
+          setSaving(false);
+          return;
+        }
+
+        // Still unreachable after 10s → auto-save offline (no extra prompt).
+        // Fall through to the existing offline-save block below, which
+        // already preserves saleData.envelope_id for the eventual sync.
+        setConnectivityStatus('offline');
+
         // Save offline if API fails for other reasons.
         // ── Linked Offline Draft Finalization (Feb 2026) ──────────────────
         // If this is a draft finalization (activeDraftId set), preserve the
@@ -3128,12 +3247,33 @@ export default function UnifiedSalesPage() {
             </div>
           )}
 
-          {/* Offline indicator */}
-          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
-            isOnline ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
-          }`}>
-            {isOnline ? <Wifi size={12} /> : <WifiOff size={12} />}
-            {isOnline ? 'Online' : 'Offline'}
+          {/* Phase 4A.1 — Connectivity indicator (3 states) ────────────
+              'online'        → green Wifi  + 'Online'
+              'reconnecting'  → amber pulse + 'Reconnecting…' + countdown
+              'offline'       → amber WifiOff + 'Offline' */}
+          <div
+            data-testid="connectivity-status"
+            data-status={connectivityStatus}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
+              connectivityStatus === 'online'
+                ? 'bg-emerald-50 text-emerald-700'
+                : connectivityStatus === 'reconnecting'
+                  ? 'bg-amber-50 text-amber-700 animate-pulse'
+                  : 'bg-amber-50 text-amber-700'
+            }`}
+          >
+            {connectivityStatus === 'online'
+              ? <Wifi size={12} />
+              : connectivityStatus === 'reconnecting'
+                ? <RefreshCw size={12} className="animate-spin" />
+                : <WifiOff size={12} />}
+            {connectivityStatus === 'online' && 'Online'}
+            {connectivityStatus === 'reconnecting' && (
+              <span data-testid="reconnect-countdown">
+                Reconnecting… {reconnectCountdown}s
+              </span>
+            )}
+            {connectivityStatus === 'offline' && 'Offline'}
             {pendingCount > 0 && <Badge variant="secondary" className="ml-1 text-[10px] h-4">{pendingCount}</Badge>}
           </div>
 

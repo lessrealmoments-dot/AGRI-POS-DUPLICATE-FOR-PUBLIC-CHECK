@@ -2,6 +2,58 @@
 
 
 
+## Feb 2026 — Phase 4A.1 Surgical: Online/Offline Routing + 10s Reconnect Grace
+
+**Goal**: Fix the reported "ONLINE but sale saved OFFLINE" bug. Real backend 4xx/5xx errors must surface the actual error and never auto-fallback. True network interruptions get a single-sale 10-second reconnect grace before falling back to offline.
+
+**Root cause confirmed**: `UnifiedSalesPage.js:2846` `catch` block fell into `addPendingSale(saleData)` for ANY thrown exception except 422 stock / 422 jit-retail / 403 closed-day. Real validation/server errors silently disappeared into the offline queue.
+
+**Old fallback rule** → ANY thrown exception (excluding 3 special cases) → save offline.
+**New fallback rule** → ONLY transport-layer failures (`!err.response`, `ERR_NETWORK`, `ECONNABORTED`, "Failed to fetch", "Network Error") → enter 10s reconnect grace → if still unreachable → save offline. **All real HTTP responses (400/401/403/404/409/422/500) → toast the server error, keep checkout open, do NOT save offline.**
+
+**Files changed**:
+- Frontend NEW: `frontend/src/lib/connectivity.js` — `isTrueNetworkError(err)` classifier + `pingBackendHealth(timeoutMs)` lightweight reachability probe.
+- Frontend NEW: `frontend/src/lib/connectivity.test.js` — 17 unit tests covering 400/401/403/404/409/422/500 NOT classified as network, and ERR_NETWORK / ECONNABORTED / "Failed to fetch" / "Network Error" / no-response classified as network. Plus 4 tests for `pingBackendHealth` against `/api/health`.
+- Frontend MOD: `frontend/src/pages/UnifiedSalesPage.js`:
+  1. Imports `isTrueNetworkError`, `pingBackendHealth`.
+  2. New state `connectivityStatus` ('online' | 'reconnecting' | 'offline'), `reconnectCountdown`, `reconnectCountdownRef`.
+  3. `goOnline`/`goOffline` window-event handlers also set `connectivityStatus`.
+  4. New 30s backend-reachability probe via `setInterval` keeps the indicator accurate when the LAN is up but the upstream is down.
+  5. `processSale` catch block — added two new branches BEFORE the existing offline-save fall-through:
+     - Real-server-error branch: surface `e.response.data.detail` as a toast, `setSaving(false)`, return. No offline save. Cart preserved. Checkout stays open.
+     - True network failure: 10-second reconnect grace, retry every 3s with health-ping gate. Success → finalize as normal online sale. Server-error during retry → surface error, no offline save. Timeout → fall through to existing offline-save block, **same `envelope_id` preserved** (Phase 2C payment idempotency dedupes a later sync).
+  6. Replaced the old `Online`/`Offline` pill with a 3-state `[data-testid='connectivity-status']` indicator (Online / Reconnecting…Ns / Offline), with `data-status` attribute and `[data-testid='reconnect-countdown']` inside it during retry.
+- Backend: NO changes. `/api/health` already exists at `backend/main.py:1243`. Phase 2C envelope_id dedup already in place.
+
+**Reconnect behavior**:
+- True network failure during `POST /api/unified-sale` → indicator flips to amber `Reconnecting… 10s` (animated).
+- Retry every 3s, gated by `pingBackendHealth` (no useless retries when server is still down).
+- Success → green toast `Connection restored — Sale {invoiceNum} processed online.`, cart cleared, checkout closed.
+- Server error mid-retry → red toast with the real backend message, cart preserved, checkout stays open.
+- Timeout (10s exhausted) → silently falls through to the existing offline-save path with the same `envelope_id`. No extra "Save Offline?" prompt. Existing toast `{invoice_number} saved offline (will sync later)` appears.
+
+**Duplicate-submission protection**:
+- `envelope_id` is generated once (line ~2628 `newEnvelopeId()`) and stored on `saleData`. Reused for every retry attempt and preserved into the offline IndexedDB record so the eventual sync produces the same idempotency key. Backend Phase 2C dedupes at write time.
+- Confirm button's `disabled` prop already includes `saving` (line ~4533). The retry loop holds `saving=true` for the entire grace period, so a double-click during retry is impossible.
+- On real server error (HTTP 4xx/5xx), `setSaving(false)` is called so the cashier can fix and resubmit — but submitting again generates a NEW `envelope_id` for what is conceptually a new attempt.
+
+**Tests added/results**:
+- Frontend unit: **17/17 PASS** (`yarn test --testPathPattern=connectivity`). Covers HTTP 400/401/403/404/409/422/500 NOT-network + 4 network-error variants + `pingBackendHealth` happy path / 5xx / throw / correct URL.
+- Backend regression: **28/28 PASS** (Phase 3 + Phase 4A unit). Live smoke tests are env-gated and previously passed in iter 256.
+- Live: connectivity-status indicator renders correctly with `data-status='online'` on the deployed preview.
+
+**Historical Credit / 7-day late encode**:
+- Both flows are intact. The classifier branch sits BEFORE the existing offline fall-through; it does NOT touch the special 422 stock / 422 jit-retail / 403 closed-day handlers, so the manager-PIN late-encode dialog still opens correctly. Historical Credit posts to `/api/historical-credit` via its own dedicated commit handler in this fork — never touches `processSale`.
+
+**POS Terminal / offline sync**:
+- Untouched. `addPendingSale` / `syncPendingSales` paths are unchanged. The new fall-through still produces the same offline record format with the same `envelope_id`.
+
+**Recommended next step**:
+- Phase 4 cleanup — split `UnifiedSalesPage.js` (now ~6,200 lines) into `CheckoutDialog.jsx`, `HistoricalCreditDialog.jsx`, `HistoricalCreditBanner.jsx`, `PaymentTabs.jsx`, `LateEncodeDialog.jsx`. After the split, **Phase 4A.2** can land cleanly: 30-second background held-sales queue, multi-concurrent held sales, decoupled receipt printing, "Sale B while Sale A is on hold" — implemented as a dedicated `HeldSalesQueue` module rather than crammed into the page.
+
+
+
+
 ## Feb 2026 — Phase 4A Frontend Integration: Historical Credit / Notebook AR Mode (Iter 256–258)
 
 **Goal**: Integrate the Phase 3 / 4A backend Historical Credit endpoint into UnifiedSalesPage so admins/owners can encode old notebook AR entries that are >7 days back, gated by Owner/Admin TOTP server-side. Plus add a backend soft floor that forces 1–7 day backdated credit through the existing Sales late-encode path (manager PIN), reserving the heavier Historical Credit channel for older entries only.
