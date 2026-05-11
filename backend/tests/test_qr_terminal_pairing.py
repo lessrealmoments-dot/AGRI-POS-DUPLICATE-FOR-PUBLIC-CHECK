@@ -244,7 +244,7 @@ class TestQRURLFormat:
         assert re.match(r'^[A-Za-z0-9_-]+$', token), f"Token contains non-URL-safe chars: {token}"
         
         # Construct URL (this is what QR encodes)
-        terminal_url = f"https://phase4a-frontend.preview.emergentagent.com/terminal?pair={token}"
+        terminal_url = f"https://hc-decompose.preview.emergentagent.com/terminal?pair={token}"
         print(f"✓ QR URL format valid: {terminal_url[:80]}...")
 
 

@@ -1,24 +1,27 @@
 <analysis>**original_problem_statement**: 
-PRODUCT REQUIREMENTS & ONGOING INITIATIVES:
-The user requested a full read-only logic, connection, security, and data-flow audit of the repository, followed by a multi-phase repair plan. Previously, Phases 1A-1C and 2A-2C.5 were completed. In this session, the agent successfully implemented Phase 2D (Branch/Tenant Permission Hardening), Phase 2D.5 (Terminal POS Built-in Printer Receipt Layout Hotfix), Phase 2E (Report Date-Basis Standardisation), Phase 3 (Historical Credit Encoding / Notebook AR), and the backend portion of Phase 4A (Backend Approval Gate via TOTP). 
-
-The explicit goal for the next fork agent is to implement **Phase 4A Frontend Integration (Historical Credit Encoding within UnifiedSalesPage)**. A dedicated handoff document  was created to serve as the single source of truth for the next agent.
+Continue Phase 4 cleanup. The single source of truth for this fork is: . 
+Steps:
+1. Read the handoff completely before anything else.
+2. Run the smoke baseline.
+3. Produce a written assessment in the A/B/C/D/E format described in §8 of the handoff for extracting  and  as the next pass.
+4. Do NOT write any code until the user approves the assessment.
+5. Honor every constraint in the handoff.
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
 **what currently exists?** 
-A robust multi-tenant POS application with a React frontend and FastAPI backend. Phase 1 through Phase 3 and Phase 4A (Backend) are fully implemented. The backend now supports highly secure Historical Credit Encoding (Notebook AR reconstruction) which separates  from , safely protects old closed Z-reports, respects count-sheet stoppers, and requires Owner/Admin TOTP (Authenticator App) validation at the time of commit using an advanced  policy engine.
+A robust multi-tenant POS application (React + FastAPI). In the previous session, Phase 4A Frontend Integration (Historical Credit / Notebook AR mode in UnifiedSalesPage) was successfully shipped, gated by a server-side TOTP. Phase 4A.1 (Online/Offline Routing Stabilization) and Phase 4A.1.1 (Pending-sync pill) were also completed.  was safely decoupled from its state through Pass 1 ( hook) and Pass 2 ( hook extraction).
 
 **Last working item**: 
-    - Last item agent was working: Creating the  file to guide the next fork agent securely through the Phase 4A Frontend integration.
-    - Status: NOT STARTED (The actual frontend implementation for Phase 4A has not begun).
+    - Last item agent was working: Creating the handoff file  to guide the next fork agent in assessing the extraction of presentational components ( and ).
+    - Status: NOT STARTED (The assessment and actual frontend extraction have not begun).
     - Agent Testing Done: N/A
-    - Which testing method agent to use? frontend testing agent () to test the new Historical Credit mode in UnifiedSalesPage.
+    - Which testing method agent to use? Frontend testing agent / manual testing / React unit tests.
     - User Testing Done: N
 
 **All Pending/In progress Issue list**: 
   Issue 1: 11 Pre-existing Unit Test Failures (Month-Boundary Hardcoded Dates) (P2)
-     - Attempted fixes: None.
+     - Attempted fixes: None (Explicitly marked out of scope for Phase 4A/Cleanup).
      - Next debug checklist: Mock  using  or update hardcoded date variables in test files.
      - Why fix this issue and what will be achieved with the fix? Restores a fully green CI test suite.
      - Status: NOT STARTED
@@ -26,44 +29,36 @@ A robust multi-tenant POS application with a React frontend and FastAPI backend.
      - Should Test frontend/backend/both after fix? Backend
      - Blocked on other issue: None
 
-  Issue 2: Intermittent pytest flakiness (P2)
-     - Attempted fixes: None (Diagnosed as pre-existing).
-     - Next debug checklist: Investigate pytest-asyncio session-scoped event loop and shared MongoDB state causing state pollution between  and  tests across repeated runs.
-     - Why fix this issue and what will be achieved with the fix? Stable regression runs.
-     - Status: NOT STARTED
-     - Is recurring issue? Y
-     - Should Test frontend/backend/both after fix? Backend
-
-  Issue 3: Duplicate RMA cleanup before unique index enforcement (P1)
-     - Status: NOT STARTED
-
-  Issue 4: Consolidate  and  pages (P1)
-     - Status: NOT STARTED
-
 **In progress Task List**: 
-  Task 1: Phase 4A — Frontend Integration for Historical Credit (P0 for current fork)
-     - Where to resume: Read  first. Implement the backend soft floor for  to reject transactions within the 7-day window. Then, integrate Historical Credit mode into .
-     - What will be achieved with this? Allows staff/managers to input old notebook AR entries directly from the standard sales interface, gating the final commit behind an Owner/Admin TOTP challenge.
+  Task 1: Phase 4 Cleanup — Extract HistoricalCreditBanner.jsx and HistoricalCreditDialog.jsx (P0)
+     - Where to resume: Read . Produce the required A/B/C/D/E assessment of the  inline JSX. Wait for user approval before coding.
+     - What will be achieved with this? Safely decomposes the massive  file by moving presentational components out, having them consume the already-created  object from the  hook.
      - Status: NOT STARTED
-     - Should Test frontend/backend/both after fix? Frontend (using testing agent)
-     - Blocked on something: Nothing.
+     - Should Test frontend/backend/both after fix? Frontend
+     - Blocked on something: Needs user approval of the assessment *before* code is written.
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
-    - Phase 4 — Cleanup, Deduplication ( vs ), and UX alignment (P1).
-    - Phase 5 — Full Regression Testing & Deployment Checklist (P1).
-
+    - Phase 4 Cleanup: Extract  and  (P1)
+    - Phase 4 Cleanup: Extract  (P1)
+    - Phase 4 Cleanup: Refactor  (P1)
+    - Phase 4 Cleanup: Rename  to  (P2)
+    - Phase 4A.2: Concurrent Held-Sales Queue (30-second hold with cashier free to start Sale B) (P1)
+    
     Future Tasks:
-    - P1 - Document Management System Assessment (Pending architecture confirmation).
+    - Add Sync this AR to customer SMS toggle to Historical Credit.
+    - P1 - Document Management System Assessment.
     - P3 - Implement Tap to Pay / QR Ph integration.
 
 **Completed work in this session**
-- Phase 2D Branch/Tenant Permission Hardening (DONE): Fixed  to block 403 on missing branch_ids, aligned JWT org_id, secured . 
-- Phase 2D.5 Printer Receipt Layout Hotfix (DONE): Fixed CSS in  to stop product name bleeding and improve readability.
-- Phase 2E Report Date-Basis Standardisation (DONE): Added , exposed , ,  separately on reports, created .
-- Phase 3 Historical Credit Encoding / Notebook AR (DONE): Created . Ensured entries do not mutate old Z-reports or today's cash collected.
-- Phase 4A Backend Approval Gate (DONE): Upgraded  with  and . Registered  event requiring TOTP. Wired commit flow to require verification server-side.
-- Created Handoff file:  (DONE).
+- Phase 4A Backend Soft Floor ( rejecting ) (DONE)
+- Phase 4A Frontend Integration (Historical Credit / Notebook AR mode in ) (DONE)
+- Phase 4A.1 Online/Offline Routing Stabilization (added , fixed offline fallback catch block, added 10-second ping retry) (DONE)
+- Phase 4A.1.1 Pending-sync pill (DONE)
+- Phase 4 Cleanup Pass 0 (Fixed dedupe-pill pointer events, improved All-Branches UX guard) (DONE)
+- Phase 4 Cleanup Pass 1 (Extracted  hook) (DONE)
+- Phase 4 Cleanup  hook extraction (Moved state/helpers to hook, cleaned up  duplication) (DONE)
+- Created Handoff file:  (DONE)
 
 **Earlier issues found/mentioned but not fixed**
    - Issue 1: 11 Pre-existing Unit Test Failures (Hardcoded dates).
@@ -74,43 +69,42 @@ A robust multi-tenant POS application with a React frontend and FastAPI backend.
 
 **Known issue recurrence from previous fork**
   - Issue recurrence in previous fork: 11 Pre-existing Unit Test Failures
-  - Recurrence count: 35+
+  - Recurrence count: 36+
   - Status: NOT STARTED
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
-- **TOTP / verify.py engine**: The approval gate leverages  dynamically, mapping  to  and checking roles via . No generic manager PINs can bypass this.
+- **Online/Offline Stabilisation**:  now correctly differentiates true network errors (handled via 10-second  retry loop) vs. real backend HTTP error responses (400, 422, etc., displayed as toasts instead of forcing an offline save).
 - **Historical Credit vs Late Encode**: Normal backdated sales (<= 7 days) hit . Historical Credits (> 7 days) hit .
-- **Date Separation**: Real  (order_date) is tracked completely separately from  to preserve the sanctity of older closed Z-reports and accurate customer ledgers.
+- **UnifiedSalesPage decomposition**: We are incrementally pulling state and logic into custom hooks (, ) so presentational components can be extracted cleanly without huge prop drilling.
 
 **key DB schema**
-  - : Now frequently tracks , , , , and .
+  - : Tracks , , , , and .
 
 **changes in tech stack**
-  - No new stack changes. Reused  from existing Settings -> Security logic.
+  - No major changes. Introduced custom React Hooks testing inside the frontend unit test suite ().
 
 **All files of reference** 
-  -  (CRITICAL MUST READ BEFORE STARTING)
-  - 
+  -  (CRITICAL MUST READ)
   - 
   - 
 
 **Areas that need refactoring**: 
-  - Duplicate sales pages ( vs ).
-  - Unit tests with hardcoded date boundaries.
+  -  is still very large and needs further decomposition (Extracting JSX for Historical Credit banners and dialogs).
 
 **key api endpoints**
-  -  (Admin/Owner only)
-  -  (Admin/Owner only, requires )
+  -  
+  -  
   - 
 
 **Critical Info for New Agent** 
-- **IMMEDIATE ACTION**: Read  completely before coding. 
-- **Backend Soft Floor**: As per section 6 of the handoff doc, your very first coding task is to add a backend soft floor to  that rejects  within the 7-day window with a  error.
-- **Frontend Mode Trigger**: In , switch to Historical Credit Mode ONLY when . Backdated cash/digital/split sales must be strictly blocked.
-- **Do not expose TOTP secrets**: Verification happens entirely server-side. The frontend only captures the 6-digit code to pass to the backend.
+- **IMMEDIATE ACTION**: Read  completely. 
+- You must perform an A/B/C/D/E structured assessment of  and  and await user approval *before* you write any code.
+- Quick Sale and Detailed Sale / Order Mode are two modes inside , not separate POS systems.
+- Do NOT extract , , or  yet. 
+- Do NOT touch POS Terminal logic, offline sync logic, or business rules.
 
 **documents and test reports created in this job** 
   - 
@@ -119,31 +113,37 @@ A robust multi-tenant POS application with a React frontend and FastAPI backend.
   - 
 
 **Last 10 User Messages and any pending HUMAN messages** 
- 1. User: Asked for Phase 2D.5 Printer layout hotfix.
- 2. Agent: Implemented CSS fixes in , generated standalone HTML preview.
- 3. User: Approved 2D.5. Requested Phase 2E Report Date-Basis Standardisation.
- 4. Agent: Performed audit, created , enriched reports/customer routes, added tests.
- 5. User: Approved 2E. Requested Phase 3 Historical Credit Encoding / Notebook AR workflow.
- 6. Agent: Built  backend, tested constraints around Z-reports/inventory.
- 7. User: Instructed Phase 4A (change of direction): integrate Historical Credit inside  (not a separate page), using existing company/admin TOTP. Asked for critique.
- 8. Agent: Audited  and . Confirmed feasibility and proposed using  policy .
- 9. User: Approved backend-only Phase 4A steps (implementing the TOTP policy gate).
- 10. Agent: Implemented  in , wired TOTP approval to , wrote 12 tests.
- 11. User: Instructed creation of  to be the source of truth for the *next fork agent*. 
-
+ 1. User: Asked to implement the Phase 4A Backend soft-floor and Frontend Historical credit flow.
+ 2. Agent: Implemented soft floor, smoke tested, and implemented  UI logic.
+ 3. User: Identified bug (Online but sale saved offline). Instructed Phase 4A.1 (Online/Offline stabilization) with complex queue architecture.
+ 4. Agent: Assessed and advised that 30-sec queue architecture is overkill right now. Recommended surgical Phase 4A.1 now, defer Phase 4A.2 queue until after page split.
+ 5. User: Approved surgical Phase 4A.1.
+ 6. Agent: Implemented , fixed offline fallback catch block.
+ 7. User: Instructed Phase 4A.1.1 (Read-only waiting to sync pill).
+ 8. Agent: Promoted existing  into a UI pill.
+ 9. User: Asked for Phase 4 Cleanup Assessment (how to split the massive ).
+ 10. Agent: Recommended 5-pass split plan.
+ 11. User: Approved Pass 0 (UI pre-fixes) and Pass 1 ().
+ 12. Agent: Extracted  hook. All tests passed.
+ 13. User: Asked for assessment for  extraction.
+ 14. Agent: Assessed, recommended replacing duplicate  as prereq, then hook.
+ 15. User: Approved.
+ 16. Agent: Extracted . 37/37 FE tests + 28/28 BE tests pass.
+ 17. User: Instructed to generate the  for the next fork.
+ 
 **Project Health Check:**
-  - Broken: 11 hard-coded date boundary unit tests. Intermittent pytest async flakiness.
+  - Broken: 11 hard-coded date boundary unit tests.
   - Mocked: NA. 
-  - App backend is verified with ~137 passing regression tests across Phase 1-4A logic.
+  - App backend is verified with 28 passing regression tests (Phase 3 & 4A) + 37 frontend unit tests.
 
 **3rd Party Integrations** 
   - Cloudflare R2 / Boto3 (File Storage) — requires User API Key
   - Resend (Emails) — requires User API Key
 
 **Testing status**
-  - Testing agent used after significant changes: YES (iteration 255).
+  - Testing agent used after significant changes: YES (iteration 256, 257, 258).
   - Troubleshoot agent used after agent stuck in loop: NO.
-  - Test files created: , , , .
+  - Test files created: , , .
   - Known regressions: None (Pre-existing flaky tests only).
 
 **Credentials to test flow:**
@@ -152,19 +152,12 @@ A robust multi-tenant POS application with a React frontend and FastAPI backend.
   - Owner / Admin PIN: 
 
 **What agent forgot to execute**
-  - Nothing. Agent strictly followed the pause-and-fork instructions.
+  - Nothing. Agent explicitly followed instructions to wait and fork for the assessment phase.
 
-**Debugging checklist for current issue (Phase 4A Frontend)**
-    Issue: Phase 4A Frontend Integration in UnifiedSalesPage
+**Debugging checklist for current issue (Phase 4 Cleanup Assessment)**
+    Issue: Extracting presentational components
     Checklist:
     1. Read .
-    2. Add backend soft floor in  (reject  backdated entries, enforce use of normal late-encode path).
-    3. Open .
-    4. Implement Historical Credit Mode trigger ().
-    5. Block backdated cash/digital/split payments.
-    6. Render BACKDATED CREDIT / NOTEBOOK AR MODE banner.
-    7. Add required fields: Reason (min 20 char), Proof/reference.
-    8. Trigger  to show the 'Customer Owes Total Snapshot' and count-sheet stopper warning.
-    9. In final confirmation modal, render TOTP code input.
-    10. Submit to  instead of . 
-    11. Test thoroughly via .</analysis>
+    2. Run the specified smoke baseline (frontend lint, FE unit tests, BE tests).
+    3. Generate the exact A/B/C/D/E assessment report outlining how  and  will be extracted to consume  from .
+    4. Propose the plan to the user using . Do NOT write code yet.</analysis>
