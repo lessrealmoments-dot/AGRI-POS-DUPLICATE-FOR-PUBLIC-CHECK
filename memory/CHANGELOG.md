@@ -2,6 +2,63 @@
 
 
 
+## Feb 2026 — Phase 4 Cleanup, Pass 0 + Pass 1
+
+**Goal**: Make the UnifiedSalesPage codebase ready for the eventual HeldSalesQueue (Phase 4A.2) by relocating connectivity behavior into a reusable hook, plus two tiny UX fixes that unblock E2E testing without weakening any business rule.
+
+### Pass 0 — Pre-fixes
+1. **Dedupe-pill repositioned** (`frontend/src/components/CustomerDedupeManager.js`). Was `fixed bottom-5 right-5 z-[60]`, which sat ON TOP of the cart's `[data-testid='checkout-btn']` on the right rail and blocked testing-agent clicks. Moved to `fixed bottom-5 left-72 z-[60]`. Same z-index, same visibility, no behaviour change — just out of the cart's click area.
+2. **All-Branches checkout guard — clearer, NOT weaker** (`frontend/src/pages/UnifiedSalesPage.js`). Business rule preserved: a sale still cannot be checked out under "All Branches" scope. Improvements:
+   - Both Checkout buttons (Quick and Order modes) are now `disabled={cart.length === 0 || !currentBranch?.id}` — the precondition is visible before the click.
+   - Button label switches to `"Select a branch to checkout"` when no branch is selected.
+   - `title` hover tooltip explains: "A sale must belong to a specific branch. Open the branch picker in the top header and pick one."
+   - The fallback `openCheckout` toast carries `id: 'checkout-blocked-no-branch'` so E2E tests can match it deterministically. Message rewritten: "Select a specific branch to checkout. Open the branch picker in the top header and pick one — 'All Branches' is for browsing only."
+
+### Pass 1 — `useConnectivity()` hook extracted
+- NEW `frontend/src/lib/useConnectivity.js` (~110 lines). Reuses (does NOT duplicate) the Phase 4A.1 `connectivity.js` helpers and the existing `syncManager` / `offlineDB` modules. Owns:
+  - `isOnline`, `connectivityStatus` (`'online' | 'reconnecting' | 'offline'`), `reconnectCountdown`, `pendingCount`.
+  - The `goOnline` / `goOffline` window listeners (incl. `toast.success('Back online! Syncing...')`, auto-sync, and the post-sync `onReconnect` callback).
+  - The 30s `/api/health` background reachability probe (skipped while `reconnectCountdownRef.current > 0` to avoid colliding with the processSale retry loop).
+  - `setConnectivityStatus` and `setReconnectCountdown` setters exposed for the processSale retry-loop integration (escape hatch preserved).
+  - `refreshPendingCount()` helper.
+- NEW `frontend/src/lib/useConnectivity.test.js` — 6 hook tests via `@testing-library/react`'s `renderHook` + `act`. Covers initial state, setter wiring, browser `offline` event, browser `online` event with `onReconnect` callback, `refreshPendingCount`, and cleanup.
+- MOD `frontend/src/pages/UnifiedSalesPage.js`:
+  - Imports the new hook.
+  - Replaced ~12 lines of inline state (`isOnline`/`connectivityStatus`/`reconnectCountdown`/`reconnectCountdownRef`/`pendingCount`) with a single `useConnectivity({ onReconnect: onReconnectLoadData })` call.
+  - Removed the entire 50-line inline `useEffect` that owned the window listeners + 30s probe + auto-sync (now in the hook).
+  - Added a tiny mount-once `useEffect` that binds the existing `loadData` function into a ref so the hook can call it after a successful reconnect-sync (preserves the existing post-reconnect product-grid refresh).
+  - Net: ~60 lines removed from UnifiedSalesPage.js; behavior identical.
+- Reusable pieces reused (no duplicates created):
+  - `lib/connectivity.js` (`isTrueNetworkError`, `pingBackendHealth`)
+  - `lib/syncManager.js` (`syncPendingSales`, `startAutoSync`, `stopAutoSync`)
+  - `lib/offlineDB.js` (`getPendingSaleCount`)
+- Dev dep added: `@testing-library/react@^16` + `@testing-library/dom` (no other deps changed).
+
+### What remains inside UnifiedSalesPage.js (deliberately)
+- All cart / lines / header / customer / branch / scheme state.
+- All Phase 4A historical-credit state and helpers (deferred to a future pass).
+- `processSale` (475 lines) and its retry loop — uses the hook's exposed `setConnectivityStatus` and `setReconnectCountdown` setters as before.
+- The 3-state connectivity indicator JSX + pending-sync pill JSX — they READ from the hook but render inline in the header. Extracting them is presentational-only and not required for Phase 4A.2.
+
+### Behavior change?
+None. Same online/reconnecting/offline indicator, same 10s reconnect grace, same pending-sync pill rules, same auto-sync, same `loadData(true)` after reconnect, same Phase 4A historical-credit flow, same 0–7 day late-encode flow, same Quick + Detailed Sale modes inside UnifiedSalesPage. POS Terminal untouched.
+
+### Tests / Checks
+- Frontend unit: **23/23 PASS** (17 existing `connectivity.test.js` + 6 new `useConnectivity.test.js`). Run with `cd /app/frontend && CI=true yarn test --watchAll=false --testPathPattern="connectivity|useConnectivity"`.
+- Backend regression: **28/28 PASS** (Phase 3 + 4A unit). Phase 4A.1 unaffected.
+- Live smoke on deployed preview:
+  - `[data-testid='unified-sales-page']` present ✅
+  - `[data-testid='connectivity-status'][data-status='online']` present ✅
+  - `[data-testid='checkout-btn']` shows label `"Select a branch to checkout"` and is `disabled` while no branch is selected ✅ — proves Pass 0 #2 (clearer, rule preserved).
+  - `[data-testid='dedupe-pill-wrapper']` computed `left: 288px` (was right-side) ✅ — proves Pass 0 #1 fix.
+- ESLint clean.
+
+### Duplicate / overlap discovered during implementation
+- None. The hook composes existing leaf modules without overlap. `OfflineIndicator` (sidebar prefetch) remains a distinct concern from the in-page 3-state pill — confirmed during the assessment, validated during implementation.
+
+
+
+
 ## Feb 2026 — Phase 4A.1.1: Read-only "Waiting to sync" reassurance pill
 
 **Goal**: Make the offline-queue size visible at a glance instead of hidden inside a tiny secondary badge on the connectivity indicator.

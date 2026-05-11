@@ -31,6 +31,7 @@ import {
 } from '../lib/offlineDB';
 import { syncPendingSales, startAutoSync, stopAutoSync, newEnvelopeId } from '../lib/syncManager';
 import { isTrueNetworkError, pingBackendHealth } from '../lib/connectivity';
+import { useConnectivity } from '../lib/useConnectivity';
 import {
   buildParkPayload, parkSale, discardParkedSale, consumeParkedSale, loadParkedSales, drainSyncQueue as drainParkQueue,
 } from '../lib/parkedSalesSync';
@@ -679,16 +680,27 @@ export default function UnifiedSalesPage() {
   const [sigDialog, setSigDialog] = useState({ open: false, invoice: null });
   
   // Offline
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
-  // Phase 4A.1 — Connectivity status distinguishes confirmed-online (browser
-  // says online AND last health probe succeeded), reconnecting (we are
-  // currently retrying after a network error), and offline (browser/health
-  // both say no). Reconnecting drives the "Sale on hold" countdown UI.
-  const [connectivityStatus, setConnectivityStatus] = useState('online'); // 'online' | 'reconnecting' | 'offline'
-  const [reconnectCountdown, setReconnectCountdown] = useState(0);
-  const reconnectCountdownRef = useRef(0);
-  useEffect(() => { reconnectCountdownRef.current = reconnectCountdown; }, [reconnectCountdown]);
-  const [pendingCount, setPendingCount] = useState(0);
+  // Phase 4 Pass 1 — connectivity state + effects extracted into
+  // `lib/useConnectivity`. Behavior is unchanged: same three-state
+  // indicator, same 10s reconnect grace cooperation (the processSale
+  // retry loop still drives the countdown via the exposed setters),
+  // same 30s health probe, same auto-sync wiring, same offline-queue
+  // pending count. `onReconnect` preserves the existing post-sync
+  // call to `loadData(true)` that refreshes the product grid.
+  const loadDataRef = useRef(null);
+  const onReconnectLoadData = useCallback(async () => {
+    if (loadDataRef.current) await loadDataRef.current(true);
+  }, []);
+  const {
+    isOnline,
+    connectivityStatus,
+    setConnectivityStatus,
+    reconnectCountdown,
+    setReconnectCountdown,
+    pendingCount,
+    setPendingCount,
+    refreshPendingCount,
+  } = useConnectivity({ onReconnect: onReconnectLoadData });
   const [dataLoaded, setDataLoaded] = useState(false);
 
   // Parked / Draft sales (server-shared, offline-capable)
@@ -886,56 +898,12 @@ export default function UnifiedSalesPage() {
 
 
 
-  // Online/Offline detection
+  // Online/Offline detection — Phase 4 Pass 1: state, effects, and
+  // listeners now live in `useConnectivity`. We only need to bind
+  // `loadData` to the ref so the hook can call it after a successful
+  // reconnect-sync. Mount-once, exactly like before.
   useEffect(() => {
-    const goOnline = async () => {
-      setIsOnline(true);
-      setConnectivityStatus('online');
-      toast.success('Back online! Syncing...');
-      const result = await syncPendingSales();
-      if (result?.synced > 0) toast.success(`${result.synced} sale(s) synced!`);
-      const count = await getPendingSaleCount();
-      setPendingCount(count);
-      await loadData(true);
-    };
-    const goOffline = () => {
-      setIsOnline(false);
-      setConnectivityStatus('offline');
-      toast('Offline Mode - Sales saved locally', { duration: 4000 });
-    };
-    window.addEventListener('online', goOnline);
-    window.addEventListener('offline', goOffline);
-    startAutoSync();
-
-    // Phase 4A.1 — Backend reachability probe. The browser online event
-    // only knows about the LAN; it cannot tell the difference between
-    // "WiFi is connected to a router with no internet" and a real
-    // upstream outage. Probe /api/health every 30s while the user is
-    // actively working on this page so the indicator can downgrade from
-    // 'online' to 'offline' without the cashier hitting Submit first.
-    let cancelled = false;
-    const probeNow = async () => {
-      if (cancelled) return;
-      // Skip the probe entirely when we're inside the reconnect retry
-      // loop — that path already pings health on its own cadence.
-      if (reconnectCountdownRef.current > 0) return;
-      const browserOnline = navigator.onLine;
-      if (!browserOnline) {
-        setConnectivityStatus('offline');
-        return;
-      }
-      const healthy = await pingBackendHealth(3000);
-      if (cancelled) return;
-      setConnectivityStatus(healthy ? 'online' : 'offline');
-    };
-    const probeTimer = setInterval(probeNow, 30000);
-    return () => {
-      cancelled = true;
-      clearInterval(probeTimer);
-      window.removeEventListener('online', goOnline);
-      window.removeEventListener('offline', goOffline);
-      stopAutoSync();
-    };
+    loadDataRef.current = loadData;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -2143,7 +2111,16 @@ export default function UnifiedSalesPage() {
   // Open checkout
   const openCheckout = () => {
     if (items.length === 0) { toast.error('Add items first'); return; }
-    if (!currentBranch) { toast.error('Select a branch'); return; }
+    if (!currentBranch?.id) {
+      // BUSINESS RULE PRESERVED: a sale must belong to a specific branch.
+      // We only make the next-step crystal clear and add a testid so E2E
+      // tooling can reliably assert the block.
+      toast.error(
+        'Select a specific branch to checkout. Open the branch picker in the top header and pick one — "All Branches" is for browsing only.',
+        { id: 'checkout-blocked-no-branch', duration: 6000 },
+      );
+      return;
+    }
 
     // Check for zero-price items (no price set for selected scheme)
     const zeroPriceItem = mode === 'quick'
@@ -4095,9 +4072,12 @@ export default function UnifiedSalesPage() {
                     data-testid="checkout-btn"
                     className="w-full bg-[#1A4D2E] hover:bg-[#14532d] text-white"
                     onClick={openCheckout}
-                    disabled={cart.length === 0}
+                    disabled={cart.length === 0 || !currentBranch?.id}
+                    title={!currentBranch?.id
+                      ? 'A sale must belong to a specific branch. Open the branch picker in the top header and pick one.'
+                      : undefined}
                   >
-                    <CreditCard size={16} className="mr-2" /> {activeDraftId ? 'Finalize & Pay' : 'Checkout'}
+                    <CreditCard size={16} className="mr-2" /> {activeDraftId ? 'Finalize & Pay' : (!currentBranch?.id ? 'Select a branch to checkout' : 'Checkout')}
                   </Button>
                 </div>
               </CardContent>
@@ -4363,9 +4343,12 @@ export default function UnifiedSalesPage() {
                           data-testid="checkout-btn"
                           className="w-full bg-[#1A4D2E] hover:bg-[#14532d] text-white mt-1"
                           onClick={openCheckout}
-                          disabled={items.length === 0}
+                          disabled={items.length === 0 || !currentBranch?.id}
+                          title={!currentBranch?.id
+                            ? 'A sale must belong to a specific branch. Open the branch picker in the top header and pick one.'
+                            : undefined}
                         >
-                          <CreditCard size={15} className="mr-2" /> {activeDraftId ? 'Finalize & Pay' : 'Complete & Pay'}
+                          <CreditCard size={15} className="mr-2" /> {activeDraftId ? 'Finalize & Pay' : (!currentBranch?.id ? 'Select a branch to checkout' : 'Complete & Pay')}
                         </Button>
                       </div>
                     </div>

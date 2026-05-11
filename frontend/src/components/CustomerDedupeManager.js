@@ -195,7 +195,12 @@ export default function CustomerDedupeManager() {
   return (
     <>
       {showPill && (
-        <div className="fixed bottom-5 right-5 z-[60]" data-testid="dedupe-pill-wrapper">
+        // Bottom-LEFT so it never overlays the cart Checkout button on the
+        // right rail of UnifiedSalesPage (it previously sat at bottom-right
+        // and intercepted clicks on `[data-testid='checkout-btn']`, blocking
+        // the testing agent's E2E flow). Also lifted slightly so it doesn't
+        // sit on top of the global sidebar footer.
+        <div className="fixed bottom-5 left-72 z-[60]" data-testid="dedupe-pill-wrapper">
           <Button
             data-testid="open-dedupe-dialog-btn"
             onClick={() => setDialogOpen(true)}
