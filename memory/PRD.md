@@ -2,6 +2,63 @@
 
 
 
+## Phase 4 Cleanup — CreditApprovalDialog Presentational Extraction (Feb 2026) ✅
+
+### Status: COMPLETE — third dialog extracted; submit handler stays page-owned.
+
+### What was delivered (this fork)
+1. **NEW `frontend/src/components/CreditApprovalDialog.jsx`** (~155 lines) — pure render of the "Authorization Required" dialog: credit-limit-result panel (red exceeded / amber allowed), PIN/TOTP input + 3-method chip row, conditional offline-bypass-reason input, Cancel + Authorize buttons. Renders nothing when `open=false`. All gating booleans (`pinSessionWarm`, `showOfflineReason`) precomputed in the page.
+2. **NEW `frontend/src/components/CreditApprovalDialog.test.jsx`** (11 RTL tests) — covers open/closed gating, both credit-limit panel variants, PIN session hint visibility, offline reason visibility + setter wiring, Cancel callback, Authorize disable/enable rule, Enter-key submit behavior (positive + guarded-empty cases), PIN input setter wiring.
+3. **MOD `frontend/src/pages/UnifiedSalesPage.js`** — added `CreditApprovalDialog` import, replaced the inline ~102-line `<Dialog open={creditApprovalDialog}>` block (lines 4279–4380 previously) with a single 18-line `<CreditApprovalDialog ... />` mount that inlines the `pinSessionWarm` and `showOfflineReason` boolean precomputes. File shrank 5,501 → 5,420 lines.
+
+### Props used (11 total)
+`open`, `onOpenChange`, `creditCheckResult`, `balanceDue`, `pin`, `setPin`, `pinSessionWarm`, `reason`, `setReason`, `showOfflineReason`, `onVerify`, `onCancel`, `saving`. Dialog never reads `paymentType`, `selectedCustomer`, `isOnline`, or `pinSessionRef` directly — all gates are precomputed by the page.
+
+### Tests
+- Frontend: **75 / 75** PASS (64 pre-existing + 11 new RTL).
+- Backend regression: **28 / 28** PASS (`test_phase3_historical_credit.py` + `test_phase4a_approval_gate.py`).
+- Live smoke: signed in as `test_org_admin`, picked Main Warehouse, added product, opened Checkout, switched to Credit tab, selected a customer, clicked Confirm → `CropCreditTypeDialog` opened (prerequisite, unchanged), clicked "By Term" → `CreditApprovalDialog` opened with title "Authorization Required", `manager-pin`, `verify-pin`, all 3 method chips visible. Typing PIN enabled the Authorize button. Offline-reason input correctly hidden (online mode). PIN-session hint correctly hidden (no warm session).
+
+### Behavior changes — NONE
+- All 4 `data-testid` values preserved verbatim (`credit-pin-session-hint`, `manager-pin`, `offline-bypass-reason`, `verify-pin`).
+- `verifyManagerPin` async submit handler untouched (still in page, 117 lines).
+- Auto-fill `useEffect` (lines 707–712) untouched — still reads `pinSessionRef.current.pin` into `managerPin` when the dialog opens with a warm session.
+- Credit-limit math (`checkCreditLimit`) untouched.
+- PIN session lifecycle (`startPinSession`, `clearPinSession`, `isPinSessionWarm`) untouched.
+- Cancel button still clears `managerPin` + `offlineBypassReason` and closes the dialog.
+- Enter key on PIN input still triggers `verifyManagerPin` when the PIN is non-empty.
+- The `CropCreditTypeDialog` prerequisite step (separate sibling dialog) still fires first for credit sales with a customer — unchanged.
+
+### Duplicates introduced — NONE
+- `AuthDialog` / `VerifyPinDialog` (`mode="pin"`, doc-scoped, posts to a doc-verify endpoint) — different endpoint shape, **not reused** intentionally.
+- `OfflineCreditBypassDialog` (uses local bcrypt via `verifyOfflinePin`; TerminalSales only) — different verification mechanism, **not reused** intentionally.
+- `TotpVerifyDialog` (TOTP-only) — subset of our credit-approval's 3-method flow, **not reused**.
+- Each dialog stays its own component because the submit endpoint, the `verify.py` `action_key`, and the post-verify routing differ. A future P3 idea (out of scope): introduce a thin `<PinApprovalDialog />` primitive that all four compose — only worth considering after all four are extracted and we observe truly-common props.
+
+### Files
+- NEW `frontend/src/components/CreditApprovalDialog.jsx`
+- NEW `frontend/src/components/CreditApprovalDialog.test.jsx`
+- MOD `frontend/src/pages/UnifiedSalesPage.js`
+
+### Cleanup tally so far
+| Pass | Lines removed from `UnifiedSalesPage.js` |
+|---|---|
+| HC banner + dialog | ~280 |
+| CheckoutDialog | ~274 |
+| CreditApprovalDialog | ~81 |
+| **Total** | **~635 lines removed** (6,030 → 5,420) |
+
+### Recommendation for the next pass
+The dialog-extraction trilogy (HC, Checkout, Credit Approval) is now complete. The two highest-value remaining cleanup targets are:
+- **`processSale` decomposition** (currently ~570 lines inside the page, P1) — split into `buildSalePayload`, `submitOnline`, `queueOffline`, `printAndComplete` helpers without changing behavior. Largest practical pain point.
+- **`useCheckoutState`** — still on the table but with a known lower value-to-risk ratio (50+ page-side rewrites for modest CheckoutDialog ergonomics).
+
+I'd recommend `processSale` next because it's the actual P1 backlog item, but a fresh A/B/C/D/E assessment is needed first. Alternatively, you could pause Phase 4 here (635 lines is a real cleanup win) and prioritize **Phase 4A.2 Concurrent Held-Sales Queue** which is a real cashier-facing feature with revenue impact.
+
+---
+
+
+
 ## Phase 4 Cleanup — CheckoutDialog Presentational Extraction (Feb 2026) ✅
 
 ### Status: COMPLETE — payment dialog extracted; state still page-owned.

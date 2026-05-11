@@ -48,6 +48,7 @@ import LateEncodeDialog from '../components/LateEncodeDialog';
 import HistoricalCreditBanner from '../components/HistoricalCreditBanner';
 import HistoricalCreditDialog from '../components/HistoricalCreditDialog';
 import CheckoutDialog from '../components/CheckoutDialog';
+import CreditApprovalDialog from '../components/CreditApprovalDialog';
 
 // ── Bounded Levenshtein distance ─────────────────────────────────────────────
 // Returns the edit distance between `a` and `b`, BUT bails out early as soon
@@ -4276,108 +4277,26 @@ export default function UnifiedSalesPage() {
         }}
       />
 
-      <Dialog open={creditApprovalDialog} onOpenChange={setCreditApprovalDialog}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2" style={{ fontFamily: 'Manrope' }}>
-              <Shield className="text-amber-500" /> Authorization Required
-            </DialogTitle>
-            <DialogDescription>
-              Credit/Partial sales require PIN or TOTP authorization
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4">
-            {/* Credit check result */}
-            {creditCheckResult && !creditCheckResult.allowed && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-                <p className="text-sm font-medium text-red-700 flex items-center gap-1">
-                  <AlertTriangle size={14} /> Credit Limit Exceeded
-                </p>
-                <div className="mt-2 space-y-1 text-xs text-red-600">
-                  <div className="flex justify-between"><span>Current Balance:</span><span>{formatPHP(creditCheckResult.currentBalance)}</span></div>
-                  <div className="flex justify-between"><span>This Sale:</span><span>{formatPHP(balanceDue)}</span></div>
-                  <div className="flex justify-between font-medium"><span>New Total:</span><span>{formatPHP(creditCheckResult.newTotal)}</span></div>
-                  <div className="flex justify-between"><span>Credit Limit:</span><span>{formatPHP(creditCheckResult.creditLimit)}</span></div>
-                  <Separator className="my-1" />
-                  <div className="flex justify-between font-bold text-red-700">
-                    <span>Exceeded By:</span><span>{formatPHP(creditCheckResult.exceededBy)}</span>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {creditCheckResult?.allowed && (
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                <p className="text-sm text-amber-700">
-                  This credit sale of <strong>{formatPHP(balanceDue)}</strong> requires authorization.
-                </p>
-              </div>
-            )}
-
-            {/* PIN / TOTP Input — supports all configured methods */}
-            <div>
-              <Label>Authorization Code</Label>
-              <p className="text-[10px] text-slate-400 mb-2">
-                Enter Admin PIN, Manager PIN, or TOTP code from Authenticator app
-              </p>
-              {managerPin && isPinSessionWarm() && (
-                <p className="text-[10px] text-emerald-600 mb-1 flex items-center gap-1 font-medium" data-testid="credit-pin-session-hint">
-                  <Unlock size={10} /> PIN auto-filled from active session
-                </p>
-              )}
-              <Input
-                data-testid="manager-pin"
-                type="password" autoComplete="new-password"
-                value={managerPin}
-                onChange={e => setManagerPin(e.target.value)}
-                placeholder="PIN or 6-digit TOTP code"
-                className="text-center text-2xl tracking-widest h-14"
-                onKeyDown={e => e.key === 'Enter' && managerPin && verifyManagerPin()}
-              />
-              <div className="flex flex-wrap gap-1.5 mt-2">
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 font-medium">Admin PIN</span>
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-50 border border-blue-200 text-blue-700 font-medium">Manager PIN</span>
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-50 border border-purple-200 text-purple-700 font-medium">TOTP (Authenticator)</span>
-              </div>
-            </div>
-
-            {/* Offline credit-sale: required reason for audit log */}
-            {!isOnline && (paymentType === 'credit' || paymentType === 'partial') && selectedCustomer?.id && (
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
-                <p className="text-[11px] font-semibold text-amber-800 flex items-center gap-1">
-                  <WifiOff size={11} /> Offline mode — Admin PIN or branch Manager PIN
-                </p>
-                <Label className="text-[11px]">Reason for offline credit (required)</Label>
-                <Input
-                  data-testid="offline-bypass-reason"
-                  value={offlineBypassReason}
-                  onChange={e => setOfflineBypassReason(e.target.value)}
-                  placeholder="e.g. Customer in a hurry, signed paper slip"
-                  className="h-9 text-xs bg-white"
-                />
-                <p className="text-[10px] text-amber-700 leading-relaxed">
-                  No signature can be captured offline. The bypass + reason is logged for audit when the device reconnects.
-                </p>
-              </div>
-            )}
-
-            <div className="flex gap-2">
-              <Button variant="outline" className="flex-1" onClick={() => { setCreditApprovalDialog(false); setManagerPin(''); setOfflineBypassReason(''); }}>
-                Cancel
-              </Button>
-              <Button 
-                data-testid="verify-pin"
-                className="flex-1 bg-amber-500 hover:bg-amber-600 text-white"
-                onClick={() => verifyManagerPin()}
-                disabled={!managerPin || saving}
-              >
-                <CheckCircle2 size={16} className="mr-2" /> Authorize Sale
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* Phase 4 Cleanup — extracted to `components/CreditApprovalDialog.jsx`.
+          State (`creditApprovalDialog`, `managerPin`, `offlineBypassReason`,
+          `creditCheckResult`) and the async `verifyManagerPin` submit handler
+          stay page-owned. Gate booleans (`pinSessionWarm`, `showOfflineReason`)
+          are pre-computed below so the dialog stays purely presentational. */}
+      <CreditApprovalDialog
+        open={creditApprovalDialog}
+        onOpenChange={setCreditApprovalDialog}
+        creditCheckResult={creditCheckResult}
+        balanceDue={balanceDue}
+        pin={managerPin}
+        setPin={setManagerPin}
+        pinSessionWarm={!!managerPin && isPinSessionWarm()}
+        reason={offlineBypassReason}
+        setReason={setOfflineBypassReason}
+        showOfflineReason={!isOnline && (paymentType === 'credit' || paymentType === 'partial') && !!selectedCustomer?.id}
+        onVerify={() => verifyManagerPin()}
+        onCancel={() => { setCreditApprovalDialog(false); setManagerPin(''); setOfflineBypassReason(''); }}
+        saving={saving}
+      />
 
       {/* New Customer Dialog */}
       <Dialog open={newCustomerDialog} onOpenChange={setNewCustomerDialog}>
