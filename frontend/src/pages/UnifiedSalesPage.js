@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useAuth, api } from '../contexts/AuthContext';
 import { formatPHP, fmtDateTime, fmtDate } from '../lib/utils';
-import { formatTime } from '../lib/dateFormat';
+import { formatTime, localTodayStr } from '../lib/dateFormat';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import CalcInput from '../components/CalcInput';
@@ -32,6 +32,7 @@ import {
 import { syncPendingSales, startAutoSync, stopAutoSync, newEnvelopeId } from '../lib/syncManager';
 import { isTrueNetworkError, pingBackendHealth } from '../lib/connectivity';
 import { useConnectivity } from '../lib/useConnectivity';
+import { useHistoricalCredit } from '../lib/useHistoricalCredit';
 import {
   buildParkPayload, parkSale, discardParkedSale, consumeParkedSale, loadParkedSales, drainSyncQueue as drainParkQueue,
 } from '../lib/parkedSalesSync';
@@ -222,27 +223,11 @@ const EMPTY_LINE = {
 };
 
 // Returns today's date in YYYY-MM-DD using the ORG's configured timezone.
-// Falls back to the browser's local date when the org TZ hasn't been loaded
-// yet (e.g. before the settings fetch on app boot). The org TZ is cached in
-// localStorage by the AuthContext under `agribooks.org_tz` so this helper
-// stays synchronous — critical because it runs inside useState initializers.
-const localToday = () => {
-  try {
-    const tz = localStorage.getItem('agribooks.org_tz') || '';
-    if (tz) {
-      const parts = new Intl.DateTimeFormat('en-CA', {
-        timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
-      }).formatToParts(new Date());
-      const get = k => parts.find(p => p.type === k)?.value || '';
-      const y = get('year'), m = get('month'), d = get('day');
-      if (y && m && d) return `${y}-${m}-${d}`;
-    }
-  } catch {
-    /* fall through to browser-local */
-  }
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
+// Phase 4 cleanup — the page-local `localTodayStr()` helper was previously a
+// near-duplicate of `lib/dateFormat.js#localTodayStr`. Both read the same
+// `agribooks.org_tz` localStorage key with a Manila fallback and produce
+// the same YYYY-MM-DD string. The page now imports the shared helper and
+// uses it directly. No behavior change.
 
 export default function UnifiedSalesPage() {
   const { currentBranch, user, effectiveBranchId, hasPerm } = useAuth();
@@ -260,7 +245,7 @@ export default function UnifiedSalesPage() {
   const [mainTab, setMainTab] = useState('sale');
 
   // ── Sales History ────────────────────────────────────────────────────────
-  const [historyDate, setHistoryDate] = useState(localToday());
+  const [historyDate, setHistoryDate] = useState(localTodayStr());
   const [historySearch, setHistorySearch] = useState('');
   const [historyList, setHistoryList] = useState([]);
   const [historyTotals, setHistoryTotals] = useState(null);
@@ -411,7 +396,7 @@ export default function UnifiedSalesPage() {
   // Order header
   const [header, setHeader] = useState({
     terms: 'COD', terms_days: 0, customer_po: '', sales_rep_id: '', sales_rep_name: '',
-    prefix: 'SI', order_date: localToday(),
+    prefix: 'SI', order_date: localTodayStr(),
     shipping_address: '', location: '', mod: '', check_number: '', req_ship_date: '', notes: '',
   });
   const [freight, setFreight] = useState(0);
@@ -436,7 +421,7 @@ export default function UnifiedSalesPage() {
   // flow (credit/partial only — server enforces). Capped at floorDate so
   // dates before the system existed are still blocked.
   const minAllowedDate = useMemo(() => {
-    const today = localToday();
+    const today = localTodayStr();
     // Phase 4A: admins/owners may pick any past date (down to floorDate)
     // for Historical Credit / Notebook AR encoding.
     if (isPrivilegedRole) {
@@ -456,7 +441,7 @@ export default function UnifiedSalesPage() {
   // Forward-dating beyond +1 day is blocked (prevents stock laundering — see
   // /app/frontend/src/lib/nextOpenDate.js header for the full rationale).
   const maxAllowedDate = useMemo(() => {
-    const today = localToday();
+    const today = localTodayStr();
     if (lastCloseDate && lastCloseDate >= today) {
       const d = new Date(today + 'T12:00:00');
       d.setDate(d.getDate() + 1);
@@ -466,18 +451,18 @@ export default function UnifiedSalesPage() {
   }, [lastCloseDate]);
 
   // ── Phase 4A — Historical Credit / Notebook AR triggers ─────────────
-  // daysBack: positive integer = days the order_date is in the past.
-  //   0 = today, negative would be a future date (handled separately).
+  // `daysBack` is computed here (still needed by both the HC mode flag
+  // and the date-error banner). The HC mode flag itself + 12 state
+  // fields + 4 helpers now live in `lib/useHistoricalCredit.js` —
+  // wired below right after the cart/customer/totals are computed.
   const daysBack = useMemo(() => {
     if (!header.order_date) return 0;
-    const today = localToday();
+    const today = localTodayStr();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(header.order_date)) return 0;
     const t1 = new Date(today + 'T00:00:00').getTime();
     const t2 = new Date(header.order_date + 'T00:00:00').getTime();
     return Math.round((t1 - t2) / 86400000);
   }, [header.order_date]);
-
-  const HISTORICAL_CREDIT_FLOOR_DAYS = 7;
 
   // Order header collapse
   const [headerCollapsed, setHeaderCollapsed] = useState(true);
@@ -519,46 +504,16 @@ export default function UnifiedSalesPage() {
   const [saving, setSaving] = useState(false);
   const [releaseMode, setReleaseMode] = useState('full'); // full | partial
 
-  // ── Phase 4A — Historical Credit mode triggers ─────────────────────
-  // Declared AFTER `paymentType` so the memos do not hit a TDZ on first
-  // render (reported in iter 256 by the testing agent).
-  //
-  // True only when ALL three conditions hold (per handoff §7):
-  //   • transaction_date < today
-  //   • payment_type === 'credit'
-  //   • daysBack > 7
-  // AND the user has the role required by the backend gate.
-  const isHistoricalCreditMode = useMemo(() => (
-    daysBack > HISTORICAL_CREDIT_FLOOR_DAYS
-    && paymentType === 'credit'
-    && isPrivilegedRole
-  ), [daysBack, paymentType, isPrivilegedRole]);
+  // ── Phase 4A — Historical Credit / Notebook AR (extracted) ─────────
+  // State, trigger flags, and helpers now live in
+  // `lib/useHistoricalCredit.js`. The hook is wired below right after
+  // the cart/lines/totals/customer/branch are computed (see `hc =
+  // useHistoricalCredit(...)` further down). We continue to destructure
+  // `isHistoricalCreditMode` and `isBackdatedNonCreditBlocked` into
+  // local consts under their old names so the existing JSX and
+  // `handleCreditSale` callsites remain unchanged.
 
-  // True when the cashier picked a past date >7 days back but the payment
-  // type is NOT pure credit. Backdated cash/digital/split/partial-paid
-  // sales must be strictly blocked at this depth — they would change cash
-  // collected today, which is not allowed for AR reconstruction.
-  const isBackdatedNonCreditBlocked = useMemo(() => (
-    daysBack > HISTORICAL_CREDIT_FLOOR_DAYS && paymentType !== 'credit'
-  ), [daysBack, paymentType]);
 
-  // ── Phase 4A — Historical Credit / Notebook AR Mode (admin-only) ─────
-  // Triggered automatically when transaction_date < today AND payment_type
-  // == credit AND days_back > 7. Backdated cash/digital/split sales are
-  // strictly blocked. Final commit posts to /api/historical-credit and is
-  // gated by an Owner/Admin TOTP approval_code verified server-side.
-  const [historicalCreditPreview, setHistoricalCreditPreview] = useState(null);
-  const [historicalCreditPreviewLoading, setHistoricalCreditPreviewLoading] = useState(false);
-  const [historicalCreditPreviewError, setHistoricalCreditPreviewError] = useState('');
-  const [historicalCreditReason, setHistoricalCreditReason] = useState('');
-  const [historicalCreditProofUrl, setHistoricalCreditProofUrl] = useState('');
-  const [historicalCreditNotebookRef, setHistoricalCreditNotebookRef] = useState('');
-  const [historicalCreditAllowInv, setHistoricalCreditAllowInv] = useState(false);
-  const [historicalCreditApprovalCode, setHistoricalCreditApprovalCode] = useState('');
-  const [historicalCreditDialog, setHistoricalCreditDialog] = useState(false);
-  const [historicalCreditCommitting, setHistoricalCreditCommitting] = useState(false);
-  const [historicalCreditCommitError, setHistoricalCreditCommitError] = useState('');
-  
   // Reference number prompt
   const [refPrompt, setRefPrompt] = useState({ open: false, number: '', title: '', invoiceData: null });
 
@@ -2214,156 +2169,67 @@ export default function UnifiedSalesPage() {
     proceedToCheckoutAfterCustSave();
   };
 
-  // ── Phase 4A — Historical Credit / Notebook AR helpers ─────────────
-  // Build the items[] payload from the active cart (Quick or Order mode)
-  // exactly the way processSale does, but stripped to the minimum the
-  // /api/historical-credit endpoint expects.
-  const buildHistoricalCreditItems = useCallback(() => {
-    if (mode === 'quick') {
-      return cart.map(c => ({
-        product_id: c.product_id,
-        product_name: c.product_name,
-        sku: c.sku,
-        quantity: c.quantity,
-        rate: c.price,
-        price: c.price,
-        total: c.total,
+  // ── Phase 4A — Historical Credit / Notebook AR (hook wiring) ─────
+  // State, trigger flags, payload builders, preview, and commit all
+  // live in `lib/useHistoricalCredit.js`. We pass in:
+  //   • `daysBack`, `paymentType`, `isPrivilegedRole` — for the mode flag
+  //   • `getItems` — page-owned cart→items mapper (mode-aware)
+  //   • `getContext` — page-owned customer/branch/totals/date
+  //   • `hasCustomer` — gate for runPreview
+  //   • `onCommitted` — REQUIRED page-side cleanup after success
+  // The destructured names (`isHistoricalCreditMode`,
+  // `isBackdatedNonCreditBlocked`) preserve the existing JSX and
+  // `handleCreditSale` call-sites so no broader refactor is needed.
+  const hc = useHistoricalCredit({
+    daysBack,
+    paymentType,
+    isPrivilegedRole,
+    getItems: useCallback(() => {
+      if (mode === 'quick') {
+        return cart.map(c => ({
+          product_id: c.product_id,
+          product_name: c.product_name,
+          sku: c.sku,
+          quantity: c.quantity,
+          rate: c.price,
+          price: c.price,
+          total: c.total,
+        }));
+      }
+      return lines.filter(l => l.product_id).map(l => ({
+        product_id: l.product_id,
+        product_name: l.product_name,
+        quantity: l.quantity,
+        rate: l.rate,
+        price: l.rate,
+        total: lineTotal(l),
       }));
-    }
-    return lines.filter(l => l.product_id).map(l => ({
-      product_id: l.product_id,
-      product_name: l.product_name,
-      quantity: l.quantity,
-      rate: l.rate,
-      price: l.rate,
-      total: lineTotal(l),
-    }));
-  }, [mode, cart, lines]);
-
-  // Build the canonical historical-credit payload (used by both the
-  // preview call and the final commit call). Approval code is only ever
-  // attached to the commit payload — the preview must never leak it.
-  const buildHistoricalCreditPayload = useCallback(() => ({
-    customer_id: selectedCustomer?.id || '',
-    branch_id: currentBranch?.id || '',
-    transaction_date: header.order_date,
-    items: buildHistoricalCreditItems(),
-    subtotal,
-    freight,
-    overall_discount: overallDiscount,
-    grand_total: grandTotal,
-    reason: historicalCreditReason.trim(),
-    proof_url: historicalCreditProofUrl.trim() || undefined,
-    notebook_reference: historicalCreditNotebookRef.trim() || undefined,
-    allow_inventory_deduction: !!historicalCreditAllowInv,
-  }), [
-    selectedCustomer?.id, currentBranch?.id, header.order_date,
-    buildHistoricalCreditItems, subtotal, freight, overallDiscount, grandTotal,
-    historicalCreditReason, historicalCreditProofUrl, historicalCreditNotebookRef,
-    historicalCreditAllowInv,
-  ]);
-
-  const previewHistoricalCredit = useCallback(async () => {
-    setHistoricalCreditPreviewError('');
-    setHistoricalCreditPreview(null);
-    if (!selectedCustomer?.id) {
-      setHistoricalCreditPreviewError('Select a customer before preview.');
-      return;
-    }
-    if (historicalCreditReason.trim().length < 20) {
-      setHistoricalCreditPreviewError('Reason must be at least 20 characters.');
-      return;
-    }
-    setHistoricalCreditPreviewLoading(true);
-    try {
-      const res = await api.post('/historical-credit/preview', buildHistoricalCreditPayload());
-      setHistoricalCreditPreview(res.data);
-    } catch (e) {
-      const detail = e?.response?.data?.detail;
-      if (detail && typeof detail === 'object') {
-        if (Array.isArray(detail.errors)) {
-          setHistoricalCreditPreviewError(detail.errors.join(' • '));
-        } else if (detail.message) {
-          setHistoricalCreditPreviewError(detail.message);
-        } else {
-          setHistoricalCreditPreviewError(JSON.stringify(detail));
-        }
-      } else {
-        setHistoricalCreditPreviewError(detail || e.message || 'Preview failed');
-      }
-    } finally {
-      setHistoricalCreditPreviewLoading(false);
-    }
-  }, [
-    selectedCustomer?.id, historicalCreditReason, buildHistoricalCreditPayload,
-  ]);
-
-  const commitHistoricalCredit = useCallback(async () => {
-    setHistoricalCreditCommitError('');
-    if (!historicalCreditPreview) {
-      setHistoricalCreditCommitError('Run preview first.');
-      return;
-    }
-    if (!historicalCreditApprovalCode.trim()) {
-      setHistoricalCreditCommitError('Owner / Admin Authenticator (TOTP) code is required.');
-      return;
-    }
-    setHistoricalCreditCommitting(true);
-    try {
-      const payload = {
-        ...buildHistoricalCreditPayload(),
-        approval_code: historicalCreditApprovalCode.trim(),
-      };
-      const res = await api.post('/historical-credit', payload);
-      const inv = res.data?.invoice || {};
-      const invoiceNum = inv.invoice_number || res.data?.invoice_number || '(unknown)';
-      invalidateBalanceCache();
-      toast.success(`Historical credit recorded — Invoice ${invoiceNum}`, { duration: 5000 });
-      // Clear cart + historical credit state
+    }, [mode, cart, lines]),
+    getContext: useCallback(() => ({
+      customer_id: selectedCustomer?.id || '',
+      branch_id: currentBranch?.id || '',
+      transaction_date: header.order_date,
+      subtotal,
+      freight,
+      overall_discount: overallDiscount,
+      grand_total: grandTotal,
+    }), [selectedCustomer?.id, currentBranch?.id, header.order_date, subtotal, freight, overallDiscount, grandTotal]),
+    hasCustomer: useCallback(() => !!selectedCustomer?.id, [selectedCustomer?.id]),
+    onCommitted: useCallback(() => {
+      // Page-side post-commit cleanup. Behavior-identical to the inline
+      // commit flow before extraction: clear the cart, reset the order
+      // date back to today, clear any pending credit-sale latch, and
+      // close the checkout dialog if it was still open.
       clearCart();
-      setHistoricalCreditDialog(false);
-      setHistoricalCreditPreview(null);
-      setHistoricalCreditReason('');
-      setHistoricalCreditProofUrl('');
-      setHistoricalCreditNotebookRef('');
-      setHistoricalCreditAllowInv(false);
-      setHistoricalCreditApprovalCode('');
-      setHistoricalCreditCommitError('');
+      setHeader(h => ({ ...h, order_date: localTodayStr() }));
       setPendingCreditSale(null);
-      // Reset order date back to today so next sale is a normal one.
-      setHeader(h => ({ ...h, order_date: localToday() }));
-    } catch (e) {
-      const detail = e?.response?.data?.detail;
-      const status = e?.response?.status;
-      if (detail && typeof detail === 'object') {
-        if (detail.error === 'approval_code_required') {
-          setHistoricalCreditCommitError('Approval code required. Ask the company owner / admin to enter their Authenticator App (TOTP) code.');
-        } else if (detail.error === 'approval_invalid') {
-          setHistoricalCreditCommitError('Invalid or unauthorized approval code. Only Owner / Admin Authenticator App (TOTP) codes are accepted for Historical Credit.');
-        } else if (detail.error === 'use_regular_late_encode') {
-          setHistoricalCreditCommitError(detail.message || 'Use the regular Sales late-encode path for dates within 7 days back.');
-        } else if (Array.isArray(detail.errors)) {
-          setHistoricalCreditCommitError(detail.errors.join(' • '));
-        } else if (detail.message) {
-          setHistoricalCreditCommitError(detail.message);
-        } else {
-          setHistoricalCreditCommitError(JSON.stringify(detail));
-        }
-      } else {
-        setHistoricalCreditCommitError(
-          (typeof detail === 'string' ? detail : null)
-          || (status === 403 ? 'Approval rejected (403). Owner / Admin TOTP required.' : null)
-          || e?.message
-          || 'Commit failed.'
-        );
-      }
-    } finally {
-      setHistoricalCreditCommitting(false);
-    }
-  }, [
-    historicalCreditPreview, historicalCreditApprovalCode,
-    buildHistoricalCreditPayload, clearCart,
-  ]);
+      setCheckoutDialog(false);
+    }, []),
+  });
+  const {
+    isMode: isHistoricalCreditMode,
+    isBackdatedNonCreditBlocked,
+  } = hc;
 
   // Handle credit sale with approval
   const handleCreditSale = async () => {
@@ -2386,11 +2252,7 @@ export default function UnifiedSalesPage() {
     if (isHistoricalCreditMode && selectedCustomer?.id) {
       setPendingCreditSale({ paymentType, partialPayment: 0, amountTendered: 0 });
       setCheckoutDialog(false);
-      setHistoricalCreditPreview(null);
-      setHistoricalCreditPreviewError('');
-      setHistoricalCreditCommitError('');
-      setHistoricalCreditApprovalCode('');
-      setHistoricalCreditDialog(true);
+      hc.openDialog();
       return;
     }
 
@@ -2568,7 +2430,7 @@ export default function UnifiedSalesPage() {
     
     const saleId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const envelopeId = newEnvelopeId(); // separate idempotency key for resilient sync
-    const today = localToday();
+    const today = localTodayStr();
 
     // Offline receipt number — mirrors the online format (PREFIX-BRANCH-SEQ)
     // with an "OFF" marker so it can never collide with the server-side
@@ -3107,7 +2969,7 @@ export default function UnifiedSalesPage() {
             // a locked input. Only do this on first load — don't clobber a
             // date the user has explicitly picked.
             if (last_close_date) {
-              const today = localToday();
+              const today = localTodayStr();
               if (last_close_date >= today) {
                 setHeader(h => {
                   // Only auto-bump if order_date is still today's default
@@ -3744,13 +3606,13 @@ export default function UnifiedSalesPage() {
                   </Label>
                   <textarea
                     data-testid="historical-credit-reason-input"
-                    value={historicalCreditReason}
-                    onChange={e => setHistoricalCreditReason(e.target.value)}
+                    value={hc.reason}
+                    onChange={e => hc.setReason(e.target.value)}
                     placeholder="Notebook AR carry-forward verified against ledger page 12, customer countersigned 2026-02-04."
                     className="w-full text-[12px] rounded border border-amber-300 bg-white px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-400 min-h-[60px] mt-0.5"
                   />
-                  <p className={`text-[10px] mt-0.5 ${historicalCreditReason.trim().length >= 20 ? 'text-emerald-700' : 'text-amber-700'}`}>
-                    {historicalCreditReason.trim().length} / 20 minimum
+                  <p className={`text-[10px] mt-0.5 ${hc.reason.trim().length >= 20 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                    {hc.reason.trim().length} / 20 minimum
                   </p>
                 </div>
                 <div>
@@ -3759,8 +3621,8 @@ export default function UnifiedSalesPage() {
                   </Label>
                   <Input
                     data-testid="historical-credit-proof-url-input"
-                    value={historicalCreditProofUrl}
-                    onChange={e => setHistoricalCreditProofUrl(e.target.value)}
+                    value={hc.proofUrl}
+                    onChange={e => hc.setProofUrl(e.target.value)}
                     placeholder="https://… (photo of notebook page)"
                     className="h-8 text-[12px] mt-0.5 bg-white"
                   />
@@ -3771,8 +3633,8 @@ export default function UnifiedSalesPage() {
                   </Label>
                   <Input
                     data-testid="historical-credit-notebook-ref-input"
-                    value={historicalCreditNotebookRef}
-                    onChange={e => setHistoricalCreditNotebookRef(e.target.value)}
+                    value={hc.notebookRef}
+                    onChange={e => hc.setNotebookRef(e.target.value)}
                     placeholder="Ledger 2025 — Page 12, Row 4"
                     className="h-8 text-[12px] mt-0.5 bg-white"
                   />
@@ -4676,7 +4538,7 @@ export default function UnifiedSalesPage() {
                   )) ||
                   ((paymentType === 'partial' || paymentType === 'credit') && !selectedCustomer) ||
                   isBackdatedNonCreditBlocked ||
-                  (isHistoricalCreditMode && historicalCreditReason.trim().length < 20)
+                  (isHistoricalCreditMode && hc.reason.trim().length < 20)
                 }
               >
                 {saving ? 'Processing...' : (
@@ -5964,15 +5826,10 @@ export default function UnifiedSalesPage() {
           Final confirmation modal: shows preview output and gates the
           commit behind an Owner / Admin Authenticator (TOTP) code that
           is verified server-side. The frontend never sees the secret. */}
-      <Dialog open={historicalCreditDialog} onOpenChange={(o) => {
-        if (!historicalCreditCommitting) {
-          setHistoricalCreditDialog(o);
-          if (!o) {
-            setHistoricalCreditPreview(null);
-            setHistoricalCreditPreviewError('');
-            setHistoricalCreditCommitError('');
-            setHistoricalCreditApprovalCode('');
-          }
+      <Dialog open={hc.dialogOpen} onOpenChange={(o) => {
+        if (!hc.committing) {
+          if (o) hc.setDialogOpen(true);
+          else hc.closeDialog();
         }
       }}>
         <DialogContent data-testid="historical-credit-dialog" className="max-w-xl max-h-[90vh] overflow-y-auto">
@@ -6004,11 +5861,11 @@ export default function UnifiedSalesPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-amber-700">Will be encoded today as</span>
-                <span className="font-medium text-amber-900">{localToday()}</span>
+                <span className="font-medium text-amber-900">{localTodayStr()}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-amber-700">Items</span>
-                <span className="font-medium text-amber-900">{(buildHistoricalCreditItems() || []).length}</span>
+                <span className="font-medium text-amber-900">{items.length}</span>
               </div>
               <div className="flex justify-between border-t border-amber-200 pt-1 mt-1">
                 <span className="text-amber-700 font-semibold">Grand total (AR)</span>
@@ -6017,64 +5874,64 @@ export default function UnifiedSalesPage() {
             </div>
 
             {/* Preview button */}
-            {!historicalCreditPreview && (
+            {!hc.preview && (
               <div className="flex justify-end">
                 <Button
                   data-testid="historical-credit-preview-btn"
                   size="sm"
                   variant="outline"
                   className="border-amber-400 text-amber-800 hover:bg-amber-100"
-                  disabled={historicalCreditPreviewLoading || historicalCreditReason.trim().length < 20}
-                  onClick={previewHistoricalCredit}
+                  disabled={hc.previewLoading || hc.reason.trim().length < 20}
+                  onClick={hc.runPreview}
                 >
-                  {historicalCreditPreviewLoading ? 'Previewing…' : 'Run Preview'}
+                  {hc.previewLoading ? 'Previewing…' : 'Run Preview'}
                 </Button>
               </div>
             )}
 
-            {historicalCreditPreviewError && (
+            {hc.previewError && (
               <p className="text-[11px] text-red-600 bg-red-50 border border-red-200 rounded p-2" data-testid="historical-credit-preview-error">
-                {historicalCreditPreviewError}
+                {hc.previewError}
               </p>
             )}
 
             {/* Preview panel */}
-            {historicalCreditPreview && (
+            {hc.preview && (
               <div className="space-y-2">
                 {/* Customer Owes Total Snapshot */}
                 <div
                   data-testid="historical-credit-customer-owes-snapshot"
                   className={`rounded-md border p-2.5 text-[12px] space-y-1 ${
-                    (historicalCreditPreview.customer?.projected_balance || 0)
-                      - (historicalCreditPreview.customer?.current_balance || 0)
-                      > Math.max(5000, (historicalCreditPreview.customer?.current_balance || 0) * 0.5)
+                    (hc.preview.customer?.projected_balance || 0)
+                      - (hc.preview.customer?.current_balance || 0)
+                      > Math.max(5000, (hc.preview.customer?.current_balance || 0) * 0.5)
                       ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-slate-50'
                   }`}
                 >
                   <p className="text-[11px] font-semibold text-slate-700 uppercase tracking-wide">Customer Owes</p>
                   <div className="flex justify-between">
                     <span className="text-slate-600">Current balance</span>
-                    <span className="font-mono">{formatPHP(historicalCreditPreview.customer?.current_balance || 0)}</span>
+                    <span className="font-mono">{formatPHP(hc.preview.customer?.current_balance || 0)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-600">+ Historical credit</span>
-                    <span className="font-mono text-amber-700">+ {formatPHP(historicalCreditPreview.grand_total || 0)}</span>
+                    <span className="font-mono text-amber-700">+ {formatPHP(hc.preview.grand_total || 0)}</span>
                   </div>
                   <div className="flex justify-between border-t pt-1 font-bold">
                     <span>Projected balance</span>
-                    <span className="font-mono">{formatPHP(historicalCreditPreview.customer?.projected_balance || 0)}</span>
+                    <span className="font-mono">{formatPHP(hc.preview.customer?.projected_balance || 0)}</span>
                   </div>
                 </div>
 
                 {/* Count-sheet stopper */}
-                {historicalCreditPreview.inventory_action === 'skipped_count_sheet_lock' && (
+                {hc.preview.inventory_action === 'skipped_count_sheet_lock' && (
                   <div className="rounded-md border border-amber-300 bg-amber-50 p-2.5 text-[11px] text-amber-800 space-y-1.5" data-testid="historical-credit-count-stopper">
                     <p className="font-semibold flex items-center gap-1">
                       <AlertTriangle size={12} /> Inventory will NOT be deducted
                     </p>
                     <p>
                       This date is on or before the latest approved count
-                      sheet ({historicalCreditPreview.count_sheet_stopper?.latest_count_date || 'n/a'}).
+                      sheet ({hc.preview.count_sheet_stopper?.latest_count_date || 'n/a'}).
                       Inventory will not be deducted unless Admin / Owner
                       explicitly allows it. Otherwise this is recorded as
                       AR-only reconstruction.
@@ -6083,11 +5940,11 @@ export default function UnifiedSalesPage() {
                       <input
                         type="checkbox"
                         data-testid="historical-credit-allow-inv-checkbox"
-                        checked={historicalCreditAllowInv}
+                        checked={hc.allowInv}
                         onChange={e => {
-                          setHistoricalCreditAllowInv(e.target.checked);
+                          hc.setAllowInv(e.target.checked);
                           // Re-preview to refresh inventory_action
-                          setHistoricalCreditPreview(null);
+                          hc.setPreview(null);
                         }}
                       />
                       <span>Override and deduct inventory anyway (with audit)</span>
@@ -6121,18 +5978,18 @@ export default function UnifiedSalesPage() {
                     autoComplete="off"
                     autoFocus
                     placeholder="6-digit TOTP"
-                    value={historicalCreditApprovalCode}
-                    onChange={e => setHistoricalCreditApprovalCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 8))}
+                    value={hc.approvalCode}
+                    onChange={e => hc.setApprovalCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 8))}
                     className="text-center text-2xl tracking-widest h-12 bg-white"
                     onKeyDown={e => {
-                      if (e.key === 'Enter' && historicalCreditApprovalCode && !historicalCreditCommitting) {
-                        commitHistoricalCredit();
+                      if (e.key === 'Enter' && hc.approvalCode && !hc.committing) {
+                        hc.commit();
                       }
                     }}
                   />
-                  {historicalCreditCommitError && (
+                  {hc.commitError && (
                     <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded p-1.5" data-testid="historical-credit-commit-error">
-                      {historicalCreditCommitError}
+                      {hc.commitError}
                     </p>
                   )}
                 </div>
@@ -6145,8 +6002,8 @@ export default function UnifiedSalesPage() {
               variant="ghost"
               size="sm"
               data-testid="historical-credit-cancel-btn"
-              disabled={historicalCreditCommitting}
-              onClick={() => setHistoricalCreditDialog(false)}
+              disabled={hc.committing}
+              onClick={() => hc.closeDialog()}
             >
               Cancel
             </Button>
@@ -6155,14 +6012,14 @@ export default function UnifiedSalesPage() {
               data-testid="historical-credit-commit-btn"
               className="bg-amber-600 hover:bg-amber-700 text-white"
               disabled={
-                !historicalCreditPreview
-                || !historicalCreditApprovalCode.trim()
-                || historicalCreditReason.trim().length < 20
-                || historicalCreditCommitting
+                !hc.preview
+                || !hc.approvalCode.trim()
+                || hc.reason.trim().length < 20
+                || hc.committing
               }
-              onClick={commitHistoricalCredit}
+              onClick={hc.commit}
             >
-              {historicalCreditCommitting ? 'Committing…' : 'Commit Historical Credit'}
+              {hc.committing ? 'Committing…' : 'Commit Historical Credit'}
             </Button>
           </div>
         </DialogContent>

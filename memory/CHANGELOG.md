@@ -2,6 +2,67 @@
 
 
 
+## Feb 2026 — Phase 4 Cleanup, useHistoricalCredit() Extraction Pass
+
+**Goal**: Extract the Historical Credit / Notebook AR feature state, trigger flags, and helpers out of `UnifiedSalesPage.js` into a reusable hook. Plus a tiny prerequisite cleanup: replace the page-local `localToday()` duplicate with the shared `lib/dateFormat.js#localTodayStr`.
+
+### Files changed
+- **NEW** `frontend/src/lib/useHistoricalCredit.js` (~240 lines, ~150 lines of business logic + 90 lines of comments / type docs).
+- **NEW** `frontend/src/lib/useHistoricalCredit.test.js` — 14 focused hook tests, all green.
+- **MOD** `frontend/src/pages/UnifiedSalesPage.js` — imports the hook + the shared `localTodayStr`, removed the page-local `localToday()` definition, removed the 12 HC state declarations, the 2 HC trigger memos, and the 4 HC helpers (`buildHistoricalCreditItems`, `buildHistoricalCreditPayload`, `previewHistoricalCredit`, `commitHistoricalCredit`). Replaced 9 `localToday()` call-sites with `localTodayStr()`. Wired the new `hc = useHistoricalCredit({...})` call with explicit `getItems`/`getContext`/`hasCustomer` getters and a single `onCommitted` callback. Updated all banner + dialog JSX consumer sites to read from `hc.*`. Net: ~210 lines removed from UnifiedSalesPage.js.
+
+### Prerequisite micro-cleanup
+- Replaced the page-local `localToday()` helper (which was a near-duplicate of `lib/dateFormat.js#localTodayStr` — same `agribooks.org_tz` localStorage read, same Manila fallback, same YYYY-MM-DD output) with the shared utility. 9 call-sites migrated. `lib/nextOpenDate.js` untouched (out of scope).
+
+### State moved into the hook (12 state fields)
+`reason`, `proofUrl`, `notebookRef`, `allowInv`, `approvalCode`, `dialogOpen`, `preview`, `previewLoading`, `previewError`, `committing`, `commitError`, plus the constant `HISTORICAL_CREDIT_FLOOR_DAYS = 7` and the memoised flags `isMode` (= `isHistoricalCreditMode`) + `isBackdatedNonCreditBlocked`.
+
+### Functions moved into the hook (4 helpers + 3 new dialog conveniences)
+- `buildItems` (mode-aware cart→items mapper)
+- `buildPayload` (preview/commit-shared, approval-code-aware)
+- `runPreview` (was `previewHistoricalCredit`)
+- `commit` (was `commitHistoricalCredit`)
+- **New**: `openDialog()` — clears stale preview/error/code and opens; preserves the user-typed reason/proof/notebook so a re-open doesn't lose them.
+- **New**: `closeDialog()` — symmetric cleanup on cancel.
+- **New**: `reset()` — convenience for tests.
+
+### What intentionally remained in `UnifiedSalesPage.js`
+- `isPrivilegedRole` — used by `minAllowedDate` (date-picker widening), not only HC. Passed INTO the hook as an option.
+- `daysBack` — used by both HC and the existing date-error banner. Passed IN as an option.
+- All cart / lines / customer / branch / header / totals ownership.
+- `clearCart`, `setHeader`, `setPendingCreditSale`, `setCheckoutDialog` setters — invoked through `onCommitted` so the page stays in full control.
+- All HC JSX (banner with reason/proof/notebook inputs + the commit dialog) — read from `hc.*` for now; presentational extraction is a separate future pass.
+
+### onCommitted wiring
+```js
+onCommitted: useCallback(() => {
+  clearCart();
+  setHeader(h => ({ ...h, order_date: localTodayStr() }));
+  setPendingCreditSale(null);
+  setCheckoutDialog(false);
+}, []),
+```
+Single source of truth for post-commit page cleanup. Hook does NOT touch any of these directly. Errors thrown from `onCommitted` are swallowed inside the hook so the cashier still sees the green toast + reset HC state.
+
+### Tests added / results
+- Frontend unit: **37/37 PASS** (17 connectivity + 6 useConnectivity + 14 useHistoricalCredit). Run with `cd /app/frontend && CI=true yarn test --watchAll=false --testPathPattern="connectivity|useConnectivity|useHistoricalCredit"`.
+- Backend regression: **28/28 PASS** (Phase 3 + 4A unit).
+- Live smoke on deployed preview: page mounts, `connectivity-status[data-status="online"]`, no console errors, no React `pageerror`s, both Quick Sale + Detailed Sale tabs render correctly, Sale Date picker and customer search work, dedupe pill still in bottom-left (Pass 0 fix preserved).
+- ESLint clean.
+
+### Behavior change?
+None. Same Historical Credit trigger conditions (daysBack > 7 AND credit AND privileged role), same backdated-non-credit block, same approval-code rules, same Owner/Admin TOTP gate (server-side), same `use_regular_late_encode` routing for 1–7 day credit, same 0–7 day late-encode flow via `LateEncodeDialog`, same post-commit cleanup. Both Quick Sale mode and Detailed Sale / Order Mode remain inside the same `UnifiedSalesPage`. POS Terminal untouched. Offline sync untouched. Reports untouched. Pending-sync pill rules untouched.
+
+### Duplicate / overlap discovered during implementation
+- The previous near-duplicate `localToday()` was eliminated (replaced with shared `localTodayStr`). `lib/nextOpenDate.js` still has its own copy — flagged for a future tiny cleanup.
+- No other duplicates introduced. The hook composes existing leaf modules (`api`, `invalidateBalanceCache`, `localTodayStr`) without overlap.
+
+### Pass landed cleanly?
+Yes. Lint green, all unit tests green, all backend regression green, live page renders without errors, both sales modes functional, dedupe-pill/branch-guard pre-fixes from Pass 0 preserved.
+
+
+
+
 ## Feb 2026 — Phase 4 Cleanup, Pass 0 + Pass 1
 
 **Goal**: Make the UnifiedSalesPage codebase ready for the eventual HeldSalesQueue (Phase 4A.2) by relocating connectivity behavior into a reusable hook, plus two tiny UX fixes that unblock E2E testing without weakening any business rule.
