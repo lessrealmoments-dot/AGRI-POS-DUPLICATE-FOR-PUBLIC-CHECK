@@ -2,6 +2,60 @@
 
 
 
+## Phase 4 Cleanup — CheckoutDialog Presentational Extraction (Feb 2026) ✅
+
+### Status: COMPLETE — payment dialog extracted; state still page-owned.
+
+### What was delivered (this fork)
+1. **NEW `frontend/src/components/CheckoutDialog.jsx`** (~403 lines) — pure render of the Payment dialog (customer pane + total + 5-tab payment picker + per-type input panes + release-mode + confirm/cancel). State is owned by the page; the dialog receives setters via props. `confirmDisabled` is pre-computed in the page and passed as a single boolean, keeping the dialog 100% presentational.
+2. **NEW `frontend/src/components/CheckoutDialog.test.jsx`** (13 RTL tests) — covers dialog gating, 5-tab presence, cash + digital + split + partial + credit pane rendering, release-mode toggle, confirm-button label switching (cash / digital / split / HC / saving), `confirmDisabled` honoring, customer-clear, and customer-match-typeahead.
+3. **MOD `frontend/src/pages/UnifiedSalesPage.js`** — added `confirmDisabled` `useMemo`-equivalent computation right after the `hc` destructure, replaced the inline ~330-line `<Dialog open={checkoutDialog}>` block (lines 4158–4486 originally) with a single `<CheckoutDialog ... />` mount. File shrank from 5,775 → 5,501 lines.
+
+### `confirmDisabled` computation (page-owned, identical to previous inline rule)
+```js
+const confirmDisabled = (
+  saving ||
+  (paymentType === 'cash' && amountTendered < grandTotal) ||
+  (paymentType === 'digital' && !digitalRefNumber.trim()) ||
+  (paymentType === 'split' && (
+    !digitalRefNumber.trim() ||
+    Math.abs((parseFloat(splitCash||0) + parseFloat(splitDigital||0)) - grandTotal) > 0.01
+  )) ||
+  ((paymentType === 'partial' || paymentType === 'credit') && !selectedCustomer) ||
+  isBackdatedNonCreditBlocked ||
+  (isHistoricalCreditMode && hc.reason.trim().length < 20)
+);
+```
+
+### Props surface (26 props)
+Open/close (2), customer surface (6), totals (2), payment state (14), release mode (2), confirm (3), HC flag (1). All props are 1:1 mirrors of existing page setters/values — no renames, no new shape, no callback wrapping. Future `useCheckoutState` pass will collapse ~18 of these into a single `cs` object.
+
+### Tests
+- Frontend: **64 / 64** PASS (51 pre-existing + 13 new RTL).
+- Backend regression: **28 / 28** PASS (`test_phase3_historical_credit.py` + `test_phase4a_approval_gate.py`).
+- Live smoke: signed in as `test_org_admin`, picked Main Warehouse branch, added a product, clicked `checkout-btn`, dialog mounted, all 5 payment-type testids resolved (`pay-cash`, `pay-digital`, `pay-split`, `pay-partial`, `pay-credit`), `amount-tendered` rendered, switched to Digital tab → `digital-ref-number` rendered. `confirm-payment`, `release-mode-full`, `release-mode-partial` all present.
+
+### Behavior changes — NONE
+Payment-type Tabs reset rules (`setDigitalRefNumber('')`, `setDigitalSender('')`, `setSplitCash('')`, `setSplitDigital('')`) preserved. Split auto-balance preserved. Cash change calculation preserved. Partial AR-balance hint preserved. Credit info card preserved. `release-mode-partial` warning preserved. Confirm button label switching (cash / digital / split / HC / saving) preserved. `openCheckout` pre-flight (capital floor, price match, customer-edit prompt) preserved. `handleCreditSale` routing (HC mode / cash / digital / split / credit / partial → Credit Approval) preserved. Credit Approval Dialog and offline-bypass reason input preserved as a sibling outside the dialog.
+
+### Duplicates introduced — NONE
+- `CheckoutDialog` reuses `CalcInput`, shadcn `Dialog` / `Tabs` / `Input` / `Label` / `Button`, `formatPHP`, and lucide icons. No new helpers, no parallel state, no duplicate payment component.
+- `useHistoricalCredit` remains untouched.
+- Credit Approval dialog stays at the page level (separate dialog opened after `handleCreditSale`).
+- TerminalSales NOT touched — its similar payment-fields layout is structurally different (wizard, not dialog; empty initial state; digital-screenshot required) and was explicitly out of scope.
+
+### Files
+- NEW `frontend/src/components/CheckoutDialog.jsx`
+- NEW `frontend/src/components/CheckoutDialog.test.jsx`
+- MOD `frontend/src/pages/UnifiedSalesPage.js`
+
+### Next candidate pass
+**`useCheckoutState` hook extraction** — collapse the 18 payment-state props that CheckoutDialog currently receives into a single `cs` object passed via the hook, mirroring how `useHistoricalCredit` works. Once that lands, `PaymentTabs` becomes a clean child extraction of `CheckoutDialog` with `cs` already in scope, and `processSale` decoupling becomes the final pass. A fresh A/B/C/D/E assessment will be produced when the owner is ready.
+
+---
+
+
+
 ## Phase 4 Cleanup — Historical Credit Presentational Extraction (Feb 2026) ✅
 
 ### Status: COMPLETE — two presentational components extracted; behavior unchanged.
