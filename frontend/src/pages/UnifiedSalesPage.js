@@ -45,6 +45,8 @@ import PrintEngine from '../lib/PrintEngine';
 import GlobalPriceBadge from '../components/GlobalPriceBadge';
 import PriceMatchModal from '../components/PriceMatchModal';
 import LateEncodeDialog from '../components/LateEncodeDialog';
+import HistoricalCreditBanner from '../components/HistoricalCreditBanner';
+import HistoricalCreditDialog from '../components/HistoricalCreditDialog';
 
 // ── Bounded Levenshtein distance ─────────────────────────────────────────────
 // Returns the edit distance between `a` and `b`, BUT bails out early as soon
@@ -3562,87 +3564,16 @@ export default function UnifiedSalesPage() {
           Appears only when the cashier (admin/owner) has chosen a date
           >7 days back AND payment_type === credit AND a customer is set.
           Also shows a strict block warning for backdated cash/digital/
-          split sales > 7 days, since those would taint today's cash. */}
-      {mainTab === 'sale' && isBackdatedNonCreditBlocked && (
-        <div className="px-1 pb-3" data-testid="backdated-non-credit-block">
-          <Card className="border-2 border-red-300 bg-red-50">
-            <CardContent className="p-3">
-              <div className="flex items-start gap-2">
-                <AlertTriangle className="text-red-600 shrink-0 mt-0.5" size={18} />
-                <div className="text-[12px] text-red-800 leading-snug">
-                  <strong>Backdated transactions older than 7 days are allowed for CREDIT only.</strong>{' '}
-                  Cash, digital, split, or paid transactions must be recorded on the actual payment date.
-                  Switch payment type to <em>Credit</em>, or change the Sale Date back to today.
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {mainTab === 'sale' && isHistoricalCreditMode && (
-        <div className="px-1 pb-3" data-testid="historical-credit-banner">
-          <Card className="border-2 border-amber-400 bg-amber-50">
-            <CardContent className="p-3 space-y-2">
-              <div className="flex items-start gap-2">
-                <ShieldAlert className="text-amber-600 shrink-0 mt-0.5" size={20} />
-                <div className="space-y-1">
-                  <p className="text-sm font-bold text-amber-900 tracking-tight">
-                    BACKDATED CREDIT / NOTEBOOK AR MODE — {daysBack} days back
-                  </p>
-                  <p className="text-[11px] text-amber-800 leading-snug">
-                    You are encoding an old credit transaction. This will be
-                    recorded as historical credit / AR reconstruction. It will
-                    not be treated as cash collected today and will not modify
-                    old closed Z-reports. Company Owner / Admin Authenticator
-                    App (TOTP) approval is required.
-                  </p>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-1">
-                <div className="md:col-span-2">
-                  <Label className="text-[11px] font-semibold text-amber-900">
-                    Reason (min 20 characters) <span className="text-red-600">*</span>
-                  </Label>
-                  <textarea
-                    data-testid="historical-credit-reason-input"
-                    value={hc.reason}
-                    onChange={e => hc.setReason(e.target.value)}
-                    placeholder="Notebook AR carry-forward verified against ledger page 12, customer countersigned 2026-02-04."
-                    className="w-full text-[12px] rounded border border-amber-300 bg-white px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-400 min-h-[60px] mt-0.5"
-                  />
-                  <p className={`text-[10px] mt-0.5 ${hc.reason.trim().length >= 20 ? 'text-emerald-700' : 'text-amber-700'}`}>
-                    {hc.reason.trim().length} / 20 minimum
-                  </p>
-                </div>
-                <div>
-                  <Label className="text-[11px] font-semibold text-amber-900">
-                    Proof URL (optional)
-                  </Label>
-                  <Input
-                    data-testid="historical-credit-proof-url-input"
-                    value={hc.proofUrl}
-                    onChange={e => hc.setProofUrl(e.target.value)}
-                    placeholder="https://… (photo of notebook page)"
-                    className="h-8 text-[12px] mt-0.5 bg-white"
-                  />
-                </div>
-                <div>
-                  <Label className="text-[11px] font-semibold text-amber-900">
-                    Notebook reference (optional)
-                  </Label>
-                  <Input
-                    data-testid="historical-credit-notebook-ref-input"
-                    value={hc.notebookRef}
-                    onChange={e => hc.setNotebookRef(e.target.value)}
-                    placeholder="Ledger 2025 — Page 12, Row 4"
-                    className="h-8 text-[12px] mt-0.5 bg-white"
-                  />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+          split sales > 7 days, since those would taint today's cash.
+          Extracted to `components/HistoricalCreditBanner.jsx` (Phase 4
+          cleanup); behavior + every `data-testid` preserved verbatim. */}
+      {mainTab === 'sale' && (
+        <HistoricalCreditBanner
+          enabled={isHistoricalCreditMode}
+          blocked={isBackdatedNonCreditBlocked}
+          daysBack={daysBack}
+          hc={hc}
+        />
       )}
 
       {/* Main Content */}
@@ -5825,205 +5756,18 @@ export default function UnifiedSalesPage() {
       {/* ─── Phase 4A — Historical Credit / Notebook AR commit dialog ───
           Final confirmation modal: shows preview output and gates the
           commit behind an Owner / Admin Authenticator (TOTP) code that
-          is verified server-side. The frontend never sees the secret. */}
-      <Dialog open={hc.dialogOpen} onOpenChange={(o) => {
-        if (!hc.committing) {
-          if (o) hc.setDialogOpen(true);
-          else hc.closeDialog();
-        }
-      }}>
-        <DialogContent data-testid="historical-credit-dialog" className="max-w-xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-amber-800" style={{ fontFamily: 'Manrope' }}>
-              <ShieldAlert className="text-amber-600" /> Historical Credit / Notebook AR
-            </DialogTitle>
-            <DialogDescription>
-              You are about to create a backdated CREDIT transaction for AR
-              reconstruction. This will not be treated as cash collected
-              today and will not alter old closed Z-reports.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-3">
-            {/* Snapshot */}
-            <div className="rounded-md border border-amber-200 bg-amber-50 p-2.5 space-y-1 text-[12px]">
-              <div className="flex justify-between">
-                <span className="text-amber-700">Customer</span>
-                <span className="font-medium text-amber-900">{selectedCustomer?.name || '—'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-amber-700">Branch</span>
-                <span className="font-medium text-amber-900">{currentBranch?.name || '—'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-amber-700">Transaction date</span>
-                <span className="font-medium text-amber-900">{header.order_date} ({daysBack} days back)</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-amber-700">Will be encoded today as</span>
-                <span className="font-medium text-amber-900">{localTodayStr()}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-amber-700">Items</span>
-                <span className="font-medium text-amber-900">{items.length}</span>
-              </div>
-              <div className="flex justify-between border-t border-amber-200 pt-1 mt-1">
-                <span className="text-amber-700 font-semibold">Grand total (AR)</span>
-                <span className="font-bold text-amber-900">{formatPHP(grandTotal)}</span>
-              </div>
-            </div>
-
-            {/* Preview button */}
-            {!hc.preview && (
-              <div className="flex justify-end">
-                <Button
-                  data-testid="historical-credit-preview-btn"
-                  size="sm"
-                  variant="outline"
-                  className="border-amber-400 text-amber-800 hover:bg-amber-100"
-                  disabled={hc.previewLoading || hc.reason.trim().length < 20}
-                  onClick={hc.runPreview}
-                >
-                  {hc.previewLoading ? 'Previewing…' : 'Run Preview'}
-                </Button>
-              </div>
-            )}
-
-            {hc.previewError && (
-              <p className="text-[11px] text-red-600 bg-red-50 border border-red-200 rounded p-2" data-testid="historical-credit-preview-error">
-                {hc.previewError}
-              </p>
-            )}
-
-            {/* Preview panel */}
-            {hc.preview && (
-              <div className="space-y-2">
-                {/* Customer Owes Total Snapshot */}
-                <div
-                  data-testid="historical-credit-customer-owes-snapshot"
-                  className={`rounded-md border p-2.5 text-[12px] space-y-1 ${
-                    (hc.preview.customer?.projected_balance || 0)
-                      - (hc.preview.customer?.current_balance || 0)
-                      > Math.max(5000, (hc.preview.customer?.current_balance || 0) * 0.5)
-                      ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-slate-50'
-                  }`}
-                >
-                  <p className="text-[11px] font-semibold text-slate-700 uppercase tracking-wide">Customer Owes</p>
-                  <div className="flex justify-between">
-                    <span className="text-slate-600">Current balance</span>
-                    <span className="font-mono">{formatPHP(hc.preview.customer?.current_balance || 0)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-600">+ Historical credit</span>
-                    <span className="font-mono text-amber-700">+ {formatPHP(hc.preview.grand_total || 0)}</span>
-                  </div>
-                  <div className="flex justify-between border-t pt-1 font-bold">
-                    <span>Projected balance</span>
-                    <span className="font-mono">{formatPHP(hc.preview.customer?.projected_balance || 0)}</span>
-                  </div>
-                </div>
-
-                {/* Count-sheet stopper */}
-                {hc.preview.inventory_action === 'skipped_count_sheet_lock' && (
-                  <div className="rounded-md border border-amber-300 bg-amber-50 p-2.5 text-[11px] text-amber-800 space-y-1.5" data-testid="historical-credit-count-stopper">
-                    <p className="font-semibold flex items-center gap-1">
-                      <AlertTriangle size={12} /> Inventory will NOT be deducted
-                    </p>
-                    <p>
-                      This date is on or before the latest approved count
-                      sheet ({hc.preview.count_sheet_stopper?.latest_count_date || 'n/a'}).
-                      Inventory will not be deducted unless Admin / Owner
-                      explicitly allows it. Otherwise this is recorded as
-                      AR-only reconstruction.
-                    </p>
-                    <label className="flex items-center gap-1.5 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        data-testid="historical-credit-allow-inv-checkbox"
-                        checked={hc.allowInv}
-                        onChange={e => {
-                          hc.setAllowInv(e.target.checked);
-                          // Re-preview to refresh inventory_action
-                          hc.setPreview(null);
-                        }}
-                      />
-                      <span>Override and deduct inventory anyway (with audit)</span>
-                    </label>
-                  </div>
-                )}
-
-                {/* Closed-day note */}
-                <div className="rounded-md border border-slate-200 bg-slate-50 p-2 text-[11px] text-slate-700" data-testid="historical-credit-report-effect">
-                  <p>
-                    Old closed Z-reports: <strong>not modified</strong>. Today's
-                    encoded-today report: <strong>will appear</strong>.
-                    Today's cash collected: <strong>not changed</strong>.
-                  </p>
-                </div>
-
-                {/* TOTP input + commit */}
-                <div className="rounded-md border-2 border-amber-400 bg-amber-50 p-3 space-y-2">
-                  <Label className="text-[11px] font-bold text-amber-900 uppercase tracking-wide">
-                    Owner / Admin Authenticator (TOTP) Code <span className="text-red-600">*</span>
-                  </Label>
-                  <p className="text-[10px] text-amber-700 leading-snug">
-                    Settings → Security → Authenticator App. Manager PIN and
-                    static admin PIN are <strong>not</strong> accepted for
-                    Historical Credit. Code is verified server-side.
-                  </p>
-                  <Input
-                    data-testid="historical-credit-approval-code-input"
-                    type="password"
-                    inputMode="numeric"
-                    autoComplete="off"
-                    autoFocus
-                    placeholder="6-digit TOTP"
-                    value={hc.approvalCode}
-                    onChange={e => hc.setApprovalCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 8))}
-                    className="text-center text-2xl tracking-widest h-12 bg-white"
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' && hc.approvalCode && !hc.committing) {
-                        hc.commit();
-                      }
-                    }}
-                  />
-                  {hc.commitError && (
-                    <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded p-1.5" data-testid="historical-credit-commit-error">
-                      {hc.commitError}
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="flex justify-end gap-2 pt-2 border-t">
-            <Button
-              variant="ghost"
-              size="sm"
-              data-testid="historical-credit-cancel-btn"
-              disabled={hc.committing}
-              onClick={() => hc.closeDialog()}
-            >
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              data-testid="historical-credit-commit-btn"
-              className="bg-amber-600 hover:bg-amber-700 text-white"
-              disabled={
-                !hc.preview
-                || !hc.approvalCode.trim()
-                || hc.reason.trim().length < 20
-                || hc.committing
-              }
-              onClick={hc.commit}
-            >
-              {hc.committing ? 'Committing…' : 'Commit Historical Credit'}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+          is verified server-side. The frontend never sees the secret.
+          Extracted to `components/HistoricalCreditDialog.jsx` (Phase 4
+          cleanup); behavior + every `data-testid` preserved verbatim. */}
+      <HistoricalCreditDialog
+        hc={hc}
+        customer={selectedCustomer}
+        branch={currentBranch}
+        orderDate={header.order_date}
+        daysBack={daysBack}
+        itemsCount={items.length}
+        grandTotal={grandTotal}
+      />
 
     </div>
   );

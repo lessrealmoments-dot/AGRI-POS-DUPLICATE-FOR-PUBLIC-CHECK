@@ -2,6 +2,44 @@
 
 
 
+## Phase 4 Cleanup — Historical Credit Presentational Extraction (Feb 2026) ✅
+
+### Status: COMPLETE — two presentational components extracted; behavior unchanged.
+
+### What was delivered (this fork)
+1. **NEW `frontend/src/components/HistoricalCreditBanner.jsx`** (~112 lines) — pure render of the red `backdated-non-credit-block` + amber `historical-credit-banner` (with reason / proof URL / notebook-ref inputs). Props: `{ enabled, blocked, daysBack, hc }`. Consumes `useHistoricalCredit`-owned state via the `hc` prop. Renders nothing when both `enabled` and `blocked` are false.
+2. **NEW `frontend/src/components/HistoricalCreditDialog.jsx`** (~245 lines) — pure render of the `[data-testid='historical-credit-dialog']` commit dialog: snapshot panel, run-preview button, customer-owes panel, count-sheet stopper checkbox, closed-day note, TOTP input, cancel + commit buttons. Props: `{ hc, customer, branch, orderDate, daysBack, itemsCount, grandTotal }`.
+3. **NEW `frontend/src/components/HistoricalCreditBanner.test.jsx`** (5 RTL tests) — renders-nothing, blocked-only, enabled-only, setter wiring, both-true.
+4. **NEW `frontend/src/components/HistoricalCreditDialog.test.jsx`** (9 RTL tests) — dialog gating, snapshot rows, preview-button disabled rule, customer-owes panel, count-sheet stopper + checkbox wiring, commit-button enable rule, cancel, TOTP sanitisation.
+5. **MOD `frontend/src/pages/UnifiedSalesPage.js`** — removed ~280 inline JSX lines, added 2 component imports + 2 mount sites. File shrank from 6,030 → 5,774 lines. Every `data-testid` preserved verbatim. No business-logic change, no closure rewrite, no setter reshuffling.
+6. **MOD `frontend/craco.config.js`** — added `jest.configure.moduleNameMapper` for the `@/...` alias so the shadcn UI components can be imported inside Jest tests (previously broken on first attempt).
+
+### Tests
+- Frontend: **51 / 51** PASS (37 pre-existing + 14 new RTL).
+- Backend regression: **28 / 28** PASS (`test_phase3_historical_credit.py` + `test_phase4a_approval_gate.py`).
+- Live smoke: `/sales-new` mounts, `[data-testid='unified-sales-page']` present, `[data-testid='connectivity-status'][data-status='online']` visible, Quick + Detailed Sale tabs both render, no pageerror.
+
+### Behavior changes — NONE
+Banner trigger rules, TOTP gate, preview/commit endpoints, count-sheet override flow, closed-day note, post-commit cleanup (`onCommitted` cascade), Quick / Detailed mode boundaries, connectivity behavior, late-encode (0–7 day) flow, normal today-sale flow — all unchanged.
+
+### Duplicates introduced — NONE
+Each new component imports its own shadcn primitives (Card, Dialog, Button, Input, Label) which is standard React composition, not a logic duplicate. `useHistoricalCredit` remains the single state owner. Page-level setters (`clearCart`, `setHeader`, `setPendingCreditSale`, `setCheckoutDialog`) still invoked only via the hook's `onCommitted` callback. No HC-related helper, payload builder, or API call exists outside the hook.
+
+### Files
+- NEW `frontend/src/components/HistoricalCreditBanner.jsx`
+- NEW `frontend/src/components/HistoricalCreditBanner.test.jsx`
+- NEW `frontend/src/components/HistoricalCreditDialog.jsx`
+- NEW `frontend/src/components/HistoricalCreditDialog.test.jsx`
+- MOD `frontend/src/pages/UnifiedSalesPage.js`
+- MOD `frontend/craco.config.js`
+
+### Next candidate pass (per `/app/memory/PHASE_4_HC_PRESENTATIONAL_HANDOFF.md` §6)
+Extract `CheckoutDialog` + `PaymentTabs` — but only AFTER an A/B/C/D/E assessment is approved, since those touch payment-method state which is shared with `processSale`. Recommendation: assess `CheckoutDialog` first (still presentational over existing state), then `processSale` extraction as the final pass.
+
+---
+
+
+
 ## Phase 4A — Frontend Integration: Historical Credit / Notebook AR Mode (Feb 2026) ✅
 
 ### Status: COMPLETE — backend soft floor + frontend integrated; ready for production after testing-precondition cleanup.
