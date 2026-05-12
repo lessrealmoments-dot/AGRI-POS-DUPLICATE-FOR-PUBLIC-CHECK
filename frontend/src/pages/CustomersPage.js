@@ -11,11 +11,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { ScrollArea } from '../components/ui/scroll-area';
-import { Users, Plus, Pencil, Trash2, Search, FileText, Eye, X, Printer, AlertTriangle, Clock } from 'lucide-react';
+import { Users, Plus, Pencil, Trash2, Search, FileText, Eye, X, Printer, AlertTriangle, Clock, History } from 'lucide-react';
 import { toast } from 'sonner';
 import CustomerStatementModal from '../components/CustomerStatementModal';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
 import CalcInput from '../components/CalcInput';
+import AddOldBalanceDialog from '../components/AddOldBalanceDialog';
 
 const SALE_TYPE_LABELS = {
   farm_expense: { label: 'Farm Expense', cls: 'bg-green-100 text-green-700' },
@@ -65,6 +66,7 @@ export default function CustomersPage() {
   const [historyDialog, setHistoryDialog] = useState(false);
   const [statementDialog, setStatementDialog] = useState(false);
   const [statementCustomer, setStatementCustomer] = useState(null);
+  const [oldBalCustomer, setOldBalCustomer] = useState(null);
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [selectedInvoiceNumber, setSelectedInvoiceNumber] = useState(null);
   const openDetailModal = (num) => { setSelectedInvoiceNumber(num); setInvoiceModalOpen(true); };
@@ -370,6 +372,14 @@ export default function CustomersPage() {
                         title="Statement of Account" className="text-slate-400 hover:text-[#1A4D2E]">
                         <Printer size={14} />
                       </Button>
+                      {isAdminOrOwner && (
+                        <Button variant="ghost" size="sm" onClick={() => setOldBalCustomer(c)}
+                          title="Add Old Balance (notebook AR)"
+                          className="text-amber-600 hover:text-amber-800"
+                          data-testid={`add-old-balance-${c.id}`}>
+                          <History size={14} />
+                        </Button>
+                      )}
                       <Button variant="ghost" size="sm" data-testid={`edit-customer-${c.id}`} onClick={() => openEdit(c)}>
                         <Pencil size={14} />
                       </Button>
@@ -675,6 +685,12 @@ export default function CustomersPage() {
         open={statementDialog}
         onOpenChange={setStatementDialog}
         customer={statementCustomer}
+      />
+      <AddOldBalanceDialog
+        open={!!oldBalCustomer}
+        onOpenChange={(o) => { if (!o) setOldBalCustomer(null); }}
+        customer={oldBalCustomer}
+        onCommitted={fetchCustomers}
       />
       <InvoiceDetailModal compact
         open={invoiceModalOpen}
