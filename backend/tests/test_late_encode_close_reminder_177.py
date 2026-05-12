@@ -42,7 +42,7 @@ def _read_frontend_env_var(key: str) -> str:
 BASE_URL = (
     os.environ.get("REACT_APP_BACKEND_URL")
     or _read_frontend_env_var("REACT_APP_BACKEND_URL")
-    or "https://br-suite-phase5.preview.emergentagent.com"
+    or "https://invoice-recovery-fix.preview.emergentagent.com"
 ).rstrip("/")
 API = f"{BASE_URL}/api"
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")

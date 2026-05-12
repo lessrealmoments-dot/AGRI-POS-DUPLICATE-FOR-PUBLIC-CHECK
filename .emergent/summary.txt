@@ -1,42 +1,38 @@
-<analysis>**original_problem_statement**: Finalize Phase 4 Cleanup, conduct Phase 5 Deployment Readiness Assessment, and apply surgical deployment fixes. Following the successful completion of Phase 5 Deployment readiness, the goal expanded to design and implement a new, isolated Phase 5+ Business Flow Regression Suite (starting with Prompt 1 foundation and reconciliation tests) without touching production code unless tests expose real bugs. PRODUCT REQUIREMENTS: Robust E2E automated test suite mimicking real POS operations with zero database pollution. 
+<analysis>**original_problem_statement**: Finalize Phase 4 Cleanup, conduct Phase 5 Deployment Readiness Assessment, and apply surgical deployment fixes. Extend Phase 5+ Business Flow Regression Suite. Ensure robust E2E automated test suite mimicking real POS operations with zero database pollution. Most recently, diagnose and fix an urgent production bug where prepared-order completions were creating customer balances but the invoices/receipts disappeared due to missing s, and refine UI for dot-matrix printing and branch transfers. 
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
-**what currently exists?** A React + FastAPI multi-tenant POS application. Phase 5 Deployment Assessment is COMPLETED. An isolated  backend testing framework has been heavily expanded across multiple prompts (br1 to br6). The suite now covers baseline setup, PO receive flows, branch transfers, PO/invoice paydown, repack flow math, and Z-report close-day money conservation. The suite surfaced two critical bugs (B-1:  cross-tenant isolation weakness, and B-3: Partial-sale cash double-counting in Z-reports) which were successfully fixed surgically. 
+**what currently exists?** A React + FastAPI multi-tenant POS application. Phase 5 Deployment Assessment is COMPLETED and the app is live with recent bug fixes. The Business Regression (BR) suite is fully green (185 rows, 0 failures, zero-footprint). A major visibility bug regarding prepared orders (H-1) has been fixed, and a backfill restored ₱170k+ of AR data on production. Front-end refinements include a robust Dot-Matrix printing layout (with discounts and page numbering), enhanced Branch Transfer request recovery, and a TOTP-secured Add Old Balance feature for customer historical credit.
 
 **Last working item**: 
-    - Last item agent was working: Prompt 9 (Documentation-only update to ). The agent documented the runbook entry for the B-3 (partial-sale cash double-count) fix, alongside the earlier B-1 (internal invoices backfill) deploy instructions.
-    - Status: USER VERIFICATION PENDING
-    - Agent Testing Done: Y (Regression tests passed after all fixes).
-    - Which testing method agent to use? backend testing agent / pytest
-    - User Testing Done: N
+    - Last item agent was working: Preparing the clean next-fork handoff document () to capture stable deployed status, list completed fixes, and outline the next two potential workstreams (BR7 or SMS Notifications) without starting any code.
+    - Status: USER VERIFICATION PENDING / NONE (Awaiting user to provide the opening prompt for the next workstream)
+    - Agent Testing Done: N/A (Documentation task)
+    - Which testing method agent to use? N/A
+    - User Testing Done: Y
 
 **All Pending/In progress Issue list**: 
-(No active P0/P1 issues. B-1 and B-3 fixes have been applied and tested.)
+(No active P0/P1 issues. The H-1 bug was successfully fixed and backfilled in production).
 
 **In progress Task List**: 
-  Task 1: Phase 5+ Business Flow Regression Suite (Prompt 10)
-     - Where to resume: Await user instructions for Prompt 10. The agent previously recommended creating a  test summarizer or proceeding to .
-     - What will be achieved with this? Continued expansion of the zero-pollution E2E business regression test suite or tooling.
-     - Status: USER VERIFICATION PENDING / BLOCKED
-     - Should Test frontend/backend/both after fix? Backend (pytest)
-     - Blocked on something: User providing Prompt 10 instructions.
+  (No tasks are actively in progress. The agent paused intentionally for the fork.)
 
 **Upcoming and Future Tasks**
-    Upcoming Tasks:
-    - Phase 5+ Business Regression Suite continuation (Prompt 10 instructions, e.g.,  or ).
+    Upcoming Tasks (Pending User Choice for Next Assessment):
+    - **Workstream A**: Implement  (Test the seam between branch transfer and repack sale). (P1)
+    - **Workstream B**: Assess new SMS feature: Prepared Order Completion SMS notification (for non-walk-in customers with valid phone numbers upon order finalization). (P1)
+    
+    Future Tasks:
     - Phase 4A.2: Concurrent Held-Sales Queue (P1)
     - Add Sync this AR to customer SMS toggle to Historical Credit (P2)
     - Rename  to  (P2)
-    
-    Future Tasks:
     - Fix 11 hardcoded-date legacy FE unit tests using .
     - H-7: JWT TTL 24h with no rotation/blacklist (Backlog)
     - H-9:  per-tenant unique index (Backlog)
     - H-10:  unique index (Backlog)
     - H-12: Offline negative stock incident_ticket + admin notification (Backlog)
     - H-14:  endpoint hardening (Backlog)
-    -  decomposition (Deferred to HeldSalesQueue feature)
+    - Fix Status divergence:  writes  while live writes  (Backlog)
     - Full ============================= test session starts ==============================
 platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
 rootdir: /app
@@ -47,22 +43,23 @@ collected 0 items
 ============================ no tests ran in 0.01s ============================= test suite cleanup to remove DB state pollution.
 
 **Completed work in this session**
-- Implemented Prompt 2:  (DONE)
-- Implemented Prompt 3:  (DONE)
-- Implemented Prompt 4:  (DONE)
-- Fixed B-1 (Isolation Issue): Added  to , updated , wrote isolation test , and added an admin backfill script (DONE)
-- Implemented Prompt 5:  (DONE)
-- Implemented Prompt 6:  (DONE)
-- Implemented Prompt 7:  (DONE)
-- Fixed B-3 (Aggregation Bug): Fixed partial-sale cash double-count in  Z-report pipelines (DONE)
-- Implemented Prompt 9: Updated  with post-deploy checklists for B-1 and B-3 (DONE)
+- Built  for readable terminal BR reporting (DONE)
+- Created  (DONE)
+- Diagnosed live bug (H-1): Draft  stripped  resulting in invisible invoices. (DONE)
+- Implemented and successfully applied  to restore orphan invoices on live prod. (DONE)
+- Implemented  covering all 5 payment types. (DONE)
+- Fixed Dot Matrix Printing: Added item-level discounts, +1pt font size, and rebuilt Trust Agreement layout with letterhead, QR, and Page X of Y (). (DONE)
+- Added Dot Matrix print button on  InvoiceDetailModal. (DONE)
+- Fixed Branch Transfer stuck  requests by making backend  re-entrant. Added Print, Cancel, and Resume Transfer buttons to UI. (DONE)
+- Added Add Old Balance feature via  (admin/owner only, TOTP protected) wired to . (DONE)
+- Created  (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-   - Issue 1: B-2 Cosmetic Defect - Branch-transfer  are generated with .
-     - Debug checklist:  passes  (field should be ). Lookups self-heal via legacy fallbacks. 
-     - Why to solve this issue and what will be achieved with this: Code cleanliness. 
+   - Issue 1: Status divergence in offline finalize.
+     - Debug checklist:  in  writes , but live  writes . Causes offline-synced credit invoices to be invisible under the Credit tab (though visible under All).
+     - Why to solve this issue and what will be achieved with this? Data consistency between online and offline replay flows.
      - Should Test frontend/backend/both after fix: Backend
-     - Is recurring issue? N (User explicitly deferred it to backlog as it poses no leak risk).
+     - Is recurring issue? N (Low priority, deferred to backlog).
 
 **Known issue recurrence from previous fork**
   - Issue recurrence in previous fork: 11 Pre-existing Unit Test Failures (Hardcoded dates)
@@ -73,65 +70,64 @@ collected 0 items
 
 
 **Key Technical Concepts**
-- **Idempotent Test Infrastructure**: Module-scoped fresh tenants using strict teardowns directly off . Zero DB footprint logic is strictly asserted.
-- **Tenant Isolation**:  auto-injects  via  overriding.
-- **Z-Report Aggregation Math**: End-of-day money conservation requires strict filtering (e.g., excluding partial sale unpaid portions from ).
+- **Zero Footprint DB Testing**: Tests dynamically mount/teardown tenant data to prevent backend state pollution.
+- **Tenant Isolation Proxy**:  auto-injects . Bypassing this via  caused the H-1 bug.
+- **Dot-Matrix Printing**: Front-end engine converts structured invoice data into HTML layouts optimized for dot-matrix fanfold paper formatting.
+- **TOTP Security**: Sensitive historical data actions (Add Old Balance) bypass manager PINs and strictly require Admin/Owner TOTP approval server-side.
 
 **key DB schema**
-  - : Records close-day reports, variance (), and sales logs aggregates.
-  - : Track inter-branch payables (recently added to ).
+  - : Tracks POS sales, now securely mapped with  on all finalized states.
+  - : Audits any script-driven backfills.
 
 **changes in tech stack**
   - None.
 
 **All files of reference** 
-  -  (All BR files listed in Architecture)
-  -  (Added  to TENANT_COLLECTIONS)
-  -  (Refactored  for tenant-looping)
-  -  (Fixed B-3  bug)
-  -  (New script)
+  -  (CRITICAL: Read this first to understand the current stable state and next prompt instructions)
+  - 
+  - 
+  - 
+  - 
+  - 
   - 
 
 **Areas that need refactoring**: 
-  - The general full legacy backend test suite (============================= test session starts ==============================
+  - Full ============================= test session starts ==============================
 platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
 rootdir: /app
 plugins: asyncio-1.3.0, anyio-4.12.1
 asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
 collected 0 items
 
-============================ no tests ran in 0.01s =============================) due to heavy state pollution causing false negatives.
+============================ no tests ran in 0.01s ============================= legacy test suite cleanup to remove DB state pollution.
 
 **key api endpoints**
-  - 
-  - 
-  - 
-  - 
+  -  (Backfill logic)
+  -  (Made re-entrant)
+  -  (Reused for Add Old Balance)
 
 **Critical Info for New Agent** 
-- **DO NOT TOUCH PRODUCTION CODE**: You are strictly operating under a test-driven approach. Only apply code fixes if a newly written regression test mathematically proves a defect and the user explicitly approves the patch (as was done with B-1 and B-3).
-- **Zero DB Footprint**: Any test written under  must clean up after itself completely. This is checked at the end of every test run.
-- Wait for the user to provide Prompt 10 instructions before taking action.
+- **STRICT WORKFLOW RULE:** Do NOT jump into coding. Wait for the user to copy-paste the suggested opening prompt regarding Workstream A (BR7) or Workstream B (SMS feature). 
+- Always conduct a codebase-aware alignment assessment prior to implementing any new feature (especially for the SMS notification provider/config discovery).
+- The production environment has been successfully patched and verified. Do not make any further patches to the draft/for_preparation completion logic unless a regression occurs.
 
 **documents and test reports created in this job** 
-  -  (Updated deploy runbook)
-  -  (Structured JSON outputs for all regression tests)
+  - 
+  - 
+  - 
+  - 
 
 **Last 10 User Messages and any pending HUMAN messages** 
- 1. User: Proceed with Prompt 5 ().
- 2. Agent: Implemented br4 paydown scenarios and guards. Zero footprint confirmed.
- 3. User: Proceed with Prompt 6 Assessment: Repack Flow Regression.
- 4. Agent: Assessed Repack model (derived stock, cost propagation). Recommended tests.
- 5. User: Proceed with br5 repack flow test with narrow scope.
- 6. Agent: Implemented , tests pass, zero footprint.
- 7. User: Proceed with Prompt 7 Assessment: Z-Report / Close-Day.
- 8. Agent: Assessed daily_operations, defined tests. Surfaced a potential double-count logic bug in partial-sale aggregations.
- 9. User: Proceed with Prompt 7 implementation. 
- 10. Agent: Wrote . Test confirmed the product bug (B-3) as a deliberate FAIL signal row.
- 11. User: Proceed with Prompt 8: Surgically fix B-3 Partial Sale Cash Double-Count Patch.
- 12. Agent: Fixed bug in  by excluding partial sales from . All tests passed.
- 13. User: Proceed with Prompt 9: Doc-only update to  for the B-3 fix.
- 14. Agent: Updated deploy documentation. Reported completion. (Awaiting Prompt 10).
+ 1. User: Fix the dot matrix print on sale (discount missing, bump font size by 1).
+ 2. Agent: Updated  (discount column, font bumped).
+ 3. User: Validate deployment command sequence without deploying yet. 
+ 4. Agent: Validated commands, noted missing steps for backend restart and frontend publish, mapped out safe deploy script.
+ 5. User: Note that dot matrix print option is missing from the  history.
+ 6. Agent: Added Dot Matrix print button to .
+ 7. User: Executed git pulls, ran dry-runs and apply for the invoice organization_id backfill on production.
+ 8. Agent: Restructured the dot matrix trust receipt format to match the user's provided images (letterhead, Page X of Y, terms).
+ 9. User: Add Cancel, Print buttons, and Resume Transfer flow to  to fix stuck in progress states. Add Add Old Balance feature for existing customers.
+ 10. User: Before we fork, please prepare the next-fork handoff (). Do NOT code. (Pending user to initiate the actual new workstream).
 
 **Project Health Check:**
   - Broken: 11 hardcoded-date FE unit tests. The legacy full backend pytest suite.
@@ -142,10 +138,10 @@ collected 0 items
   - Resend (Emails) — requires User API Key
 
 **Testing status**
-  - Testing agent used after significant changes: NO (Self-tested heavily via Pytest).
+  - Testing agent used after significant changes: NO (Rigorous isolated Pytest scripts run under ).
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created:  through , plus .
-  - Known regressions: None. B-1 and B-3 fixed.
+  - Test files created: .
+  - Known regressions: None. (H-1 fixed).
 
 **Credentials to test flow:**
   - Org Admin: 
@@ -153,20 +149,10 @@ collected 0 items
   - Manager PIN: 
 
 **What agent forgot to execute**
-  - Nothing. Agent meticulously followed user prompts through Prompt 9 and correctly paused.
+  - Nothing. Agent successfully paused without coding Workstream A or B, honoring the user constraints.
 
 **Debugging checklist for current issue**
-    Issue: Waiting on Prompt 10 for Business Regression Suite.
-    Checklist:
-    1. Await User's response containing Prompt 10.
-    2. Confirm if the user wants to proceed with , , or something else.
-    3. Ensure any new tests added utilize the module-scoped  fixture and assert zero DB footprint.
-    4. Execute tests via: ============================= test session starts ==============================
-platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0 -- /root/.venv/bin/python3
-cachedir: .pytest_cache
-rootdir: /app
-plugins: asyncio-1.3.0, anyio-4.12.1
-asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
-collecting ... collected 0 items
-
-============================ no tests ran in 0.00s =============================</analysis>
+    Issue: Wait for the user to present the opening prompt for the next fork.
+    1. Read .
+    2. Await User's response instructing whether to assess  (Workstream A) or the SMS feature (Workstream B).
+    3. Perform a deep codebase analysis *before* writing code.</analysis>
