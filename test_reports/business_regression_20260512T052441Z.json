@@ -1,0 +1,367 @@
+{
+  "generated_at": "2026-05-12T05:24:41.900651+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 15,
+  "pass_count": 13,
+  "fail_count": 2,
+  "rows": [
+    {
+      "scenario": "br6.a_close_day_conservation",
+      "step": "expected_counter_equals_formula_recomputation",
+      "expected": {
+        "expected_counter": 2500.0
+      },
+      "actual": {
+        "expected_counter": 2500.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-c734a6d0",
+        "branch_id": "p2b-br-33dd1a59",
+        "report_date": "2026-05-12",
+        "close_id": "ce63c283-0534-4451-bfa0-e6d454130ad0",
+        "closing_status": "closed",
+        "invoice_numbers": [
+          "SI-B1-001000",
+          "SI-B1-001001",
+          "SI-B1-001002"
+        ],
+        "cashier_wallet_id": "w-cash-55935508",
+        "starting_float": 1600.0,
+        "components": {
+          "starting_float": 1600.0,
+          "total_cash_in": 900.0,
+          "total_cashier_expenses": 0.0,
+          "net_fund_transfers": 0.0
+        }
+      },
+      "recorded_at": "2026-05-12T05:24:41.691765+00:00"
+    },
+    {
+      "scenario": "br6.a_close_day_conservation",
+      "step": "total_cash_sales_matches_sales_log_aggregation",
+      "expected": {
+        "total_cash_sales": 800.0
+      },
+      "actual": {
+        "total_cash_sales": 800.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-c734a6d0",
+        "branch_id": "p2b-br-33dd1a59",
+        "report_date": "2026-05-12",
+        "close_id": "ce63c283-0534-4451-bfa0-e6d454130ad0",
+        "closing_status": "closed",
+        "invoice_numbers": [
+          "SI-B1-001000",
+          "SI-B1-001001",
+          "SI-B1-001002"
+        ],
+        "cashier_wallet_id": "w-cash-55935508",
+        "starting_float": 1600.0,
+        "rationale": "close route aggregates sales_log rows where payment_method ~ /^cash$/i; the test re-runs the same query and asserts equality."
+      },
+      "recorded_at": "2026-05-12T05:24:41.691775+00:00"
+    },
+    {
+      "scenario": "br6.a_close_day_conservation",
+      "step": "total_cash_ar_matches_payments_today_aggregation",
+      "expected": {
+        "total_cash_ar": 100.0
+      },
+      "actual": {
+        "total_cash_ar": 100.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-c734a6d0",
+        "branch_id": "p2b-br-33dd1a59",
+        "report_date": "2026-05-12",
+        "close_id": "ce63c283-0534-4451-bfa0-e6d454130ad0",
+        "closing_status": "closed",
+        "invoice_numbers": [
+          "SI-B1-001000",
+          "SI-B1-001001",
+          "SI-B1-001002"
+        ],
+        "cashier_wallet_id": "w-cash-55935508",
+        "starting_float": 1600.0,
+        "rationale": "close route unwinds invoices.payments and sums payments.date==today for credit/partial invoices."
+      },
+      "recorded_at": "2026-05-12T05:24:41.691779+00:00"
+    },
+    {
+      "scenario": "br6.a_close_day_conservation",
+      "step": "total_new_credit_sums_credit_and_partial_balances",
+      "expected": {
+        "total_new_credit": 400.0
+      },
+      "actual": {
+        "total_new_credit": 400.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-c734a6d0",
+        "branch_id": "p2b-br-33dd1a59",
+        "report_date": "2026-05-12",
+        "close_id": "ce63c283-0534-4451-bfa0-e6d454130ad0",
+        "closing_status": "closed",
+        "invoice_numbers": [
+          "SI-B1-001000",
+          "SI-B1-001001",
+          "SI-B1-001002"
+        ],
+        "cashier_wallet_id": "w-cash-55935508",
+        "starting_float": 1600.0,
+        "credit_invoice_number": "SI-B1-001001",
+        "partial_invoice_number": "SI-B1-001002"
+      },
+      "recorded_at": "2026-05-12T05:24:41.691782+00:00"
+    },
+    {
+      "scenario": "br6.a_close_day_conservation",
+      "step": "daily_closings_row_created_with_status_closed",
+      "expected": {
+        "row_count_for_branch": 1,
+        "status": "closed"
+      },
+      "actual": {
+        "row_count_for_branch": 1,
+        "status": "closed"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-c734a6d0",
+        "branch_id": "p2b-br-33dd1a59",
+        "report_date": "2026-05-12",
+        "close_id": "ce63c283-0534-4451-bfa0-e6d454130ad0",
+        "closing_status": "closed",
+        "invoice_numbers": [
+          "SI-B1-001000",
+          "SI-B1-001001",
+          "SI-B1-001002"
+        ],
+        "cashier_wallet_id": "w-cash-55935508",
+        "starting_float": 1600.0
+      },
+      "recorded_at": "2026-05-12T05:24:41.691785+00:00"
+    },
+    {
+      "scenario": "br6.a_close_day_conservation",
+      "step": "business_rule_owner_expected_cash_in_matches_route",
+      "expected": {
+        "owner_expected_cash_in": 600.0
+      },
+      "actual": {
+        "total_cash_in_per_route": 900.0
+      },
+      "status": "FAIL",
+      "evidence": {
+        "org_id": "p2b-org-c734a6d0",
+        "branch_id": "p2b-br-33dd1a59",
+        "report_date": "2026-05-12",
+        "close_id": "ce63c283-0534-4451-bfa0-e6d454130ad0",
+        "closing_status": "closed",
+        "invoice_numbers": [
+          "SI-B1-001000",
+          "SI-B1-001001",
+          "SI-B1-001002"
+        ],
+        "cashier_wallet_id": "w-cash-55935508",
+        "starting_float": 1600.0,
+        "note": "If owner_expected_cash_in != total_cash_in_per_route, surface as evidence \u2014 the route's categorisation of partial line totals may need review (flagged in the pre-flight assessment)."
+      },
+      "recorded_at": "2026-05-12T05:24:41.691789+00:00"
+    },
+    {
+      "scenario": "br6.b_duplicate_close_and_wallet_reset",
+      "step": "cashier_wallet_balance_reset_to_cash_to_drawer",
+      "expected": {
+        "cashier_balance": 1600.0
+      },
+      "actual": {
+        "cashier_balance": 1600.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-c734a6d0",
+        "branch_id": "p2b-br-33dd1a59",
+        "report_date": "2026-05-12",
+        "close_id": "ce63c283-0534-4451-bfa0-e6d454130ad0",
+        "cash_to_drawer_in_close_record": 1600.0
+      },
+      "recorded_at": "2026-05-12T05:24:41.700436+00:00"
+    },
+    {
+      "scenario": "br6.b_duplicate_close_and_wallet_reset",
+      "step": "duplicate_close_rejected_400",
+      "expected": {
+        "status_code": 400,
+        "rejected": true
+      },
+      "actual": {
+        "status_code": 400,
+        "rejected": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "detail": "Day already closed",
+        "closing_rows_after_attempt": 1,
+        "wallet_balance_after_attempt": 1600.0
+      },
+      "recorded_at": "2026-05-12T05:24:41.704097+00:00"
+    },
+    {
+      "scenario": "br6.b_duplicate_close_and_wallet_reset",
+      "step": "no_extra_close_row_no_wallet_mutation",
+      "expected": {
+        "closing_row_count": 1,
+        "wallet_unchanged": 1600.0
+      },
+      "actual": {
+        "closing_row_count": 1,
+        "wallet_unchanged": 1600.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "close_id": "ce63c283-0534-4451-bfa0-e6d454130ad0"
+      },
+      "recorded_at": "2026-05-12T05:24:41.704104+00:00"
+    },
+    {
+      "scenario": "br6.c_cross_day_ar_payment",
+      "step": "today_AR_payment_counted_in_today_cash_ar",
+      "expected": {
+        "total_cash_ar_at_least": 75.0
+      },
+      "actual": {
+        "total_cash_ar": 75.0
+      },
+      "status": "FAIL",
+      "evidence": {
+        "org_id": "p2b-org-c734a6d0",
+        "branch_id": "br-b2-br-a74ee58b",
+        "report_date": "2026-05-12",
+        "yesterday": "2026-05-11",
+        "credit_invoice_number": "SI-BB-001000",
+        "payment_amount": 75.0,
+        "rationale": "ar_pipeline unwinds invoice.payments and matches by payments.date == today, independent of order_date."
+      },
+      "recorded_at": "2026-05-12T05:24:41.786646+00:00"
+    },
+    {
+      "scenario": "br6.c_cross_day_ar_payment",
+      "step": "yesterday_credit_does_not_leak_into_today_new_credit",
+      "expected": {
+        "total_new_credit": 0.0
+      },
+      "actual": {
+        "total_new_credit": 0.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-c734a6d0",
+        "branch_id": "br-b2-br-a74ee58b",
+        "report_date": "2026-05-12",
+        "yesterday": "2026-05-11",
+        "credit_invoice_number": "SI-BB-001000",
+        "payment_amount": 75.0,
+        "rationale": "new_credit aggregates invoices.balance filtered on order_date==today; yesterday's invoice has order_date=yesterday."
+      },
+      "recorded_at": "2026-05-12T05:24:41.786657+00:00"
+    },
+    {
+      "scenario": "br6.c_cross_day_ar_payment",
+      "step": "ar_classification_today_vs_older",
+      "expected": {
+        "today_AR_payment_present": true,
+        "older_AR_present_on_invoice": true
+      },
+      "actual": {
+        "today_AR_payment_present": true,
+        "older_AR_present_on_invoice": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-c734a6d0",
+        "branch_id": "br-b2-br-a74ee58b",
+        "report_date": "2026-05-12",
+        "yesterday": "2026-05-11",
+        "credit_invoice_number": "SI-BB-001000",
+        "payment_amount": 75.0
+      },
+      "recorded_at": "2026-05-12T05:24:41.788222+00:00"
+    },
+    {
+      "scenario": "br6.d_negative_variance",
+      "step": "over_short_recorded_as_negative",
+      "expected": {
+        "over_short": -525.0,
+        "negative": true
+      },
+      "actual": {
+        "over_short": -525.0,
+        "negative": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-c734a6d0",
+        "branch_id": "br-b2-br-a74ee58b",
+        "report_date": "2026-05-12",
+        "close_id": "d0fa172f-70be-44b9-bf17-7da312d8ce00",
+        "real_cash_in_drawer": 400.0,
+        "actual_cash_reported": 350.0,
+        "expected_counter": 875.0,
+        "shortage": 50.0
+      },
+      "recorded_at": "2026-05-12T05:24:41.847773+00:00"
+    },
+    {
+      "scenario": "br6.d_negative_variance",
+      "step": "variance_notes_preserved_on_close_record",
+      "expected": {
+        "variance_notes": "br6d-under-reported-by-50"
+      },
+      "actual": {
+        "variance_notes": "br6d-under-reported-by-50"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-c734a6d0",
+        "branch_id": "br-b2-br-a74ee58b",
+        "report_date": "2026-05-12",
+        "close_id": "d0fa172f-70be-44b9-bf17-7da312d8ce00",
+        "real_cash_in_drawer": 400.0,
+        "actual_cash_reported": 350.0,
+        "expected_counter": 875.0,
+        "shortage": 50.0
+      },
+      "recorded_at": "2026-05-12T05:24:41.847781+00:00"
+    },
+    {
+      "scenario": "br6.d_negative_variance",
+      "step": "wallet_movements_carry_variance_entry_if_recorded",
+      "expected": {
+        "has_variance_entry_or_field_present": true
+      },
+      "actual": {
+        "has_variance_entry_or_field_present": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-c734a6d0",
+        "branch_id": "br-b2-br-a74ee58b",
+        "report_date": "2026-05-12",
+        "close_id": "d0fa172f-70be-44b9-bf17-7da312d8ce00",
+        "real_cash_in_drawer": 400.0,
+        "actual_cash_reported": 350.0,
+        "expected_counter": 875.0,
+        "shortage": 50.0,
+        "variance_entries_seen": 1,
+        "note": "Route persists `over_short` on close_record unconditionally; ledger variance entry is optional depending on _write_close_ledger_entries."
+      },
+      "recorded_at": "2026-05-12T05:24:41.847785+00:00"
+    }
+  ]
+}
