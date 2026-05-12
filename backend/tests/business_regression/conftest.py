@@ -96,13 +96,20 @@ def record_result():
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
-    """Dump the structured BR report to disk after the test session."""
+    """Dump the structured BR report to disk after the test session.
+
+    Writes TWO files:
+      * Timestamped:  business_regression_<ts>.json  — historical record.
+      * Stable:       business_regression_latest.json — convenience pointer
+        for CI / dashboards that always want the most recent run.
+    """
     if not _REPORT_ROWS:
         return
     out_dir = Path("/app/test_reports")
     out_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     out_path = out_dir / f"business_regression_{ts}.json"
+    latest_path = out_dir / "business_regression_latest.json"
     summary = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "pytest_exitstatus": exitstatus,
@@ -111,10 +118,13 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
         "fail_count": sum(1 for r in _REPORT_ROWS if r["status"] == "FAIL"),
         "rows": _REPORT_ROWS,
     }
-    with out_path.open("w") as f:
-        json.dump(summary, f, indent=2, default=str)
+    payload = json.dumps(summary, indent=2, default=str)
+    out_path.write_text(payload)
+    latest_path.write_text(payload)
     terminalreporter.write_sep("=", "business_regression structured report")
     terminalreporter.write_line(
         f"  rows={summary['row_count']} pass={summary['pass_count']} "
-        f"fail={summary['fail_count']}  →  {out_path}"
+        f"fail={summary['fail_count']}"
     )
+    terminalreporter.write_line(f"  timestamped → {out_path}")
+    terminalreporter.write_line(f"  latest      → {latest_path}")

@@ -1,0 +1,149 @@
+{
+  "generated_at": "2026-05-12T03:26:56.169394+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 5,
+  "pass_count": 5,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br99.reconciliation_snapshot",
+      "step": "product_stock_end_of_day",
+      "expected": {
+        "stock": 41
+      },
+      "actual": {
+        "stock": 41.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-ab322f40",
+        "branch_id": "p2b-br-ce6ca25f",
+        "product_id": "prd-2bea928a",
+        "credit_customer_id": "cust-a28ea127",
+        "starting_stock": 50.0,
+        "starting_cashier_wallet": 0.0,
+        "starting_credit_ar": 0,
+        "expected_qty": 41,
+        "actual_qty": 41.0,
+        "deltas": {
+          "cash_sale": -5,
+          "credit_sale": -3,
+          "partial_sale": -2,
+          "return": 1
+        }
+      },
+      "recorded_at": "2026-05-12T03:26:56.137188+00:00"
+    },
+    {
+      "scenario": "br99.reconciliation_snapshot",
+      "step": "cashier_wallet_end_of_day",
+      "expected": {
+        "cashier_wallet": 1000.0
+      },
+      "actual": {
+        "cashier_wallet": 1000.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-ab322f40",
+        "branch_id": "p2b-br-ce6ca25f",
+        "product_id": "prd-2bea928a",
+        "credit_customer_id": "cust-a28ea127",
+        "starting_stock": 50.0,
+        "starting_cashier_wallet": 0.0,
+        "starting_credit_ar": 0,
+        "expected_wallet": 1000.0,
+        "actual_wallet": 1000.0,
+        "money_in": {
+          "cash_sale": 500,
+          "partial_cash_leg": 200.0,
+          "credit_payment": 400.0
+        },
+        "money_out": {
+          "return_refund": 100.0
+        }
+      },
+      "recorded_at": "2026-05-12T03:26:56.137194+00:00"
+    },
+    {
+      "scenario": "br99.reconciliation_snapshot",
+      "step": "credit_customer_AR_end_of_day",
+      "expected": {
+        "customer_balance": 600.0
+      },
+      "actual": {
+        "customer_balance": 600.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-ab322f40",
+        "branch_id": "p2b-br-ce6ca25f",
+        "product_id": "prd-2bea928a",
+        "credit_customer_id": "cust-a28ea127",
+        "starting_stock": 50.0,
+        "starting_cashier_wallet": 0.0,
+        "starting_credit_ar": 0,
+        "expected_ar": 600.0,
+        "actual_ar": 600.0,
+        "ar_in": {
+          "credit_sale": 600,
+          "partial_unpaid_leg": 400.0
+        },
+        "ar_out": {
+          "credit_payment": 400.0
+        }
+      },
+      "recorded_at": "2026-05-12T03:26:56.137198+00:00"
+    },
+    {
+      "scenario": "br99.reconciliation_snapshot",
+      "step": "credit_invoice_balance_after_payment",
+      "expected": {
+        "invoice_balance": 200.0
+      },
+      "actual": {
+        "invoice_balance": 200.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-ab322f40",
+        "branch_id": "p2b-br-ce6ca25f",
+        "product_id": "prd-2bea928a",
+        "credit_customer_id": "cust-a28ea127",
+        "starting_stock": 50.0,
+        "starting_cashier_wallet": 0.0,
+        "starting_credit_ar": 0,
+        "invoice_id": "a2c2ca21-0904-4440-b879-5e4915342fa7",
+        "invoice_number": "SI-BA-001001",
+        "expected_balance": 200.0,
+        "actual_balance": 200.0
+      },
+      "recorded_at": "2026-05-12T03:26:56.137201+00:00"
+    },
+    {
+      "scenario": "br99.reconciliation_snapshot",
+      "step": "partial_invoice_balance_unchanged",
+      "expected": {
+        "invoice_balance": 400.0
+      },
+      "actual": {
+        "invoice_balance": 400.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-ab322f40",
+        "branch_id": "p2b-br-ce6ca25f",
+        "product_id": "prd-2bea928a",
+        "credit_customer_id": "cust-a28ea127",
+        "starting_stock": 50.0,
+        "starting_cashier_wallet": 0.0,
+        "starting_credit_ar": 0,
+        "invoice_id": "883935e0-298b-49f6-8005-18cccef672ee",
+        "invoice_number": "SI-BA-001002",
+        "expected_balance": 400.0,
+        "actual_balance": 400.0
+      },
+      "recorded_at": "2026-05-12T03:26:56.137207+00:00"
+    }
+  ]
+}
