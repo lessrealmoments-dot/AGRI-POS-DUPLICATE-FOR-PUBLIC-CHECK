@@ -1927,27 +1927,25 @@ export default function BranchTransferPage() {
                           {req.items?.length > 4 && <span className="text-sm text-slate-400 self-center">+{req.items.length - 4} more</span>}
                         </div>
                         {req.notes && <p className="text-sm text-slate-500 mt-2 italic">&quot;{req.notes}&quot;</p>}
-                        <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+                        <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-end gap-2 flex-wrap">
+                          <Button size="sm" variant="outline" onClick={() => handlePrintRequest(req, 'full_page')}
+                            className="h-10 px-3 text-xs" data-testid={`print-full-incoming-${req.id}`}>
+                            <Printer size={12} className="mr-1" /> Print Full
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => handlePrintRequest(req, 'thermal')}
+                            className="h-10 px-3 text-xs" data-testid={`print-58mm-incoming-${req.id}`}>
+                            <Printer size={12} className="mr-1" /> 58mm
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => handlePrintRequest(req, 'dot_matrix')}
+                            className="h-10 px-3 text-xs" data-testid={`print-dot-incoming-${req.id}`}>
+                            <Printer size={12} className="mr-1" /> Dot Matrix
+                          </Button>
                           {(req.status === 'requested' || req.status === 'draft') && (
-                            <>
-                              <Button size="sm" variant="outline" onClick={() => handlePrintRequest(req, 'full_page')}
-                                className="h-10 px-3 text-xs" data-testid={`print-full-incoming-${req.id}`}>
-                                <Printer size={12} className="mr-1" /> Print Full
-                              </Button>
-                              <Button size="sm" variant="outline" onClick={() => handlePrintRequest(req, 'thermal')}
-                                className="h-10 px-3 text-xs" data-testid={`print-58mm-incoming-${req.id}`}>
-                                <Printer size={12} className="mr-1" /> 58mm
-                              </Button>
-                              <Button size="sm" variant="outline" onClick={() => handlePrintRequest(req, 'dot_matrix')}
-                                className="h-10 px-3 text-xs" data-testid={`print-dot-incoming-${req.id}`}>
-                                <Printer size={12} className="mr-1" /> Dot Matrix
-                              </Button>
-                              <Button size="sm" variant="outline" onClick={() => handleCancelRequest(req)}
-                                className="h-10 px-4 text-xs text-red-700 border-red-200 hover:bg-red-50"
-                                data-testid={`cancel-incoming-${req.id}`}>
-                                <XCircle size={12} className="mr-1" /> Cancel
-                              </Button>
-                            </>
+                            <Button size="sm" variant="outline" onClick={() => handleCancelRequest(req)}
+                              className="h-10 px-4 text-xs text-red-700 border-red-200 hover:bg-red-50"
+                              data-testid={`cancel-incoming-${req.id}`}>
+                              <XCircle size={12} className="mr-1" /> Cancel
+                            </Button>
                           )}
                           {(req.status === 'requested' || req.status === 'draft') && (
                             <Button size="sm" onClick={() => handleGenerateTransfer(req)} disabled={generatingTransfer === req.id}
@@ -2012,27 +2010,25 @@ export default function BranchTransferPage() {
                         {req.notes && <p className="text-sm text-slate-500 mt-2 italic">&quot;{req.notes}&quot;</p>}
                         <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
                           <span className="text-xs text-slate-400">by {req.created_by_name} · {fmtDate(req.created_at)}</span>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Button size="sm" variant="outline" onClick={() => handlePrintRequest(req, 'full_page')}
+                              className="h-9 px-3 text-xs" data-testid={`print-full-outgoing-${req.id}`}>
+                              <Printer size={12} className="mr-1" /> Print Full
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => handlePrintRequest(req, 'thermal')}
+                              className="h-9 px-3 text-xs" data-testid={`print-58mm-outgoing-${req.id}`}>
+                              <Printer size={12} className="mr-1" /> 58mm
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => handlePrintRequest(req, 'dot_matrix')}
+                              className="h-9 px-3 text-xs" data-testid={`print-dot-outgoing-${req.id}`}>
+                              <Printer size={12} className="mr-1" /> Dot Matrix
+                            </Button>
                             {(req.status === 'requested' || req.status === 'draft') && (
-                              <>
-                                <Button size="sm" variant="outline" onClick={() => handlePrintRequest(req, 'full_page')}
-                                  className="h-9 px-3 text-xs" data-testid={`print-full-outgoing-${req.id}`}>
-                                  <Printer size={12} className="mr-1" /> Print Full
-                                </Button>
-                                <Button size="sm" variant="outline" onClick={() => handlePrintRequest(req, 'thermal')}
-                                  className="h-9 px-3 text-xs" data-testid={`print-58mm-outgoing-${req.id}`}>
-                                  <Printer size={12} className="mr-1" /> 58mm
-                                </Button>
-                                <Button size="sm" variant="outline" onClick={() => handlePrintRequest(req, 'dot_matrix')}
-                                  className="h-9 px-3 text-xs" data-testid={`print-dot-outgoing-${req.id}`}>
-                                  <Printer size={12} className="mr-1" /> Dot Matrix
-                                </Button>
-                                <Button size="sm" variant="outline" onClick={() => handleCancelRequest(req)}
-                                  className="h-9 px-4 text-xs text-red-700 border-red-200 hover:bg-red-50"
-                                  data-testid={`cancel-outgoing-${req.id}`}>
-                                  <XCircle size={12} className="mr-1" /> Cancel
-                                </Button>
-                              </>
+                              <Button size="sm" variant="outline" onClick={() => handleCancelRequest(req)}
+                                className="h-9 px-4 text-xs text-red-700 border-red-200 hover:bg-red-50"
+                                data-testid={`cancel-outgoing-${req.id}`}>
+                                <XCircle size={12} className="mr-1" /> Cancel
+                              </Button>
                             )}
                             {req.status === 'fulfilled' && (
                               <div className="flex items-center gap-2">
