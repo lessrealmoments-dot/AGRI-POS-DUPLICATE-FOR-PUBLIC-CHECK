@@ -473,6 +473,10 @@ export default function InvoiceDetailModal({
                     <Printer size={12} className="mr-1" /> 58mm
                   </Button>
                   <Button size="sm" variant="outline" className="h-7 text-xs whitespace-nowrap"
+                    onClick={() => handlePrint('dot_matrix')} data-testid="sale-print-dot-matrix">
+                    <Printer size={12} className="mr-1" /> Dot Matrix
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-xs whitespace-nowrap"
                     onClick={() => setViewQROpen(true)} data-testid="sale-view-phone-btn">
                     <Wallet size={12} className="mr-1" /> Phone
                   </Button>
