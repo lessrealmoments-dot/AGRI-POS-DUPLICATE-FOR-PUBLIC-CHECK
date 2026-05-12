@@ -396,6 +396,12 @@ async def test_br3a_main_to_b2_full_receive_moves_stock(tenant, record_result):
     assert internal_inv["from_branch_id"] == main
     assert internal_inv["to_branch_id"] == b2
     assert float(internal_inv["grand_total"]) == float(TRANSFER_QTY * TRANSFER_CAP)
+    # Phase 5+ B-1: internal_invoices is now tenant-scoped; every row
+    # must carry the correct organization_id.
+    assert internal_inv.get("organization_id") == org_id, (
+        f"br3a B-1 regression — internal_invoice.organization_id should "
+        f"be {org_id!r}, got {internal_inv.get('organization_id')!r}"
+    )
     assert wallets_main_after == wallets_main_before
     assert wallets_b2_after   == wallets_b2_before
 

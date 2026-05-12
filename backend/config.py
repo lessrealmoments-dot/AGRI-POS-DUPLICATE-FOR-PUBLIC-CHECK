@@ -49,6 +49,13 @@ TENANT_COLLECTIONS = {
     'upload_sessions',               # Receipt/document upload sessions
     'business_documents',            # AgriDocs — business document cloud
     'doc_upload_tokens',             # QR upload tokens for phone uploads
+    # Phase 5+ isolation hardening (B-1): internal_invoices were inserted via
+    # `db.internal_invoices` but the collection was never registered with the
+    # tenant proxy → rows landed with organization_id=None and reads scoped
+    # only by branch_id. Registering it here turns on auto-injection on
+    # insert and auto-scoping on read for every code path that goes through
+    # the `db` proxy (routes/internal_invoices.py, routes/search.py).
+    'internal_invoices',
     # SMS — per-company isolation
     'sms_queue',                     # Outbound SMS queue per company
     'sms_templates',                 # Customizable message templates per company

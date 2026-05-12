@@ -62,6 +62,7 @@ from routes.parked_branch_transfers import router as parked_branch_transfers_rou
 from routes.parked_purchase_orders import router as parked_purchase_orders_router
 from routes.draft_orders import router as draft_orders_router
 from routes.admin_backfill_240 import router as admin_backfill_240_router
+from routes.admin_backfill_internal_invoices import router as admin_backfill_iso_internal_invoices_router
 from routes.close_reminder import start_scheduler_on_startup as _start_close_reminder
 from routes.print_jobs import router as print_jobs_router
 from routes.balance_reconciliation import router as balance_reconciliation_router
@@ -240,6 +241,7 @@ api_router.include_router(parked_branch_transfers_router)
 api_router.include_router(parked_purchase_orders_router)
 api_router.include_router(draft_orders_router)
 api_router.include_router(admin_backfill_240_router)
+api_router.include_router(admin_backfill_iso_internal_invoices_router)
 
 # Remote Branch Print Terminal
 api_router.include_router(print_jobs_router)

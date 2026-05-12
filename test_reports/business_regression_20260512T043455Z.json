@@ -1,0 +1,41 @@
+{
+  "generated_at": "2026-05-12T04:34:55.429858+00:00",
+  "pytest_exitstatus": 1,
+  "row_count": 2,
+  "pass_count": 0,
+  "fail_count": 2,
+  "rows": [
+    {
+      "scenario": "br_iso.internal_invoices_carry_org_id",
+      "step": "tenant_A_invoice_has_org_a",
+      "expected": {
+        "organization_id": "p2b-org-e824ebc5"
+      },
+      "actual": {
+        "organization_id": null
+      },
+      "status": "FAIL",
+      "evidence": {
+        "invoice_id": "25e70f62-8627-4573-bd3e-20147a6be7ed",
+        "transfer_id": "14a865fa-7596-44cc-97c8-a67e7049aaec"
+      },
+      "recorded_at": "2026-05-12T04:34:55.336909+00:00"
+    },
+    {
+      "scenario": "br_iso.internal_invoices_carry_org_id",
+      "step": "tenant_B_invoice_has_org_b",
+      "expected": {
+        "organization_id": "p2b-org-2c45c77a"
+      },
+      "actual": {
+        "organization_id": null
+      },
+      "status": "FAIL",
+      "evidence": {
+        "invoice_id": "cf6ac5ce-bf76-4e27-adbe-47acd0d99cda",
+        "transfer_id": "3ebd826f-3ea5-4da2-8124-98fcb3b802d1"
+      },
+      "recorded_at": "2026-05-12T04:34:55.336914+00:00"
+    }
+  ]
+}

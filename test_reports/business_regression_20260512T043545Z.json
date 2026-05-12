@@ -1,0 +1,94 @@
+{
+  "generated_at": "2026-05-12T04:35:45.632497+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 5,
+  "pass_count": 5,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br_iso.internal_invoices_carry_org_id",
+      "step": "tenant_A_invoice_has_org_a",
+      "expected": {
+        "organization_id": "p2b-org-0945d871"
+      },
+      "actual": {
+        "organization_id": "p2b-org-0945d871"
+      },
+      "status": "PASS",
+      "evidence": {
+        "invoice_id": "0b66f214-548f-4cf8-92f7-2933518dde80",
+        "transfer_id": "23fa0617-6793-4d57-ae08-49eb061ccafa"
+      },
+      "recorded_at": "2026-05-12T04:35:45.540324+00:00"
+    },
+    {
+      "scenario": "br_iso.internal_invoices_carry_org_id",
+      "step": "tenant_B_invoice_has_org_b",
+      "expected": {
+        "organization_id": "p2b-org-5ed58ccd"
+      },
+      "actual": {
+        "organization_id": "p2b-org-5ed58ccd"
+      },
+      "status": "PASS",
+      "evidence": {
+        "invoice_id": "d9af0ae6-db11-4e9f-88ea-05d94e4dbda6",
+        "transfer_id": "04fabdb5-7430-4e61-8c02-662b2b39e92c"
+      },
+      "recorded_at": "2026-05-12T04:35:45.540333+00:00"
+    },
+    {
+      "scenario": "br_iso.cross_tenant_read_blocked",
+      "step": "get_internal_invoice_by_id_blocked",
+      "expected": {
+        "status_code": 404,
+        "blocked": true
+      },
+      "actual": {
+        "status_code": 404,
+        "blocked": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "tenant_A_org": "p2b-org-0945d871",
+        "tenant_B_org": "p2b-org-5ed58ccd",
+        "tenant_B_invoice_id": "d9af0ae6-db11-4e9f-88ea-05d94e4dbda6"
+      },
+      "recorded_at": "2026-05-12T04:35:45.541130+00:00"
+    },
+    {
+      "scenario": "br_iso.cross_tenant_read_blocked",
+      "step": "get_invoice_by_transfer_blocked",
+      "expected": {
+        "status_code": 404,
+        "blocked": true
+      },
+      "actual": {
+        "status_code": 404,
+        "blocked": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "tenant_A_org": "p2b-org-0945d871",
+        "tenant_B_org": "p2b-org-5ed58ccd",
+        "tenant_B_transfer_id": "04fabdb5-7430-4e61-8c02-662b2b39e92c"
+      },
+      "recorded_at": "2026-05-12T04:35:45.541134+00:00"
+    },
+    {
+      "scenario": "br_iso.same_tenant_read_still_works",
+      "step": "tenant_A_can_read_own_invoice",
+      "expected": {
+        "id": "0b66f214-548f-4cf8-92f7-2933518dde80"
+      },
+      "actual": {
+        "id": "0b66f214-548f-4cf8-92f7-2933518dde80"
+      },
+      "status": "PASS",
+      "evidence": {
+        "invoice_number": "INV-BB-001000"
+      },
+      "recorded_at": "2026-05-12T04:35:45.542275+00:00"
+    }
+  ]
+}

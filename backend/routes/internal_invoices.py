@@ -451,7 +451,41 @@ async def pay_internal_invoice(invoice_id: str, data: dict, user=Depends(get_cur
 
 
 async def check_due_invoices():
-    """Check for due/overdue invoices and send notifications. Called by scheduler."""
+    """Check for due/overdue invoices and send notifications. Called by scheduler.
+
+    Phase 5+ B-1 hardening: `internal_invoices` is now a tenant-scoped
+    collection (registered in `TENANT_COLLECTIONS`), so reading without an
+    org context fails closed. The scheduler therefore walks each active
+    organization and runs the existing due/overdue logic inside that
+    tenant's context. All downstream `db.*` reads/writes inherit the
+    correct scope automatically.
+    """
+    from config import _raw_db, set_org_context, get_org_context
+
+    # Snapshot active org ids cross-tenant (the only legitimate use of
+    # `_raw_db.organizations` outside admin tools).
+    org_rows = await _raw_db.organizations.find(
+        {"active": True}, {"_id": 0, "id": 1}
+    ).to_list(10000)
+    org_ids = [o["id"] for o in org_rows if o.get("id")]
+
+    saved_ctx = get_org_context()
+    try:
+        for org_id in org_ids:
+            set_org_context(org_id)
+            await _check_due_invoices_for_current_org()
+    finally:
+        # Restore whatever context was active before this batch ran so we
+        # don't leak the last-iterated org back to the scheduler caller.
+        set_org_context(saved_ctx)
+
+
+async def _check_due_invoices_for_current_org():
+    """Per-tenant body of the daily due-invoice check.
+
+    Assumes `set_org_context(org_id)` has already been called by the
+    caller. All `db.*` queries below auto-scope to the current tenant.
+    """
     now = datetime.now(timezone.utc)
     three_days_ahead = now + timedelta(days=3)
 

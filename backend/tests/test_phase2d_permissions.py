@@ -409,6 +409,13 @@ ALLOWLIST_FILES = {
     "returns.py": "Uses TenantCollection (db.*).",
     "sales.py": "Uses TenantCollection (db.*).",
     "accounting.py": "Uses TenantCollection (db.*).",
+    "admin_backfill_internal_invoices.py": (
+        "Phase 5+ B-1 one-shot backfill. Cross-tenant by necessity: the "
+        "very rows being repaired lack `organization_id`, so the proxy "
+        "cannot find them. Admin-gated (role == 'admin'), idempotent, "
+        "and the only writes are to fill in the missing org id derived "
+        "from the row's from_branch_id / to_branch_id."
+    ),
 }
 
 # Pattern: `_raw_db.<collection>.<op>(`
