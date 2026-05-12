@@ -944,11 +944,13 @@ function trustReceiptDotMatrix(data, biz, docCode) {
 
   // Items table
   const items = inv.items || [];
+  const hasDiscount = items.some(i => parseFloat(i.discount_amount) > 0);
   html += `<table class="dm-items-table"><thead><tr>`;
   html += `<th style="width:4%">#</th>`;
   html += `<th>ITEM DESCRIPTION</th>`;
   html += `<th class="c" style="width:7%">QTY</th>`;
   html += `<th class="r" style="width:16%">UNIT PRICE</th>`;
+  if (hasDiscount) html += `<th class="r" style="width:12%">DISC</th>`;
   html += `<th class="r" style="width:15%">LINE TOTAL</th>`;
   html += `</tr></thead><tbody>`;
 
@@ -956,12 +958,14 @@ function trustReceiptDotMatrix(data, biz, docCode) {
     const item = items[i];
     const qty   = parseFloat(item.quantity) || 0;
     const rate  = parseFloat(item.rate || item.unit_price || item.price) || 0;
-    const total = parseFloat(item.total) || (qty * rate);
+    const disc  = parseFloat(item.discount_amount) || 0;
+    const total = parseFloat(item.total) || (qty * rate - disc);
     html += `<tr>`;
     html += `<td class="c">${i + 1}</td>`;
     html += `<td>${item.product_name || ''}</td>`;
     html += `<td class="c">${qty}</td>`;
     html += `<td class="r">${formatPHP(rate)}</td>`;
+    if (hasDiscount) html += `<td class="r">${disc > 0 ? formatPHP(disc) : '-'}</td>`;
     html += `<td class="r strong">${formatPHP(total)}</td>`;
     html += `</tr>`;
   }
