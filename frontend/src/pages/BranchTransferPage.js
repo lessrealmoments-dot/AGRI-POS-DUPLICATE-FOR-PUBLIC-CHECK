@@ -23,7 +23,7 @@ import {
   Plus, Trash2, Send, CheckCircle2, Search, RefreshCw, Settings2,
   AlertTriangle, ChevronDown, ChevronUp, Building2, Package, X,
   TrendingUp, TrendingDown, Clock, ArrowRight, Eye, XCircle, Pencil, Upload, Check,
-  ClipboardCheck, FileText, Smartphone, Lock, Pause, FolderOpen, Trash, Tag, Shield
+  ClipboardCheck, FileText, Smartphone, Lock, Pause, FolderOpen, Trash, Tag, Shield, Printer
 } from 'lucide-react';
 import { localTodayStr } from '../lib/dateFormat';
 import PrintEngine from '../lib/PrintEngine';
@@ -997,6 +997,53 @@ export default function BranchTransferPage() {
     } catch (e) { toast.error(e.response?.data?.detail || 'Failed'); }
   };
 
+  // ── Stock-request actions (Incoming / Outgoing tabs under Requests) ─────────
+  // Print the stock request through PrintEngine using the same 3 formats as
+  // other documents (full / 58mm / dot-matrix). Stock requests are purchase
+  // orders with po_type="branch_request", so we re-use the purchase_order
+  // print pathway.
+  const handlePrintRequest = async (req, format) => {
+    const requesting = branches.find(b => b.id === req.branch_id)?.name || 'Requesting Branch';
+    const supplying  = branches.find(b => b.id === req.supply_branch_id)?.name || 'Supplying Branch';
+    let docCode = req.doc_code || '';
+    if (!docCode) {
+      try {
+        const res = await api.post('/doc/generate-code', { doc_type: 'purchase_order', doc_id: req.id });
+        docCode = res.data.code || '';
+      } catch { /* print without QR if generation fails */ }
+    }
+    PrintEngine.print({
+      type: 'purchase_order',
+      data: {
+        ...req,
+        vendor: `Stock Request from ${requesting}`,
+        supply_branch_name: supplying,
+        order_date: req.purchase_date || req.created_at,
+      },
+      format,
+      businessInfo: bizInfo,
+      docCode,
+    });
+  };
+
+  // Cancel a stock request. Backend requires manager PIN (same as PO cancel).
+  const handleCancelRequest = async (req) => {
+    if (!(req.status === 'requested' || req.status === 'draft')) {
+      toast.error(`Cannot cancel — status is "${req.status}"`);
+      return;
+    }
+    if (!window.confirm(`Cancel stock request ${req.po_number}?`)) return;
+    const pin = window.prompt('Enter manager PIN to cancel:');
+    if (!pin) return;
+    try {
+      await api.delete(`/purchase-orders/${req.id}`, { data: { pin } });
+      toast.success('Stock request cancelled');
+      loadOrders();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Cancel failed');
+    }
+  };
+
   // ── Totals ─────────────────────────────────────────────────────────────────
   const validRows = rows.filter(r => r.product);
   const totalBranchCapital = validRows.reduce((s, r) => s + (r.branch_capital * (parseFloat(r.qty)||0)), 0);
@@ -1882,6 +1929,27 @@ export default function BranchTransferPage() {
                         {req.notes && <p className="text-sm text-slate-500 mt-2 italic">&quot;{req.notes}&quot;</p>}
                         <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
                           {(req.status === 'requested' || req.status === 'draft') && (
+                            <>
+                              <Button size="sm" variant="outline" onClick={() => handlePrintRequest(req, 'full_page')}
+                                className="h-10 px-3 text-xs" data-testid={`print-full-incoming-${req.id}`}>
+                                <Printer size={12} className="mr-1" /> Print Full
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => handlePrintRequest(req, 'thermal')}
+                                className="h-10 px-3 text-xs" data-testid={`print-58mm-incoming-${req.id}`}>
+                                <Printer size={12} className="mr-1" /> 58mm
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => handlePrintRequest(req, 'dot_matrix')}
+                                className="h-10 px-3 text-xs" data-testid={`print-dot-incoming-${req.id}`}>
+                                <Printer size={12} className="mr-1" /> Dot Matrix
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => handleCancelRequest(req)}
+                                className="h-10 px-4 text-xs text-red-700 border-red-200 hover:bg-red-50"
+                                data-testid={`cancel-incoming-${req.id}`}>
+                                <XCircle size={12} className="mr-1" /> Cancel
+                              </Button>
+                            </>
+                          )}
+                          {(req.status === 'requested' || req.status === 'draft') && (
                             <Button size="sm" onClick={() => handleGenerateTransfer(req)} disabled={generatingTransfer === req.id}
                               className="h-10 px-5 bg-[#1A4D2E] hover:bg-[#14532d] text-white text-sm font-semibold" data-testid={`gen-transfer-${req.id}`}>
                               {generatingTransfer === req.id ? <RefreshCw size={14} className="animate-spin mr-2" /> : <ArrowRight size={14} className="mr-2" />}
@@ -1945,6 +2013,27 @@ export default function BranchTransferPage() {
                         <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
                           <span className="text-xs text-slate-400">by {req.created_by_name} · {fmtDate(req.created_at)}</span>
                           <div className="flex items-center gap-2">
+                            {(req.status === 'requested' || req.status === 'draft') && (
+                              <>
+                                <Button size="sm" variant="outline" onClick={() => handlePrintRequest(req, 'full_page')}
+                                  className="h-9 px-3 text-xs" data-testid={`print-full-outgoing-${req.id}`}>
+                                  <Printer size={12} className="mr-1" /> Print Full
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={() => handlePrintRequest(req, 'thermal')}
+                                  className="h-9 px-3 text-xs" data-testid={`print-58mm-outgoing-${req.id}`}>
+                                  <Printer size={12} className="mr-1" /> 58mm
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={() => handlePrintRequest(req, 'dot_matrix')}
+                                  className="h-9 px-3 text-xs" data-testid={`print-dot-outgoing-${req.id}`}>
+                                  <Printer size={12} className="mr-1" /> Dot Matrix
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={() => handleCancelRequest(req)}
+                                  className="h-9 px-4 text-xs text-red-700 border-red-200 hover:bg-red-50"
+                                  data-testid={`cancel-outgoing-${req.id}`}>
+                                  <XCircle size={12} className="mr-1" /> Cancel
+                                </Button>
+                              </>
+                            )}
                             {req.status === 'fulfilled' && (
                               <div className="flex items-center gap-2">
                                 <CheckCircle2 size={16} className="text-emerald-600" />

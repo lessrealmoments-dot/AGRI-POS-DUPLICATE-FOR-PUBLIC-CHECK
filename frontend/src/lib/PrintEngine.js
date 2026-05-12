@@ -1383,7 +1383,9 @@ const PrintEngine = {
              :                           trustReceiptFullPage(data, businessInfo, docCode);
         break;
       case 'purchase_order':
-        body = format === 'thermal' ? purchaseOrderThermal(data, businessInfo, docCode) : purchaseOrderFullPage(data, businessInfo, docCode);
+        body = format === 'thermal'    ? purchaseOrderThermal(data, businessInfo, docCode)
+             : format === 'dot_matrix' ? orderSlipDotMatrix(data, businessInfo, docCode)
+             : purchaseOrderFullPage(data, businessInfo, docCode);
         break;
       case 'branch_transfer':
         body = format === 'thermal' ? branchTransferThermal(data, businessInfo, docCode) : branchTransferFullPage(data, businessInfo, docCode);
@@ -1428,7 +1430,9 @@ const PrintEngine = {
              :                           trustReceiptFullPage(data, businessInfo, docCode);
         break;
       case 'purchase_order':
-        body = format === 'thermal' ? purchaseOrderThermal(data, businessInfo, docCode) : purchaseOrderFullPage(data, businessInfo, docCode);
+        body = format === 'thermal'    ? purchaseOrderThermal(data, businessInfo, docCode)
+             : format === 'dot_matrix' ? orderSlipDotMatrix(data, businessInfo, docCode)
+             : purchaseOrderFullPage(data, businessInfo, docCode);
         break;
       case 'branch_transfer':
         body = format === 'thermal' ? branchTransferThermal(data, businessInfo, docCode) : branchTransferFullPage(data, businessInfo, docCode);
