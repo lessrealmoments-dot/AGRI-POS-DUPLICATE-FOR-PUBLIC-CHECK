@@ -38,11 +38,24 @@
 **Verdict**: **Secure as-is.** No cross-tenant PIN-leak vulnerability. Two non-blocking observations:
 
 - *Observation 1 (legacy code, no-op)*: `POST /api/verify/public/{doc_type}/{doc_id}` (`verify.py:557`) does NOT set org context. Because `TenantCollection` is fail-closed when no context is set, every doc query returns nothing → endpoint always 404s in production (confirmed via live curl). Effectively dead code, not a leak vector. Consider deprecating or wiring it to a `view_token` to set context properly.
-- *Observation 2 (recommended)*: Add an explicit regression test asserting `Company B PIN cannot unlock Company A receipt` to lock in the current behaviour against future refactors.
+- *Observation 2 (recommended)*: Add an explicit regression test asserting `Company B PIN cannot unlock Company A receipt` to lock in the current behaviour against future refactors. **DONE — see test addition below.**
+
+### Cross-tenant PIN-isolation regression test (Feb 2026) ✅
+- **NEW `backend/tests/test_phase5_public_receipt_pin_isolation.py`** — single async pytest that spins up two throw-away tenants A and B, each with its own org-scoped `system_settings.admin_pin` (hashed) and its own manager user with `manager_pin`. Exercises the live request flow through `routes.doc_lookup`:
+  1. `view_document_open(A.code)` → returns invoice number + items, **does NOT leak** `payments`, `customer`, `attached_files`, or `document` raw dump.
+  2. `lookup_document({code: A.code, pin: B.admin_pin})` → HTTPException 403.
+  3. `lookup_document({code: A.code, pin: B.manager_pin})` → HTTPException 403.
+  4. `lookup_document({code: A.code, pin: "9999XYZ"})` → HTTPException 403.
+  5. `lookup_document({code: A.code, pin: A.admin_pin})` → 200 + payments[0].amount=500 + customer.balance=500 + `verifier_method="admin_pin"`.
+  6. `lookup_document({code: A.code, pin: A.manager_pin})` → 200 + `verifier_method="manager_pin"`.
+  7. Reverse symmetry: A's admin_pin / manager_pin against B's doc_code → both 403.
+- **Result**: **1/1 PASS** in 2.89s standalone. **17/17 PASS** when run alongside `test_phase3_historical_credit.py`. Test is idempotent (passes when run twice consecutively).
+- **Production code changes from this test**: NONE — the test confirms current behaviour is secure.
 
 ### Files touched (surgical only)
 - `backend/main.py` — 1 hunk
 - `backend/tests/test_phase2d_permissions.py` — 2 hunks
+- `backend/tests/test_phase5_public_receipt_pin_isolation.py` — NEW (test-only)
 
 ### Constraints honored
 No features added, Phase 4 cleanup paused (no `processSale` decomp, no `useCheckoutState`, no `PaymentTabs`), no HeldSalesQueue work, no production data mutation, no touch to Terminal POS / sync / reports.
