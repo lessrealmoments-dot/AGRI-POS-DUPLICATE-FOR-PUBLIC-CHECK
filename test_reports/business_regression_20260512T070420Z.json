@@ -1,0 +1,1214 @@
+{
+  "generated_at": "2026-05-12T07:04:20.577234+00:00",
+  "pytest_exitstatus": 1,
+  "row_count": 80,
+  "pass_count": 79,
+  "fail_count": 1,
+  "rows": [
+    {
+      "scenario": "br_prep.a_cash",
+      "step": "invoice_visible_via_tenant_proxy",
+      "expected": {
+        "visible_via_proxy": true
+      },
+      "actual": {
+        "visible_via_proxy": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-7d6b1981",
+        "invoice_id": "5533c191-6b32-4f40-aea1-6ccc06ae2563",
+        "rationale": "This is the regression assertion. If org_id is stripped, the proxy returns None and this fails."
+      },
+      "recorded_at": "2026-05-12T07:04:19.911096+00:00"
+    },
+    {
+      "scenario": "br_prep.a_cash",
+      "step": "invoice_organization_id_matches_tenant",
+      "expected": {
+        "organization_id": "p2b-org-7d6b1981"
+      },
+      "actual": {
+        "organization_id": "p2b-org-7d6b1981"
+      },
+      "status": "PASS",
+      "evidence": {
+        "invoice_id": "5533c191-6b32-4f40-aea1-6ccc06ae2563"
+      },
+      "recorded_at": "2026-05-12T07:04:19.911105+00:00"
+    },
+    {
+      "scenario": "br_prep.a_cash",
+      "step": "invoice_number_preserved_from_draft",
+      "expected": {
+        "invoice_number": "SI-BC-001000"
+      },
+      "actual": {
+        "invoice_number": "SI-BC-001000"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:19.911108+00:00"
+    },
+    {
+      "scenario": "br_prep.a_cash",
+      "step": "doc_code_preserved_from_draft",
+      "expected": {
+        "doc_code_present": true,
+        "matches_draft": true
+      },
+      "actual": {
+        "doc_code_present": true,
+        "matches_draft": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "doc_code": "GKWJN2KY"
+      },
+      "recorded_at": "2026-05-12T07:04:19.911112+00:00"
+    },
+    {
+      "scenario": "br_prep.a_cash",
+      "step": "status_finalized",
+      "expected": {
+        "status": "paid"
+      },
+      "actual": {
+        "status": "paid"
+      },
+      "status": "PASS",
+      "evidence": {
+        "rationale": "Original draft status was 'for_preparation'"
+      },
+      "recorded_at": "2026-05-12T07:04:19.911115+00:00"
+    },
+    {
+      "scenario": "br_prep.a_cash",
+      "step": "balance_and_amount_paid",
+      "expected": {
+        "balance": 0.0,
+        "amount_paid": 200.0
+      },
+      "actual": {
+        "balance": 0.0,
+        "amount_paid": 200.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:19.911121+00:00"
+    },
+    {
+      "scenario": "br_prep.a_cash",
+      "step": "customer_id_present",
+      "expected": {
+        "customer_id": "cust-23d9a8ce"
+      },
+      "actual": {
+        "customer_id": "cust-23d9a8ce"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:19.911125+00:00"
+    },
+    {
+      "scenario": "br_prep.a_cash",
+      "step": "no_duplicate_invoice_for_draft_id",
+      "expected": {
+        "row_count": 1
+      },
+      "actual": {
+        "row_count": 1
+      },
+      "status": "PASS",
+      "evidence": {
+        "draft_id": "5533c191-6b32-4f40-aea1-6ccc06ae2563"
+      },
+      "recorded_at": "2026-05-12T07:04:19.912369+00:00"
+    },
+    {
+      "scenario": "br_prep.a_cash",
+      "step": "no_duplicate_invoice_number_in_tenant",
+      "expected": {
+        "row_count": 1
+      },
+      "actual": {
+        "row_count": 1
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:19.913733+00:00"
+    },
+    {
+      "scenario": "br_prep.a_cash",
+      "step": "stock_movement_recorded_exactly_once",
+      "expected": {
+        "movement_count": 1
+      },
+      "actual": {
+        "movement_count": 1
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:19.916089+00:00"
+    },
+    {
+      "scenario": "br_prep.a_cash",
+      "step": "visible_in_sales_history_listing",
+      "expected": {
+        "in_listing": true
+      },
+      "actual": {
+        "in_listing": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "sales_history_size": 1
+      },
+      "recorded_at": "2026-05-12T07:04:19.918103+00:00"
+    },
+    {
+      "scenario": "br_prep.a_cash",
+      "step": "payments_receivables_visibility",
+      "expected": {
+        "open_invoice_count_for_customer": 0,
+        "open_balance_includes_this_invoice": false
+      },
+      "actual": {
+        "open_invoice_count_for_customer": 0,
+        "open_balance_includes_this_invoice": false
+      },
+      "status": "PASS",
+      "evidence": {
+        "open_sum": 0
+      },
+      "recorded_at": "2026-05-12T07:04:19.918549+00:00"
+    },
+    {
+      "scenario": "br_prep.a_cash",
+      "step": "completion_response_has_receipt_fields",
+      "expected": {
+        "has_id": true,
+        "has_invoice_number": true
+      },
+      "actual": {
+        "has_id": true,
+        "has_invoice_number": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "response_id": "5533c191-6b32-4f40-aea1-6ccc06ae2563",
+        "response_invoice_number": "SI-BC-001000"
+      },
+      "recorded_at": "2026-05-12T07:04:19.918555+00:00"
+    },
+    {
+      "scenario": "br_prep.a_cash",
+      "step": "cashier_wallet_credited_full_amount",
+      "expected": {
+        "delta": 200.0
+      },
+      "actual": {
+        "delta": 200.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:19.921477+00:00"
+    },
+    {
+      "scenario": "br_prep.a_cash",
+      "step": "no_AR_for_cash_sale",
+      "expected": {
+        "customer_balance_delta": 0.0
+      },
+      "actual": {
+        "customer_balance_delta": 0.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:19.921990+00:00"
+    },
+    {
+      "scenario": "br_prep.b_digital",
+      "step": "invoice_visible_via_tenant_proxy",
+      "expected": {
+        "visible_via_proxy": true
+      },
+      "actual": {
+        "visible_via_proxy": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-7d6b1981",
+        "invoice_id": "9d5975f3-5d46-4fcd-b356-348ce49690e2",
+        "rationale": "This is the regression assertion. If org_id is stripped, the proxy returns None and this fails."
+      },
+      "recorded_at": "2026-05-12T07:04:19.964231+00:00"
+    },
+    {
+      "scenario": "br_prep.b_digital",
+      "step": "invoice_organization_id_matches_tenant",
+      "expected": {
+        "organization_id": "p2b-org-7d6b1981"
+      },
+      "actual": {
+        "organization_id": "p2b-org-7d6b1981"
+      },
+      "status": "PASS",
+      "evidence": {
+        "invoice_id": "9d5975f3-5d46-4fcd-b356-348ce49690e2"
+      },
+      "recorded_at": "2026-05-12T07:04:19.964239+00:00"
+    },
+    {
+      "scenario": "br_prep.b_digital",
+      "step": "invoice_number_preserved_from_draft",
+      "expected": {
+        "invoice_number": "SI-BC-001001"
+      },
+      "actual": {
+        "invoice_number": "SI-BC-001001"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:19.964243+00:00"
+    },
+    {
+      "scenario": "br_prep.b_digital",
+      "step": "doc_code_preserved_from_draft",
+      "expected": {
+        "doc_code_present": true,
+        "matches_draft": true
+      },
+      "actual": {
+        "doc_code_present": true,
+        "matches_draft": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "doc_code": "W4DWK5WJ"
+      },
+      "recorded_at": "2026-05-12T07:04:19.964246+00:00"
+    },
+    {
+      "scenario": "br_prep.b_digital",
+      "step": "status_finalized",
+      "expected": {
+        "status": "paid"
+      },
+      "actual": {
+        "status": "paid"
+      },
+      "status": "PASS",
+      "evidence": {
+        "rationale": "Original draft status was 'for_preparation'"
+      },
+      "recorded_at": "2026-05-12T07:04:19.964249+00:00"
+    },
+    {
+      "scenario": "br_prep.b_digital",
+      "step": "balance_and_amount_paid",
+      "expected": {
+        "balance": 0.0,
+        "amount_paid": 300.0
+      },
+      "actual": {
+        "balance": 0.0,
+        "amount_paid": 300.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:19.964255+00:00"
+    },
+    {
+      "scenario": "br_prep.b_digital",
+      "step": "customer_id_present",
+      "expected": {
+        "customer_id": "cust-23d9a8ce"
+      },
+      "actual": {
+        "customer_id": "cust-23d9a8ce"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:19.964259+00:00"
+    },
+    {
+      "scenario": "br_prep.b_digital",
+      "step": "no_duplicate_invoice_for_draft_id",
+      "expected": {
+        "row_count": 1
+      },
+      "actual": {
+        "row_count": 1
+      },
+      "status": "PASS",
+      "evidence": {
+        "draft_id": "9d5975f3-5d46-4fcd-b356-348ce49690e2"
+      },
+      "recorded_at": "2026-05-12T07:04:19.965524+00:00"
+    },
+    {
+      "scenario": "br_prep.b_digital",
+      "step": "no_duplicate_invoice_number_in_tenant",
+      "expected": {
+        "row_count": 1
+      },
+      "actual": {
+        "row_count": 1
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:19.966804+00:00"
+    },
+    {
+      "scenario": "br_prep.b_digital",
+      "step": "stock_movement_recorded_exactly_once",
+      "expected": {
+        "movement_count": 1
+      },
+      "actual": {
+        "movement_count": 1
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:19.968672+00:00"
+    },
+    {
+      "scenario": "br_prep.b_digital",
+      "step": "visible_in_sales_history_listing",
+      "expected": {
+        "in_listing": true
+      },
+      "actual": {
+        "in_listing": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "sales_history_size": 2
+      },
+      "recorded_at": "2026-05-12T07:04:19.971086+00:00"
+    },
+    {
+      "scenario": "br_prep.b_digital",
+      "step": "payments_receivables_visibility",
+      "expected": {
+        "open_invoice_count_for_customer": 0,
+        "open_balance_includes_this_invoice": false
+      },
+      "actual": {
+        "open_invoice_count_for_customer": 0,
+        "open_balance_includes_this_invoice": false
+      },
+      "status": "PASS",
+      "evidence": {
+        "open_sum": 0
+      },
+      "recorded_at": "2026-05-12T07:04:19.972007+00:00"
+    },
+    {
+      "scenario": "br_prep.b_digital",
+      "step": "completion_response_has_receipt_fields",
+      "expected": {
+        "has_id": true,
+        "has_invoice_number": true
+      },
+      "actual": {
+        "has_id": true,
+        "has_invoice_number": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "response_id": "9d5975f3-5d46-4fcd-b356-348ce49690e2",
+        "response_invoice_number": "SI-BC-001001"
+      },
+      "recorded_at": "2026-05-12T07:04:19.972016+00:00"
+    },
+    {
+      "scenario": "br_prep.b_digital",
+      "step": "digital_metadata_preserved",
+      "expected": {
+        "digital_platform": "GCash",
+        "digital_ref_number": "REF-BR-PREP-B",
+        "digital_sender": "Test Sender"
+      },
+      "actual": {
+        "digital_platform": "GCash",
+        "digital_ref_number": "REF-BR-PREP-B",
+        "digital_sender": "Test Sender"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:19.973674+00:00"
+    },
+    {
+      "scenario": "br_prep.b_digital",
+      "step": "digital_wallet_credited_full_amount",
+      "expected": {
+        "delta": 300.0
+      },
+      "actual": {
+        "delta": 300.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:19.977175+00:00"
+    },
+    {
+      "scenario": "br_prep.b_digital",
+      "step": "no_AR_for_digital_sale",
+      "expected": {
+        "customer_balance_delta": 0.0
+      },
+      "actual": {
+        "customer_balance_delta": 0.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:19.977705+00:00"
+    },
+    {
+      "scenario": "br_prep.c_split",
+      "step": "invoice_visible_via_tenant_proxy",
+      "expected": {
+        "visible_via_proxy": true
+      },
+      "actual": {
+        "visible_via_proxy": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-7d6b1981",
+        "invoice_id": "dd3c6d6b-fb96-4f72-b07f-fbe4037cd16f",
+        "rationale": "This is the regression assertion. If org_id is stripped, the proxy returns None and this fails."
+      },
+      "recorded_at": "2026-05-12T07:04:20.029909+00:00"
+    },
+    {
+      "scenario": "br_prep.c_split",
+      "step": "invoice_organization_id_matches_tenant",
+      "expected": {
+        "organization_id": "p2b-org-7d6b1981"
+      },
+      "actual": {
+        "organization_id": "p2b-org-7d6b1981"
+      },
+      "status": "PASS",
+      "evidence": {
+        "invoice_id": "dd3c6d6b-fb96-4f72-b07f-fbe4037cd16f"
+      },
+      "recorded_at": "2026-05-12T07:04:20.029915+00:00"
+    },
+    {
+      "scenario": "br_prep.c_split",
+      "step": "invoice_number_preserved_from_draft",
+      "expected": {
+        "invoice_number": "SI-BC-001002"
+      },
+      "actual": {
+        "invoice_number": "SI-BC-001002"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:20.029919+00:00"
+    },
+    {
+      "scenario": "br_prep.c_split",
+      "step": "doc_code_preserved_from_draft",
+      "expected": {
+        "doc_code_present": true,
+        "matches_draft": true
+      },
+      "actual": {
+        "doc_code_present": true,
+        "matches_draft": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "doc_code": "VNSTQPGD"
+      },
+      "recorded_at": "2026-05-12T07:04:20.029922+00:00"
+    },
+    {
+      "scenario": "br_prep.c_split",
+      "step": "status_finalized",
+      "expected": {
+        "status": "paid"
+      },
+      "actual": {
+        "status": "paid"
+      },
+      "status": "PASS",
+      "evidence": {
+        "rationale": "Original draft status was 'for_preparation'"
+      },
+      "recorded_at": "2026-05-12T07:04:20.029924+00:00"
+    },
+    {
+      "scenario": "br_prep.c_split",
+      "step": "balance_and_amount_paid",
+      "expected": {
+        "balance": 0.0,
+        "amount_paid": 400.0
+      },
+      "actual": {
+        "balance": 0.0,
+        "amount_paid": 400.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:20.029929+00:00"
+    },
+    {
+      "scenario": "br_prep.c_split",
+      "step": "customer_id_present",
+      "expected": {
+        "customer_id": "cust-23d9a8ce"
+      },
+      "actual": {
+        "customer_id": "cust-23d9a8ce"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:20.029933+00:00"
+    },
+    {
+      "scenario": "br_prep.c_split",
+      "step": "no_duplicate_invoice_for_draft_id",
+      "expected": {
+        "row_count": 1
+      },
+      "actual": {
+        "row_count": 1
+      },
+      "status": "PASS",
+      "evidence": {
+        "draft_id": "dd3c6d6b-fb96-4f72-b07f-fbe4037cd16f"
+      },
+      "recorded_at": "2026-05-12T07:04:20.031251+00:00"
+    },
+    {
+      "scenario": "br_prep.c_split",
+      "step": "no_duplicate_invoice_number_in_tenant",
+      "expected": {
+        "row_count": 1
+      },
+      "actual": {
+        "row_count": 1
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:20.032623+00:00"
+    },
+    {
+      "scenario": "br_prep.c_split",
+      "step": "stock_movement_recorded_exactly_once",
+      "expected": {
+        "movement_count": 1
+      },
+      "actual": {
+        "movement_count": 1
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:20.034021+00:00"
+    },
+    {
+      "scenario": "br_prep.c_split",
+      "step": "visible_in_sales_history_listing",
+      "expected": {
+        "in_listing": true
+      },
+      "actual": {
+        "in_listing": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "sales_history_size": 3
+      },
+      "recorded_at": "2026-05-12T07:04:20.036131+00:00"
+    },
+    {
+      "scenario": "br_prep.c_split",
+      "step": "payments_receivables_visibility",
+      "expected": {
+        "open_invoice_count_for_customer": 0,
+        "open_balance_includes_this_invoice": false
+      },
+      "actual": {
+        "open_invoice_count_for_customer": 0,
+        "open_balance_includes_this_invoice": false
+      },
+      "status": "PASS",
+      "evidence": {
+        "open_sum": 0
+      },
+      "recorded_at": "2026-05-12T07:04:20.036720+00:00"
+    },
+    {
+      "scenario": "br_prep.c_split",
+      "step": "completion_response_has_receipt_fields",
+      "expected": {
+        "has_id": true,
+        "has_invoice_number": true
+      },
+      "actual": {
+        "has_id": true,
+        "has_invoice_number": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "response_id": "dd3c6d6b-fb96-4f72-b07f-fbe4037cd16f",
+        "response_invoice_number": "SI-BC-001002"
+      },
+      "recorded_at": "2026-05-12T07:04:20.036728+00:00"
+    },
+    {
+      "scenario": "br_prep.c_split",
+      "step": "split_payment_breakdown_preserved",
+      "expected": {
+        "cash_portion": 150.0,
+        "digital_portion": 250.0
+      },
+      "actual": {
+        "cash_portion": 150.0,
+        "digital_portion": 250.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "payments_rows": 2
+      },
+      "recorded_at": "2026-05-12T07:04:20.038044+00:00"
+    },
+    {
+      "scenario": "br_prep.c_split",
+      "step": "both_wallets_credited",
+      "expected": {
+        "cashier_delta": 150.0,
+        "digital_delta": 250.0
+      },
+      "actual": {
+        "cashier_delta": 150.0,
+        "digital_delta": 250.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:20.044237+00:00"
+    },
+    {
+      "scenario": "br_prep.d_partial",
+      "step": "invoice_visible_via_tenant_proxy",
+      "expected": {
+        "visible_via_proxy": true
+      },
+      "actual": {
+        "visible_via_proxy": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-7d6b1981",
+        "invoice_id": "f27d6ca3-f15a-4784-bafc-ef89e03cde71",
+        "rationale": "This is the regression assertion. If org_id is stripped, the proxy returns None and this fails."
+      },
+      "recorded_at": "2026-05-12T07:04:20.099715+00:00"
+    },
+    {
+      "scenario": "br_prep.d_partial",
+      "step": "invoice_organization_id_matches_tenant",
+      "expected": {
+        "organization_id": "p2b-org-7d6b1981"
+      },
+      "actual": {
+        "organization_id": "p2b-org-7d6b1981"
+      },
+      "status": "PASS",
+      "evidence": {
+        "invoice_id": "f27d6ca3-f15a-4784-bafc-ef89e03cde71"
+      },
+      "recorded_at": "2026-05-12T07:04:20.099726+00:00"
+    },
+    {
+      "scenario": "br_prep.d_partial",
+      "step": "invoice_number_preserved_from_draft",
+      "expected": {
+        "invoice_number": "SI-BC-001003"
+      },
+      "actual": {
+        "invoice_number": "SI-BC-001003"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:20.099729+00:00"
+    },
+    {
+      "scenario": "br_prep.d_partial",
+      "step": "doc_code_preserved_from_draft",
+      "expected": {
+        "doc_code_present": true,
+        "matches_draft": true
+      },
+      "actual": {
+        "doc_code_present": true,
+        "matches_draft": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "doc_code": "MQ2F6RZU"
+      },
+      "recorded_at": "2026-05-12T07:04:20.099733+00:00"
+    },
+    {
+      "scenario": "br_prep.d_partial",
+      "step": "status_finalized",
+      "expected": {
+        "status": "partial"
+      },
+      "actual": {
+        "status": "partial"
+      },
+      "status": "PASS",
+      "evidence": {
+        "rationale": "Original draft status was 'for_preparation'"
+      },
+      "recorded_at": "2026-05-12T07:04:20.099735+00:00"
+    },
+    {
+      "scenario": "br_prep.d_partial",
+      "step": "balance_and_amount_paid",
+      "expected": {
+        "balance": 380.0,
+        "amount_paid": 120.0
+      },
+      "actual": {
+        "balance": 380.0,
+        "amount_paid": 120.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:20.099740+00:00"
+    },
+    {
+      "scenario": "br_prep.d_partial",
+      "step": "customer_id_present",
+      "expected": {
+        "customer_id": "cust-6c8f4539"
+      },
+      "actual": {
+        "customer_id": "cust-6c8f4539"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:20.099744+00:00"
+    },
+    {
+      "scenario": "br_prep.d_partial",
+      "step": "no_duplicate_invoice_for_draft_id",
+      "expected": {
+        "row_count": 1
+      },
+      "actual": {
+        "row_count": 1
+      },
+      "status": "PASS",
+      "evidence": {
+        "draft_id": "f27d6ca3-f15a-4784-bafc-ef89e03cde71"
+      },
+      "recorded_at": "2026-05-12T07:04:20.101099+00:00"
+    },
+    {
+      "scenario": "br_prep.d_partial",
+      "step": "no_duplicate_invoice_number_in_tenant",
+      "expected": {
+        "row_count": 1
+      },
+      "actual": {
+        "row_count": 1
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:20.102389+00:00"
+    },
+    {
+      "scenario": "br_prep.d_partial",
+      "step": "stock_movement_recorded_exactly_once",
+      "expected": {
+        "movement_count": 1
+      },
+      "actual": {
+        "movement_count": 1
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:20.103848+00:00"
+    },
+    {
+      "scenario": "br_prep.d_partial",
+      "step": "visible_in_sales_history_listing",
+      "expected": {
+        "in_listing": true
+      },
+      "actual": {
+        "in_listing": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "sales_history_size": 4
+      },
+      "recorded_at": "2026-05-12T07:04:20.105808+00:00"
+    },
+    {
+      "scenario": "br_prep.d_partial",
+      "step": "payments_receivables_visibility",
+      "expected": {
+        "open_invoice_count_for_customer": 1,
+        "open_balance_includes_this_invoice": true
+      },
+      "actual": {
+        "open_invoice_count_for_customer": 1,
+        "open_balance_includes_this_invoice": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "open_sum": 380.0
+      },
+      "recorded_at": "2026-05-12T07:04:20.106316+00:00"
+    },
+    {
+      "scenario": "br_prep.d_partial",
+      "step": "completion_response_has_receipt_fields",
+      "expected": {
+        "has_id": true,
+        "has_invoice_number": true
+      },
+      "actual": {
+        "has_id": true,
+        "has_invoice_number": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "response_id": "f27d6ca3-f15a-4784-bafc-ef89e03cde71",
+        "response_invoice_number": "SI-BC-001003"
+      },
+      "recorded_at": "2026-05-12T07:04:20.106324+00:00"
+    },
+    {
+      "scenario": "br_prep.d_partial",
+      "step": "cashier_wallet_credited_paid_portion_only",
+      "expected": {
+        "delta": 120.0
+      },
+      "actual": {
+        "delta": 120.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:20.109307+00:00"
+    },
+    {
+      "scenario": "br_prep.d_partial",
+      "step": "customer_balance_increased_by_unpaid_portion_only",
+      "expected": {
+        "customer_balance_delta": 380.0
+      },
+      "actual": {
+        "customer_balance_delta": 380.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:20.109742+00:00"
+    },
+    {
+      "scenario": "br_prep.e_credit",
+      "step": "invoice_visible_via_tenant_proxy",
+      "expected": {
+        "visible_via_proxy": true
+      },
+      "actual": {
+        "visible_via_proxy": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-7d6b1981",
+        "invoice_id": "3532f676-f362-4b6b-8ba5-c33ce8ab2863",
+        "rationale": "This is the regression assertion. If org_id is stripped, the proxy returns None and this fails."
+      },
+      "recorded_at": "2026-05-12T07:04:20.141933+00:00"
+    },
+    {
+      "scenario": "br_prep.e_credit",
+      "step": "invoice_organization_id_matches_tenant",
+      "expected": {
+        "organization_id": "p2b-org-7d6b1981"
+      },
+      "actual": {
+        "organization_id": "p2b-org-7d6b1981"
+      },
+      "status": "PASS",
+      "evidence": {
+        "invoice_id": "3532f676-f362-4b6b-8ba5-c33ce8ab2863"
+      },
+      "recorded_at": "2026-05-12T07:04:20.141939+00:00"
+    },
+    {
+      "scenario": "br_prep.e_credit",
+      "step": "invoice_number_preserved_from_draft",
+      "expected": {
+        "invoice_number": "SI-BC-001004"
+      },
+      "actual": {
+        "invoice_number": "SI-BC-001004"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:20.141942+00:00"
+    },
+    {
+      "scenario": "br_prep.e_credit",
+      "step": "doc_code_preserved_from_draft",
+      "expected": {
+        "doc_code_present": true,
+        "matches_draft": true
+      },
+      "actual": {
+        "doc_code_present": true,
+        "matches_draft": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "doc_code": "VQ4T949P"
+      },
+      "recorded_at": "2026-05-12T07:04:20.141945+00:00"
+    },
+    {
+      "scenario": "br_prep.e_credit",
+      "step": "status_finalized",
+      "expected": {
+        "status": "open"
+      },
+      "actual": {
+        "status": "open"
+      },
+      "status": "PASS",
+      "evidence": {
+        "rationale": "Original draft status was 'for_preparation'"
+      },
+      "recorded_at": "2026-05-12T07:04:20.141948+00:00"
+    },
+    {
+      "scenario": "br_prep.e_credit",
+      "step": "balance_and_amount_paid",
+      "expected": {
+        "balance": 600.0,
+        "amount_paid": 0.0
+      },
+      "actual": {
+        "balance": 600.0,
+        "amount_paid": 0.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:20.141952+00:00"
+    },
+    {
+      "scenario": "br_prep.e_credit",
+      "step": "customer_id_present",
+      "expected": {
+        "customer_id": "cust-6c8f4539"
+      },
+      "actual": {
+        "customer_id": "cust-6c8f4539"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:20.141956+00:00"
+    },
+    {
+      "scenario": "br_prep.e_credit",
+      "step": "no_duplicate_invoice_for_draft_id",
+      "expected": {
+        "row_count": 1
+      },
+      "actual": {
+        "row_count": 1
+      },
+      "status": "PASS",
+      "evidence": {
+        "draft_id": "3532f676-f362-4b6b-8ba5-c33ce8ab2863"
+      },
+      "recorded_at": "2026-05-12T07:04:20.143069+00:00"
+    },
+    {
+      "scenario": "br_prep.e_credit",
+      "step": "no_duplicate_invoice_number_in_tenant",
+      "expected": {
+        "row_count": 1
+      },
+      "actual": {
+        "row_count": 1
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:20.144218+00:00"
+    },
+    {
+      "scenario": "br_prep.e_credit",
+      "step": "stock_movement_recorded_exactly_once",
+      "expected": {
+        "movement_count": 1
+      },
+      "actual": {
+        "movement_count": 1
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:20.145487+00:00"
+    },
+    {
+      "scenario": "br_prep.e_credit",
+      "step": "visible_in_sales_history_listing",
+      "expected": {
+        "in_listing": true
+      },
+      "actual": {
+        "in_listing": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "sales_history_size": 5
+      },
+      "recorded_at": "2026-05-12T07:04:20.147334+00:00"
+    },
+    {
+      "scenario": "br_prep.e_credit",
+      "step": "payments_receivables_visibility",
+      "expected": {
+        "open_invoice_count_for_customer": 1,
+        "open_balance_includes_this_invoice": true
+      },
+      "actual": {
+        "open_invoice_count_for_customer": 2,
+        "open_balance_includes_this_invoice": true
+      },
+      "status": "FAIL",
+      "evidence": {
+        "open_sum": 980.0
+      },
+      "recorded_at": "2026-05-12T07:04:20.147719+00:00"
+    },
+    {
+      "scenario": "br_prep.f_orphan_backfill",
+      "step": "orphan_invisible_via_tenant_proxy_before_backfill",
+      "expected": {
+        "visible_via_proxy": false
+      },
+      "actual": {
+        "visible_via_proxy": false
+      },
+      "status": "PASS",
+      "evidence": {
+        "orphan_id": "843364c4-e6c6-4bf4-977a-6fe06abb0aa4",
+        "invoice_number": "ORPHAN-bb0aa4"
+      },
+      "recorded_at": "2026-05-12T07:04:20.189010+00:00"
+    },
+    {
+      "scenario": "br_prep.f_orphan_backfill",
+      "step": "dryrun_reports_orphan_and_does_not_write",
+      "expected": {
+        "finds_orphan": true,
+        "mode": "dry-run"
+      },
+      "actual": {
+        "finds_orphan": true,
+        "mode": "dry-run"
+      },
+      "status": "PASS",
+      "evidence": {
+        "scanned": 1,
+        "missing_org_id": 1
+      },
+      "recorded_at": "2026-05-12T07:04:20.193273+00:00"
+    },
+    {
+      "scenario": "br_prep.f_orphan_backfill",
+      "step": "apply_stamps_org_id_and_audit_log",
+      "expected": {
+        "mode": "apply",
+        "audit_rows_added": 1
+      },
+      "actual": {
+        "mode": "apply",
+        "audit_rows_added": 1
+      },
+      "status": "PASS",
+      "evidence": {
+        "updated_count": 1
+      },
+      "recorded_at": "2026-05-12T07:04:20.227137+00:00"
+    },
+    {
+      "scenario": "br_prep.f_orphan_backfill",
+      "step": "raw_row_organization_id_stamped",
+      "expected": {
+        "organization_id": "p2b-org-7d6b1981"
+      },
+      "actual": {
+        "organization_id": "p2b-org-7d6b1981"
+      },
+      "status": "PASS",
+      "evidence": {
+        "resolution_source": "multi"
+      },
+      "recorded_at": "2026-05-12T07:04:20.228443+00:00"
+    },
+    {
+      "scenario": "br_prep.f_orphan_backfill",
+      "step": "rerun_dryrun_does_not_re_resolve_stamped_row",
+      "expected": {
+        "finds_orphan_again": false
+      },
+      "actual": {
+        "finds_orphan_again": false
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-12T07:04:20.231315+00:00"
+    },
+    {
+      "scenario": "br_prep.f_orphan_backfill",
+      "step": "orphan_visible_via_tenant_proxy_after_backfill",
+      "expected": {
+        "visible_via_proxy": true
+      },
+      "actual": {
+        "visible_via_proxy": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "orphan_id": "843364c4-e6c6-4bf4-977a-6fe06abb0aa4"
+      },
+      "recorded_at": "2026-05-12T07:04:20.232689+00:00"
+    },
+    {
+      "scenario": "br_prep.f_orphan_backfill",
+      "step": "unresolved_and_conflict_rows_skipped",
+      "expected": {
+        "unresolved_stamped": false,
+        "conflict_stamped": false,
+        "unresolved_in_report": true,
+        "conflict_in_report": true
+      },
+      "actual": {
+        "unresolved_stamped": false,
+        "conflict_stamped": false,
+        "unresolved_in_report": true,
+        "conflict_in_report": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "unresolved_count": 1,
+        "conflict_count": 1
+      },
+      "recorded_at": "2026-05-12T07:04:20.240627+00:00"
+    }
+  ]
+}

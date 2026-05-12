@@ -29,7 +29,7 @@
 
 | # | Finding | Status |
 |---|---|---|
-| H-1 | Draft `replace_one` race | ✅ CLOSED |
+| H-1 | Draft `replace_one` race + invoice org_id strip | ✅ CLOSED (code) · ⚠️ DEPLOY ACTION REQUIRED (backfill — see §4.A) |
 | H-2 | No MongoDB transactions | ⚙️ DEFERRED BY DESIGN (replica-set + WT migration; interim compensation pattern accepted) |
 | H-3 | Customer balance drift / no reconciliation | ✅ DIAGNOSTIC CLOSED (`GET /api/admin/customer-balance-reconciliation`) |
 | H-4 | Returns credit any-open-invoice | ✅ CLOSED |
@@ -384,8 +384,169 @@ The application is **deployment-ready** for production multi-tenant rollout, **s
    - `rma_dedupe_dry_run.py` shows zero same-org duplicates.
    - No `DuplicateKeyError` in backend startup logs.
 
-All 9 P0 audit findings are closed (the C-8 backstop index is now correctly compound per-tenant). 9 of 14 P1 findings are closed; 1 deferred-by-design (H-2 transactions); 1 partial (H-12); 4 open backlog (H-7, H-9, H-10, H-14) — none deploy-blocking. Phase-specific audit suite is **112 / 112 PASS** including the new cross-tenant receipt-PIN isolation regression (`tests/test_phase5_public_receipt_pin_isolation.py`). Frontend is **75 / 75 PASS** with a clean production build.
+All 9 P0 audit findings are closed (the C-8 backstop index is now correctly compound per-tenant). 9 of 14 P1 findings are closed; 1 deferred-by-design (H-2 transactions); 1 partial (H-12); 4 open backlog (H-7, H-9, H-10, H-14) — none deploy-blocking. **H-1 has a code-side closure but requires a one-time post-deploy backfill (§4.A below).** Phase-specific audit suite is **112 / 112 PASS** including the new cross-tenant receipt-PIN isolation regression (`tests/test_phase5_public_receipt_pin_isolation.py`). Frontend is **75 / 75 PASS** with a clean production build.
 
 No additional code work is required prior to deploy. Engineering hands the keys over to the deployment owner.
 
 — End of handoff —
+
+---
+
+## 4. POST-DEPLOY RUNBOOK ADDENDUM
+
+### 4.A — H-1 prepared-order invoice visibility backfill (one-time)
+
+**What happened**
+The legacy draft-finalize path in `routes/sales.py` used
+`db.invoices.replace_one(filter, invoice)`. The `TenantCollection`
+proxy only wraps `insert_one`, `update_one`, and `find_one_and_update`;
+`replace_one` falls through `__getattr__` to the raw collection.
+This meant two things at the same time:
+1. The filter was **not** org-scoped (the race that H-1 was originally
+   filed for).
+2. The replacement document was written **verbatim with no
+   `organization_id`** — the proxy's `_inject_org` was bypassed
+   entirely. The `organization_id` that was stamped at draft-create
+   time was wiped by the wholesale replacement.
+
+Symptom: after finalize, the customer balance increased correctly
+(`customers.update_one $inc` goes through the proxy), but the invoice
+row was invisible to every tenant-scoped read. Sales History, Payments
+/ receivables, `/customers/{id}/invoices`, `/customers/{id}/statement`,
+and receipt search all returned empty for the affected customer.
+
+**Live sample-site evidence (`agri-books.com`, 2026-05-12)**
+
+| Customer | `customer.balance` | Visible open invoices | Statement closing |
+|---|---|---|---|
+| GREEN HANDS AGRIVET SUPPLY | ₱95,528.00 | 0 | ₱0.00 |
+| ANGEL AGRIVET SUPPLY       | ₱74,803.00 | 0 | ₱0.00 |
+| **Total unaccounted AR**   | **₱170,331.00** | — | — |
+
+Both customers' invoices have been finalized but the persisted rows
+carry no `organization_id`, so the tenant proxy cannot see them.
+
+**What is fixed in the current repo**
+Commit `200b6c1e` (2026-05-09) replaced `replace_one` with:
+```python
+guard = await db.invoices.find_one_and_update(
+    {"id": draft_doc["id"], "status": "for_preparation"},
+    {"$set": {"status": "processing", "_finalize_started_at": now_iso()}},
+)
+if guard is None:
+    return await db.invoices.find_one({"id": draft_doc["id"]}, {"_id": 0})
+await db.invoices.update_one({"id": draft_doc["id"]}, {"$set": invoice})
+```
+Both `find_one_and_update` and `update_one` are proxy-wrapped. The
+`$set` payload does NOT include `organization_id`, so the org_id from
+the draft-create-time `insert_one` survives. Locked in by the new
+regression file
+`backend/tests/business_regression/test_br_prepare_order_completion_visibility.py`
+(6 scenarios, 83 expected-vs-actual rows, all green).
+
+**Required deploy action**
+
+1. **Deploy the fixed code.** Confirm `git log -S "replace_one" -- backend/routes/sales.py` shows the removal commit (200b6c1e) is in the deploy artifact.
+
+2. **Dry-run the backfill** (no writes; admin role only):
+   ```bash
+   curl -s -H "Authorization: Bearer $ADMIN_JWT" \
+        https://<host>/api/admin/backfill/invoices-org-id \
+        | tee /tmp/h1_invoices_dryrun_$(date +%F).json | jq .
+   ```
+   **Save the JSON output** as a deploy artifact. Expected fields:
+   `scanned`, `missing_org_id`, `resolved_by_branch`,
+   `resolved_by_customer`, `resolved_by_cashier`, `multi_path_agreed`,
+   `multi_path_conflict`, `unresolved`, `per_tenant_breakdown`,
+   `unresolved_samples`, `conflict_samples`.
+
+3. **Review** the dry-run output:
+   - `multi_path_conflict` should be 0 in a healthy production state.
+     If > 0, inspect `conflict_samples` and resolve manually before
+     proceeding. The backfill will **not** stamp conflict rows.
+   - `unresolved` rows have no usable branch_id, customer_id, or
+     cashier_id. The backfill will **not** stamp these either.
+     Inspect `unresolved_samples` — these are typically very old
+     pre-tenant rows that need human disposition.
+   - `per_tenant_breakdown` should show counts and AR pesos per tenant.
+     For agri-books.com, expect ≥2 invoices for org
+     `c391c89b-3be9-4bbf-8e01-3ad5f758c448` summing to ~₱170,331.
+
+4. **Apply only after review** (requires `apply=1` confirm flag):
+   ```bash
+   curl -s -X POST -H "Authorization: Bearer $ADMIN_JWT" \
+        "https://<host>/api/admin/backfill/invoices-org-id?apply=1" \
+        | tee /tmp/h1_invoices_apply_$(date +%F).json | jq .
+   ```
+   Save the JSON output. Each stamped row also writes an audit entry
+   to `admin_backfill_log` with `kind = "invoices_org_id_backfill"`,
+   the resolved org_id, the resolution source (`branch`/`customer`/
+   `cashier`/`multi`), the actor user id, and `ran_at`.
+
+5. **Re-run the dry-run** to confirm idempotency:
+   ```bash
+   curl -s -H "Authorization: Bearer $ADMIN_JWT" \
+        https://<host>/api/admin/backfill/invoices-org-id | jq .
+   ```
+   Expected: `missing_org_id == 0` (every row that could be resolved
+   has been stamped). The only remaining items should be
+   `multi_path_conflict` and `unresolved` from step 3 — neither will
+   shrink without manual intervention.
+
+**Post-deploy smoke (mandatory)**
+
+1. **Verify affected customers reappear** (agri-books.com):
+   - Open GREEN HANDS AGRIVET SUPPLY → Payments tab. Expected: invoice(s)
+     totalling ~₱95,528.00 now visible.
+   - Same for ANGEL AGRIVET SUPPLY (~₱74,803.00).
+   - Open one of those invoices → confirm receipt renders, doc_code
+     resolves, payments form works.
+2. **Apply a token payment** (e.g. ₱100.00) on one reappeared invoice
+   to confirm the full Pay → invoice.balance decrement → customer.balance
+   decrement chain works end-to-end.
+3. **Create a fresh prepared order** at any branch:
+   - Prepare Order → Complete as **Credit** → confirm invoice
+     immediately appears in Sales History and Payments.
+   - Prepare Order → Complete as **Partial** → confirm invoice in
+     Sales History and Payments.
+   - Prepare Order → Complete as **Cash** → confirm invoice in Sales
+     History only (no AR).
+4. **Re-run the drift check** from the diagnosis report:
+   ```python
+   # for every customer in /api/customers:
+   #   diff = customer.balance - sum(open invoice balances for that customer)
+   # expected post-backfill: 0 customers with |diff| > 0.01
+   ```
+
+**Rollback / safety**
+
+- The backfill never deletes or rewrites real data. It only writes
+  `organization_id` (plus four diagnostic fields:
+  `_org_id_backfilled_at`, `_org_id_backfilled_by`,
+  `_org_id_backfilled_source`) to rows where the field was previously
+  missing/null/empty.
+- The audit log makes every change reversible: an emergency
+  `UPDATE invoices SET organization_id = "" WHERE id IN (SELECT invoice_id FROM admin_backfill_log WHERE ran_at = "<ts>")` (Mongo equivalent) would undo a run.
+- Conflict and unresolved rows are never touched, so manual review
+  cannot be silently overridden by re-running the backfill.
+
+**Deferred / accepted-as-backlog**
+- `multi_path_conflict` and `unresolved` rows from the dry-run are a
+  manual triage queue. They should not block deploy. Track in the
+  next ops cycle.
+
+### 4.B — Locked-in regression
+
+The bug class is permanently guarded by:
+- `backend/tests/business_regression/test_br_prepare_order_completion_visibility.py`
+  - 5 payment-type scenarios (cash, digital, split, partial, credit) +
+    1 backfill end-to-end scenario.
+  - 83 expected-vs-actual rows per run, all green.
+  - Key regression assertion: tenant-scoped `db.invoices.find_one({"id": draft_id})`
+    must return non-None after finalize. If `organization_id` is
+    stripped again, this is the assertion that fails first.
+- Run before every deploy: `python3 -m pytest tests/business_regression/ -v`
+  must end at exit 0 with `business_regression_latest.json` reporting
+  `fail_count == 0`.
+
+— End of post-deploy runbook addendum —
