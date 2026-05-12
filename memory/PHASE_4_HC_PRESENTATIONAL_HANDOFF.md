@@ -53,7 +53,7 @@
 | `backend/tests/test_phase4a_approval_gate.py` | 12 | ✅ |
 | **Backend regression total** | **28 / 28** | **PASS** |
 
-**Live smoke (most recent)**: `https://regression-suite-p5.preview.emergentagent.com/sales-new` mounts cleanly. `[data-testid='unified-sales-page']` present, `[data-testid='connectivity-status'][data-status='online']` visible, dedupe pill in bottom-left, no `pageerror`s, no console errors. Both Quick Sale and Detailed Sale tabs render.
+**Live smoke (most recent)**: `https://br-suite-phase5.preview.emergentagent.com/sales-new` mounts cleanly. `[data-testid='unified-sales-page']` present, `[data-testid='connectivity-status'][data-status='online']` visible, dedupe pill in bottom-left, no `pageerror`s, no console errors. Both Quick Sale and Detailed Sale tabs render.
 
 **Known out-of-scope flakiness (DO NOT FIX in this fork)**:
 - 11 pre-existing hardcoded-date unit-test failures in older test files (requires `freezegun` rework).

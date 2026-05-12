@@ -1,32 +1,30 @@
-<analysis>**original_problem_statement**: 
-Finalize Phase 4 Cleanup, conduct Phase 5 Deployment Readiness Assessment, and apply surgical deployment fixes (C-8 RMA Index & Phase 2D brittle tests). Following the successful completion of Phase 5 Deployment readiness, the goal expanded to design and implement a new, isolated Phase 5+ Business Flow Regression Suite (starting with Prompt 1 foundation and reconciliation tests) without touching production code.
+<analysis>**original_problem_statement**: Finalize Phase 4 Cleanup, conduct Phase 5 Deployment Readiness Assessment, and apply surgical deployment fixes. Following the successful completion of Phase 5 Deployment readiness, the goal expanded to design and implement a new, isolated Phase 5+ Business Flow Regression Suite (starting with Prompt 1 foundation and reconciliation tests) without touching production code unless tests expose real bugs. PRODUCT REQUIREMENTS: Robust E2E automated test suite mimicking real POS operations with zero database pollution. 
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
-**what currently exists?** 
-A React + FastAPI multi-tenant POS application. Phase 4 Cleanup (extracting presentational components) is paused. Phase 5 Deployment Assessment and all P0/P1 audit fixes are COMPLETED. The system is considered deployment-ready. The C-8 RMA compound index and cross-tenant QR receipt PIN isolation have been secured and tested. A new, isolated  backend testing framework has been successfully laid out (, ), avoiding the historical shared-DB pollution. The keystone  has been implemented and tests cleanly.
+**what currently exists?** A React + FastAPI multi-tenant POS application. Phase 5 Deployment Assessment is COMPLETED. An isolated  backend testing framework has been heavily expanded across multiple prompts (br1 to br6). The suite now covers baseline setup, PO receive flows, branch transfers, PO/invoice paydown, repack flow math, and Z-report close-day money conservation. The suite surfaced two critical bugs (B-1:  cross-tenant isolation weakness, and B-3: Partial-sale cash double-counting in Z-reports) which were successfully fixed surgically. 
 
 **Last working item**: 
-    - Last item agent was working: Implementing Prompt 1 of the Phase 5+ Business Regression Suite. The agent created , , and  under , executing a mini business-day sequence (cash sale, credit sale, partial sale, payment, return) and accurately asserting expected vs. actual stock, wallet, and AR balances. Test runs pass cleanly and idempotently with 0 DB pollution. 
-    - Status: USER VERIFICATION PENDING (Agent finished Prompt 1 and reported back, waiting for user instructions on Prompt 2).
-    - Agent Testing Done: Y
+    - Last item agent was working: Prompt 9 (Documentation-only update to ). The agent documented the runbook entry for the B-3 (partial-sale cash double-count) fix, alongside the earlier B-1 (internal invoices backfill) deploy instructions.
+    - Status: USER VERIFICATION PENDING
+    - Agent Testing Done: Y (Regression tests passed after all fixes).
     - Which testing method agent to use? backend testing agent / pytest
     - User Testing Done: N
 
 **All Pending/In progress Issue list**: 
-(No active bug issues. Previous P0/P1 fixes are closed).
+(No active P0/P1 issues. B-1 and B-3 fixes have been applied and tested.)
 
 **In progress Task List**: 
-  Task 1: Phase 5+ Business Flow Regression Suite (Prompt 2)
-     - Where to resume: Await user instructions. The agent recommended starting  (proving  shapes) or  (PO full/partial receive + AP delta) next.
-     - What will be achieved with this? Comprehensive, DB-pollution-free backend API automated testing mimicking real end-to-end store operations. 
-     - Status: USER VERIFICATION PENDING / BLOCKED (Waiting for user's Prompt 2 choice).
+  Task 1: Phase 5+ Business Flow Regression Suite (Prompt 10)
+     - Where to resume: Await user instructions for Prompt 10. The agent previously recommended creating a  test summarizer or proceeding to .
+     - What will be achieved with this? Continued expansion of the zero-pollution E2E business regression test suite or tooling.
+     - Status: USER VERIFICATION PENDING / BLOCKED
      - Should Test frontend/backend/both after fix? Backend (pytest)
-     - Blocked on something: User providing Prompt 2 instructions.
+     - Blocked on something: User providing Prompt 10 instructions.
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
-    - Phase 5+ Business Regression Suite continuation (Prompt 2, 3, 4, etc. including files like , , ).
+    - Phase 5+ Business Regression Suite continuation (Prompt 10 instructions, e.g.,  or ).
     - Phase 4A.2: Concurrent Held-Sales Queue (P1)
     - Add Sync this AR to customer SMS toggle to Historical Credit (P2)
     - Rename  to  (P2)
@@ -49,47 +47,52 @@ collected 0 items
 ============================ no tests ran in 0.01s ============================= test suite cleanup to remove DB state pollution.
 
 **Completed work in this session**
-- Applied C-8 RMA compound index  in  (DONE)
-- Randomized  usernames in  (DONE)
-- Audited cross-tenant QR receipt PIN isolation and added regression test  (DONE)
-- Prepared final deployment handoff document  (DONE)
-- Implemented Business Regression Prompt 1: , , and  (DONE)
+- Implemented Prompt 2:  (DONE)
+- Implemented Prompt 3:  (DONE)
+- Implemented Prompt 4:  (DONE)
+- Fixed B-1 (Isolation Issue): Added  to , updated , wrote isolation test , and added an admin backfill script (DONE)
+- Implemented Prompt 5:  (DONE)
+- Implemented Prompt 6:  (DONE)
+- Implemented Prompt 7:  (DONE)
+- Fixed B-3 (Aggregation Bug): Fixed partial-sale cash double-count in  Z-report pipelines (DONE)
+- Implemented Prompt 9: Updated  with post-deploy checklists for B-1 and B-3 (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-   - Issue 1: Full backend suite failure due to test database pollution
-     - Debug checklist: A massive DB cleanup or rewriting tests to properly teardown created users.
-     - Why to solve this issue and what will be achieved with this: Restores a clean, reliable full regression test suite. (Note: The new  suite explicitly bypasses this by using strict isolated module-scoped teardowns).
+   - Issue 1: B-2 Cosmetic Defect - Branch-transfer  are generated with .
+     - Debug checklist:  passes  (field should be ). Lookups self-heal via legacy fallbacks. 
+     - Why to solve this issue and what will be achieved with this: Code cleanliness. 
      - Should Test frontend/backend/both after fix: Backend
-     - Is recurring issue: Y
+     - Is recurring issue? N (User explicitly deferred it to backlog as it poses no leak risk).
 
 **Known issue recurrence from previous fork**
   - Issue recurrence in previous fork: 11 Pre-existing Unit Test Failures (Hardcoded dates)
-  - Recurrence count: 37+
+  - Recurrence count: 38+
   - Status: NOT STARTED
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
-- **Compound MongoDB Indexes**: Unique indexes scoped correctly ( + ) for multi-tenant isolation.
-- **Idempotent Test Infrastructure**: Module-scoped fresh tenants using  suffixes and strict teardowns ( by ) directly off  ensures zero DB pollution across regression test runs.
+- **Idempotent Test Infrastructure**: Module-scoped fresh tenants using strict teardowns directly off . Zero DB footprint logic is strictly asserted.
+- **Tenant Isolation**:  auto-injects  via  overriding.
+- **Z-Report Aggregation Math**: End-of-day money conservation requires strict filtering (e.g., excluding partial sale unpaid portions from ).
 
 **key DB schema**
-  - :  (compound unique index)
+  - : Records close-day reports, variance (), and sales logs aggregates.
+  - : Track inter-branch payables (recently added to ).
 
 **changes in tech stack**
   - None.
 
 **All files of reference** 
+  -  (All BR files listed in Architecture)
+  -  (Added  to TENANT_COLLECTIONS)
+  -  (Refactored  for tenant-looping)
+  -  (Fixed B-3  bug)
+  -  (New script)
   - 
-  - 
-  - 
-  - 
-  - 
-  - 
-  
+
 **Areas that need refactoring**: 
-  -  inside  (deferred).
   - The general full legacy backend test suite (============================= test session starts ==============================
 platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
 rootdir: /app
@@ -103,38 +106,35 @@ collected 0 items
   - 
   - 
   - 
+  - 
 
 **Critical Info for New Agent** 
-- **DO NOT TOUCH PRODUCTION CODE**: You are strictly in a testing/regression phase now. Unless a newly written test exposes an actual product bug and the user explicitly approves a fix, do not modify application code.
-- **Business Regression Suite**: You are building tests under . Read the  and  there. Make sure to reuse existing  helpers where possible. 
-- Wait for the user to provide Prompt 2 before writing the next regression files ( or ).
-- Do NOT run the full ============================= test session starts ==============================
-platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
-rootdir: /app
-plugins: asyncio-1.3.0, anyio-4.12.1
-asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
-collected 0 items
-
-============================ no tests ran in 0.01s ============================= directory due to legacy DB-pollution causing timeouts/errors. Run specific files.
+- **DO NOT TOUCH PRODUCTION CODE**: You are strictly operating under a test-driven approach. Only apply code fixes if a newly written regression test mathematically proves a defect and the user explicitly approves the patch (as was done with B-1 and B-3).
+- **Zero DB Footprint**: Any test written under  must clean up after itself completely. This is checked at the end of every test run.
+- Wait for the user to provide Prompt 10 instructions before taking action.
 
 **documents and test reports created in this job** 
-  - 
-  -  (Structured test results dump)
+  -  (Updated deploy runbook)
+  -  (Structured JSON outputs for all regression tests)
 
 **Last 10 User Messages and any pending HUMAN messages** 
- 1. User: Asked to apply the two approved surgical fixes and run a read-only audit of public QR receipt PIN security.
- 2. Agent: Applied fixes in  and , verified them, audited QR code routes, confirming tenant scoping is secure.
- 3. User: Approved adding 1 regression test for the QR receipt PIN security. 
- 4. Agent: Added , executed successfully.
- 5. User: Approved creation of Final Deployment Handoff.
- 6. Agent: Authored .
- 7. User: Shared a massive Phase 5+ Regression Suite plan for *assessment only*. 
- 8. Agent: Assessed and recommended reusing  helpers, splitting into smaller tests, and tackling  reconciliation first.
- 9. User: Approved Prompt 1 (Foundation & ). Agent wrote  & , verified with user.
- 10. User: Confirmed foundation looks good. Instructed agent to write and idempotently test  and report back. Agent did so, verifying 0 DB pollution, and is now awaiting instructions for Prompt 2.
+ 1. User: Proceed with Prompt 5 ().
+ 2. Agent: Implemented br4 paydown scenarios and guards. Zero footprint confirmed.
+ 3. User: Proceed with Prompt 6 Assessment: Repack Flow Regression.
+ 4. Agent: Assessed Repack model (derived stock, cost propagation). Recommended tests.
+ 5. User: Proceed with br5 repack flow test with narrow scope.
+ 6. Agent: Implemented , tests pass, zero footprint.
+ 7. User: Proceed with Prompt 7 Assessment: Z-Report / Close-Day.
+ 8. Agent: Assessed daily_operations, defined tests. Surfaced a potential double-count logic bug in partial-sale aggregations.
+ 9. User: Proceed with Prompt 7 implementation. 
+ 10. Agent: Wrote . Test confirmed the product bug (B-3) as a deliberate FAIL signal row.
+ 11. User: Proceed with Prompt 8: Surgically fix B-3 Partial Sale Cash Double-Count Patch.
+ 12. Agent: Fixed bug in  by excluding partial sales from . All tests passed.
+ 13. User: Proceed with Prompt 9: Doc-only update to  for the B-3 fix.
+ 14. Agent: Updated deploy documentation. Reported completion. (Awaiting Prompt 10).
 
 **Project Health Check:**
-  - Broken: 11 hardcoded-date FE unit tests. The legacy full backend pytest suite (test pollution).
+  - Broken: 11 hardcoded-date FE unit tests. The legacy full backend pytest suite.
   - Mocked: NA.
 
 **3rd Party Integrations** 
@@ -142,10 +142,10 @@ collected 0 items
   - Resend (Emails) — requires User API Key
 
 **Testing status**
-  - Testing agent used after significant changes: NO (Self-tested via Pytest).
+  - Testing agent used after significant changes: NO (Self-tested heavily via Pytest).
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: , , , 
-  - Known regressions: None introduced. Legacy  pollution was fixed.
+  - Test files created:  through , plus .
+  - Known regressions: None. B-1 and B-3 fixed.
 
 **Credentials to test flow:**
   - Org Admin: 
@@ -153,16 +153,15 @@ collected 0 items
   - Manager PIN: 
 
 **What agent forgot to execute**
-  - Nothing. Agent successfully completed Prompt 1 of the testing framework and cleanly handed back control to the user.
+  - Nothing. Agent meticulously followed user prompts through Prompt 9 and correctly paused.
 
 **Debugging checklist for current issue**
-    Issue: Waiting on Prompt 2 for Business Regression Suite.
+    Issue: Waiting on Prompt 10 for Business Regression Suite.
     Checklist:
-    1. Await User's response containing Prompt 2.
-    2. Confirm if user wants to proceed with  or .
-    3. Ensure any new tests added to  utilize the module-scoped  fixture from .
-    4. Validate any new file runs idempotently and leaves 0 leftover DB records.
-    5. Execute via: ============================= test session starts ==============================
+    1. Await User's response containing Prompt 10.
+    2. Confirm if the user wants to proceed with , , or something else.
+    3. Ensure any new tests added utilize the module-scoped  fixture and assert zero DB footprint.
+    4. Execute tests via: ============================= test session starts ==============================
 platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0 -- /root/.venv/bin/python3
 cachedir: .pytest_cache
 rootdir: /app
