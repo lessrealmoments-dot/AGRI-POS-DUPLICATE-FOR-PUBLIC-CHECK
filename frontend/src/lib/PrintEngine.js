@@ -177,7 +177,15 @@ const fullPageCSS = `
 // Rules: monospace throughout, solid black text only, no colours/gradients/
 // shading, visible 1px solid borders on all table rows, minimum 11px body.
 const dotMatrixCSS = `
-  @page { size: 8.5in 11in; margin: 0.5in 0.75in; }
+  @page {
+    size: 8.5in 11in;
+    margin: 0.5in 0.75in 0.7in 0.75in;
+    @bottom-center {
+      content: "Page " counter(page) " of " counter(pages);
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 10px; color: #000;
+    }
+  }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     font-family: 'Courier New', Courier, monospace;
@@ -185,7 +193,100 @@ const dotMatrixCSS = `
     -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
 
-  /* ── Company header ── */
+  /* ── Page-frame: thead repeats letterhead on every printed page,
+        tfoot reserves space for the receipt-# fallback footer. ── */
+  .dm-page-frame { width: 100%; border-collapse: collapse; }
+  .dm-page-frame > thead { display: table-header-group; }
+  .dm-page-frame > tfoot { display: table-footer-group; }
+  .dm-page-frame > thead > tr > td,
+  .dm-page-frame > tbody > tr > td,
+  .dm-page-frame > tfoot > tr > td { padding: 0; border: 0; }
+
+  /* ── Letterhead repeated on every page ── */
+  .dm-letterhead {
+    width: 100%; border-collapse: collapse;
+    padding-bottom: 10px; margin-bottom: 6px;
+  }
+  .dm-letterhead td { vertical-align: top; padding: 0; }
+  .dm-lh-biz { padding-left: 8px; }
+  .dm-lh-biz .dm-biz-name-lh {
+    font-size: 13px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .dm-lh-biz .dm-biz-detail-lh { font-size: 11px; line-height: 1.45; }
+  .dm-lh-biz .dm-biz-detail-lh .dm-lbl { display: inline-block; min-width: 52px; }
+  .dm-lh-title-cell { text-align: right; padding-right: 0; vertical-align: top; }
+  .dm-lh-title {
+    font-size: 22px; font-weight: bold; text-transform: uppercase;
+    letter-spacing: 2px; margin-bottom: 6px;
+  }
+  .dm-lh-invbox {
+    display: inline-block; border: 1px solid #000; padding: 4px 8px;
+    font-size: 12px; line-height: 1.5; text-align: left; min-width: 200px;
+  }
+  .dm-lh-invbox table { border-collapse: collapse; }
+  .dm-lh-invbox td { padding: 1px 6px 1px 0; }
+  .dm-lh-invbox .dm-inv-val { font-weight: bold; text-align: right; padding-left: 12px; }
+
+  /* ── Billing / Shipping band (first page only) ── */
+  .dm-addr-band { width: 100%; border-collapse: collapse; margin: 8px 0 6px 0; }
+  .dm-addr-band td { vertical-align: top; padding: 2px 4px; font-size: 11px; }
+  .dm-addr-band .dm-addr-label { font-weight: bold; width: 110px; }
+  .dm-addr-band .dm-addr-val { font-weight: bold; }
+
+  /* ── Sales-rep / Payment terms grid (first page only) ── */
+  .dm-meta-grid { width: 100%; border-collapse: collapse; margin: 6px 0 10px 0; }
+  .dm-meta-grid th, .dm-meta-grid td {
+    border: 1px solid #000; padding: 5px 8px; font-size: 11px; vertical-align: top;
+  }
+  .dm-meta-grid th { background: #f0f0f0; font-weight: bold; text-align: left; }
+
+  /* ── Right-aligned totals box (matches reference) ── */
+  .dm-total-box {
+    margin: 14px 0 6px auto;
+    width: 320px; border-collapse: collapse;
+  }
+  .dm-total-box td { padding: 6px 10px; font-size: 13px; vertical-align: middle; }
+  .dm-total-box td.dm-tb-label { text-align: left; }
+  .dm-total-box td.dm-tb-val {
+    text-align: right; border: 1px solid #000; min-width: 140px; font-weight: bold;
+  }
+  .dm-total-box tr.dm-tb-grand td.dm-tb-label { font-size: 16px; font-weight: bold; }
+  .dm-total-box tr.dm-tb-grand td.dm-tb-val { font-size: 16px; }
+
+  /* ── Centered AUTHORIZED REPRESENTATIVE signature line ── */
+  .dm-auth-sig {
+    text-align: center; margin: 28px auto 8px auto;
+    page-break-inside: avoid;
+  }
+  .dm-auth-sig .dm-sig-line-c {
+    border-bottom: 1px solid #000; width: 320px; height: 22px; margin: 0 auto;
+  }
+  .dm-auth-sig .dm-sig-label-c {
+    font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;
+    margin-top: 4px;
+  }
+
+  /* ── Terms block (charge agreement style) ── */
+  .dm-terms-block {
+    margin-top: 16px; font-size: 11px; line-height: 1.5;
+    text-align: center;
+    page-break-inside: avoid;
+  }
+  .dm-terms-block .dm-terms-head {
+    font-weight: bold; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;
+  }
+  .dm-terms-block .dm-terms-copy-key {
+    font-size: 11px; font-weight: bold; letter-spacing: 0.5px;
+    margin-top: 6px; text-transform: uppercase;
+  }
+
+  /* ── Receipt-# fallback footer (in tfoot — shows even if @page bottom unsupported) ── */
+  .dm-foot-receipt {
+    text-align: right; font-size: 10px; padding: 4px 0;
+    border-top: 1px dashed #000;
+  }
+
+  /* ── Company header (legacy — order slip uses this) ── */
   .dm-header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 8px; }
   .dm-biz-name { font-size: 18px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; }
   .dm-biz-detail { font-size: 11px; line-height: 1.5; }
@@ -903,102 +1004,142 @@ function orderSlipDotMatrix(data, biz, docCode) {
   return html;
 }
 
-// ── Charge Agreement (Credit / Partial) — Dot Matrix ───────────────────────
+// ── Charge Agreement (Credit / Partial / Cash) — Dot Matrix ───────────────
+// Layout matches the Trust Agreement reference: letterhead with logo, company
+// info, doc title and invoice/date box repeats on every printed page; items
+// table flows across pages; totals box + signature + terms render after the
+// last item; receipt number + "Page X of Y" appear in the footer of every page.
 function trustReceiptDotMatrix(data, biz, docCode) {
   const inv = data;
-  let html = buildDotMatrixHeader(biz);
+  const docTitle = (inv.payment_type === 'cash' || inv.payment_type === 'digital' || inv.payment_type === 'split')
+    ? 'SALES INVOICE'
+    : 'TRUST AGREEMENT';
 
-  html += `<div class="dm-doc-title">CHARGE AGREEMENT</div>`;
+  // ── 1. Repeated letterhead (sits in <thead>) ──────────────────────────────
+  const logoHtml = biz.logo_url
+    ? `<img src="${biz.logo_url}" alt="logo" style="max-width:130px;max-height:90px;object-fit:contain;display:block;" />`
+    : '';
+  const bizLines = [];
+  if (biz.address) bizLines.push(`<div class="dm-biz-detail-lh">${biz.address}</div>`);
+  if (biz.email)   bizLines.push(`<div class="dm-biz-detail-lh"><span class="dm-lbl">Email</span>${biz.email}</div>`);
+  if (biz.phone)   bizLines.push(`<div class="dm-biz-detail-lh"><span class="dm-lbl">Tel</span>${biz.phone}</div>`);
+  if (biz.tin)     bizLines.push(`<div class="dm-biz-detail-lh"><span class="dm-lbl">TIN</span>${biz.tin}</div>`);
 
-  // Meta
-  html += `<table class="dm-meta-table">`;
-  html += `<tr>
-    <td class="dm-label">Receipt No:</td><td>${inv.invoice_number || ''}</td>
-    <td class="dm-label">Date:</td><td>${fmtDateMaybeTime(inv.created_at || inv.order_date)}</td>
-  </tr>`;
-  html += `<tr>
-    <td class="dm-label">Cashier:</td><td>${inv.cashier_name || ''}</td>
-    <td class="dm-label">Terms:</td><td>${inv.terms || 'COD'}</td>
-  </tr>`;
-  if (inv.due_date) {
-    html += `<tr><td class="dm-label">Due Date:</td><td colspan="3">${fmtDate(inv.due_date)}</td></tr>`;
+  const letterhead = `
+    <table class="dm-letterhead">
+      <tr>
+        <td style="width:140px;">${logoHtml}</td>
+        <td class="dm-lh-biz">
+          <div class="dm-biz-name-lh">${biz.business_name || 'AgriBooks'}</div>
+          ${bizLines.join('')}
+        </td>
+        <td class="dm-lh-title-cell" style="width:240px;">
+          <div class="dm-lh-title">${docTitle}</div>
+          <div class="dm-lh-invbox">
+            <table>
+              <tr><td>Invoice #</td><td class="dm-inv-val">${inv.invoice_number || ''}</td></tr>
+              <tr><td>Date</td><td class="dm-inv-val">${fmtDate(inv.created_at || inv.order_date)}</td></tr>
+            </table>
+          </div>
+        </td>
+      </tr>
+    </table>
+  `;
+
+  // ── 2. Footer fallback (sits in <tfoot>) ──────────────────────────────────
+  //   The browser's @page @bottom-center prints "Page X of Y" centered. We
+  //   also print the receipt # right-aligned in tfoot so even browsers that
+  //   skip @page margin boxes still show grounding info on every page.
+  const tfootHtml = `
+    <div class="dm-foot-receipt">Receipt No: ${inv.invoice_number || ''}</div>
+  `;
+
+  // ── 3. Body content (first-page-only billing + meta grid + items + totals) ─
+  let body = '';
+
+  // First-page-only: Billing / Shipping address band (only when customer set)
+  if (inv.customer_name && inv.customer_name !== 'Walk-in') {
+    body += `<table class="dm-addr-band">
+      <tr>
+        <td class="dm-addr-label">Billing Address</td>
+        <td class="dm-addr-val">${inv.customer_name}${inv.customer_address ? `<br/>${inv.customer_address}` : ''}</td>
+        <td class="dm-addr-label" style="width:120px;">Shipping Address</td>
+        <td class="dm-addr-val">${inv.shipping_name || inv.customer_name}${inv.shipping_address || inv.customer_address ? `<br/>${inv.shipping_address || inv.customer_address}` : ''}</td>
+      </tr>
+    </table>`;
   }
-  if (inv.release_mode === 'full') {
-    html += `<tr><td class="dm-label">Status:</td><td colspan="3"><strong>FULLY RELEASED</strong></td></tr>`;
-  } else if (inv.release_mode === 'partial') {
-    html += `<tr><td class="dm-label">Status:</td><td colspan="3"><strong>PARTIAL RELEASE</strong></td></tr>`;
-  }
-  html += `</table>`;
 
-  // Customer box
-  html += `<div class="dm-info-box">`;
-  html += `<div class="dm-box-label">Customer</div>`;
-  html += `<div class="dm-box-name">${inv.customer_name || ''}</div>`;
-  if (inv.customer_address) html += `<div class="dm-box-sub">${inv.customer_address}</div>`;
-  if (inv.customer_phone) html += `<div class="dm-box-sub">Tel: ${inv.customer_phone}</div>`;
-  html += `</div>`;
+  // First-page-only: Sales Rep / Payment Terms grid
+  body += `<table class="dm-meta-grid">
+    <tr>
+      <th style="width:50%;">Sales Rep</th>
+      <th>Payment Terms</th>
+    </tr>
+    <tr>
+      <td>${inv.cashier_name || ''}</td>
+      <td>${inv.terms || (inv.due_date ? `Due ${fmtDate(inv.due_date)}` : 'Due on receipt')}</td>
+    </tr>
+  </table>`;
 
   if (inv.release_mode === 'partial') {
-    html += `<div class="dm-warning">** PARTIAL RELEASE — SCAN QR CODE BELOW TO RELEASE ITEMS **</div>`;
+    body += `<div class="dm-warning">** PARTIAL RELEASE — SCAN QR CODE BELOW TO RELEASE ITEMS **</div>`;
   }
 
-  // Items table
+  // Items table — column structure mirrors the reference
   const items = inv.items || [];
   const hasDiscount = items.some(i => parseFloat(i.discount_amount) > 0);
-  html += `<table class="dm-items-table"><thead><tr>`;
-  html += `<th style="width:4%">#</th>`;
-  html += `<th>ITEM DESCRIPTION</th>`;
-  html += `<th class="c" style="width:7%">QTY</th>`;
-  html += `<th class="r" style="width:16%">UNIT PRICE</th>`;
-  if (hasDiscount) html += `<th class="r" style="width:12%">DISC</th>`;
-  html += `<th class="r" style="width:15%">LINE TOTAL</th>`;
-  html += `</tr></thead><tbody>`;
+  body += `<table class="dm-items-table"><thead><tr>`;
+  body += `<th style="width:22%;">Item</th>`;
+  body += `<th style="width:24%;">Description</th>`;
+  body += `<th class="c" style="width:10%;">Quantity</th>`;
+  body += `<th class="r" style="width:14%;">Unit Price</th>`;
+  body += `<th class="r" style="width:14%;">Discount</th>`;
+  body += `<th class="r" style="width:16%;">Sub-Total</th>`;
+  body += `</tr></thead><tbody>`;
 
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i];
+  for (const item of items) {
     const qty   = parseFloat(item.quantity) || 0;
     const rate  = parseFloat(item.rate || item.unit_price || item.price) || 0;
     const disc  = parseFloat(item.discount_amount) || 0;
     const total = parseFloat(item.total) || (qty * rate - disc);
-    html += `<tr>`;
-    html += `<td class="c">${i + 1}</td>`;
-    html += `<td>${item.product_name || ''}</td>`;
-    html += `<td class="c">${qty}</td>`;
-    html += `<td class="r">${formatPHP(rate)}</td>`;
-    if (hasDiscount) html += `<td class="r">${disc > 0 ? formatPHP(disc) : '-'}</td>`;
-    html += `<td class="r strong">${formatPHP(total)}</td>`;
-    html += `</tr>`;
+    const unit  = item.unit || item.uom || '';
+    const desc  = item.description || item.category || '';
+    body += `<tr>`;
+    body += `<td>${item.product_name || ''}</td>`;
+    body += `<td>${desc}</td>`;
+    body += `<td class="c">${qty}${unit ? ' ' + unit : ''}</td>`;
+    body += `<td class="r">${formatPHP(rate)}</td>`;
+    body += `<td class="r">${disc > 0 ? formatPHP(disc) : (hasDiscount ? '0 %' : '0 %')}</td>`;
+    body += `<td class="r strong">${formatPHP(total)}</td>`;
+    body += `</tr>`;
   }
-  html += `</tbody></table>`;
+  body += `</tbody></table>`;
 
-  // Totals
-  html += `<div class="dm-totals">`;
-  html += `<div class="dm-tot-row"><span class="dm-tot-label">Subtotal:</span><span class="dm-tot-val">${formatPHP(inv.subtotal)}</span></div>`;
+  // Right-aligned totals box
+  body += `<table class="dm-total-box">`;
+  body += `<tr><td class="dm-tb-label">Sub-Total</td><td class="dm-tb-val">${formatPHP(inv.subtotal)}</td></tr>`;
   if (parseFloat(inv.overall_discount) > 0) {
-    html += `<div class="dm-tot-row"><span class="dm-tot-label">Discount:</span><span class="dm-tot-val">- ${formatPHP(inv.overall_discount)}</span></div>`;
+    body += `<tr><td class="dm-tb-label">Discount</td><td class="dm-tb-val">- ${formatPHP(inv.overall_discount)}</td></tr>`;
   }
-  html += `<div class="dm-tot-row dm-grand"><span class="dm-tot-label">GRAND TOTAL:</span><span class="dm-tot-val">${formatPHP(inv.grand_total)}</span></div>`;
+  if (parseFloat(inv.freight) > 0) {
+    body += `<tr><td class="dm-tb-label">Freight</td><td class="dm-tb-val">${formatPHP(inv.freight)}</td></tr>`;
+  }
+  body += `<tr class="dm-tb-grand"><td class="dm-tb-label">Total</td><td class="dm-tb-val">${formatPHP(inv.grand_total)}</td></tr>`;
   if (parseFloat(inv.amount_paid) > 0) {
-    html += `<div class="dm-tot-row"><span class="dm-tot-label">Amount Paid:</span><span class="dm-tot-val">${formatPHP(inv.amount_paid)}</span></div>`;
+    body += `<tr><td class="dm-tb-label">Amount Paid</td><td class="dm-tb-val">${formatPHP(inv.amount_paid)}</td></tr>`;
   }
   if (parseFloat(inv.balance) > 0) {
-    html += `<div class="dm-tot-row dm-grand"><span class="dm-tot-label">BALANCE DUE:</span><span class="dm-tot-val">${formatPHP(inv.balance)}</span></div>`;
+    body += `<tr class="dm-tb-grand"><td class="dm-tb-label">Balance Due</td><td class="dm-tb-val">${formatPHP(inv.balance)}</td></tr>`;
   }
-  html += `</div>`;
+  body += `</table>`;
 
-  // Terms & Conditions
-  const terms = (biz.trust_receipt_terms || '').replace('{business_name}', biz.business_name || '');
-  if (terms) {
-    html += `<div class="dm-box"><strong>Terms and Conditions</strong><br/>${terms}</div>`;
-  }
+  // AUTHORIZED REPRESENTATIVE — centered signature line
+  body += `<div class="dm-auth-sig">
+    <div class="dm-sig-line-c"></div>
+    <div class="dm-sig-label-c">Authorized Representative</div>
+  </div>`;
 
-  // Tax disclaimer
-  html += `<div style="border:1px solid #000;padding:7px;margin:8px 0;text-align:center;font-size:9px;line-height:1.45;">${TAX_DISCLAIMER}</div>`;
-
-  // QR Code
-  html += qrImgTagDM(docCode, inv);
-
-  // Signature block
+  // Customer signature (if captured) — sits below the auth signature
   const sigStampDM = (() => {
     const t  = data.signature_verification_token || '';
     const sa = data.signature_signed_at || '';
@@ -1007,20 +1148,42 @@ function trustReceiptDotMatrix(data, biz, docCode) {
     const dtStr = dt ? dt.toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : '';
     return `<div style="font-size:9px;text-align:center;margin-top:3px;">Signed ${dtStr}${t ? ` - v.${t}` : ''}</div>`;
   })();
-
-  html += `<div style="border-top:1px solid #000;margin-top:20px;padding-top:14px;">`;
-  html += `<div class="dm-sig-row">`;
-  html += `<div class="dm-sig-block"><div class="dm-sig-line"></div><div class="dm-sig-label">Authorized Representative</div></div>`;
   if (data.signature_url) {
-    html += `<div class="dm-sig-block"><img src="${data.signature_url}" alt="signature" style="max-width:80%;max-height:50px;display:block;margin:0 auto 2px;object-fit:contain"/><div class="dm-sig-line"></div><div class="dm-sig-label">Customer Signature</div>${sigStampDM}</div>`;
+    body += `<div class="dm-auth-sig" style="margin-top:16px;">
+      <img src="${data.signature_url}" alt="signature" style="max-width:300px;max-height:60px;display:block;margin:0 auto 2px;object-fit:contain"/>
+      <div class="dm-sig-line-c"></div>
+      <div class="dm-sig-label-c">Customer Signature</div>
+      ${sigStampDM}
+    </div>`;
   } else if (data.bypass_method) {
-    html += `<div class="dm-sig-block"><div style="margin:8px auto;font-size:10px;border:1px solid #000;padding:4px 8px;display:inline-block;">AUTHORIZED VIA MANAGER PIN</div><div class="dm-sig-label">Customer (Bypassed)</div>${sigStampDM}</div>`;
-  } else {
-    html += `<div class="dm-sig-block"><div class="dm-sig-line"></div><div class="dm-sig-label">Customer Signature &amp; Printed Name</div></div>`;
+    body += `<div class="dm-auth-sig" style="margin-top:16px;">
+      <div style="margin:8px auto;font-size:10px;border:1px solid #000;padding:4px 8px;display:inline-block;">AUTHORIZED VIA MANAGER PIN</div>
+      <div class="dm-sig-label-c">Customer (Bypassed)</div>
+      ${sigStampDM}
+    </div>`;
   }
-  html += `</div></div>`;
 
-  return html;
+  // Terms & Conditions (charge agreement boilerplate)
+  const termsTxt = (biz.trust_receipt_terms || '').replace('{business_name}', biz.business_name || 'this business');
+  if (termsTxt) {
+    body += `<div class="dm-terms-block">
+      <div class="dm-terms-head">Terms and Condition</div>
+      <div>${termsTxt}</div>
+      <div class="dm-terms-copy-key">Cash and Check — White and Pink &nbsp;|&nbsp; Credit — Pink &nbsp;|&nbsp; Store Copy — Yellow</div>
+    </div>`;
+  }
+
+  // QR code at the very end
+  body += qrImgTagDM(docCode, inv);
+
+  // ── 4. Compose the page-frame table (thead+tbody+tfoot) ───────────────────
+  return `
+    <table class="dm-page-frame">
+      <thead><tr><td>${letterhead}</td></tr></thead>
+      <tfoot><tr><td>${tfootHtml}</td></tr></tfoot>
+      <tbody><tr><td>${body}</td></tr></tbody>
+    </table>
+  `;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
