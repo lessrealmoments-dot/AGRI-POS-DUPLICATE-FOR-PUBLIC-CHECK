@@ -1,0 +1,68 @@
+{
+  "generated_at": "2026-05-12T05:33:24.873034+00:00",
+  "pytest_exitstatus": 1,
+  "row_count": 2,
+  "pass_count": 1,
+  "fail_count": 1,
+  "rows": [
+    {
+      "scenario": "br6.a_close_day_conservation",
+      "step": "expected_counter_equals_formula_recomputation",
+      "expected": {
+        "expected_counter": 2200.0
+      },
+      "actual": {
+        "expected_counter": 2200.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-272ced87",
+        "branch_id": "p2b-br-8e3347b9",
+        "report_date": "2026-05-12",
+        "close_id": "3c2f98cc-1c79-4237-9d4c-8fa8a1118f59",
+        "closing_status": "closed",
+        "invoice_numbers": [
+          "SI-B4-001000",
+          "SI-B4-001001",
+          "SI-B4-001002"
+        ],
+        "cashier_wallet_id": "w-cash-0f243cef",
+        "starting_float": 1600.0,
+        "components": {
+          "starting_float": 1600.0,
+          "total_cash_in": 600.0,
+          "total_cashier_expenses": 0.0,
+          "net_fund_transfers": 0.0
+        }
+      },
+      "recorded_at": "2026-05-12T05:33:24.798252+00:00"
+    },
+    {
+      "scenario": "br6.a_close_day_conservation",
+      "step": "total_cash_sales_matches_sales_log_aggregation",
+      "expected": {
+        "total_cash_sales": 800.0
+      },
+      "actual": {
+        "total_cash_sales": 500.0
+      },
+      "status": "FAIL",
+      "evidence": {
+        "org_id": "p2b-org-272ced87",
+        "branch_id": "p2b-br-8e3347b9",
+        "report_date": "2026-05-12",
+        "close_id": "3c2f98cc-1c79-4237-9d4c-8fa8a1118f59",
+        "closing_status": "closed",
+        "invoice_numbers": [
+          "SI-B4-001000",
+          "SI-B4-001001",
+          "SI-B4-001002"
+        ],
+        "cashier_wallet_id": "w-cash-0f243cef",
+        "starting_float": 1600.0,
+        "rationale": "close route aggregates sales_log rows where payment_method ~ /^cash$/i; the test re-runs the same query and asserts equality."
+      },
+      "recorded_at": "2026-05-12T05:33:24.798263+00:00"
+    }
+  ]
+}

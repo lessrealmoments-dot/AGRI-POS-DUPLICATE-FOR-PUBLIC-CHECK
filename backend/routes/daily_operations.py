@@ -282,8 +282,12 @@ async def get_unclosed_days(
         cash_total = 0
         if sales_count > 0:
             agg = await db.sales_log.aggregate([
+                # B-3 fix: exclude partial-line rows from this summary too,
+                # to keep the "unclosed-days" cash preview consistent with
+                # the close-day mutating path.
                 {"$match": {"branch_id": branch_id, "date": d, "voided": {"$ne": True},
-                            "payment_method": {"$regex": "^cash$", "$options": "i"}}},
+                            "payment_method": {"$regex": "^cash$", "$options": "i"},
+                            "partial_grand_total": {"$exists": False}}},
                 {"$group": {"_id": None, "total": {"$sum": "$line_total"}}}
             ]).to_list(1)
             cash_total = round(agg[0]["total"], 2) if agg else 0
@@ -601,9 +605,15 @@ async def get_daily_close_preview(
         safe_balance = sum(l["remaining_amount"] for l in lots)
 
     # ── Cash sales today (payment_type=cash, by category) ────────────────────
+    # B-3 fix: exclude partial-sale line rows here — their cash portion is
+    # already captured by `ar_pipeline` (payments[].date==today on credit/
+    # partial invoices). Including the full partial line_total here as well
+    # would double-count by (line_total - partial_cash_amount) per partial
+    # sale, falsely shorting the cashier at close.
     cash_sales_pipeline = [
         {"$match": {"branch_id": branch_id, "date": date, "voided": {"$ne": True},
-                    "payment_method": {"$regex": "^cash$", "$options": "i"}}},
+                    "payment_method": {"$regex": "^cash$", "$options": "i"},
+                    "partial_grand_total": {"$exists": False}}},
         {"$group": {"_id": "$category", "total": {"$sum": "$line_total"}, "qty": {"$sum": "$quantity"}}},
         {"$sort": {"total": -1}},
     ]
@@ -1559,8 +1569,11 @@ async def batch_close_preview(
 
     # Cash sales
     cash_sales_agg = await db.sales_log.aggregate([
+        # B-3 fix: exclude partial-line rows; partial cash is captured via
+        # ar_pipeline / partial_total path below.
         {"$match": {"branch_id": branch_id, "date": date_filter, "voided": {"$ne": True},
-                    "payment_method": {"$regex": "^cash$", "$options": "i"}}},
+                    "payment_method": {"$regex": "^cash$", "$options": "i"},
+                    "partial_grand_total": {"$exists": False}}},
         {"$group": {"_id": "$category", "total": {"$sum": "$line_total"}}}
     ]).to_list(100)
     sales_by_category = {r["_id"] or "General": round(r["total"], 2) for r in cash_sales_agg}
@@ -1805,8 +1818,11 @@ async def close_day(data: dict, user=Depends(get_current_user)):
         safe_balance = sum(l["remaining_amount"] for l in lots)
 
     cash_sales_agg = await db.sales_log.aggregate([
+        # B-3 fix: exclude partial-line rows; partial cash is captured via
+        # ar_pipeline / partial_total path below (mutating close_day path).
         {"$match": {"branch_id": branch_id, "date": date, "voided": {"$ne": True},
-                    "payment_method": {"$regex": "^cash$", "$options": "i"}}},
+                    "payment_method": {"$regex": "^cash$", "$options": "i"},
+                    "partial_grand_total": {"$exists": False}}},
         {"$group": {"_id": "$category", "total": {"$sum": "$line_total"}}}
     ]).to_list(100)
     sales_by_category = {r["_id"] or "General": round(r["total"], 2) for r in cash_sales_agg}

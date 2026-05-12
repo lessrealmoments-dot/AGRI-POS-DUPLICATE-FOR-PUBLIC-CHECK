@@ -98,11 +98,16 @@ async def _set_cashier_balance(branch_id, balance):
 async def _sales_log_cash_sum(branch_id, date):
     """Replicate the close-day cash_pipeline against sales_log so the
     test computes EXACTLY what the route will compute, instead of
-    asserting an idealised number."""
+    asserting an idealised number.
+
+    Matches the B-3-patched aggregation: cash-payment rows that are NOT
+    part of a partial sale (partial_grand_total absent).
+    """
     rows = await _raw_db.sales_log.find(
         {"branch_id": branch_id, "date": date,
          "voided": {"$ne": True},
-         "payment_method": {"$regex": "^cash$", "$options": "i"}},
+         "payment_method": {"$regex": "^cash$", "$options": "i"},
+         "partial_grand_total": {"$exists": False}},
         {"_id": 0, "line_total": 1},
     ).to_list(1000)
     return round(sum(float(r.get("line_total") or 0) for r in rows), 2)
@@ -306,21 +311,30 @@ async def test_br6a_close_day_conservation_formula(tenant, record_result):
     assert close_record.get("status") == "closed"
     assert daily_closings_count == 1
 
-    # ── Assertion family 6: business-rule SANITY surface (NON-asserting).
-    # Owner's stated rule: cash sales count + partial paid portion +
-    # AR collected today == cash that physically entered the drawer.
+    # ── Assertion family 6: business-rule correctness (B-3 fix).
+    # Owner's stated rule: cash sales count + partial paid portion + AR
+    # collected today == cash that physically entered the drawer. Before
+    # the B-3 patch this row was a deliberate signal-channel FAIL; after
+    # the patch (`partial_grand_total: {$exists: false}` exclusion in
+    # `cash_sales_pipeline`) it is now a hard assertion.
     owner_expected_cash_in = 500.0 + 100.0   # cash sale + partial cash portion
     record_result(
         scenario="br6.a_close_day_conservation",
         step="business_rule_owner_expected_cash_in_matches_route",
-        expected={"owner_expected_cash_in": owner_expected_cash_in},
-        actual={"total_cash_in_per_route": tot_cash_in},
+        expected={"cash_in": owner_expected_cash_in},
+        actual={"cash_in": tot_cash_in},
         evidence={**base_ev,
-                  "note": "If owner_expected_cash_in != "
-                          "total_cash_in_per_route, surface as evidence — "
-                          "the route's categorisation of partial line "
-                          "totals may need review (flagged in the "
-                          "pre-flight assessment)."},
+                  "owner_expected_cash_in": owner_expected_cash_in,
+                  "total_cash_in_per_route": tot_cash_in,
+                  "note": "B-3 patched — partial-sale line totals are now "
+                          "excluded from cash_sales_pipeline; partial cash "
+                          "portion enters total_cash_ar via ar_pipeline only."},
+    )
+    assert tot_cash_in == owner_expected_cash_in, (
+        f"br6a B-3 REGRESSION — total_cash_in {tot_cash_in} should equal "
+        f"the physically-present cash {owner_expected_cash_in} (cash sale "
+        f"₱500 + partial cash portion ₱100). Did the partial_grand_total "
+        f"exclusion in daily_operations.py regress?"
     )
 
     # Save IDs for the br6.b / br6.d siblings.
