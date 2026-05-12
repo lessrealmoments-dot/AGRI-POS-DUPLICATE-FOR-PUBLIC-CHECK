@@ -1,0 +1,420 @@
+{
+  "generated_at": "2026-05-12T04:55:17.121068+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 16,
+  "pass_count": 16,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br4.a_po_terms_paydown",
+      "step": "partial_payment_payable_status_partial",
+      "expected": {
+        "paid": 500.0,
+        "balance": 700.0,
+        "status": "partial"
+      },
+      "actual": {
+        "paid": 500.0,
+        "balance": 700.0,
+        "status": "partial"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-c4681e8d",
+        "branch_id": "p2b-br-b6781cb6",
+        "supplier_id": "supp-79b3a282",
+        "vendor": "BR4 Vendor",
+        "po_id": "7bbd3d0f-b939-4e15-9a5f-b0915dfa6c85",
+        "po_number": "PO-B1-001000",
+        "payable_id": "91101dec-446f-4d7f-a9b2-b03b3db9f12a",
+        "grand_total": 1200,
+        "cashier_start": 2000.0,
+        "payment_amount": 500.0
+      },
+      "recorded_at": "2026-05-12T04:55:16.303117+00:00"
+    },
+    {
+      "scenario": "br4.a_po_terms_paydown",
+      "step": "partial_payment_po_mirrors_payable",
+      "expected": {
+        "amount_paid": 500.0,
+        "balance": 700.0,
+        "payment_status": "partial"
+      },
+      "actual": {
+        "amount_paid": 500.0,
+        "balance": 700.0,
+        "payment_status": "partial"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-c4681e8d",
+        "branch_id": "p2b-br-b6781cb6",
+        "supplier_id": "supp-79b3a282",
+        "vendor": "BR4 Vendor",
+        "po_id": "7bbd3d0f-b939-4e15-9a5f-b0915dfa6c85",
+        "po_number": "PO-B1-001000",
+        "payable_id": "91101dec-446f-4d7f-a9b2-b03b3db9f12a",
+        "grand_total": 1200,
+        "cashier_start": 2000.0
+      },
+      "recorded_at": "2026-05-12T04:55:16.303122+00:00"
+    },
+    {
+      "scenario": "br4.a_po_terms_paydown",
+      "step": "partial_payment_cashier_decremented",
+      "expected": {
+        "cashier_balance": 1500.0,
+        "delta": -500.0
+      },
+      "actual": {
+        "cashier_balance": 1500.0,
+        "delta": -500.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-c4681e8d",
+        "branch_id": "p2b-br-b6781cb6",
+        "supplier_id": "supp-79b3a282",
+        "vendor": "BR4 Vendor",
+        "po_id": "7bbd3d0f-b939-4e15-9a5f-b0915dfa6c85",
+        "po_number": "PO-B1-001000",
+        "payable_id": "91101dec-446f-4d7f-a9b2-b03b3db9f12a",
+        "grand_total": 1200,
+        "cashier_start": 2000.0,
+        "route_response": {
+          "new_balance": 700.0,
+          "payment_status": "partial"
+        }
+      },
+      "recorded_at": "2026-05-12T04:55:16.303125+00:00"
+    },
+    {
+      "scenario": "br4.a_po_terms_paydown",
+      "step": "remainder_payment_payable_status_paid",
+      "expected": {
+        "paid": 1200,
+        "balance": 0.0,
+        "status": "paid"
+      },
+      "actual": {
+        "paid": 1200.0,
+        "balance": 0.0,
+        "status": "paid"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-c4681e8d",
+        "branch_id": "p2b-br-b6781cb6",
+        "supplier_id": "supp-79b3a282",
+        "vendor": "BR4 Vendor",
+        "po_id": "7bbd3d0f-b939-4e15-9a5f-b0915dfa6c85",
+        "po_number": "PO-B1-001000",
+        "payable_id": "91101dec-446f-4d7f-a9b2-b03b3db9f12a",
+        "grand_total": 1200,
+        "cashier_start": 2000.0,
+        "payment_amount": 700.0
+      },
+      "recorded_at": "2026-05-12T04:55:16.551952+00:00"
+    },
+    {
+      "scenario": "br4.a_po_terms_paydown",
+      "step": "remainder_payment_po_status_paid",
+      "expected": {
+        "amount_paid": 1200,
+        "balance": 0.0,
+        "payment_status": "paid"
+      },
+      "actual": {
+        "amount_paid": 1200.0,
+        "balance": 0.0,
+        "payment_status": "paid"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-c4681e8d",
+        "branch_id": "p2b-br-b6781cb6",
+        "supplier_id": "supp-79b3a282",
+        "vendor": "BR4 Vendor",
+        "po_id": "7bbd3d0f-b939-4e15-9a5f-b0915dfa6c85",
+        "po_number": "PO-B1-001000",
+        "payable_id": "91101dec-446f-4d7f-a9b2-b03b3db9f12a",
+        "grand_total": 1200,
+        "cashier_start": 2000.0
+      },
+      "recorded_at": "2026-05-12T04:55:16.551961+00:00"
+    },
+    {
+      "scenario": "br4.a_po_terms_paydown",
+      "step": "remainder_payment_cashier_balance_at_total_minus_grand",
+      "expected": {
+        "cashier_balance": 800.0
+      },
+      "actual": {
+        "cashier_balance": 800.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-c4681e8d",
+        "branch_id": "p2b-br-b6781cb6",
+        "supplier_id": "supp-79b3a282",
+        "vendor": "BR4 Vendor",
+        "po_id": "7bbd3d0f-b939-4e15-9a5f-b0915dfa6c85",
+        "po_number": "PO-B1-001000",
+        "payable_id": "91101dec-446f-4d7f-a9b2-b03b3db9f12a",
+        "grand_total": 1200,
+        "cashier_start": 2000.0
+      },
+      "recorded_at": "2026-05-12T04:55:16.551964+00:00"
+    },
+    {
+      "scenario": "br4.a_po_terms_paydown",
+      "step": "already_paid_guard_rejects_extra_payment",
+      "expected": {
+        "status_code": 400,
+        "rejected": true
+      },
+      "actual": {
+        "status_code": 400,
+        "rejected": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-c4681e8d",
+        "branch_id": "p2b-br-b6781cb6",
+        "supplier_id": "supp-79b3a282",
+        "vendor": "BR4 Vendor",
+        "po_id": "7bbd3d0f-b939-4e15-9a5f-b0915dfa6c85",
+        "po_number": "PO-B1-001000",
+        "payable_id": "91101dec-446f-4d7f-a9b2-b03b3db9f12a",
+        "grand_total": 1200,
+        "cashier_start": 2000.0,
+        "third_call_detail": "PO already paid in full"
+      },
+      "recorded_at": "2026-05-12T04:55:16.552428+00:00"
+    },
+    {
+      "scenario": "br4.b_internal_invoice_paydown",
+      "step": "invoice_status_paid",
+      "expected": {
+        "status": "paid",
+        "payment_status": "paid",
+        "paid_amount": 50.0
+      },
+      "actual": {
+        "status": "paid",
+        "payment_status": "paid",
+        "paid_amount": 50.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-c4681e8d",
+        "from_branch_id": "p2b-br-b6781cb6",
+        "to_branch_id": "br-b2-br-b728ab2a",
+        "transfer_id": "6f17a011-a884-442f-9c9c-5441ce75e8cd",
+        "internal_invoice_id": "e3881de6-b301-480c-9b58-b78d826056db",
+        "invoice_number": "INV-BB-001000",
+        "grand_total": 50.0,
+        "buyer_bank_start": 200.0,
+        "supplier_bank_start": 0.0,
+        "route_response": {
+          "amount": 50.0,
+          "buyer_bank_balance": 150.0,
+          "supplier_bank_balance": 50.0
+        }
+      },
+      "recorded_at": "2026-05-12T04:55:16.588346+00:00"
+    },
+    {
+      "scenario": "br4.b_internal_invoice_paydown",
+      "step": "buyer_bank_decremented",
+      "expected": {
+        "buyer_bank": 150.0,
+        "delta": -50.0
+      },
+      "actual": {
+        "buyer_bank": 150.0,
+        "delta": -50.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-c4681e8d",
+        "from_branch_id": "p2b-br-b6781cb6",
+        "to_branch_id": "br-b2-br-b728ab2a",
+        "transfer_id": "6f17a011-a884-442f-9c9c-5441ce75e8cd",
+        "internal_invoice_id": "e3881de6-b301-480c-9b58-b78d826056db",
+        "invoice_number": "INV-BB-001000",
+        "grand_total": 50.0,
+        "buyer_bank_start": 200.0,
+        "supplier_bank_start": 0.0
+      },
+      "recorded_at": "2026-05-12T04:55:16.588352+00:00"
+    },
+    {
+      "scenario": "br4.b_internal_invoice_paydown",
+      "step": "supplier_bank_credited",
+      "expected": {
+        "supplier_bank": 50.0,
+        "delta": 50.0
+      },
+      "actual": {
+        "supplier_bank": 50.0,
+        "delta": 50.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-c4681e8d",
+        "from_branch_id": "p2b-br-b6781cb6",
+        "to_branch_id": "br-b2-br-b728ab2a",
+        "transfer_id": "6f17a011-a884-442f-9c9c-5441ce75e8cd",
+        "internal_invoice_id": "e3881de6-b301-480c-9b58-b78d826056db",
+        "invoice_number": "INV-BB-001000",
+        "grand_total": 50.0,
+        "buyer_bank_start": 200.0,
+        "supplier_bank_start": 0.0
+      },
+      "recorded_at": "2026-05-12T04:55:16.588355+00:00"
+    },
+    {
+      "scenario": "br4.b_internal_invoice_paydown",
+      "step": "wallet_movements_two_rows_cash_out_in",
+      "expected": {
+        "cash_out_count": 1,
+        "cash_out_amount": -50.0,
+        "cash_in_count": 1,
+        "cash_in_amount": 50.0
+      },
+      "actual": {
+        "cash_out_count": 1,
+        "cash_out_amount": -50.0,
+        "cash_in_count": 1,
+        "cash_in_amount": 50.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-c4681e8d",
+        "from_branch_id": "p2b-br-b6781cb6",
+        "to_branch_id": "br-b2-br-b728ab2a",
+        "transfer_id": "6f17a011-a884-442f-9c9c-5441ce75e8cd",
+        "internal_invoice_id": "e3881de6-b301-480c-9b58-b78d826056db",
+        "invoice_number": "INV-BB-001000",
+        "grand_total": 50.0,
+        "buyer_bank_start": 200.0,
+        "supplier_bank_start": 0.0,
+        "wallet_movement_ids": [
+          "2c6a5d8e-0dc0-4daf-bd9e-06b0f0ff7c4d",
+          "5d766894-b018-4440-b09c-9688464f4a56"
+        ]
+      },
+      "recorded_at": "2026-05-12T04:55:16.588360+00:00"
+    },
+    {
+      "scenario": "br4.b_internal_invoice_paydown",
+      "step": "already_paid_guard_rejects_second_pay",
+      "expected": {
+        "status_code": 400,
+        "rejected": true
+      },
+      "actual": {
+        "status_code": 400,
+        "rejected": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-c4681e8d",
+        "from_branch_id": "p2b-br-b6781cb6",
+        "to_branch_id": "br-b2-br-b728ab2a",
+        "transfer_id": "6f17a011-a884-442f-9c9c-5441ce75e8cd",
+        "internal_invoice_id": "e3881de6-b301-480c-9b58-b78d826056db",
+        "invoice_number": "INV-BB-001000",
+        "grand_total": 50.0,
+        "buyer_bank_start": 200.0,
+        "supplier_bank_start": 0.0
+      },
+      "recorded_at": "2026-05-12T04:55:16.588629+00:00"
+    },
+    {
+      "scenario": "br4.c_payment_guards",
+      "step": "po_overpayment_rejected_400",
+      "expected": {
+        "status_code": 400,
+        "rejected": true,
+        "po_balance_unchanged": 600.0,
+        "payable_balance_unchanged": 600.0
+      },
+      "actual": {
+        "status_code": 400,
+        "rejected": true,
+        "po_balance_unchanged": 600.0,
+        "payable_balance_unchanged": 600.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "984ec017-499f-43df-a174-fd5b59350e80",
+        "detail": "Payment \u20b12000.00 exceeds outstanding balance \u20b1600.00"
+      },
+      "recorded_at": "2026-05-12T04:55:17.055146+00:00"
+    },
+    {
+      "scenario": "br4.c_payment_guards",
+      "step": "po_pay_unknown_id_404",
+      "expected": {
+        "status_code": 404
+      },
+      "actual": {
+        "status_code": 404
+      },
+      "status": "PASS",
+      "evidence": {
+        "attempted_po_id": "br4-nonexistent-po-zzz"
+      },
+      "recorded_at": "2026-05-12T04:55:17.055705+00:00"
+    },
+    {
+      "scenario": "br4.c_payment_guards",
+      "step": "internal_invoice_pay_unknown_id_404",
+      "expected": {
+        "status_code": 404
+      },
+      "actual": {
+        "status_code": 404
+      },
+      "status": "PASS",
+      "evidence": {
+        "attempted_invoice_id": "br4-nonexistent-inv-zzz"
+      },
+      "recorded_at": "2026-05-12T04:55:17.055993+00:00"
+    },
+    {
+      "scenario": "br4.c_payment_guards",
+      "step": "internal_invoice_insufficient_bank_400",
+      "expected": {
+        "status_code": 400,
+        "detail_type": "insufficient_funds",
+        "buyer_bank_unchanged": 5.0,
+        "supplier_bank_unchanged": 0.0,
+        "invoice_status_unchanged": "prepared"
+      },
+      "actual": {
+        "status_code": 400,
+        "detail_type": "insufficient_funds",
+        "buyer_bank_unchanged": 5.0,
+        "supplier_bank_unchanged": 0.0,
+        "invoice_status_unchanged": "prepared"
+      },
+      "status": "PASS",
+      "evidence": {
+        "internal_invoice_id": "dc43a096-02d6-47d0-86cc-2a8a699761dc",
+        "invoice_number": "INV-BB-001001",
+        "short_detail": {
+          "type": "insufficient_funds",
+          "message": "Branch B ab2a bank has \u20b15.00. Need \u20b150.00.",
+          "balance": 5.0,
+          "required": 50.0,
+          "shortfall": 45.0
+        }
+      },
+      "recorded_at": "2026-05-12T04:55:17.081400+00:00"
+    }
+  ]
+}
