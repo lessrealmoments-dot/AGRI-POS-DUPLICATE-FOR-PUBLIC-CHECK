@@ -294,6 +294,52 @@ curl -X GET "{PROD}/api/admin/backfill/internal-invoices-org-id" \
 - **Cross-tenant by necessity**: this is the one and only legitimate cross-tenant write path for `internal_invoices` (the rows being repaired have no org to filter by); documented in `tests/test_phase2d_permissions.py` `ALLOWLIST_FILES` with full justification.
 - **Persist the dry-run output** (JSON) before applying — it is the auditable record of which legacy rows were resolved, and which branches (if any) require operator follow-up.
 
+### B-3 — Close-Day / Z-Report partial-sale cash double-count fix
+
+**What changed.** The close-day / Z-Report cash aggregation now excludes partial-sale rows from `total_cash_sales`. Specifically, every `cash_sales_pipeline` / `cash_sales_agg` `$match` in `backend/routes/daily_operations.py` (4 call sites: unclosed-days summary, preview-bookkeeping, `get_daily_close_preview`, mutating `close_day`) now also requires `"partial_grand_total": {"$exists": False}`. This uses the marker stamped by `helpers.py:407` only for partial sales, so the filter is exact and non-disruptive:
+- Partial-sale **actual paid amount** still flows through the invoice payments / `ar_pipeline` and lands in `total_cash_ar` (today-dated `payments[]` on credit/partial invoices) — unchanged.
+- Partial-sale **unpaid balance** still aggregates into `total_new_credit` via `payment_type ∈ [credit, partial]` and today's `order_date` — unchanged.
+- Partial sales still surface through `partial_invoices` (and the corresponding section of the close-day record), but no longer inflate `total_cash_sales` or `total_cash_in`.
+
+**Why it changed.** Before the patch, every partial sale was counted twice in the closing-day cash math:
+1. The **full** partial-sale `line_total` (e.g. ₱300) entered `total_cash_sales` because the `sales_log` row carried `payment_method="cash"` and the cash-pipeline filter didn't exclude partial rows.
+2. The **actual** cash leg of the partial sale (e.g. ₱100) entered `total_cash_ar` via the AR pipeline (`payment_type=partial` + `payments[0].date==today`).
+
+Net effect: every partial sale inflated `total_cash_in` by `(partial_line_total − partial_cash_amount)`. For a cashier reconciling the drawer with a partial sale of ₱300 / ₱100 paid, the system claimed `expected_counter = +₱200` more than was physically present — i.e., a recurring **false shortage** equal to the unpaid AR portion of every partial-sale day. (The route's pre-existing comment at `daily_operations.py:1840-1846` already states the design intent that "the expanded `total_cash_ar` subsumes `partial_total`, which is dropped from the cash_in math below" — the bug was a missing implementation of that intent in the four cash-pipeline call sites.)
+
+**Worked example.**
+- Cash sale: ₱500 (paid in full)
+- Partial sale: ₱300 grand_total, ₱100 cash, ₱200 AR
+- **Before** the fix → `total_cash_in = 900` ← ₱300 phantom over, cashier appears to be ₱300 SHORT
+- **After** the fix → `total_cash_in = 600` ← matches the drawer
+- Expected counter for cashier reconciliation: **600** = ₱500 cash sale + ₱100 partial cash portion
+
+**Post-deploy smoke check.** Run this once on production after the deploy:
+1. As a cashier on a fresh business day, create a regular cash sale (any amount, payment_method=Cash).
+2. Create one partial sale on the same day: capture the cash portion + leave a balance unpaid. (e.g. ₱300 sale, ₱100 cash, ₱200 to AR.)
+3. Open the daily-close preview (`GET /api/daily-close-preview?date=<today>&branch_id=<id>`):
+   - Confirm the partial sale does NOT appear in the cash-sales-by-category breakdown.
+   - Confirm `total_cash_sales` equals only the cash sale amount.
+   - Confirm `total_cash_ar` (or the route's collected-payments bucket — UI label varies) includes the partial sale's cash portion.
+   - Confirm `total_new_credit` includes the partial sale's unpaid balance.
+   - Confirm the partial sale appears under `partial_invoices` (or the partial-sales section of the UI).
+4. Run the close-day flow (`POST /api/daily-close`):
+   - Provide `actual_cash` = real cash physically counted in the drawer.
+   - Confirm `expected_counter` matches what the drawer should hold (cash sale + partial cash portion + starting float − expenses + net transfers).
+   - Confirm `over_short` is ₱0 (give or take rounding) when the drawer matches.
+
+**Test evidence.**
+- `tests/business_regression/` — **21 tests / 102 invariants — 100% PASS** (up from 101/102 pre-patch; the previously deliberate signal-channel FAIL row is now a hard assertion).
+- `tests/business_regression/test_br6_z_report_close_day.py` — all 4 scenarios green (conservation, duplicate-close, cross-day AR, negative variance).
+- `tests/test_phase2e_date_basis.py` — **10/10 PASS**. No regression in date-basis behavior, late-encode reporting, voided-transaction exclusion, branch scoping, transaction-date logic, or split-payment handling.
+
+**Safety notes.**
+- **No change to sale creation.** `routes/sales.py` and `helpers.log_sale_items` are untouched. Existing `sales_log` rows keep their original shape.
+- **No change to invoice payments.** `record_invoice_payment`, the payments array, fund-source dispatch, and AR receivables are all unchanged.
+- **No change to wallet behavior.** `update_cashier_wallet`, `fund_wallets` schema, `wallet_movements`, and the close-day wallet reset to `cash_to_drawer` are all unchanged.
+- **No change to Historical Credit / late-encode behavior.** Historical Credit notebook AR continues to land in `total_new_credit` via `payment_type=credit` on the appropriate `order_date`; late-encoded sales of past dates do not leak into today via the unchanged `order_date` filter.
+- **Only the close-day / Z-Report cash aggregation classification changed** — partial-sale rows are now correctly classified as belonging to the partial-sale bucket, not the cash-sales bucket.
+
 ---
 
 ## 7. Backlog Items (post-deploy work, prioritised)
