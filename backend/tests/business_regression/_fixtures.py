@@ -170,6 +170,12 @@ _AUDIT_COLLECTIONS_WITH_ORG_FIELD = [
     "security_events",
 ]
 
+# Collections whose tenant link is a DIFFERENT field name (not
+# `organization_id`). Mapped here so cleanup stays surgical.
+_AUDIT_COLLECTIONS_ALT_KEY = {
+    "doc_codes": "org_id",   # doc_lookup writes `org_id`, not `organization_id`
+}
+
 
 async def cleanup_business_tenant(org_id: Optional[str]):
     """Delete every row anywhere in the database that carries this
@@ -192,6 +198,12 @@ async def cleanup_business_tenant(org_id: Optional[str]):
         except Exception:
             # Best-effort. A missing collection just means there was
             # nothing to delete anyway.
+            pass
+    # Collections that key off a different field name (e.g. `org_id`).
+    for name, alt_key in _AUDIT_COLLECTIONS_ALT_KEY.items():
+        try:
+            await _raw_db[name].delete_many({alt_key: org_id})
+        except Exception:
             pass
     # The org row itself lives in `organizations` (not tenant-scoped by
     # `organization_id`); its primary key is `id`.

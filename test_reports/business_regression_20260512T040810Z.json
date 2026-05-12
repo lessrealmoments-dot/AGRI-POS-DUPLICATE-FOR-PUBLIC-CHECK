@@ -1,0 +1,342 @@
+{
+  "generated_at": "2026-05-12T04:08:10.935064+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 13,
+  "pass_count": 13,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br2.a_terms_po_full_receive",
+      "step": "inventory_increased_by_ordered_qty",
+      "expected": {
+        "end_stock": 20.0,
+        "delta": 20
+      },
+      "actual": {
+        "end_stock": 20.0,
+        "delta": 20.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-1fa8b2ad",
+        "branch_id": "p2b-br-643dc76a",
+        "supplier_id": "supp-4cac858a",
+        "vendor": "BR2 Vendor Terms",
+        "product_id": "prd-38aa9895",
+        "po_id": "58b323ab-8e01-4e4b-a094-160ffee859c3",
+        "po_number": "PO-BC-001000",
+        "starting_stock": 0.0,
+        "ordered_qty": 20,
+        "unit_price": 60
+      },
+      "recorded_at": "2026-05-12T04:08:10.853704+00:00"
+    },
+    {
+      "scenario": "br2.a_terms_po_full_receive",
+      "step": "po_status_and_payment_status",
+      "expected": {
+        "status": "received",
+        "payment_status": "unpaid",
+        "balance": 1200
+      },
+      "actual": {
+        "status": "received",
+        "payment_status": "unpaid",
+        "balance": 1200.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-1fa8b2ad",
+        "branch_id": "p2b-br-643dc76a",
+        "supplier_id": "supp-4cac858a",
+        "vendor": "BR2 Vendor Terms",
+        "product_id": "prd-38aa9895",
+        "po_id": "58b323ab-8e01-4e4b-a094-160ffee859c3",
+        "po_number": "PO-BC-001000",
+        "starting_stock": 0.0,
+        "ordered_qty": 20,
+        "unit_price": 60,
+        "grand_total": 1200.0
+      },
+      "recorded_at": "2026-05-12T04:08:10.853714+00:00"
+    },
+    {
+      "scenario": "br2.a_terms_po_full_receive",
+      "step": "payable_row_created_at_full_amount",
+      "expected": {
+        "payable_count": 1,
+        "amount": 1200.0,
+        "balance": 1200.0,
+        "status": "pending"
+      },
+      "actual": {
+        "payable_count": 1,
+        "amount": 1200.0,
+        "balance": 1200.0,
+        "status": "pending"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-1fa8b2ad",
+        "branch_id": "p2b-br-643dc76a",
+        "supplier_id": "supp-4cac858a",
+        "vendor": "BR2 Vendor Terms",
+        "product_id": "prd-38aa9895",
+        "po_id": "58b323ab-8e01-4e4b-a094-160ffee859c3",
+        "po_number": "PO-BC-001000",
+        "starting_stock": 0.0,
+        "ordered_qty": 20,
+        "unit_price": 60,
+        "payable_ids": [
+          "1f6510c2-f2dc-40a7-adc1-d7034a767538"
+        ]
+      },
+      "recorded_at": "2026-05-12T04:08:10.853720+00:00"
+    },
+    {
+      "scenario": "br2.a_terms_po_full_receive",
+      "step": "movement_row_logged",
+      "expected": {
+        "count": 1,
+        "type": "purchase",
+        "quantity_change": 20.0
+      },
+      "actual": {
+        "count": 1,
+        "type": "purchase",
+        "quantity_change": 20.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-1fa8b2ad",
+        "branch_id": "p2b-br-643dc76a",
+        "supplier_id": "supp-4cac858a",
+        "vendor": "BR2 Vendor Terms",
+        "product_id": "prd-38aa9895",
+        "po_id": "58b323ab-8e01-4e4b-a094-160ffee859c3",
+        "po_number": "PO-BC-001000",
+        "starting_stock": 0.0,
+        "ordered_qty": 20,
+        "unit_price": 60,
+        "movement_ids": [
+          "a83c151c-4eb1-4ed9-bd93-6bdb7804f6a3"
+        ]
+      },
+      "recorded_at": "2026-05-12T04:08:10.853724+00:00"
+    },
+    {
+      "scenario": "br2.b_draft_then_receive",
+      "step": "draft_creation_does_not_move_stock_or_ap",
+      "expected": {
+        "status": "draft",
+        "stock": 0.0,
+        "payable_count": 0,
+        "movement_count": 0
+      },
+      "actual": {
+        "status": "draft",
+        "stock": 0.0,
+        "payable_count": 0,
+        "movement_count": 0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-1fa8b2ad",
+        "po_id": "7aca233f-6aa2-4247-bdd8-7689ff97273b",
+        "po_number": "PO-BC-001001",
+        "product_id": "prd-55e33660",
+        "branch_id": "p2b-br-643dc76a"
+      },
+      "recorded_at": "2026-05-12T04:08:10.861608+00:00"
+    },
+    {
+      "scenario": "br2.b_draft_then_receive",
+      "step": "receive_moves_stock_by_full_qty",
+      "expected": {
+        "end_stock": 10.0,
+        "delta": 10.0
+      },
+      "actual": {
+        "end_stock": 10.0,
+        "delta": 10.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-1fa8b2ad",
+        "po_id": "7aca233f-6aa2-4247-bdd8-7689ff97273b",
+        "po_number": "PO-BC-001001",
+        "product_id": "prd-55e33660",
+        "branch_id": "p2b-br-643dc76a",
+        "ordered_qty": 10,
+        "unit_price": 40,
+        "grand_total": 400
+      },
+      "recorded_at": "2026-05-12T04:08:10.875024+00:00"
+    },
+    {
+      "scenario": "br2.b_draft_then_receive",
+      "step": "receive_flips_status_to_received",
+      "expected": {
+        "status": "received"
+      },
+      "actual": {
+        "status": "received"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-1fa8b2ad",
+        "po_id": "7aca233f-6aa2-4247-bdd8-7689ff97273b",
+        "po_number": "PO-BC-001001",
+        "product_id": "prd-55e33660",
+        "branch_id": "p2b-br-643dc76a",
+        "ordered_qty": 10,
+        "unit_price": 40,
+        "grand_total": 400
+      },
+      "recorded_at": "2026-05-12T04:08:10.875034+00:00"
+    },
+    {
+      "scenario": "br2.b_draft_then_receive",
+      "step": "draft_path_never_creates_payable",
+      "expected": {
+        "payable_count": 0
+      },
+      "actual": {
+        "payable_count": 0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-1fa8b2ad",
+        "po_id": "7aca233f-6aa2-4247-bdd8-7689ff97273b",
+        "po_number": "PO-BC-001001",
+        "product_id": "prd-55e33660",
+        "branch_id": "p2b-br-643dc76a",
+        "ordered_qty": 10,
+        "unit_price": 40,
+        "grand_total": 400,
+        "rationale": "AP is created only for terms POs at creation"
+      },
+      "recorded_at": "2026-05-12T04:08:10.875038+00:00"
+    },
+    {
+      "scenario": "br2.b_draft_then_receive",
+      "step": "single_purchase_movement_logged",
+      "expected": {
+        "count": 1,
+        "type": "purchase",
+        "quantity_change": 10.0
+      },
+      "actual": {
+        "count": 1,
+        "type": "purchase",
+        "quantity_change": 10.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-1fa8b2ad",
+        "po_id": "7aca233f-6aa2-4247-bdd8-7689ff97273b",
+        "po_number": "PO-BC-001001",
+        "product_id": "prd-55e33660",
+        "branch_id": "p2b-br-643dc76a",
+        "ordered_qty": 10,
+        "unit_price": 40,
+        "grand_total": 400
+      },
+      "recorded_at": "2026-05-12T04:08:10.875043+00:00"
+    },
+    {
+      "scenario": "br2.c_duplicate_receive_guard",
+      "step": "second_receive_is_rejected_400",
+      "expected": {
+        "status_code": 400,
+        "rejected": true
+      },
+      "actual": {
+        "status_code": 400,
+        "rejected": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-1fa8b2ad",
+        "po_id": "5c7e6e9f-ff1d-4695-a008-d10a542d0474",
+        "product_id": "prd-29724057",
+        "branch_id": "p2b-br-643dc76a",
+        "ordered_qty": 7,
+        "stock_after_first_receive": 7.0,
+        "stock_after_second_attempt": 7.0,
+        "movement_count_first": 1,
+        "movement_count_second": 1,
+        "second_call_status_code": 400,
+        "second_call_detail": "PO already received"
+      },
+      "recorded_at": "2026-05-12T04:08:10.896252+00:00"
+    },
+    {
+      "scenario": "br2.c_duplicate_receive_guard",
+      "step": "stock_does_not_double_up",
+      "expected": {
+        "stock": 7.0
+      },
+      "actual": {
+        "stock": 7.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-1fa8b2ad",
+        "po_id": "5c7e6e9f-ff1d-4695-a008-d10a542d0474",
+        "product_id": "prd-29724057",
+        "branch_id": "p2b-br-643dc76a",
+        "ordered_qty": 7,
+        "stock_after_first_receive": 7.0,
+        "stock_after_second_attempt": 7.0,
+        "movement_count_first": 1,
+        "movement_count_second": 1,
+        "second_call_status_code": 400,
+        "second_call_detail": "PO already received"
+      },
+      "recorded_at": "2026-05-12T04:08:10.896261+00:00"
+    },
+    {
+      "scenario": "br2.c_duplicate_receive_guard",
+      "step": "no_extra_movement_row_logged",
+      "expected": {
+        "movement_count": 1
+      },
+      "actual": {
+        "movement_count": 1
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-1fa8b2ad",
+        "po_id": "5c7e6e9f-ff1d-4695-a008-d10a542d0474",
+        "product_id": "prd-29724057",
+        "branch_id": "p2b-br-643dc76a",
+        "ordered_qty": 7,
+        "stock_after_first_receive": 7.0,
+        "stock_after_second_attempt": 7.0,
+        "movement_count_first": 1,
+        "movement_count_second": 1,
+        "second_call_status_code": 400,
+        "second_call_detail": "PO already received"
+      },
+      "recorded_at": "2026-05-12T04:08:10.896264+00:00"
+    },
+    {
+      "scenario": "br2.d_invalid_po_guard",
+      "step": "unknown_po_returns_404",
+      "expected": {
+        "status_code": 404
+      },
+      "actual": {
+        "status_code": 404
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-1fa8b2ad",
+        "attempted_po_id": "br2-nonexistent-po-zzzz",
+        "detail": "PO not found"
+      },
+      "recorded_at": "2026-05-12T04:08:10.897860+00:00"
+    }
+  ]
+}
