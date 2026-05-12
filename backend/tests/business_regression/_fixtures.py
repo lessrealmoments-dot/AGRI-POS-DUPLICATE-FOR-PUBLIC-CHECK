@@ -168,6 +168,7 @@ _AUDIT_COLLECTIONS_WITH_ORG_FIELD = [
     "stock_movements",
     "movements",
     "security_events",
+    "internal_invoices",   # auto-created by branch-transfer flow
 ]
 
 # Collections whose tenant link is a DIFFERENT field name (not
@@ -187,6 +188,34 @@ async def cleanup_business_tenant(org_id: Optional[str]):
     """
     if not org_id:
         return
+
+    # Collect the tenant's branch ids + PO ids + transfer ids BEFORE we
+    # start wiping, so cascade-cleanup of side-effect collections that
+    # don't carry `organization_id` (production quirks: `internal_invoices`
+    # writes via raw `db.internal_invoices` not the tenant proxy;
+    # `doc_codes` for branch transfers stamps `org_id=""`) can target by
+    # foreign-key references instead.
+    branch_ids: list[str] = []
+    try:
+        async for b in _raw_db.branches.find(
+            {"organization_id": org_id}, {"_id": 0, "id": 1}
+        ):
+            branch_ids.append(b["id"])
+    except Exception:
+        pass
+    referenced_doc_ids: list[str] = []
+    try:
+        async for po in _raw_db.purchase_orders.find(
+            {"organization_id": org_id}, {"_id": 0, "id": 1}
+        ):
+            referenced_doc_ids.append(po["id"])
+        async for t in _raw_db.branch_transfer_orders.find(
+            {"organization_id": org_id}, {"_id": 0, "id": 1}
+        ):
+            referenced_doc_ids.append(t["id"])
+    except Exception:
+        pass
+
     seen = set()
     targets = list(TENANT_COLLECTIONS) + _AUDIT_COLLECTIONS_WITH_ORG_FIELD
     for name in targets:
@@ -203,6 +232,26 @@ async def cleanup_business_tenant(org_id: Optional[str]):
     for name, alt_key in _AUDIT_COLLECTIONS_ALT_KEY.items():
         try:
             await _raw_db[name].delete_many({alt_key: org_id})
+        except Exception:
+            pass
+
+    # Cascade-clean rows that production code writes without a tenant
+    # field but that are unambiguously ours by FK to a branch/PO/transfer.
+    if branch_ids:
+        try:
+            await _raw_db.internal_invoices.delete_many({
+                "$or": [
+                    {"from_branch_id": {"$in": branch_ids}},
+                    {"to_branch_id":   {"$in": branch_ids}},
+                ],
+            })
+        except Exception:
+            pass
+    if referenced_doc_ids:
+        try:
+            await _raw_db.doc_codes.delete_many(
+                {"doc_id": {"$in": referenced_doc_ids}}
+            )
         except Exception:
             pass
     # The org row itself lives in `organizations` (not tenant-scoped by

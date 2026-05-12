@@ -1,0 +1,539 @@
+{
+  "generated_at": "2026-05-12T04:17:54.730249+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 19,
+  "pass_count": 18,
+  "fail_count": 1,
+  "rows": [
+    {
+      "scenario": "br3.a_main_to_b2_full_receive",
+      "step": "draft_creation_does_not_move_stock",
+      "expected": {
+        "src": 50.0,
+        "dst": 0.0,
+        "status": "draft"
+      },
+      "actual": {
+        "src": 50.0,
+        "dst": 0.0,
+        "status": "draft"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-9572982c",
+        "transfer_id": "c00af253-8219-4d69-89bf-acfe995ad5c5",
+        "order_number": "BTO-20260512-0001",
+        "product_id": "prd-ea730ec2",
+        "from_branch_id": "p2b-br-36711a2b",
+        "to_branch_id": "br-b2-br-1b6afa1d"
+      },
+      "recorded_at": "2026-05-12T04:17:54.630962+00:00"
+    },
+    {
+      "scenario": "br3.a_main_to_b2_full_receive",
+      "step": "send_does_not_move_stock",
+      "expected": {
+        "src": 50.0,
+        "dst": 0.0,
+        "status": "sent"
+      },
+      "actual": {
+        "src": 50.0,
+        "dst": 0.0,
+        "status": "sent"
+      },
+      "status": "PASS",
+      "evidence": {
+        "transfer_id": "c00af253-8219-4d69-89bf-acfe995ad5c5",
+        "order_number": "BTO-20260512-0001"
+      },
+      "recorded_at": "2026-05-12T04:17:54.641165+00:00"
+    },
+    {
+      "scenario": "br3.a_main_to_b2_full_receive",
+      "step": "source_stock_decremented",
+      "expected": {
+        "src": 30.0,
+        "delta": -20
+      },
+      "actual": {
+        "src": 30.0,
+        "delta": -20.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-9572982c",
+        "transfer_id": "c00af253-8219-4d69-89bf-acfe995ad5c5",
+        "order_number": "BTO-20260512-0001",
+        "product_id": "prd-ea730ec2",
+        "from_branch_id": "p2b-br-36711a2b",
+        "to_branch_id": "br-b2-br-1b6afa1d",
+        "start_src": 50.0,
+        "start_dst": 0.0,
+        "transfer_qty": 20,
+        "transfer_capital": 60.0,
+        "branch_retail": 100.0
+      },
+      "recorded_at": "2026-05-12T04:17:54.664731+00:00"
+    },
+    {
+      "scenario": "br3.a_main_to_b2_full_receive",
+      "step": "destination_stock_incremented_via_upsert",
+      "expected": {
+        "dst": 20.0,
+        "delta": 20
+      },
+      "actual": {
+        "dst": 20.0,
+        "delta": 20.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-9572982c",
+        "transfer_id": "c00af253-8219-4d69-89bf-acfe995ad5c5",
+        "order_number": "BTO-20260512-0001",
+        "product_id": "prd-ea730ec2",
+        "from_branch_id": "p2b-br-36711a2b",
+        "to_branch_id": "br-b2-br-1b6afa1d",
+        "start_src": 50.0,
+        "start_dst": 0.0,
+        "transfer_qty": 20,
+        "transfer_capital": 60.0,
+        "branch_retail": 100.0
+      },
+      "recorded_at": "2026-05-12T04:17:54.664742+00:00"
+    },
+    {
+      "scenario": "br3.a_main_to_b2_full_receive",
+      "step": "total_stock_conserved_across_branches",
+      "expected": {
+        "total": 50.0
+      },
+      "actual": {
+        "total": 50.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-9572982c",
+        "transfer_id": "c00af253-8219-4d69-89bf-acfe995ad5c5",
+        "order_number": "BTO-20260512-0001",
+        "product_id": "prd-ea730ec2",
+        "from_branch_id": "p2b-br-36711a2b",
+        "to_branch_id": "br-b2-br-1b6afa1d",
+        "start_src": 50.0,
+        "start_dst": 0.0,
+        "transfer_qty": 20,
+        "transfer_capital": 60.0,
+        "branch_retail": 100.0,
+        "src_after": 30.0,
+        "dst_after": 20.0
+      },
+      "recorded_at": "2026-05-12T04:17:54.664745+00:00"
+    },
+    {
+      "scenario": "br3.a_main_to_b2_full_receive",
+      "step": "transfer_status_received",
+      "expected": {
+        "status": "received"
+      },
+      "actual": {
+        "status": "received"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-9572982c",
+        "transfer_id": "c00af253-8219-4d69-89bf-acfe995ad5c5",
+        "order_number": "BTO-20260512-0001",
+        "product_id": "prd-ea730ec2",
+        "from_branch_id": "p2b-br-36711a2b",
+        "to_branch_id": "br-b2-br-1b6afa1d",
+        "start_src": 50.0,
+        "start_dst": 0.0,
+        "transfer_qty": 20,
+        "transfer_capital": 60.0,
+        "branch_retail": 100.0
+      },
+      "recorded_at": "2026-05-12T04:17:54.664748+00:00"
+    },
+    {
+      "scenario": "br3.a_main_to_b2_full_receive",
+      "step": "movements_logged_out_and_in",
+      "expected": {
+        "total": 2,
+        "transfer_out": {
+          "count": 1,
+          "branch_id": "p2b-br-36711a2b",
+          "qty_change": -20.0
+        },
+        "transfer_in": {
+          "count": 1,
+          "branch_id": "br-b2-br-1b6afa1d",
+          "qty_change": 20.0
+        }
+      },
+      "actual": {
+        "total": 2,
+        "transfer_out": {
+          "count": 1,
+          "branch_id": "p2b-br-36711a2b",
+          "qty_change": -20.0
+        },
+        "transfer_in": {
+          "count": 1,
+          "branch_id": "br-b2-br-1b6afa1d",
+          "qty_change": 20.0
+        }
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-9572982c",
+        "transfer_id": "c00af253-8219-4d69-89bf-acfe995ad5c5",
+        "order_number": "BTO-20260512-0001",
+        "product_id": "prd-ea730ec2",
+        "from_branch_id": "p2b-br-36711a2b",
+        "to_branch_id": "br-b2-br-1b6afa1d",
+        "start_src": 50.0,
+        "start_dst": 0.0,
+        "transfer_qty": 20,
+        "transfer_capital": 60.0,
+        "branch_retail": 100.0,
+        "movement_ids": [
+          "71a23615-0377-429a-96ef-804539d5aba4",
+          "d1e287d1-72c0-439f-b3ac-0214dfbbbc65"
+        ]
+      },
+      "recorded_at": "2026-05-12T04:17:54.664757+00:00"
+    },
+    {
+      "scenario": "br3.a_main_to_b2_full_receive",
+      "step": "destination_branch_price_set",
+      "expected": {
+        "cost_price": 60.0,
+        "retail": 100.0,
+        "source": "branch_transfer"
+      },
+      "actual": {
+        "cost_price": 60.0,
+        "retail": 100.0,
+        "source": "branch_transfer"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-9572982c",
+        "transfer_id": "c00af253-8219-4d69-89bf-acfe995ad5c5",
+        "order_number": "BTO-20260512-0001",
+        "product_id": "prd-ea730ec2",
+        "from_branch_id": "p2b-br-36711a2b",
+        "to_branch_id": "br-b2-br-1b6afa1d",
+        "start_src": 50.0,
+        "start_dst": 0.0,
+        "transfer_qty": 20,
+        "transfer_capital": 60.0,
+        "branch_retail": 100.0,
+        "transfer_order_on_row": "BTO-20260512-0001"
+      },
+      "recorded_at": "2026-05-12T04:17:54.664768+00:00"
+    },
+    {
+      "scenario": "br3.a_main_to_b2_full_receive",
+      "step": "capital_change_audit_row_recorded",
+      "expected": {
+        "count": 1,
+        "new_capital": 60.0,
+        "source_type": "branch_transfer"
+      },
+      "actual": {
+        "count": 1,
+        "new_capital": 60.0,
+        "source_type": "branch_transfer"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-9572982c",
+        "transfer_id": "c00af253-8219-4d69-89bf-acfe995ad5c5",
+        "order_number": "BTO-20260512-0001",
+        "product_id": "prd-ea730ec2",
+        "from_branch_id": "p2b-br-36711a2b",
+        "to_branch_id": "br-b2-br-1b6afa1d",
+        "start_src": 50.0,
+        "start_dst": 0.0,
+        "transfer_qty": 20,
+        "transfer_capital": 60.0,
+        "branch_retail": 100.0,
+        "method": "transfer_capital"
+      },
+      "recorded_at": "2026-05-12T04:17:54.664772+00:00"
+    },
+    {
+      "scenario": "br3.a_main_to_b2_full_receive",
+      "step": "internal_invoice_auto_created",
+      "expected": {
+        "created": true,
+        "from_branch_id": "p2b-br-36711a2b",
+        "to_branch_id": "br-b2-br-1b6afa1d",
+        "grand_total": 1200.0
+      },
+      "actual": {
+        "created": true,
+        "from_branch_id": "p2b-br-36711a2b",
+        "to_branch_id": "br-b2-br-1b6afa1d",
+        "grand_total": 1200.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-9572982c",
+        "transfer_id": "c00af253-8219-4d69-89bf-acfe995ad5c5",
+        "order_number": "BTO-20260512-0001",
+        "product_id": "prd-ea730ec2",
+        "from_branch_id": "p2b-br-36711a2b",
+        "to_branch_id": "br-b2-br-1b6afa1d",
+        "start_src": 50.0,
+        "start_dst": 0.0,
+        "transfer_qty": 20,
+        "transfer_capital": 60.0,
+        "branch_retail": 100.0,
+        "internal_invoice_number": "INV-BB-001000"
+      },
+      "recorded_at": "2026-05-12T04:17:54.664776+00:00"
+    },
+    {
+      "scenario": "br3.a_main_to_b2_full_receive",
+      "step": "branch_transfer_is_inventory_only_no_wallet_move",
+      "expected": {
+        "main_wallets": {
+          "cashier": 0.0,
+          "digital": 0.0,
+          "safe": 0.0
+        },
+        "b2_wallets": {
+          "cashier": 0.0,
+          "digital": 0.0,
+          "safe": 0.0
+        }
+      },
+      "actual": {
+        "main_wallets": {
+          "cashier": 0.0,
+          "digital": 0.0,
+          "safe": 0.0
+        },
+        "b2_wallets": {
+          "cashier": 0.0,
+          "digital": 0.0,
+          "safe": 0.0
+        }
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-9572982c",
+        "transfer_id": "c00af253-8219-4d69-89bf-acfe995ad5c5",
+        "order_number": "BTO-20260512-0001",
+        "product_id": "prd-ea730ec2",
+        "from_branch_id": "p2b-br-36711a2b",
+        "to_branch_id": "br-b2-br-1b6afa1d",
+        "start_src": 50.0,
+        "start_dst": 0.0,
+        "transfer_qty": 20,
+        "transfer_capital": 60.0,
+        "branch_retail": 100.0,
+        "note": "branch transfer never moves fund_wallets; money side lives on internal_invoices instead"
+      },
+      "recorded_at": "2026-05-12T04:17:54.664780+00:00"
+    },
+    {
+      "scenario": "br3.b_insufficient_stock_pre_flight_guard",
+      "step": "receive_rejected_400",
+      "expected": {
+        "status_code": 400,
+        "rejected": true
+      },
+      "actual": {
+        "status_code": 400,
+        "rejected": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-9572982c",
+        "transfer_id": "2516e940-a129-4b8c-95a1-c047caab8c0b",
+        "product_id": "prd-00314807",
+        "from_branch_id": "p2b-br-36711a2b",
+        "to_branch_id": "br-b2-br-1b6afa1d",
+        "src_start": 5.0,
+        "request_qty": 8,
+        "received_status_code": 400,
+        "received_detail": "Insufficient stock for 'BR3 Product Short' in source branch: have 5, need 8. No inventory changed."
+      },
+      "recorded_at": "2026-05-12T04:17:54.682827+00:00"
+    },
+    {
+      "scenario": "br3.b_insufficient_stock_pre_flight_guard",
+      "step": "source_stock_unchanged",
+      "expected": {
+        "src": 5.0
+      },
+      "actual": {
+        "src": 5.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-9572982c",
+        "transfer_id": "2516e940-a129-4b8c-95a1-c047caab8c0b",
+        "product_id": "prd-00314807",
+        "from_branch_id": "p2b-br-36711a2b",
+        "to_branch_id": "br-b2-br-1b6afa1d",
+        "src_start": 5.0,
+        "request_qty": 8,
+        "received_status_code": 400,
+        "received_detail": "Insufficient stock for 'BR3 Product Short' in source branch: have 5, need 8. No inventory changed."
+      },
+      "recorded_at": "2026-05-12T04:17:54.682837+00:00"
+    },
+    {
+      "scenario": "br3.b_insufficient_stock_pre_flight_guard",
+      "step": "destination_stock_unchanged",
+      "expected": {
+        "dst": 0.0
+      },
+      "actual": {
+        "dst": 0.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-9572982c",
+        "transfer_id": "2516e940-a129-4b8c-95a1-c047caab8c0b",
+        "product_id": "prd-00314807",
+        "from_branch_id": "p2b-br-36711a2b",
+        "to_branch_id": "br-b2-br-1b6afa1d",
+        "src_start": 5.0,
+        "request_qty": 8,
+        "received_status_code": 400,
+        "received_detail": "Insufficient stock for 'BR3 Product Short' in source branch: have 5, need 8. No inventory changed."
+      },
+      "recorded_at": "2026-05-12T04:17:54.682840+00:00"
+    },
+    {
+      "scenario": "br3.b_insufficient_stock_pre_flight_guard",
+      "step": "no_movement_rows_logged",
+      "expected": {
+        "movement_count": 0
+      },
+      "actual": {
+        "movement_count": 0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-9572982c",
+        "transfer_id": "2516e940-a129-4b8c-95a1-c047caab8c0b",
+        "product_id": "prd-00314807",
+        "from_branch_id": "p2b-br-36711a2b",
+        "to_branch_id": "br-b2-br-1b6afa1d",
+        "src_start": 5.0,
+        "request_qty": 8,
+        "received_status_code": 400,
+        "received_detail": "Insufficient stock for 'BR3 Product Short' in source branch: have 5, need 8. No inventory changed.",
+        "movement_ids": []
+      },
+      "recorded_at": "2026-05-12T04:17:54.682844+00:00"
+    },
+    {
+      "scenario": "br3.b_insufficient_stock_pre_flight_guard",
+      "step": "transfer_status_not_received",
+      "expected": {
+        "status_not_received": true
+      },
+      "actual": {
+        "status_not_received": true,
+        "current_status": "sent"
+      },
+      "status": "FAIL",
+      "evidence": {
+        "org_id": "p2b-org-9572982c",
+        "transfer_id": "2516e940-a129-4b8c-95a1-c047caab8c0b",
+        "product_id": "prd-00314807",
+        "from_branch_id": "p2b-br-36711a2b",
+        "to_branch_id": "br-b2-br-1b6afa1d",
+        "src_start": 5.0,
+        "request_qty": 8,
+        "received_status_code": 400,
+        "received_detail": "Insufficient stock for 'BR3 Product Short' in source branch: have 5, need 8. No inventory changed."
+      },
+      "recorded_at": "2026-05-12T04:17:54.682847+00:00"
+    },
+    {
+      "scenario": "br3.c_branch_isolation_guard",
+      "step": "manager_create_rejected_403",
+      "expected": {
+        "status_code": 403,
+        "rejected": true
+      },
+      "actual": {
+        "status_code": 403,
+        "rejected": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-9572982c",
+        "product_id": "prd-95cecc8d",
+        "manager_id": "br-mgr-c7a52c9e",
+        "manager_branch_ids": [
+          "p2b-br-36711a2b"
+        ],
+        "from_branch_id": "p2b-br-36711a2b",
+        "to_branch_id": "br-b2-br-1b6afa1d",
+        "status_code": 403,
+        "detail": "You're not assigned to this branch. Ask an administrator to add it under Team \u2192 Edit User."
+      },
+      "recorded_at": "2026-05-12T04:17:54.687818+00:00"
+    },
+    {
+      "scenario": "br3.c_branch_isolation_guard",
+      "step": "no_transfer_row_created",
+      "expected": {
+        "new_rows": 0
+      },
+      "actual": {
+        "new_rows": 0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-9572982c",
+        "product_id": "prd-95cecc8d",
+        "manager_id": "br-mgr-c7a52c9e",
+        "manager_branch_ids": [
+          "p2b-br-36711a2b"
+        ],
+        "from_branch_id": "p2b-br-36711a2b",
+        "to_branch_id": "br-b2-br-1b6afa1d",
+        "status_code": 403,
+        "detail": "You're not assigned to this branch. Ask an administrator to add it under Team \u2192 Edit User."
+      },
+      "recorded_at": "2026-05-12T04:17:54.687827+00:00"
+    },
+    {
+      "scenario": "br3.c_branch_isolation_guard",
+      "step": "stock_unchanged_on_both_branches",
+      "expected": {
+        "src": 10.0,
+        "dst": 0.0
+      },
+      "actual": {
+        "src": 10.0,
+        "dst": 0.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-9572982c",
+        "product_id": "prd-95cecc8d",
+        "manager_id": "br-mgr-c7a52c9e",
+        "manager_branch_ids": [
+          "p2b-br-36711a2b"
+        ],
+        "from_branch_id": "p2b-br-36711a2b",
+        "to_branch_id": "br-b2-br-1b6afa1d",
+        "status_code": 403,
+        "detail": "You're not assigned to this branch. Ask an administrator to add it under Team \u2192 Edit User."
+      },
+      "recorded_at": "2026-05-12T04:17:54.687830+00:00"
+    }
+  ]
+}
