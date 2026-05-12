@@ -11,7 +11,7 @@ import time
 import uuid
 from datetime import datetime
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://phase5-audit-fix.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://regression-suite-p5.preview.emergentagent.com').rstrip('/')
 
 # Test data storage
 TEST_DATA = {}

@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-05-12T03:42:17.554484+00:00",
+  "generated_at": "2026-05-12T03:41:38.474334+00:00",
   "pytest_exitstatus": 0,
   "row_count": 9,
-  "pass_count": 9,
-  "fail_count": 0,
+  "pass_count": 8,
+  "fail_count": 1,
   "rows": [
     {
       "scenario": "br1.baseline",
@@ -18,10 +18,10 @@
       },
       "status": "PASS",
       "evidence": {
-        "org_id": "p2b-org-16fe004f",
-        "org_name": "Tenant 004f"
+        "org_id": "p2b-org-66729d86",
+        "org_name": "Tenant 9d86"
       },
-      "recorded_at": "2026-05-12T03:42:17.505392+00:00"
+      "recorded_at": "2026-05-12T03:41:37.988568+00:00"
     },
     {
       "scenario": "br1.baseline",
@@ -37,15 +37,15 @@
       "status": "PASS",
       "evidence": {
         "branch_ids": [
-          "br-b2-br-b29ec475",
-          "p2b-br-e8cc9dcc"
+          "br-b2-br-546f44ca",
+          "p2b-br-eb3f923b"
         ],
         "branch_names": [
-          "Branch 9dcc",
-          "Branch B c475"
+          "Branch 923b",
+          "Branch B 44ca"
         ]
       },
-      "recorded_at": "2026-05-12T03:42:17.506581+00:00"
+      "recorded_at": "2026-05-12T03:41:37.989766+00:00"
     },
     {
       "scenario": "br1.baseline",
@@ -54,8 +54,8 @@
         "count": 3,
         "roles": [
           "admin",
-          "cashier",
-          "manager"
+          "manager",
+          "cashier"
         ]
       },
       "actual": {
@@ -66,32 +66,32 @@
           "manager"
         ]
       },
-      "status": "PASS",
+      "status": "FAIL",
       "evidence": {
         "owner": {
-          "id": "p2b-adm-743eec5f",
+          "id": "p2b-adm-83095440",
           "role": "admin",
           "branch_ids": [
-            "p2b-br-e8cc9dcc"
+            "p2b-br-eb3f923b"
           ]
         },
         "manager": {
-          "id": "br-mgr-83f58491",
+          "id": "br-mgr-143b6a99",
           "role": "manager",
           "branch_ids": [
-            "p2b-br-e8cc9dcc"
+            "p2b-br-eb3f923b"
           ],
           "has_pin": true
         },
         "cashier": {
-          "id": "br-cashier-5fbd5b45",
+          "id": "br-cashier-7cdfead1",
           "role": "cashier",
           "branch_ids": [
-            "p2b-br-e8cc9dcc"
+            "p2b-br-eb3f923b"
           ]
         }
       },
-      "recorded_at": "2026-05-12T03:42:17.507210+00:00"
+      "recorded_at": "2026-05-12T03:41:37.990314+00:00"
     },
     {
       "scenario": "br1.baseline",
@@ -113,17 +113,17 @@
       "status": "PASS",
       "evidence": {
         "cash_customer": {
-          "id": "cust-5c332681",
+          "id": "cust-9dfac679",
           "balance": 0.0,
-          "branch_id": "p2b-br-e8cc9dcc"
+          "branch_id": "p2b-br-eb3f923b"
         },
         "credit_customer": {
-          "id": "cust-150da3cb",
+          "id": "cust-86e27e54",
           "balance": 0.0,
-          "branch_id": "p2b-br-e8cc9dcc"
+          "branch_id": "p2b-br-eb3f923b"
         }
       },
-      "recorded_at": "2026-05-12T03:42:17.508245+00:00"
+      "recorded_at": "2026-05-12T03:41:37.991728+00:00"
     },
     {
       "scenario": "br1.baseline",
@@ -136,10 +136,10 @@
       },
       "status": "PASS",
       "evidence": {
-        "org_id": "p2b-org-16fe004f",
+        "org_id": "p2b-org-66729d86",
         "rationale": "suppliers are br2's responsibility"
       },
-      "recorded_at": "2026-05-12T03:42:17.508691+00:00"
+      "recorded_at": "2026-05-12T03:41:38.001776+00:00"
     },
     {
       "scenario": "br1.baseline",
@@ -154,10 +154,10 @@
       },
       "status": "PASS",
       "evidence": {
-        "org_id": "p2b-org-16fe004f",
+        "org_id": "p2b-org-66729d86",
         "rationale": "scenarios seed their own products"
       },
-      "recorded_at": "2026-05-12T03:42:17.510593+00:00"
+      "recorded_at": "2026-05-12T03:41:38.013083+00:00"
     },
     {
       "scenario": "br1.baseline",
@@ -183,17 +183,17 @@
       "status": "PASS",
       "evidence": {
         "main_branch_wallets": {
-          "cashier": "w-cash-e2d83319",
-          "digital": "w-digi-5e196776",
-          "safe": "w-safe-70a88128"
+          "cashier": "w-cash-a9155425",
+          "digital": "w-digi-226244e1",
+          "safe": "w-safe-89ca11a4"
         },
         "b2_branch_wallets": {
-          "cashier": "w-cash-ebda49ae",
-          "digital": "w-digi-6883c95f",
-          "safe": "w-safe-03ace445"
+          "cashier": "w-cash-c002598a",
+          "digital": "w-digi-deddb22f",
+          "safe": "w-safe-e4c27e5f"
         }
       },
-      "recorded_at": "2026-05-12T03:42:17.513126+00:00"
+      "recorded_at": "2026-05-12T03:41:38.015735+00:00"
     },
     {
       "scenario": "br1.baseline",
@@ -206,7 +206,7 @@
       },
       "status": "PASS",
       "evidence": {
-        "org_id": "p2b-org-16fe004f",
+        "org_id": "p2b-org-66729d86",
         "rows_checked": {
           "branches": 2,
           "users": 3,
@@ -214,7 +214,7 @@
           "fund_wallets": 6
         }
       },
-      "recorded_at": "2026-05-12T03:42:17.513140+00:00"
+      "recorded_at": "2026-05-12T03:41:38.015750+00:00"
     },
     {
       "scenario": "br1.baseline",
@@ -228,17 +228,17 @@
       "status": "PASS",
       "evidence": {
         "sampled_ids": [
-          "p2b-org-16fe004f",
-          "p2b-br-e8cc9dcc",
-          "br-b2-br-b29ec475",
-          "p2b-adm-743eec5f",
-          "br-mgr-83f58491",
-          "br-cashier-5fbd5b45",
-          "cust-5c332681",
-          "cust-150da3cb"
+          "p2b-org-66729d86",
+          "p2b-br-eb3f923b",
+          "br-b2-br-546f44ca",
+          "p2b-adm-83095440",
+          "br-mgr-143b6a99",
+          "br-cashier-7cdfead1",
+          "cust-9dfac679",
+          "cust-86e27e54"
         ]
       },
-      "recorded_at": "2026-05-12T03:42:17.513148+00:00"
+      "recorded_at": "2026-05-12T03:41:38.015759+00:00"
     }
   ]
 }
