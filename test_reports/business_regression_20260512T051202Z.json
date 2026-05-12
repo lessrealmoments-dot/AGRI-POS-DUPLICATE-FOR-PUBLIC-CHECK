@@ -1,0 +1,568 @@
+{
+  "generated_at": "2026-05-12T05:12:02.806308+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 20,
+  "pass_count": 20,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br5.a_catalog_shape",
+      "step": "child_sku_follows_R_prefix_convention",
+      "expected": {
+        "prefix": "R-",
+        "starts_with_parent_sku": true
+      },
+      "actual": {
+        "prefix": "R-",
+        "starts_with_parent_sku": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-15d85f40",
+        "branch_id": "p2b-br-e8d3684a",
+        "parent_product_id": "prd-10c2758e",
+        "parent_sku": "BR5-PAR-758e",
+        "child_product_id": "dc0c4888-7cbb-456a-99d4-c2c4d0e8393b",
+        "child_sku": "R-BR5-PAR-758e",
+        "units_per_parent": 12,
+        "add_on_cost": 1.0,
+        "parent_cost_seeded": 60.0,
+        "child_retail_seeded": 12.0
+      },
+      "recorded_at": "2026-05-12T05:12:02.707647+00:00"
+    },
+    {
+      "scenario": "br5.a_catalog_shape",
+      "step": "child_is_repack_with_parent_link",
+      "expected": {
+        "is_repack": true,
+        "parent_id": "prd-10c2758e",
+        "units_per_parent": 12,
+        "add_on_cost": 1.0
+      },
+      "actual": {
+        "is_repack": true,
+        "parent_id": "prd-10c2758e",
+        "units_per_parent": 12,
+        "add_on_cost": 1.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-15d85f40",
+        "branch_id": "p2b-br-e8d3684a",
+        "parent_product_id": "prd-10c2758e",
+        "parent_sku": "BR5-PAR-758e",
+        "child_product_id": "dc0c4888-7cbb-456a-99d4-c2c4d0e8393b",
+        "child_sku": "R-BR5-PAR-758e",
+        "units_per_parent": 12,
+        "add_on_cost": 1.0,
+        "parent_cost_seeded": 60.0,
+        "child_retail_seeded": 12.0
+      },
+      "recorded_at": "2026-05-12T05:12:02.707657+00:00"
+    },
+    {
+      "scenario": "br5.a_catalog_shape",
+      "step": "child_cost_is_sentinel_zero_global_prices_empty",
+      "expected": {
+        "cost_price": 0,
+        "global_prices": {}
+      },
+      "actual": {
+        "cost_price": 0,
+        "global_prices": {}
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-15d85f40",
+        "branch_id": "p2b-br-e8d3684a",
+        "parent_product_id": "prd-10c2758e",
+        "parent_sku": "BR5-PAR-758e",
+        "child_product_id": "dc0c4888-7cbb-456a-99d4-c2c4d0e8393b",
+        "child_sku": "R-BR5-PAR-758e",
+        "units_per_parent": 12,
+        "add_on_cost": 1.0,
+        "parent_cost_seeded": 60.0,
+        "child_retail_seeded": 12.0,
+        "rationale": "cost derived live via get_repack_capital; retail lives in branch_prices only"
+      },
+      "recorded_at": "2026-05-12T05:12:02.707661+00:00"
+    },
+    {
+      "scenario": "br5.a_catalog_shape",
+      "step": "child_has_NO_independent_inventory_row",
+      "expected": {
+        "inventory_row_exists": false
+      },
+      "actual": {
+        "inventory_row_exists": false
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-15d85f40",
+        "branch_id": "p2b-br-e8d3684a",
+        "parent_product_id": "prd-10c2758e",
+        "parent_sku": "BR5-PAR-758e",
+        "child_product_id": "dc0c4888-7cbb-456a-99d4-c2c4d0e8393b",
+        "child_sku": "R-BR5-PAR-758e",
+        "units_per_parent": 12,
+        "add_on_cost": 1.0,
+        "parent_cost_seeded": 60.0,
+        "child_retail_seeded": 12.0
+      },
+      "recorded_at": "2026-05-12T05:12:02.707663+00:00"
+    },
+    {
+      "scenario": "br5.a_catalog_shape",
+      "step": "child_branch_retail_persisted_in_branch_prices",
+      "expected": {
+        "retail": 12.0,
+        "source": "repack_create"
+      },
+      "actual": {
+        "retail": 12.0,
+        "source": "repack_create"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-15d85f40",
+        "branch_id": "p2b-br-e8d3684a",
+        "parent_product_id": "prd-10c2758e",
+        "parent_sku": "BR5-PAR-758e",
+        "child_product_id": "dc0c4888-7cbb-456a-99d4-c2c4d0e8393b",
+        "child_sku": "R-BR5-PAR-758e",
+        "units_per_parent": 12,
+        "add_on_cost": 1.0,
+        "parent_cost_seeded": 60.0,
+        "child_retail_seeded": 12.0,
+        "branch_price_id": "8d77e546-f7bc-4930-b03d-2fe0133e2554"
+      },
+      "recorded_at": "2026-05-12T05:12:02.707667+00:00"
+    },
+    {
+      "scenario": "br5.a_catalog_shape",
+      "step": "organization_id_tenant_scoped",
+      "expected": {
+        "organization_id": "p2b-org-15d85f40"
+      },
+      "actual": {
+        "organization_id": "p2b-org-15d85f40"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-15d85f40",
+        "branch_id": "p2b-br-e8d3684a",
+        "parent_product_id": "prd-10c2758e",
+        "parent_sku": "BR5-PAR-758e",
+        "child_product_id": "dc0c4888-7cbb-456a-99d4-c2c4d0e8393b",
+        "child_sku": "R-BR5-PAR-758e",
+        "units_per_parent": 12,
+        "add_on_cost": 1.0,
+        "parent_cost_seeded": 60.0,
+        "child_retail_seeded": 12.0
+      },
+      "recorded_at": "2026-05-12T05:12:02.707669+00:00"
+    },
+    {
+      "scenario": "br5.b_repack_sale_math",
+      "step": "parent_stock_deducted_by_ratio",
+      "expected": {
+        "parent_stock_after": 8.0,
+        "deduction": 2.0
+      },
+      "actual": {
+        "parent_stock_after": 8.0,
+        "deduction": 2.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-15d85f40",
+        "branch_id": "p2b-br-e8d3684a",
+        "parent_product_id": "prd-8c25eb24",
+        "child_product_id": "d42172b7-49f2-41ec-8a3e-173e9b76a2c5",
+        "units_per_parent": 12,
+        "parent_cost": 60.0,
+        "add_on_cost": 1.0,
+        "child_retail": 12.0,
+        "qty_sold_child": 24,
+        "parent_stock_before": 10.0,
+        "child_available_before": 120.0,
+        "invoice_id": "e8dbeb06-6233-4246-8029-7dac0f9ead25",
+        "invoice_number": "SI-B6-001000"
+      },
+      "recorded_at": "2026-05-12T05:12:02.743816+00:00"
+    },
+    {
+      "scenario": "br5.b_repack_sale_math",
+      "step": "child_derived_availability_drops",
+      "expected": {
+        "child_available_after": 96.0
+      },
+      "actual": {
+        "child_available_after": 96.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-15d85f40",
+        "branch_id": "p2b-br-e8d3684a",
+        "parent_product_id": "prd-8c25eb24",
+        "child_product_id": "d42172b7-49f2-41ec-8a3e-173e9b76a2c5",
+        "units_per_parent": 12,
+        "parent_cost": 60.0,
+        "add_on_cost": 1.0,
+        "child_retail": 12.0,
+        "qty_sold_child": 24,
+        "parent_stock_before": 10.0,
+        "child_available_before": 120.0,
+        "invoice_id": "e8dbeb06-6233-4246-8029-7dac0f9ead25",
+        "invoice_number": "SI-B6-001000"
+      },
+      "recorded_at": "2026-05-12T05:12:02.743822+00:00"
+    },
+    {
+      "scenario": "br5.b_repack_sale_math",
+      "step": "invoice_line_records_child_with_repack_flag_and_derived_cost",
+      "expected": {
+        "product_id": "d42172b7-49f2-41ec-8a3e-173e9b76a2c5",
+        "is_repack": true,
+        "quantity": 24.0,
+        "cost_price_per_unit": 6.0
+      },
+      "actual": {
+        "product_id": "d42172b7-49f2-41ec-8a3e-173e9b76a2c5",
+        "is_repack": true,
+        "quantity": 24.0,
+        "cost_price_per_unit": 6.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-15d85f40",
+        "branch_id": "p2b-br-e8d3684a",
+        "parent_product_id": "prd-8c25eb24",
+        "child_product_id": "d42172b7-49f2-41ec-8a3e-173e9b76a2c5",
+        "units_per_parent": 12,
+        "parent_cost": 60.0,
+        "add_on_cost": 1.0,
+        "child_retail": 12.0,
+        "qty_sold_child": 24,
+        "parent_stock_before": 10.0,
+        "child_available_before": 120.0,
+        "invoice_id": "e8dbeb06-6233-4246-8029-7dac0f9ead25",
+        "invoice_number": "SI-B6-001000",
+        "invoice_line_keys": [
+          "product_id",
+          "product_name",
+          "sku",
+          "description",
+          "quantity",
+          "rate",
+          "discount_type",
+          "discount_value",
+          "discount_amount",
+          "total",
+          "is_repack",
+          "cost_price"
+        ],
+        "note": "Parent linkage (parent_product_id, units_per_parent) lives on the movements row, not on the invoice line."
+      },
+      "recorded_at": "2026-05-12T05:12:02.743828+00:00"
+    },
+    {
+      "scenario": "br5.b_repack_sale_math",
+      "step": "movement_row_on_parent_with_repack_marker_in_notes",
+      "expected": {
+        "count": 1,
+        "type": "sale",
+        "qty_change": -2.0,
+        "product_id": "prd-8c25eb24",
+        "notes_starts_with": "Sold as repack: "
+      },
+      "actual": {
+        "count": 1,
+        "type": "sale",
+        "qty_change": -2.0,
+        "product_id": "prd-8c25eb24",
+        "notes_starts_with": "Sold as repack: "
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-15d85f40",
+        "branch_id": "p2b-br-e8d3684a",
+        "parent_product_id": "prd-8c25eb24",
+        "child_product_id": "d42172b7-49f2-41ec-8a3e-173e9b76a2c5",
+        "units_per_parent": 12,
+        "parent_cost": 60.0,
+        "add_on_cost": 1.0,
+        "child_retail": 12.0,
+        "qty_sold_child": 24,
+        "parent_stock_before": 10.0,
+        "child_available_before": 120.0,
+        "invoice_id": "e8dbeb06-6233-4246-8029-7dac0f9ead25",
+        "invoice_number": "SI-B6-001000",
+        "movement_ids": [
+          "133b9636-f248-4a81-9d76-742ef7b3f5cc"
+        ],
+        "full_notes": "Sold as repack: R BR5b Parent x 24.0",
+        "rationale": "movements schema is fixed by log_movement(); parent-child linkage encoded textually in `notes`. Strong: child name + sold-qty + literal 'Sold as repack' marker."
+      },
+      "recorded_at": "2026-05-12T05:12:02.743835+00:00"
+    },
+    {
+      "scenario": "br5.b_repack_sale_math",
+      "step": "cashier_wallet_credited_repack_sale_amount",
+      "expected": {
+        "cashier_delta": 288.0,
+        "cashier_after": 288.0
+      },
+      "actual": {
+        "cashier_delta": 288.0,
+        "cashier_after": 288.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-15d85f40",
+        "branch_id": "p2b-br-e8d3684a",
+        "parent_product_id": "prd-8c25eb24",
+        "child_product_id": "d42172b7-49f2-41ec-8a3e-173e9b76a2c5",
+        "units_per_parent": 12,
+        "parent_cost": 60.0,
+        "add_on_cost": 1.0,
+        "child_retail": 12.0,
+        "qty_sold_child": 24,
+        "parent_stock_before": 10.0,
+        "child_available_before": 120.0,
+        "invoice_id": "e8dbeb06-6233-4246-8029-7dac0f9ead25",
+        "invoice_number": "SI-B6-001000"
+      },
+      "recorded_at": "2026-05-12T05:12:02.743837+00:00"
+    },
+    {
+      "scenario": "br5.b_repack_sale_math",
+      "step": "cogs_and_margin_derived_from_parent_cost",
+      "expected": {
+        "derived_repack_capital_per_unit": 6.0,
+        "line_capital_per_unit_recorded": 6.0,
+        "expected_cogs": 144.0,
+        "expected_margin": 144.0
+      },
+      "actual": {
+        "derived_repack_capital_per_unit": 6.0,
+        "line_capital_per_unit_recorded": 6.0,
+        "expected_cogs": 144.0,
+        "expected_margin": 144.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-15d85f40",
+        "branch_id": "p2b-br-e8d3684a",
+        "parent_product_id": "prd-8c25eb24",
+        "child_product_id": "d42172b7-49f2-41ec-8a3e-173e9b76a2c5",
+        "units_per_parent": 12,
+        "parent_cost": 60.0,
+        "add_on_cost": 1.0,
+        "child_retail": 12.0,
+        "qty_sold_child": 24,
+        "parent_stock_before": 10.0,
+        "child_available_before": 120.0,
+        "invoice_id": "e8dbeb06-6233-4246-8029-7dac0f9ead25",
+        "invoice_number": "SI-B6-001000",
+        "rationale": "parent_branch_cost / units_per_parent + add_on_cost = 60/12 + 1 = 6.0"
+      },
+      "recorded_at": "2026-05-12T05:12:02.743843+00:00"
+    },
+    {
+      "scenario": "br5.c_insufficient_parent_stock",
+      "step": "sale_rejected_422_insufficient_stock",
+      "expected": {
+        "status_code": 422,
+        "detail_type": "insufficient_stock"
+      },
+      "actual": {
+        "status_code": 422,
+        "detail_type": "insufficient_stock"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-15d85f40",
+        "branch_id": "p2b-br-e8d3684a",
+        "parent_product_id": "prd-e04524a1",
+        "child_product_id": "83c21860-fcaf-4002-bd15-930355fbf19b",
+        "units_per_parent": 12,
+        "parent_stock_seeded": 1,
+        "child_available_seeded": 12,
+        "qty_requested_child": 15,
+        "status_code": 422,
+        "detail_type": "insufficient_stock",
+        "detail_message": "Insufficient stock for 1 item(s). Manager PIN required to override."
+      },
+      "recorded_at": "2026-05-12T05:12:02.756481+00:00"
+    },
+    {
+      "scenario": "br5.c_insufficient_parent_stock",
+      "step": "parent_stock_unchanged",
+      "expected": {
+        "parent_stock": 1.0
+      },
+      "actual": {
+        "parent_stock": 1.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-15d85f40",
+        "branch_id": "p2b-br-e8d3684a",
+        "parent_product_id": "prd-e04524a1",
+        "child_product_id": "83c21860-fcaf-4002-bd15-930355fbf19b",
+        "units_per_parent": 12,
+        "parent_stock_seeded": 1,
+        "child_available_seeded": 12,
+        "qty_requested_child": 15,
+        "status_code": 422,
+        "detail_type": "insufficient_stock"
+      },
+      "recorded_at": "2026-05-12T05:12:02.756486+00:00"
+    },
+    {
+      "scenario": "br5.c_insufficient_parent_stock",
+      "step": "no_invoice_created",
+      "expected": {
+        "invoice_delta": 0
+      },
+      "actual": {
+        "invoice_delta": 0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-15d85f40",
+        "branch_id": "p2b-br-e8d3684a",
+        "parent_product_id": "prd-e04524a1",
+        "child_product_id": "83c21860-fcaf-4002-bd15-930355fbf19b",
+        "units_per_parent": 12,
+        "parent_stock_seeded": 1,
+        "child_available_seeded": 12,
+        "qty_requested_child": 15,
+        "status_code": 422,
+        "detail_type": "insufficient_stock"
+      },
+      "recorded_at": "2026-05-12T05:12:02.756488+00:00"
+    },
+    {
+      "scenario": "br5.c_insufficient_parent_stock",
+      "step": "no_movement_row_created",
+      "expected": {
+        "movement_delta": 0
+      },
+      "actual": {
+        "movement_delta": 0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-15d85f40",
+        "branch_id": "p2b-br-e8d3684a",
+        "parent_product_id": "prd-e04524a1",
+        "child_product_id": "83c21860-fcaf-4002-bd15-930355fbf19b",
+        "units_per_parent": 12,
+        "parent_stock_seeded": 1,
+        "child_available_seeded": 12,
+        "qty_requested_child": 15,
+        "status_code": 422,
+        "detail_type": "insufficient_stock"
+      },
+      "recorded_at": "2026-05-12T05:12:02.756490+00:00"
+    },
+    {
+      "scenario": "br5.d_branch_isolation",
+      "step": "b2_sale_rejected_insufficient_stock",
+      "expected": {
+        "status_code": 422,
+        "detail_type": "insufficient_stock"
+      },
+      "actual": {
+        "status_code": 422,
+        "detail_type": "insufficient_stock"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-15d85f40",
+        "from_branch_id_seeded_stock": "p2b-br-e8d3684a",
+        "attempted_branch_id": "br-b2-br-f23f1a98",
+        "parent_product_id": "prd-b641ace9",
+        "child_product_id": "c2aae2c9-1f4a-4b10-8ad1-b7adc2f102cf",
+        "main_parent_stock_before": 10.0,
+        "qty_requested_child": 1,
+        "status_code": 422,
+        "detail_type": "insufficient_stock",
+        "detail_message": "Insufficient stock for 1 item(s). Manager PIN required to override."
+      },
+      "recorded_at": "2026-05-12T05:12:02.770660+00:00"
+    },
+    {
+      "scenario": "br5.d_branch_isolation",
+      "step": "main_branch_parent_stock_unchanged",
+      "expected": {
+        "main_stock": 10.0
+      },
+      "actual": {
+        "main_stock": 10.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-15d85f40",
+        "from_branch_id_seeded_stock": "p2b-br-e8d3684a",
+        "attempted_branch_id": "br-b2-br-f23f1a98",
+        "parent_product_id": "prd-b641ace9",
+        "child_product_id": "c2aae2c9-1f4a-4b10-8ad1-b7adc2f102cf",
+        "main_parent_stock_before": 10.0,
+        "qty_requested_child": 1,
+        "status_code": 422,
+        "detail_type": "insufficient_stock"
+      },
+      "recorded_at": "2026-05-12T05:12:02.770668+00:00"
+    },
+    {
+      "scenario": "br5.d_branch_isolation",
+      "step": "b2_did_not_borrow_or_create_parent_inventory",
+      "expected": {
+        "b2_parent_inv_exists": false
+      },
+      "actual": {
+        "b2_parent_inv_exists": false
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-15d85f40",
+        "from_branch_id_seeded_stock": "p2b-br-e8d3684a",
+        "attempted_branch_id": "br-b2-br-f23f1a98",
+        "parent_product_id": "prd-b641ace9",
+        "child_product_id": "c2aae2c9-1f4a-4b10-8ad1-b7adc2f102cf",
+        "main_parent_stock_before": 10.0,
+        "qty_requested_child": 1,
+        "status_code": 422,
+        "detail_type": "insufficient_stock"
+      },
+      "recorded_at": "2026-05-12T05:12:02.770671+00:00"
+    },
+    {
+      "scenario": "br5.d_branch_isolation",
+      "step": "no_invoice_created",
+      "expected": {
+        "invoice_delta": 0
+      },
+      "actual": {
+        "invoice_delta": 0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-15d85f40",
+        "from_branch_id_seeded_stock": "p2b-br-e8d3684a",
+        "attempted_branch_id": "br-b2-br-f23f1a98",
+        "parent_product_id": "prd-b641ace9",
+        "child_product_id": "c2aae2c9-1f4a-4b10-8ad1-b7adc2f102cf",
+        "main_parent_stock_before": 10.0,
+        "qty_requested_child": 1,
+        "status_code": 422,
+        "detail_type": "insufficient_stock"
+      },
+      "recorded_at": "2026-05-12T05:12:02.770673+00:00"
+    }
+  ]
+}
