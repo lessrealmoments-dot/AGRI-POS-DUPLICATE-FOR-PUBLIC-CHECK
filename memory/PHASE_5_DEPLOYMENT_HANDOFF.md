@@ -251,6 +251,49 @@ Run these against the **production URL** within the first 30 minutes post-deploy
 15. Alert on backend startup that does NOT log `"Database indexes created"` (means try/except swallowed an error).
 16. Daily check on `pin_attempt_log` — group by `client_ip` over 24h to spot probing.
 
+### One-shot data backfill — `internal_invoices.organization_id` (Phase 5+ B-1)
+
+**Why this step is required.** As part of the Phase 5+ isolation hardening, `internal_invoices` was added to `TENANT_COLLECTIONS` (`backend/config.py`). The tenant proxy now auto-injects `organization_id` on insert and auto-scopes every `db.internal_invoices` read by the caller's org. Legacy rows persisted **before** this change carry `organization_id=None` and therefore become **invisible to their owning tenant** through the proxy (fail-closed by design) until backfilled. A small admin-gated, idempotent endpoint exists for exactly this remediation.
+
+**When to run.** Immediately after the backend containing the B-1 fix is deployed and restarted, and **before** the owner runs the manual smoke against any internal-invoice surface (list, summary, by-transfer, pay, profitability). It is safe to run before traffic ramps, but must be completed before the owner exercises items 8–13 of this section against pre-existing internal-invoice rows.
+
+**What to run** (order matters — review the dry-run, then apply):
+```bash
+# 1) DRY-RUN — no writes; review counts.
+curl -X GET "{PROD}/api/admin/backfill/internal-invoices-org-id" \
+     -H "Authorization: Bearer {ADMIN_JWT}"
+
+# Inspect the response:
+#   scanned          — rows with organization_id missing/null/empty
+#   updated          — would-be writes (= rows with a derivable org)
+#   skipped          — already carry a valid organization_id (no-op)
+#   unresolved_count — branch lookup failed; lists invoice_id + branch ids
+#   samples          — up to 5 (invoice_id, invoice_number, derived_org_id)
+#
+# 2) Save the dry-run JSON to your deploy log.
+# 3) Apply (note the explicit ?apply=1 final-confirm guard):
+curl -X POST "{PROD}/api/admin/backfill/internal-invoices-org-id?apply=1" \
+     -H "Authorization: Bearer {ADMIN_JWT}"
+
+# 4) Re-run the dry-run to confirm the queue is empty.
+curl -X GET "{PROD}/api/admin/backfill/internal-invoices-org-id" \
+     -H "Authorization: Bearer {ADMIN_JWT}"
+```
+
+**Success criteria.**
+- Final dry-run reports `scanned = 0` (preferred) — or `updated = 0` with any `unresolved` rows individually documented and triaged.
+- All `unresolved` rows from the apply step have been investigated; they remain in the collection untouched and continue to be invisible to the tenant proxy until manually resolved (e.g. orphan branches require operator intervention).
+- An owner-driven internal-invoice read (`GET /api/internal-invoices`, `GET /api/internal-invoices/summary`, `GET /api/internal-invoices/by-transfer/{transfer_id}`) returns the expected rows for their tenant.
+- An owner-driven internal-invoice payment (`POST /api/internal-invoices/{invoice_id}/pay`) succeeds end-to-end with correct wallet movement.
+- `tests/business_regression/` is green (`10 passed · rows=51 pass=51`) — re-run is optional but recommended as the final smoke.
+
+**Safety notes.**
+- **Admin-only**: hard-gated on `user.role == "admin"`; non-admins receive HTTP 403.
+- **Idempotent**: rows already carrying a valid `organization_id` are reported under `skipped` and never re-written. A re-apply on a clean dataset returns `scanned = 0`.
+- **Non-destructive**: the endpoint never deletes rows. Unresolved invoices stay in the collection and are listed in the response (capped at 50 entries) so the operator can decide next steps.
+- **Cross-tenant by necessity**: this is the one and only legitimate cross-tenant write path for `internal_invoices` (the rows being repaired have no org to filter by); documented in `tests/test_phase2d_permissions.py` `ALLOWLIST_FILES` with full justification.
+- **Persist the dry-run output** (JSON) before applying — it is the auditable record of which legacy rows were resolved, and which branches (if any) require operator follow-up.
+
 ---
 
 ## 7. Backlog Items (post-deploy work, prioritised)
