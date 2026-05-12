@@ -1,6 +1,55 @@
 # AgriBooks PRD
 
 
+## Phase 5 — Surgical Deployment Fixes + Receipt-PIN Tenant Audit (Feb 2026) ✅
+
+### Status: COMPLETE — both surgical fixes shipped; public receipt PIN flow audited READ-ONLY.
+
+### What was delivered (this fork)
+1. **C-8 RMA Backstop Index — corrected to compound per-tenant uniqueness.**
+   - `backend/main.py` (lines 460–468): unique partial index on `returns` changed from global `"rma_number"` to compound `[("organization_id", 1), ("rma_number", 1)]`, named `uniq_returns_org_rma`. Index creates cleanly on backend startup (verified — no DuplicateKeyError; zero same-org duplicates in the dry-run scan). The audit-intent "backstop catches cross-org and same-org duplicates" is now actually enforced for the per-tenant scope that the atomic generator guarantees.
+
+2. **Phase 2D brittle test — randomized usernames.**
+   - `backend/tests/test_phase2d_permissions.py` (lines 193, 216): hardcoded `"jwt-test"` and `"jwt-ok"` literals replaced with `f"jwt-test-{uid}"` / `f"jwt-ok-{uid}"`. Phase 2D suite now passes **17/17** in any DB state (was 16/17 due to pollution).
+
+### Verification
+- Backend restarted cleanly. `uniq_returns_org_rma` confirmed: `keys={'organization_id': 1, 'rma_number': 1}` unique=True partial=`{rma_number: {$exists: true, $type: string}}`. Companion `uniq_payment_idempotency` unchanged ✅.
+- RMA dedupe dry-run (`scripts/rma_dedupe_dry_run.py`): **zero same-org duplicate groups across all tenants** ✅.
+- `pytest tests/test_phase2d_permissions.py` → **17/17 PASS** in 0.72s ✅.
+- Combined phase-specific audit suite (`phase1a + 1b + 1c + 2a + 2a_live + 2c_live + 2c_pos + 2d + 2e + phase3 + phase4a`): **111/111 PASS** in 5.9s ✅.
+- `GET /api/health` → **200** ✅.
+
+### Read-Only Audit — Public Receipt QR PIN Tenant Scoping
+
+**Question**: If Company A's receipt QR is scanned and Company B happens to use the same admin/manager PIN, can Company B's PIN unlock Company A's receipt-sensitive data?
+
+**Answer**: **NO — secure by design.**
+
+| Q | Finding |
+|---|---|
+| 1. Which route handles public receipt QR access (open view)? | `GET /api/qr-actions/{code}/context` → `routes/doc_lookup.py::view_document_open` |
+| 2. Which routes handle PIN-gated sensitive receipt access? | `POST /api/qr-actions/{code}/verify_pin`, `/release_stocks`, `/receive_payment`, `/transfer_receive`, `/update_draft`, `/generate-upload-token`; plus `POST /api/doc/lookup` (full doc + payments + customer + attached files) |
+| 3. Is receipt/invoice organization_id resolved BEFORE PIN verification? | **YES.** Every PIN-gated route calls `_resolve_doc(code)` / `_resolve_doc_code_with_context(code)` first. These read `doc_codes.org_id` (with legacy `_raw_db` fallback to the underlying doc's `organization_id`) and call `set_org_context(org_id)` before any PIN check. |
+| 4. Is PIN verification tenant-scoped? | **YES.** `_resolve_pin` and `verify_pin_for_action` query `db.system_settings` (admin_pin), `db.users` (manager_pin/owner_pin/totp_secret/auditor_pin/staff_pin) through `TenantCollection`, which injects `organization_id == current_context` into every query (fail-closed when no context). |
+| 5. Could a different tenant's same PIN unlock the receipt? | **NO.** With context set to Company A, only Company A's `system_settings.admin_pin` and Company A's users are checked. A Company B PIN that coincidentally matches A's would only match A's stored values if A also has that PIN. Cross-tenant lookup is structurally impossible. |
+| 6. What sensitive data is exposed BEFORE PIN verification? | Open view (`view_document_open`) exposes: invoice number, date, customer name (no balance), branch/cashier names, line items (product/qty/price/total/discount), subtotal/discount/grand_total, status, reservation summary. **Withheld until PIN passes**: full payments list, customer AR balance, attached files (payment proofs / receipts), internal notes. This matches the documented design ("Sensitive data … excluded"). |
+| 7. Rate limiting + audit logging? | **YES.** `check_qr_lockout(doc_code)` enforces 5-failure admin alert + 10-failure 15-minute 429 lock; `check_draft_qr_lockout` adds stricter 3/3-min and 6-lifetime permanent disable for draft edits. Every attempt (success + fail) written to `db.pin_attempt_log` (tenant-scoped) with IP, branch_id, terminal_id, user-agent captured. |
+
+**Verdict**: **Secure as-is.** No cross-tenant PIN-leak vulnerability. Two non-blocking observations:
+
+- *Observation 1 (legacy code, no-op)*: `POST /api/verify/public/{doc_type}/{doc_id}` (`verify.py:557`) does NOT set org context. Because `TenantCollection` is fail-closed when no context is set, every doc query returns nothing → endpoint always 404s in production (confirmed via live curl). Effectively dead code, not a leak vector. Consider deprecating or wiring it to a `view_token` to set context properly.
+- *Observation 2 (recommended)*: Add an explicit regression test asserting `Company B PIN cannot unlock Company A receipt` to lock in the current behaviour against future refactors.
+
+### Files touched (surgical only)
+- `backend/main.py` — 1 hunk
+- `backend/tests/test_phase2d_permissions.py` — 2 hunks
+
+### Constraints honored
+No features added, Phase 4 cleanup paused (no `processSale` decomp, no `useCheckoutState`, no `PaymentTabs`), no HeldSalesQueue work, no production data mutation, no touch to Terminal POS / sync / reports.
+
+---
+
+
 
 ## Phase 4 Cleanup — CreditApprovalDialog Presentational Extraction (Feb 2026) ✅
 

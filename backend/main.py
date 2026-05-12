@@ -458,11 +458,12 @@ async def startup():
     # legacy duplicates so they cannot replicate.
     try:
         await _raw_db.returns.create_index(
-            "rma_number",
+            [("organization_id", 1), ("rma_number", 1)],
             unique=True,
             partialFilterExpression={
                 "rma_number": {"$exists": True, "$type": "string"}
             },
+            name="uniq_returns_org_rma",
         )
     except Exception:
         pass

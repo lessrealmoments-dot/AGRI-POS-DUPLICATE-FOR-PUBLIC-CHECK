@@ -190,7 +190,7 @@ async def test_jwt_org_mismatch_rejects_token():
 
     uid = _uid("u-jwt")
     await _raw_db.users.insert_one({
-        "id": uid, "username": "jwt-test", "role": "cashier",
+        "id": uid, "username": f"jwt-test-{uid}", "role": "cashier",
         "organization_id": "org-B-real", "active": True, "branch_ids": [],
     })
     bad_token = create_token(uid, "cashier", org_id="org-A-stale")
@@ -213,7 +213,7 @@ async def test_jwt_aligned_org_passes():
     uid = _uid("u-ok")
     await _raw_db.organizations.insert_one({"id": org_id, "name": "JWT OK", "active": True})
     await _raw_db.users.insert_one({
-        "id": uid, "username": "jwt-ok", "role": "cashier",
+        "id": uid, "username": f"jwt-ok-{uid}", "role": "cashier",
         "organization_id": org_id, "active": True, "branch_ids": [],
     })
     good_token = create_token(uid, "cashier", org_id=org_id)
