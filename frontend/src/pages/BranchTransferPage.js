@@ -1940,7 +1940,7 @@ export default function BranchTransferPage() {
                             className="h-10 px-3 text-xs" data-testid={`print-dot-incoming-${req.id}`}>
                             <Printer size={12} className="mr-1" /> Dot Matrix
                           </Button>
-                          {(req.status === 'requested' || req.status === 'draft') && (
+                          {(req.status === 'requested' || req.status === 'draft' || req.status === 'in_progress') && (
                             <Button size="sm" variant="outline" onClick={() => handleCancelRequest(req)}
                               className="h-10 px-4 text-xs text-red-700 border-red-200 hover:bg-red-50"
                               data-testid={`cancel-incoming-${req.id}`}>
@@ -1952,6 +1952,13 @@ export default function BranchTransferPage() {
                               className="h-10 px-5 bg-[#1A4D2E] hover:bg-[#14532d] text-white text-sm font-semibold" data-testid={`gen-transfer-${req.id}`}>
                               {generatingTransfer === req.id ? <RefreshCw size={14} className="animate-spin mr-2" /> : <ArrowRight size={14} className="mr-2" />}
                               Generate Transfer
+                            </Button>
+                          )}
+                          {req.status === 'in_progress' && (
+                            <Button size="sm" onClick={() => handleGenerateTransfer(req)} disabled={generatingTransfer === req.id}
+                              className="h-10 px-5 bg-amber-700 hover:bg-amber-800 text-white text-sm font-semibold" data-testid={`resume-transfer-${req.id}`}>
+                              {generatingTransfer === req.id ? <RefreshCw size={14} className="animate-spin mr-2" /> : <ArrowRight size={14} className="mr-2" />}
+                              Resume Transfer
                             </Button>
                           )}
                           {req.status === 'fulfilled' && (
@@ -2023,7 +2030,7 @@ export default function BranchTransferPage() {
                               className="h-9 px-3 text-xs" data-testid={`print-dot-outgoing-${req.id}`}>
                               <Printer size={12} className="mr-1" /> Dot Matrix
                             </Button>
-                            {(req.status === 'requested' || req.status === 'draft') && (
+                            {(req.status === 'requested' || req.status === 'draft' || req.status === 'in_progress') && (
                               <Button size="sm" variant="outline" onClick={() => handleCancelRequest(req)}
                                 className="h-9 px-4 text-xs text-red-700 border-red-200 hover:bg-red-50"
                                 data-testid={`cancel-outgoing-${req.id}`}>

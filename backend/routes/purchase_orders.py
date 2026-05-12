@@ -1608,7 +1608,7 @@ async def generate_branch_transfer_from_request(po_id: str, user=Depends(get_cur
         raise HTTPException(status_code=404, detail="PO not found")
     if po.get("po_type") != "branch_request":
         raise HTTPException(status_code=400, detail="Only branch request POs can be converted to transfers")
-    if po.get("status") not in ("requested", "draft"):
+    if po.get("status") not in ("requested", "draft", "in_progress"):
         raise HTTPException(status_code=400, detail="Request has already been processed")
 
     # The supply branch is the "from" branch, the requesting branch is "to" branch
@@ -1666,12 +1666,13 @@ async def generate_branch_transfer_from_request(po_id: str, user=Depends(get_cur
             "show_retail": po.get("show_retail", True),
         })
 
-    # Mark the PO as "in_progress"
-    await db.purchase_orders.update_one(
-        {"id": po_id},
-        {"$set": {"status": "in_progress", "fulfillment_started_at": now_iso(),
-                  "fulfillment_started_by": user.get("full_name", user["username"])}}
-    )
+    # Mark the PO as "in_progress" (idempotent — only stamp on first entry).
+    if po.get("status") != "in_progress":
+        await db.purchase_orders.update_one(
+            {"id": po_id},
+            {"$set": {"status": "in_progress", "fulfillment_started_at": now_iso(),
+                      "fulfillment_started_by": user.get("full_name", user["username"])}}
+        )
 
     return {
         "message": "Transfer pre-filled from request",
