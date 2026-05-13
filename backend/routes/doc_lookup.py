@@ -418,11 +418,46 @@ async def view_document_open(code: str):
         supply_branch_name = ""
         requesting_branch_name = branch_name
         is_branch_request = po_type == "branch_request"
+        # Phase 2 — surface linked-BTO + Phase 1 approval metadata so the
+        # mobile viewer can render the QR confirm panel.
+        has_linked_bto = False
+        linked_bto_number = ""
         if is_branch_request:
             supply_branch_id = doc.get("supply_branch_id", "")
             if supply_branch_id:
                 sb = await db.branches.find_one({"id": supply_branch_id}, {"_id": 0, "name": 1})
                 supply_branch_name = sb.get("name", "") if sb else ""
+            linked = await db.branch_transfer_orders.find_one(
+                {"request_po_id": doc_id, "status": {"$nin": ["cancelled"]}},
+                {"_id": 0, "id": 1, "order_number": 1, "status": 1},
+            )
+            if linked:
+                has_linked_bto = True
+                linked_bto_number = linked.get("order_number") or linked.get("id") or ""
+            # Mobile confirm action available only when the request is
+            # still pre-fulfillment AND no BTO links it yet.
+            if po_status in ("requested", "draft") and not has_linked_bto:
+                available_actions.append("confirm_stock_request")
+
+        # Item shape: keep legacy keys for back-compat AND add Phase 1
+        # per-line approval fields for the mobile viewer.
+        viewer_items = []
+        for it in (doc.get("items") or []):
+            row = {
+                "product_id": it.get("product_id", ""),
+                "name": it.get("product_name") or it.get("description", ""),
+                "qty": it.get("quantity", 0),
+                "price": it.get("rate") or it.get("unit_price") or it.get("price", 0),
+                "total": it.get("total", 0),
+                "unit": it.get("unit", ""),
+            }
+            if is_branch_request:
+                row["requested_qty"] = float(it.get("quantity", 0) or 0)
+                appr_raw = it.get("approved_qty")
+                has_appr = appr_raw is not None and appr_raw != ""
+                row["approved_qty"] = float(appr_raw) if has_appr else None
+                row["approved_note"] = it.get("approved_note", "") or ""
+            viewer_items.append(row)
 
         return {
             "doc_type": "purchase_order",
@@ -435,16 +470,24 @@ async def view_document_open(code: str):
             "po_type": po_type,
             "is_branch_request": is_branch_request,
             "supply_branch_name": supply_branch_name,
+            "supply_branch_id": doc.get("supply_branch_id", "") if is_branch_request else "",
             "requesting_branch_name": requesting_branch_name,
             "fulfillment_started_at": doc.get("fulfillment_started_at", ""),
             "fulfillment_started_by": doc.get("fulfillment_started_by", ""),
             "notes": doc.get("notes", ""),
-            "items": [{"name": i.get("product_name") or i.get("description", ""), "qty": i.get("quantity", 0), "price": i.get("rate") or i.get("unit_price") or i.get("price", 0), "total": i.get("total", 0), "unit": i.get("unit", "")} for i in (doc.get("items") or [])],
+            "items": viewer_items,
             "grand_total": doc.get("grand_total", 0),
             "status": (doc.get("status") or "").replace("_", " ").title(),
             "raw_status": po_status,
             "payment_status": doc.get("payment_status", "unpaid"),
             "available_actions": available_actions,
+            # Phase 2 — Branch Request approval metadata.
+            "approval_status": doc.get("approval_status") or "pending" if is_branch_request else "",
+            "approval_note": doc.get("approval_note", "") if is_branch_request else "",
+            "approved_by_name": doc.get("approved_by_name", "") if is_branch_request else "",
+            "approved_at": doc.get("approved_at", "") if is_branch_request else "",
+            "has_linked_bto": has_linked_bto,
+            "linked_bto_number": linked_bto_number,
         }
 
     elif doc_type == "branch_transfer":

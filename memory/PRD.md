@@ -1,6 +1,73 @@
 # AgriBooks PRD
 
 
+## Phase 2 — Stock Request Confirmation via QR/Mobile (Feb 2026) ✅
+
+### Status: COMPLETE — Phase-1 helper extracted; QR route delegates; mobile panel live; **89/89 BR tests green (333 rows); zero DB footprint; idempotent re-run; frontend build clean.**
+
+### What was delivered (this fork)
+1. **Helper extraction** — `backend/routes/purchase_orders.py::_apply_confirmation(...)` (~190 LOC). Single source of truth for the confirmation rules (immutable `quantity`, excess-requires-note, soft-lock against linked BTO, log writer, notification firer). The Phase 1 web route is now a thin wrapper around it (auth + perm + PIN + delegate). The QR route delegates to the same helper.
+2. **NEW endpoint `POST /api/qr-actions/{code}/confirm_stock_request`** (`routes/qr_actions.py`, ~145 LOC):
+   - Resolves doc_code → tenant context (no JWT).
+   - `check_qr_lockout` brute-force protection.
+   - PIN/TOTP via `confirm_stock_request` policy, branch-scoped to `supply_branch_id` (Phase 1 policy reused — no duplicate policy).
+   - On failed PIN: `log_failed_qr_pin_attempt` + `qr_action_log[result=failed, error=invalid_pin]`.
+   - On success: delegates to `_apply_confirmation(source="qr_mobile", extra_log_fields={client_ip, user_agent, confirm_ref})`.
+   - **Idempotency**: optional `confirm_ref` UUID. Replay returns cached PO state with `idempotent: true` and skips DB mutation. Mirrors the existing `release_stocks/release_ref` pattern (uses the `release_ref` column to share the same index).
+   - `qr_action_log` row written on every success/failure.
+3. **Enriched `GET /api/doc/view/{code}`** for branch_request POs (`routes/doc_lookup.py`):
+   - NEW fields: `approval_status`, `approval_note`, `approved_by_name`, `approved_at`, `has_linked_bto`, `linked_bto_number`, `supply_branch_id`.
+   - Per-line: `requested_qty`, `approved_qty`, `approved_note` (and legacy `qty` retained).
+   - `available_actions` now includes `"confirm_stock_request"` iff: `is_branch_request` AND `status ∈ {requested, draft}` AND `has_linked_bto === false`.
+   - No sensitive financial data added.
+4. **NEW frontend mobile panel `StockRequestConfirmPanel`** (`DocViewerPage.jsx`, ~210 LOC inline — follows the file's existing panel conventions like `DraftAdjustPanel`). Per-line approved input + note; full/partial/excess/declined pills; overall note; PIN; submit; success state with `Confirmed by {verifier_name}`. Generates `confirm_ref` once per mount for retry idempotency. Lockout reuses existing `LockoutTimer` + `parsePinError`.
+   - Eligibility-gated: shows only when `is_branch_request === true && available_actions.includes("confirm_stock_request") && !has_linked_bto`.
+   - When `has_linked_bto === true`: read-only notice "Linked transfer draft {BTO-XXX} already exists. Cancel that transfer in the web app to re-confirm quantities." (testid `stock-request-linked-bto-notice`).
+   - Wired into the existing branch_request block — view-only fallback retained when neither condition is met.
+   - Testids: `qr-confirm-quantities-panel`, `qr-confirm-quantities-done`, `qr-confirm-line-${idx}`, `qr-approved-qty-${idx}`, `qr-approved-note-${idx}`, `qr-approval-note`, `qr-confirm-pin`, `qr-confirm-submit-btn`, `qr-confirm-blocked-hint`, `qr-confirm-pin-error`, `stock-request-linked-bto-notice`.
+5. **NEW BR test `backend/tests/business_regression/test_br_stock_request_approval_qr.py`** — 12 tests / 23 rows. Covers: viewer resolution, action eligibility + linked-BTO suppression, PIN-missing 400, wrong-branch PIN 403 + qr_action_log failure row, supply-branch PIN 200, admin PIN 200, approved_qty persistence + `source=qr_mobile`, no stock movement, no BTO created, idempotent `confirm_ref` (no double log row, cached payload wins), soft-lock after BTO.
+
+### Verification
+- **NEW QR test**: 12/12 pass / 23 rows / 0 fail.
+- **Phase 1 BR (regression)**: 18/18 pass after helper refactor.
+- **Phase 0.5 BR**: 29/29 pass.
+- **Phase 0 BR (invariants)**: untouched (in full sweep).
+- **Full BR**: **89/89 pass / 333 rows / 0 fail** (was 77/310 → +12 tests / +23 rows). Re-run identical (idempotent).
+- Frontend `yarn build`: clean in 26.94s.
+- ESLint: clean on `DocViewerPage.jsx`.
+- Zero DB footprint: no `br_sr_(conf|qr)*` rows lingering across `products, inventory, branch_transfer_orders, purchase_orders, request_approval_log, users, notifications, qr_action_log, doc_codes`.
+
+### Files changed (this fork)
+- NEW `backend/tests/business_regression/test_br_stock_request_approval_qr.py` (~570 LOC, 12 tests)
+- MOD `backend/routes/purchase_orders.py` (Phase 1 endpoint trimmed to wrapper; new `_apply_confirmation` helper)
+- MOD `backend/routes/qr_actions.py` (+ `confirm_stock_request_qr` route)
+- MOD `backend/routes/doc_lookup.py` (enriched `purchase_order` branch of `view_document_open`)
+- MOD `frontend/src/pages/DocViewerPage.jsx` (+ `StockRequestConfirmPanel`, mount + linked-BTO notice)
+
+### Phase 2 invariants honoured
+- Zero duplicate confirmation logic — both web + QR go through `_apply_confirmation`.
+- No stock movement; no BTO created; no internal invoice created.
+- No View QR modal yet.
+- No SMS.
+- No one-time bearer token (direct PIN sufficient given no value mutation + lockout reuse).
+- `requested_qty` immutable; `approved_qty` audited with verifier identity via `request_approval_log` (`source="qr_mobile"`) + `qr_action_log` row.
+- `request_approval_log.source` distinguishes `web` vs `qr_mobile` for forensics.
+
+### Remaining gaps
+- **No real Playwright frontend test** for the mobile panel yet — tested via testids + manual smoke. Adding one requires booting the auth context (the page itself is no-auth, but mounting a logged-in user to create a request first adds setup). Deferred — the panel is small + thoroughly testid-tagged.
+- Per-line `approved_qty` is shown on outgoing cards in `BranchTransferPage.js` (Phase 1.1) but the mobile viewer doesn't yet show the *current* approved_qty alongside the requested for unconfirmed lines — by design, the panel seeds the input with `approved_qty || requested_qty` so it's editable in one shot.
+- `available_actions` for non-eligible statuses (e.g. `fulfilled`, `cancelled`) intentionally returns empty — the view-only fallback still renders.
+
+### Recommendation for next prompt
+1. **View QR modal** (Phase 0.6 backlog) — simplest next step. Reuses the existing `doc_codes` minted at PO creation; adds a "Show QR" button on incoming + outgoing request cards in `BranchTransferPage.js` and on transfer cards. Self-contained UI; no backend change beyond a tiny `GET /api/doc/by-ref/{doc_type}/{doc_id}` shortcut (the route already exists). Pairs naturally with Phase 2 because supply branch staff can now print/show the QR and the receiver can scan + confirm in one motion.
+2. **Variance ticket polish (Phase 3)** — adds PIN on large variance + invoice line-item rewrite. Less urgent than View QR but closes a known audit gap.
+3. **Prepared Order SMS** — most expensive (3rd party — Resend/Twilio) and depends on integration config; defer until both web + QR confirm UX have settled in production.
+
+**My pick: View QR modal first** — fastest perceived value, very small scope, complements Phase 2 directly.
+
+---
+
+
 ## Phase 1 — Stock Request Confirmation Layer (Feb 2026) ✅
 
 ### Status: COMPLETE — backend endpoints + PIN policy + frontend modal; 18/18 BR tests green; Phase 0 + 0.5 still green; build clean; zero DB footprint.

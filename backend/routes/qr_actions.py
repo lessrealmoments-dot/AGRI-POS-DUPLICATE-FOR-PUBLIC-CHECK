@@ -411,6 +411,152 @@ async def release_stocks(code: str, data: dict, request: Request):
 
 
 
+# ── Action: Confirm Stock Request (Phase 2 — QR/mobile) ──────────────────────
+
+@router.post("/{code}/confirm_stock_request")
+async def confirm_stock_request_qr(code: str, data: dict, request: Request):
+    """Confirm/adjust `approved_qty` on a branch-request PO via QR scan.
+
+    Mobile counterpart of `POST /api/purchase-orders/{po_id}/confirm-request`
+    (Phase 1). Delegates the actual confirmation work to
+    `routes.purchase_orders._apply_confirmation` so the rules stay in one
+    place:
+      * Original `items[].quantity` (requested qty) is NEVER overwritten.
+      * `approved_qty` / `approved_note` saved per line; approval_note global.
+      * `approved_qty > requested_qty` requires a note.
+      * Soft-locks once a non-cancelled linked BTO exists.
+      * Appends `request_approval_log` row with `source="qr_mobile"`.
+      * No stock movement. No BTO created. No internal invoice.
+
+    Auth: PIN/TOTP via `confirm_stock_request` policy, branch-scoped to
+    `supply_branch_id`. Brute-force lockout via `check_qr_lockout`.
+    Idempotency: optional `confirm_ref` → re-running with the same ref
+    returns the cached result and skips mutation.
+
+    Body: { pin, items: [...], approval_note?, confirm_ref? }
+    """
+    pin = (data.get("pin") or "").strip()
+    confirm_ref = (data.get("confirm_ref") or "").strip()
+    client_ip  = request.client.host if request.client else ""
+    user_agent = request.headers.get("user-agent", "")
+
+    if not pin:
+        raise HTTPException(status_code=400, detail="PIN is required")
+
+    doc_ref, doc_type, doc_id = await _resolve_doc(code)
+    if doc_type != "purchase_order":
+        raise HTTPException(status_code=400, detail="This QR code is not for a stock request")
+
+    po = await db.purchase_orders.find_one({"id": doc_id}, {"_id": 0})
+    if not po:
+        raise HTTPException(status_code=404, detail="Request not found")
+    if po.get("po_type") != "branch_request":
+        raise HTTPException(status_code=400, detail="This QR code is not for a stock request")
+
+    supply_branch_id = po.get("supply_branch_id", "")
+
+    # ── Brute-force lockout ──────────────────────────────────────────────────
+    lockout = await check_qr_lockout(doc_ref["code"])
+    if lockout["locked"]:
+        raise HTTPException(status_code=429, detail={
+            "message": "Too many failed attempts. This document is temporarily locked.",
+            "retry_after": lockout["retry_after"],
+            "locked": True,
+        })
+
+    # ── Idempotency: replay cached response on duplicate confirm_ref. ────────
+    if confirm_ref:
+        prior = await db.qr_action_log.find_one(
+            {"doc_id": doc_id, "action": "confirm_stock_request",
+             "release_ref": confirm_ref, "result": "success"},
+            {"_id": 0, "payload_summary": 1, "performed_by_name": 1},
+        )
+        if prior:
+            # Idempotent replay — return current PO state without mutation.
+            current = await db.purchase_orders.find_one(
+                {"id": doc_id}, {"_id": 0})
+            items_out = []
+            for it in (current.get("items") or []):
+                appr_raw = it.get("approved_qty")
+                has_appr = appr_raw is not None and appr_raw != ""
+                items_out.append({
+                    "product_id": it.get("product_id", ""),
+                    "product_name": it.get("product_name", ""),
+                    "requested_qty": float(it.get("quantity", 0) or 0),
+                    "approved_qty": float(appr_raw) if has_appr else None,
+                    "approved_note": it.get("approved_note", "") or "",
+                })
+            return {
+                "po_id": doc_id,
+                "po_number": current.get("po_number", ""),
+                "approval_status": current.get("approval_status") or "pending",
+                "approved_at": current.get("approved_at", ""),
+                "approved_by_name": current.get("approved_by_name", ""),
+                "approval_method": current.get("approval_method", ""),
+                "approval_note": current.get("approval_note", ""),
+                "items": items_out,
+                "idempotent": True,
+            }
+
+    # ── PIN verification — branch-scoped to supply branch. ────────────────────
+    from routes.verify import verify_pin_for_action
+    verifier = await verify_pin_for_action(
+        pin, "confirm_stock_request", branch_id=supply_branch_id)
+    if not verifier:
+        await log_failed_qr_pin_attempt(
+            doc_ref["code"], doc_type, "confirm_stock_request",
+            client_ip, supply_branch_id)
+        await _log_action(
+            doc_ref, "confirm_stock_request", None, "PIN failed",
+            result="failed", error="invalid_pin",
+            release_ref=confirm_ref,
+            client_ip=client_ip, user_agent=user_agent)
+        raise HTTPException(status_code=403, detail={
+            "message": "Invalid PIN — use supply-branch manager PIN, admin PIN, or TOTP",
+            "warn": lockout["warn"],
+            "attempts_remaining": max(0, lockout["attempts_remaining"] - 1),
+        })
+    await log_successful_qr_pin_attempt(
+        doc_ref["code"], doc_type, "confirm_stock_request",
+        verifier["verifier_name"], client_ip)
+
+    # ── Delegate to the shared Phase 1 helper. ───────────────────────────────
+    from routes.purchase_orders import _apply_confirmation
+    try:
+        result = await _apply_confirmation(
+            po=po,
+            approval_payload=data,
+            verifier=verifier,
+            caller_id=verifier.get("verifier_id", ""),
+            caller_name=verifier.get("verifier_name", ""),
+            source="qr_mobile",
+            extra_log_fields={
+                "client_ip": client_ip,
+                "user_agent": user_agent,
+                "confirm_ref": confirm_ref,
+            },
+        )
+    except HTTPException as e:
+        await _log_action(
+            doc_ref, "confirm_stock_request", verifier, str(e.detail),
+            result="failed", error="rejected",
+            release_ref=confirm_ref,
+            client_ip=client_ip, user_agent=user_agent)
+        raise
+
+    summary = (
+        f"{len(result.get('items') or [])} line(s) "
+        f"→ {result.get('approval_status')}"
+    )
+    await _log_action(
+        doc_ref, "confirm_stock_request", verifier, summary,
+        result="success", release_ref=confirm_ref,
+        client_ip=client_ip, user_agent=user_agent)
+
+    result["idempotent"] = False
+    return result
+
+
 # ── Generate upload token (public — for mobile payment proof upload) ──────────
 
 @router.post("/{code}/generate-upload-token")

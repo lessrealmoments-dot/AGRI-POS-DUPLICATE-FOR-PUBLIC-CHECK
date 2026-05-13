@@ -1596,24 +1596,20 @@ async def get_capital_preview(po_id: str, user=Depends(get_current_user)):
 @router.post("/{po_id}/confirm-request")
 async def confirm_stock_request(po_id: str, data: dict = None,
                                 user=Depends(get_current_user)):
-    """Phase 1 — Confirm `approved_qty` for each line on a branch_request PO.
+    """Phase 1 — Confirm `approved_qty` per line on a branch_request PO
+    (web/JWT path). Thin wrapper around `_apply_confirmation`.
 
     Strict rules:
-      * No stock movement; no BTO is created; no internal invoice is
-        created. This route ONLY mutates `items[].approved_qty`,
-        `items[].approved_note`, and PO-level approval metadata, plus
-        appends one row to `request_approval_log`.
+      * No stock movement; no BTO created; no internal invoice created.
+        ONLY mutates `items[].approved_qty`, `items[].approved_note`,
+        PO-level approval metadata, plus appends `request_approval_log`.
       * Original `items[].quantity` (requested qty) is NEVER overwritten.
       * Branch-context: non-privileged caller must belong to
         `po.supply_branch_id`.
       * PIN/TOTP via `confirm_stock_request` policy, branch-scoped to
-        `supply_branch_id`. The verifier identity is stamped as
-        `approved_by_*` (separate from caller identity in audit log).
-      * Soft-lock: if a non-cancelled BTO is already linked to this PO,
-        confirmation is rejected with an actionable 400.
-      * Excess: when any line has `approved_qty > requested_qty`, that
-        line's `approved_note` (or the PO-level `approval_note`) MUST be
-        non-empty — otherwise 400.
+        `supply_branch_id`.
+      * Soft-lock: if a non-cancelled BTO is already linked → 400.
+      * Excess: `approved_qty > requested_qty` requires a note.
     """
     check_perm(user, "purchase_orders", "update")
     data = data or {}
@@ -1621,24 +1617,74 @@ async def confirm_stock_request(po_id: str, data: dict = None,
     po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
     if not po:
         raise HTTPException(status_code=404, detail="PO not found")
+
+    # Branch-context: non-privileged caller must belong to supply branch.
+    from utils.auth import is_privileged, user_branch_ids
+    supply_branch_id = po.get("supply_branch_id", "")
+    if not is_privileged(user) and supply_branch_id:
+        if supply_branch_id not in user_branch_ids(user):
+            raise HTTPException(status_code=403,
+                detail="Only the supplying branch can confirm this request.")
+
+    # PIN verification — branch-scoped to supply branch.
+    pin = str(data.get("pin", "") or "").strip()
+    if not pin:
+        raise HTTPException(status_code=400,
+            detail="PIN or TOTP is required to confirm a stock request.")
+    from routes.verify import verify_pin_for_action
+    verifier = await verify_pin_for_action(
+        pin, "confirm_stock_request", branch_id=supply_branch_id)
+    if not verifier:
+        raise HTTPException(status_code=403,
+            detail="Invalid PIN or unauthorized for this supply branch.")
+
+    return await _apply_confirmation(
+        po=po,
+        approval_payload=data,
+        verifier=verifier,
+        caller_id=user.get("id", ""),
+        caller_name=user.get("full_name") or user.get("username", ""),
+        source="web",
+    )
+
+
+async def _apply_confirmation(
+    *,
+    po: dict,
+    approval_payload: dict,
+    verifier: dict,
+    caller_id: str,
+    caller_name: str,
+    source: str = "web",
+    extra_log_fields: dict = None,
+):
+    """Shared confirmation pipeline used by both the web endpoint
+    (`POST /purchase-orders/{po_id}/confirm-request`) and the QR
+    endpoint (`POST /qr-actions/{code}/confirm_stock_request`).
+
+    Caller is responsible for AUTH (perm check, JWT, doc_code resolution)
+    and for PIN verification. This helper performs:
+      * PO-shape validation (branch_request, status, supply branch present)
+      * Soft-lock against linked BTO
+      * Items diff with excess-requires-note enforcement
+      * PO update (immutable `quantity`; sets `approved_qty/note`)
+      * Append to `request_approval_log` (with `source` + extras)
+      * In-app notification to the requesting branch (best-effort)
+
+    Raises `HTTPException` for any guard violation. Returns the standard
+    response dict (po_id, po_number, approval_status, items, …).
+    """
+    po_id = po.get("id", "")
     if po.get("po_type") != "branch_request":
         raise HTTPException(status_code=400,
             detail="Only branch request POs can be confirmed.")
     if po.get("status") in ("cancelled", "fulfilled", "partially_fulfilled"):
         raise HTTPException(status_code=400,
             detail=f"Cannot confirm a request in status '{po.get('status')}'.")
-
     supply_branch_id = po.get("supply_branch_id", "")
     if not supply_branch_id:
         raise HTTPException(status_code=400,
             detail="Request has no supply branch — cannot confirm.")
-
-    # Branch-context: non-privileged caller must belong to supply branch.
-    from utils.auth import is_privileged, user_branch_ids
-    if not is_privileged(user):
-        if supply_branch_id not in user_branch_ids(user):
-            raise HTTPException(status_code=403,
-                detail="Only the supplying branch can confirm this request.")
 
     # Soft-lock: a non-cancelled BTO already exists → reject.
     linked_bto = await db.branch_transfer_orders.find_one(
@@ -1655,20 +1701,8 @@ async def confirm_stock_request(po_id: str, data: dict = None,
             ),
         )
 
-    # PIN/TOTP verification — branch-scoped to supply branch.
-    pin = str(data.get("pin", "") or "").strip()
-    if not pin:
-        raise HTTPException(status_code=400,
-            detail="PIN or TOTP is required to confirm a stock request.")
-    from routes.verify import verify_pin_for_action
-    verifier = await verify_pin_for_action(
-        pin, "confirm_stock_request", branch_id=supply_branch_id)
-    if not verifier:
-        raise HTTPException(status_code=403,
-            detail="Invalid PIN or unauthorized for this supply branch.")
-
-    # Build approval map: product_id → (approved_qty, approved_note)
-    raw_items = data.get("items") or []
+    # Build approval map: product_id → (approved_qty, approved_note).
+    raw_items = (approval_payload or {}).get("items") or []
     if not raw_items:
         raise HTTPException(status_code=400,
             detail="No items provided for confirmation.")
@@ -1690,12 +1724,10 @@ async def confirm_stock_request(po_id: str, data: dict = None,
             "approved_note": str(it.get("approved_note") or "").strip(),
         }
 
-    approval_note_global = str(data.get("approval_note") or "").strip()
+    approval_note_global = str((approval_payload or {}).get("approval_note") or "").strip()
 
-    # Walk existing PO items and update only the matched lines. Untouched
-    # lines retain their previous `approved_qty` (re-confirm preserves
-    # prior state for omitted items, but the canonical flow sends ALL
-    # lines back).
+    # Walk PO items; matched lines get approved_qty/note. Original
+    # `quantity` is NEVER touched.
     items_diff = []
     new_items = []
     total_full = 0
@@ -1770,14 +1802,14 @@ async def confirm_stock_request(po_id: str, data: dict = None,
             "approved_by_name": verifier_name,
             "approval_method": verifier_method,
             "approval_note": approval_note_global,
-            "approval_caller_id": user.get("id", ""),
-            "approval_caller_name": user.get("full_name") or user.get("username", ""),
+            "approval_caller_id": caller_id,
+            "approval_caller_name": caller_name,
         }},
     )
 
     # Append-only audit row.
-    org_id = po.get("organization_id") or user.get("organization_id") or ""
-    await db.request_approval_log.insert_one({
+    org_id = po.get("organization_id") or ""
+    log_row = {
         "id": new_id(),
         "po_id": po_id,
         "po_number": po.get("po_number", ""),
@@ -1790,10 +1822,14 @@ async def confirm_stock_request(po_id: str, data: dict = None,
         "approved_by_id": verifier_id,
         "approved_by_name": verifier_name,
         "approval_method": verifier_method,
-        "caller_id": user.get("id", ""),
-        "caller_name": user.get("full_name") or user.get("username", ""),
+        "caller_id": caller_id,
+        "caller_name": caller_name,
+        "source": source,
         "created_at": now,
-    })
+    }
+    if extra_log_fields:
+        log_row.update(extra_log_fields)
+    await db.request_approval_log.insert_one(log_row)
 
     # In-app notification to the requesting branch (admins + their managers).
     try:
@@ -1839,6 +1875,7 @@ async def confirm_stock_request(po_id: str, data: dict = None,
                 "supply_branch_id": supply_branch_id,
                 "supply_branch_name": supply_name,
                 "approved_by_name": verifier_name,
+                "source": source,
             },
             "target_user_ids": target_ids,
             "read_by": [],

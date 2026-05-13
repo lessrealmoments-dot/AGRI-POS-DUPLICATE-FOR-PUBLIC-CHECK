@@ -63,6 +63,250 @@ function LockoutBanner({ retryAfter, onExpired }) {
   );
 }
 
+// ── Stock Request Confirm Panel — Phase 2 QR/mobile flow for branch_request ──
+function StockRequestConfirmPanel({ basic, docCode, onUpdated }) {
+  const fmtQty = (v) => {
+    const n = parseFloat(v);
+    if (isNaN(n)) return '0';
+    return parseFloat(n.toFixed(3)).toString();
+  };
+  const seedLines = () => (basic.items || []).map((it) => {
+    const requested = parseFloat(it.requested_qty ?? it.qty ?? 0);
+    const existing = it.approved_qty;
+    const has = existing !== null && existing !== undefined && existing !== '';
+    return {
+      product_id: it.product_id || '',
+      product_name: it.name || it.product_name || '',
+      requested_qty: requested,
+      approved_qty: has ? String(existing) : String(requested),
+      approved_note: it.approved_note || '',
+    };
+  });
+  const [stage, setStage] = React.useState('idle'); // idle | submitting | done | locked
+  const [lines, setLines] = React.useState(seedLines);
+  const [globalNote, setGlobalNote] = React.useState(basic.approval_note || '');
+  const [pin, setPin] = React.useState('');
+  const [pinError, setPinError] = React.useState('');
+  const [lockout, setLockout] = React.useState(null);
+  const [result, setResult] = React.useState(null);
+  const confirmRefRef = React.useRef(null);
+  if (!confirmRefRef.current) {
+    confirmRefRef.current = `cr-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  const summary = React.useMemo(() => {
+    let full = 0, partial = 0, excess = 0, declined = 0, missingNote = 0;
+    for (const l of lines) {
+      const a = parseFloat(l.approved_qty || 0);
+      const r = parseFloat(l.requested_qty || 0);
+      if (a === 0) declined += 1;
+      else if (a < r) partial += 1;
+      else if (a > r) {
+        excess += 1;
+        if (!l.approved_note.trim()) missingNote += 1;
+      } else full += 1;
+    }
+    return { full, partial, excess, declined, missingNote };
+  }, [lines]);
+
+  const blocked = summary.missingNote > 0 && !globalNote.trim();
+  const disableSubmit = stage === 'submitting' || !pin.trim() || lines.length === 0 || blocked;
+
+  const setLine = (idx, patch) => {
+    setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
+  };
+
+  const submit = async () => {
+    if (disableSubmit) return;
+    setStage('submitting');
+    setPinError('');
+    try {
+      const body = {
+        pin: pin.trim(),
+        confirm_ref: confirmRefRef.current,
+        approval_note: globalNote.trim(),
+        items: lines.map((l) => ({
+          product_id: l.product_id,
+          approved_qty: parseFloat(l.approved_qty || 0),
+          approved_note: l.approved_note.trim(),
+        })),
+      };
+      const res = await axios.post(
+        `${BACKEND}/api/qr-actions/${docCode}/confirm_stock_request`, body);
+      setResult(res.data);
+      setStage('done');
+      toast.success('Quantities confirmed.');
+      if (onUpdated) onUpdated();
+    } catch (e) {
+      const parsed = parsePinError(e);
+      if (parsed.locked) {
+        setLockout({ retryAfter: parsed.retryAfter });
+        setStage('locked');
+        return;
+      }
+      setPinError(parsed.message || 'Could not confirm.');
+      setStage('idle');
+    }
+  };
+
+  if (stage === 'locked' && lockout) {
+    return <LockoutTimer retryAfter={lockout.retryAfter} />;
+  }
+
+  if (stage === 'done' && result) {
+    return (
+      <div className="space-y-3" data-testid="qr-confirm-quantities-done">
+        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+          <p className="text-sm font-semibold text-emerald-800 flex items-center gap-1.5">
+            <CheckCircle2 size={16} /> Confirmed by {result.approved_by_name || 'verifier'}
+          </p>
+          <p className="text-xs text-emerald-700 mt-1">
+            Status: <strong className="capitalize">{result.approval_status}</strong>
+            {result.approval_note ? ` · "${result.approval_note}"` : ''}
+          </p>
+        </div>
+        <div className="space-y-1.5">
+          {(result.items || []).map((it, i) => (
+            <div key={i} className="text-xs flex items-center justify-between bg-slate-50 rounded-md px-3 py-2"
+              data-testid={`qr-confirm-done-line-${i}`}>
+              <span className="text-slate-700 truncate mr-2">{it.product_name}</span>
+              <span className="font-mono text-slate-600">
+                req {fmtQty(it.requested_qty)} → appr {fmtQty(it.approved_qty)}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3" data-testid="qr-confirm-quantities-panel">
+      <div className="bg-violet-50 border border-violet-200 rounded-lg p-3">
+        <p className="text-sm font-semibold text-violet-800 flex items-center gap-1.5">
+          <ShieldCheck size={14} /> Confirm Stock Request
+        </p>
+        <p className="text-xs text-violet-700 mt-1">
+          Adjust the approved quantity per line. Original requested
+          quantities are locked. PIN/TOTP belongs to the supply branch
+          manager, admin, or owner.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        {lines.map((l, idx) => {
+          const a = parseFloat(l.approved_qty || 0);
+          const r = parseFloat(l.requested_qty || 0);
+          const isExcess = a > r;
+          const isPartial = a < r && a > 0;
+          const isDeclined = a === 0;
+          const needsNote = isExcess && !l.approved_note.trim() && !globalNote.trim();
+          return (
+            <div key={l.product_id || idx}
+              className="border border-slate-200 rounded-lg p-3 bg-white"
+              data-testid={`qr-confirm-line-${idx}`}>
+              <p className="text-sm font-medium text-slate-800 truncate">{l.product_name}</p>
+              <div className="mt-2 grid grid-cols-2 gap-2 items-end">
+                <div>
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wide">Requested</p>
+                  <p className="font-mono text-sm text-slate-700">{fmtQty(r)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wide">Approved</p>
+                  <Input
+                    type="number"
+                    min={0}
+                    step="any"
+                    value={l.approved_qty}
+                    onChange={(e) => setLine(idx, { approved_qty: e.target.value })}
+                    className={`h-10 text-right font-mono ${needsNote ? 'border-amber-400' : ''}`}
+                    data-testid={`qr-approved-qty-${idx}`}
+                  />
+                </div>
+              </div>
+              <div className="mt-1 flex gap-1">
+                {isExcess && <Badge className="text-[10px] bg-amber-100 text-amber-700">excess</Badge>}
+                {isPartial && <Badge className="text-[10px] bg-yellow-100 text-yellow-700">partial</Badge>}
+                {isDeclined && <Badge className="text-[10px] bg-rose-100 text-rose-700">declined</Badge>}
+                {!isExcess && !isPartial && !isDeclined && (
+                  <Badge className="text-[10px] bg-emerald-100 text-emerald-700">full</Badge>
+                )}
+              </div>
+              <Input
+                type="text"
+                placeholder={isExcess ? 'Note required (excess)' : 'Per-line note (optional)'}
+                value={l.approved_note}
+                onChange={(e) => setLine(idx, { approved_note: e.target.value })}
+                className={`mt-2 h-9 text-xs ${needsNote ? 'border-amber-400' : ''}`}
+                data-testid={`qr-approved-note-${idx}`}
+              />
+            </div>
+          );
+        })}
+      </div>
+
+      {summary.excess > 0 && (
+        <div className="text-xs flex items-start gap-2 text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+          <AlertTriangle size={14} className="mt-0.5" />
+          <p>
+            {summary.excess} line(s) above requested. Note the business
+            reason (per-line or overall).
+          </p>
+        </div>
+      )}
+
+      <div>
+        <p className="text-[10px] text-slate-400 uppercase tracking-wide">Overall note (optional)</p>
+        <Input
+          type="text"
+          value={globalNote}
+          onChange={(e) => setGlobalNote(e.target.value)}
+          placeholder="Owner top-up, urgent re-stock, etc."
+          className="mt-1 h-10"
+          data-testid="qr-approval-note"
+        />
+      </div>
+
+      <div>
+        <p className="text-[10px] text-slate-400 uppercase tracking-wide">PIN / TOTP</p>
+        <Input
+          type="password"
+          autoComplete="off"
+          value={pin}
+          onChange={(e) => { setPin(e.target.value); setPinError(''); }}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !disableSubmit) submit(); }}
+          placeholder="Supply-branch manager PIN, admin PIN, or TOTP"
+          className="mt-1 h-11 text-center font-mono tracking-widest"
+          data-testid="qr-confirm-pin"
+        />
+        {pinError && (
+          <p className="text-red-500 text-xs flex items-center gap-1 mt-1"
+            data-testid="qr-confirm-pin-error">
+            <AlertTriangle size={12} />{pinError}
+          </p>
+        )}
+      </div>
+
+      <Button
+        onClick={submit}
+        disabled={disableSubmit}
+        className="w-full h-11 bg-violet-700 hover:bg-violet-800 text-white font-semibold"
+        data-testid="qr-confirm-submit-btn">
+        {stage === 'submitting'
+          ? <><RefreshCw size={14} className="animate-spin mr-2" />Confirming…</>
+          : <><ShieldCheck size={14} className="mr-2" />Confirm Quantities</>}
+      </Button>
+
+      {blocked && (
+        <p className="text-xs text-rose-700" data-testid="qr-confirm-blocked-hint">
+          A note is required on at least one excess line (or overall) before confirmation.
+        </p>
+      )}
+    </div>
+  );
+}
+
+
 // ── Draft Adjust Panel — QR-based quantity editing for FOR PREPARATION orders ──
 function DraftAdjustPanel({ basic, docCode, onUpdated }) {
   const php = v => `₱${(parseFloat(v)||0).toLocaleString('en-PH',{minimumFractionDigits:2})}`;
@@ -2179,17 +2423,36 @@ export default function DocViewerPage() {
                   </>
                 )}
 
-                {/* Branch Stock Request — view-only notice + login prompt */}
+                {/* Branch Stock Request — Phase 2 QR/mobile confirm panel + fallback notice */}
                 {basic.doc_type === 'purchase_order' && basic.is_branch_request && (
                   <div className="space-y-2" data-testid="stock-request-actions">
-                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                      <p className="text-sm text-amber-800 font-medium">📦 Stock Request</p>
-                      <p className="text-xs text-amber-700 mt-1">
-                        This is a view-only summary of a branch stock request.
-                        To fulfill (generate the Branch Transfer), open the app and go to
-                        <span className="font-semibold"> Branch Transfer → History → Requests</span>.
-                      </p>
-                    </div>
+                    {basic.has_linked_bto && (
+                      <div className="bg-slate-50 border border-slate-200 rounded-lg p-3"
+                        data-testid="stock-request-linked-bto-notice">
+                        <p className="text-sm text-slate-800 font-medium">📦 Linked Transfer Exists</p>
+                        <p className="text-xs text-slate-600 mt-1">
+                          Linked transfer draft <strong>{basic.linked_bto_number}</strong> already exists.
+                          Cancel that transfer in the web app to re-confirm quantities.
+                        </p>
+                      </div>
+                    )}
+                    {!basic.has_linked_bto && (basic.available_actions || []).includes('confirm_stock_request') && (
+                      <StockRequestConfirmPanel
+                        basic={basic}
+                        docCode={code?.toUpperCase()}
+                        onUpdated={fetchBasic}
+                      />
+                    )}
+                    {!basic.has_linked_bto && !(basic.available_actions || []).includes('confirm_stock_request') && (
+                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                        <p className="text-sm text-amber-800 font-medium">📦 Stock Request</p>
+                        <p className="text-xs text-amber-700 mt-1">
+                          This is a view-only summary. To fulfill (generate the Branch Transfer),
+                          open the app and go to
+                          <span className="font-semibold"> Branch Transfer → History → Requests</span>.
+                        </p>
+                      </div>
+                    )}
                     <Button className="w-full h-10 bg-[#1A4D2E] hover:bg-emerald-700 text-white font-semibold"
                       onClick={() => navigate('/branch-transfers?tab=history&subtab=requests')}
                       data-testid="open-stock-request-btn">

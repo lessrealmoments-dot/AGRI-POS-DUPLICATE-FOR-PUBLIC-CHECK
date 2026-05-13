@@ -1,0 +1,564 @@
+{
+  "generated_at": "2026-05-13T04:43:02.313943+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 23,
+  "pass_count": 23,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br_sr_qr.1_view_resolves_branch_request",
+      "step": "is_branch_request_true",
+      "expected": {
+        "is_branch_request": true
+      },
+      "actual": {
+        "is_branch_request": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "6d8394ed-b68b-4233-aa33-78914d609ba7",
+        "code": "6B5NRQ7E",
+        "fields": [
+          "doc_type",
+          "doc_id",
+          "number",
+          "date",
+          "supplier_name",
+          "branch_id",
+          "branch_name",
+          "po_type",
+          "is_branch_request",
+          "supply_branch_name",
+          "supply_branch_id",
+          "requesting_branch_name",
+          "fulfillment_started_at",
+          "fulfillment_started_by",
+          "notes",
+          "items",
+          "grand_total",
+          "status",
+          "raw_status",
+          "payment_status",
+          "available_actions",
+          "approval_status",
+          "approval_note",
+          "approved_by_name",
+          "approved_at",
+          "has_linked_bto",
+          "linked_bto_number"
+        ]
+      },
+      "recorded_at": "2026-05-13T04:43:02.088567+00:00"
+    },
+    {
+      "scenario": "br_sr_qr.1_view_resolves_branch_request",
+      "step": "enriched_fields_present",
+      "expected": {
+        "has_appr_keys": true,
+        "has_linked_bto": false
+      },
+      "actual": {
+        "has_appr_keys": true,
+        "has_linked_bto": false
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "6d8394ed-b68b-4233-aa33-78914d609ba7",
+        "code": "6B5NRQ7E",
+        "fields": [
+          "doc_type",
+          "doc_id",
+          "number",
+          "date",
+          "supplier_name",
+          "branch_id",
+          "branch_name",
+          "po_type",
+          "is_branch_request",
+          "supply_branch_name",
+          "supply_branch_id",
+          "requesting_branch_name",
+          "fulfillment_started_at",
+          "fulfillment_started_by",
+          "notes",
+          "items",
+          "grand_total",
+          "status",
+          "raw_status",
+          "payment_status",
+          "available_actions",
+          "approval_status",
+          "approval_note",
+          "approved_by_name",
+          "approved_at",
+          "has_linked_bto",
+          "linked_bto_number"
+        ]
+      },
+      "recorded_at": "2026-05-13T04:43:02.088584+00:00"
+    },
+    {
+      "scenario": "br_sr_qr.1_view_resolves_branch_request",
+      "step": "line_has_requested_qty",
+      "expected": {
+        "requested_qty": 80.0
+      },
+      "actual": {
+        "requested_qty": 80.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "6d8394ed-b68b-4233-aa33-78914d609ba7",
+        "code": "6B5NRQ7E",
+        "fields": [
+          "doc_type",
+          "doc_id",
+          "number",
+          "date",
+          "supplier_name",
+          "branch_id",
+          "branch_name",
+          "po_type",
+          "is_branch_request",
+          "supply_branch_name",
+          "supply_branch_id",
+          "requesting_branch_name",
+          "fulfillment_started_at",
+          "fulfillment_started_by",
+          "notes",
+          "items",
+          "grand_total",
+          "status",
+          "raw_status",
+          "payment_status",
+          "available_actions",
+          "approval_status",
+          "approval_note",
+          "approved_by_name",
+          "approved_at",
+          "has_linked_bto",
+          "linked_bto_number"
+        ]
+      },
+      "recorded_at": "2026-05-13T04:43:02.088588+00:00"
+    },
+    {
+      "scenario": "br_sr_qr.2_view_lists_confirm_action_when_eligible",
+      "step": "confirm_stock_request_in_actions",
+      "expected": {
+        "in": true
+      },
+      "actual": {
+        "in": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "3efae118-cd10-4df5-8b19-7a5247a169b2",
+        "available_actions": [
+          "confirm_stock_request"
+        ]
+      },
+      "recorded_at": "2026-05-13T04:43:02.104252+00:00"
+    },
+    {
+      "scenario": "br_sr_qr.3_view_omits_action_when_linked_bto",
+      "step": "confirm_action_absent",
+      "expected": {
+        "in": false
+      },
+      "actual": {
+        "in": false
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "0d0addfe-4b3a-481e-9d85-77c36ed063aa",
+        "available_actions": [
+          "po_receive"
+        ],
+        "has_linked_bto": true,
+        "linked_bto_number": "BTO-20260513-0001"
+      },
+      "recorded_at": "2026-05-13T04:43:02.128312+00:00"
+    },
+    {
+      "scenario": "br_sr_qr.3_view_omits_action_when_linked_bto",
+      "step": "has_linked_bto_true",
+      "expected": {
+        "v": true
+      },
+      "actual": {
+        "v": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "0d0addfe-4b3a-481e-9d85-77c36ed063aa",
+        "available_actions": [
+          "po_receive"
+        ],
+        "has_linked_bto": true,
+        "linked_bto_number": "BTO-20260513-0001"
+      },
+      "recorded_at": "2026-05-13T04:43:02.128322+00:00"
+    },
+    {
+      "scenario": "br_sr_qr.4_confirm_requires_pin",
+      "step": "400_when_pin_missing",
+      "expected": {
+        "state": "err",
+        "status_code": 400
+      },
+      "actual": {
+        "state": "err",
+        "status_code": 400
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "61135824-a51a-4b21-bab3-74742282f95e",
+        "state": "err",
+        "result": [
+          400,
+          "PIN is required"
+        ]
+      },
+      "recorded_at": "2026-05-13T04:43:02.139183+00:00"
+    },
+    {
+      "scenario": "br_sr_qr.5_wrong_branch_pin_rejected",
+      "step": "403_rejected",
+      "expected": {
+        "state": "err",
+        "status_code": 403
+      },
+      "actual": {
+        "state": "err",
+        "status_code": 403
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "fb203074-cefb-4bf4-95d2-1d811c0bf328",
+        "state": "err",
+        "result": [
+          403,
+          {
+            "message": "Invalid PIN \u2014 use supply-branch manager PIN, admin PIN, or TOTP",
+            "warn": false,
+            "attempts_remaining": 9
+          }
+        ],
+        "approval_status_after": null
+      },
+      "recorded_at": "2026-05-13T04:43:02.156060+00:00"
+    },
+    {
+      "scenario": "br_sr_qr.5_wrong_branch_pin_rejected",
+      "step": "qr_action_log_failure_row",
+      "expected": {
+        "failed_logged": true
+      },
+      "actual": {
+        "failed_logged": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "fb203074-cefb-4bf4-95d2-1d811c0bf328",
+        "state": "err",
+        "result": [
+          403,
+          {
+            "message": "Invalid PIN \u2014 use supply-branch manager PIN, admin PIN, or TOTP",
+            "warn": false,
+            "attempts_remaining": 9
+          }
+        ],
+        "approval_status_after": null
+      },
+      "recorded_at": "2026-05-13T04:43:02.156455+00:00"
+    },
+    {
+      "scenario": "br_sr_qr.6_supply_branch_pin_accepted",
+      "step": "200_succeeded",
+      "expected": {
+        "state": "ok"
+      },
+      "actual": {
+        "state": "ok"
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "63e3c1de-cfec-4886-af2f-6ca83ff229f2",
+        "state": "ok",
+        "approval_status_after": "partial",
+        "approved_by_name": "B Mgr QR"
+      },
+      "recorded_at": "2026-05-13T04:43:02.175227+00:00"
+    },
+    {
+      "scenario": "br_sr_qr.6_supply_branch_pin_accepted",
+      "step": "approval_status_partial",
+      "expected": {
+        "status": "partial"
+      },
+      "actual": {
+        "status": "partial"
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "63e3c1de-cfec-4886-af2f-6ca83ff229f2",
+        "state": "ok",
+        "approval_status_after": "partial",
+        "approved_by_name": "B Mgr QR"
+      },
+      "recorded_at": "2026-05-13T04:43:02.175235+00:00"
+    },
+    {
+      "scenario": "br_sr_qr.7_admin_pin_accepted",
+      "step": "200_succeeded",
+      "expected": {
+        "state": "ok"
+      },
+      "actual": {
+        "state": "ok"
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "5eed8d45-dbcc-4419-83a8-528e1400d104",
+        "state": "ok",
+        "approval_status_after": "approved",
+        "approval_method": "manager_pin"
+      },
+      "recorded_at": "2026-05-13T04:43:02.192921+00:00"
+    },
+    {
+      "scenario": "br_sr_qr.7_admin_pin_accepted",
+      "step": "method_recorded",
+      "expected": {
+        "method_is_manager_or_admin": true
+      },
+      "actual": {
+        "method_is_manager_or_admin": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "5eed8d45-dbcc-4419-83a8-528e1400d104",
+        "state": "ok",
+        "approval_status_after": "approved",
+        "approval_method": "manager_pin"
+      },
+      "recorded_at": "2026-05-13T04:43:02.192926+00:00"
+    },
+    {
+      "scenario": "br_sr_qr.8_approved_qty_persisted",
+      "step": "line_approved_qty_40",
+      "expected": {
+        "approved_qty": 40.0
+      },
+      "actual": {
+        "approved_qty": 40.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "5af4ea95-04ce-4331-bedb-957471c02201",
+        "items": [
+          {
+            "product_id": "prd-7374568d",
+            "product_name": "br_sr_qr8 P",
+            "unit": "pc",
+            "description": "",
+            "quantity": 50.0,
+            "unit_price": 60.0,
+            "discount_type": "amount",
+            "discount_value": 0.0,
+            "discount_amount": 0.0,
+            "total": 3000.0,
+            "approved_qty": 40.0,
+            "approved_note": "qr"
+          }
+        ],
+        "log_source": "qr_mobile"
+      },
+      "recorded_at": "2026-05-13T04:43:02.208687+00:00"
+    },
+    {
+      "scenario": "br_sr_qr.8_approved_qty_persisted",
+      "step": "log_source_qr_mobile",
+      "expected": {
+        "source": "qr_mobile"
+      },
+      "actual": {
+        "source": "qr_mobile"
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "5af4ea95-04ce-4331-bedb-957471c02201",
+        "items": [
+          {
+            "product_id": "prd-7374568d",
+            "product_name": "br_sr_qr8 P",
+            "unit": "pc",
+            "description": "",
+            "quantity": 50.0,
+            "unit_price": 60.0,
+            "discount_type": "amount",
+            "discount_value": 0.0,
+            "discount_amount": 0.0,
+            "total": 3000.0,
+            "approved_qty": 40.0,
+            "approved_note": "qr"
+          }
+        ],
+        "log_source": "qr_mobile"
+      },
+      "recorded_at": "2026-05-13T04:43:02.208691+00:00"
+    },
+    {
+      "scenario": "br_sr_qr.9_confirm_no_stock_movement",
+      "step": "src_unchanged",
+      "expected": {
+        "qty": 150.0
+      },
+      "actual": {
+        "qty": 150.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "3813bd7e-203b-401b-9fe2-2a6e52472988",
+        "src_before": 150.0,
+        "src_after": 150.0,
+        "dst_before": 0.0,
+        "dst_after": 0.0
+      },
+      "recorded_at": "2026-05-13T04:43:02.223507+00:00"
+    },
+    {
+      "scenario": "br_sr_qr.9_confirm_no_stock_movement",
+      "step": "dst_unchanged",
+      "expected": {
+        "qty": 0.0
+      },
+      "actual": {
+        "qty": 0.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "3813bd7e-203b-401b-9fe2-2a6e52472988",
+        "src_before": 150.0,
+        "src_after": 150.0,
+        "dst_before": 0.0,
+        "dst_after": 0.0
+      },
+      "recorded_at": "2026-05-13T04:43:02.223511+00:00"
+    },
+    {
+      "scenario": "br_sr_qr.10_confirm_no_bto_created",
+      "step": "bto_count_zero",
+      "expected": {
+        "count": 0
+      },
+      "actual": {
+        "count": 0
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "cc3e057b-3e7c-4e9a-9196-1ce4b3be591e",
+        "bto_count": 0
+      },
+      "recorded_at": "2026-05-13T04:43:02.238118+00:00"
+    },
+    {
+      "scenario": "br_sr_qr.11_duplicate_ref_returns_cached",
+      "step": "second_call_idempotent_true",
+      "expected": {
+        "idem": true
+      },
+      "actual": {
+        "idem": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "de6ff64c-e1b7-4b66-b827-b4a1d715fde3",
+        "first_idem": false,
+        "second_idem": true,
+        "log_after_first": 1,
+        "log_after_second": 1,
+        "approved_qty_now": 25.0
+      },
+      "recorded_at": "2026-05-13T04:43:02.257144+00:00"
+    },
+    {
+      "scenario": "br_sr_qr.11_duplicate_ref_returns_cached",
+      "step": "no_extra_log_row",
+      "expected": {
+        "count": 1
+      },
+      "actual": {
+        "count": 1
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "de6ff64c-e1b7-4b66-b827-b4a1d715fde3",
+        "first_idem": false,
+        "second_idem": true,
+        "log_after_first": 1,
+        "log_after_second": 1,
+        "approved_qty_now": 25.0
+      },
+      "recorded_at": "2026-05-13T04:43:02.257152+00:00"
+    },
+    {
+      "scenario": "br_sr_qr.11_duplicate_ref_returns_cached",
+      "step": "approved_qty_not_999",
+      "expected": {
+        "qty_is_25": true
+      },
+      "actual": {
+        "qty_is_25": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "de6ff64c-e1b7-4b66-b827-b4a1d715fde3",
+        "first_idem": false,
+        "second_idem": true,
+        "log_after_first": 1,
+        "log_after_second": 1,
+        "approved_qty_now": 25.0
+      },
+      "recorded_at": "2026-05-13T04:43:02.257156+00:00"
+    },
+    {
+      "scenario": "br_sr_qr.12_blocked_after_linked_bto",
+      "step": "400_rejected_actionable",
+      "expected": {
+        "state": "err",
+        "status_code": 400
+      },
+      "actual": {
+        "state": "err",
+        "status_code": 400
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "bfe9e740-44f0-4961-9e36-516a31e86f95",
+        "state": "err",
+        "detail": "Cancel the linked transfer draft BTO-20260513-0002 before re-confirming the request."
+      },
+      "recorded_at": "2026-05-13T04:43:02.279355+00:00"
+    },
+    {
+      "scenario": "br_sr_qr.12_blocked_after_linked_bto",
+      "step": "detail_mentions_transfer_or_cancel",
+      "expected": {
+        "mentions": true
+      },
+      "actual": {
+        "mentions": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "bfe9e740-44f0-4961-9e36-516a31e86f95",
+        "state": "err",
+        "detail": "Cancel the linked transfer draft BTO-20260513-0002 before re-confirming the request."
+      },
+      "recorded_at": "2026-05-13T04:43:02.279358+00:00"
+    }
+  ]
+}
