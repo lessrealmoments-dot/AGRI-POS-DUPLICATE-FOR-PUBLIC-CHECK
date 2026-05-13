@@ -32,6 +32,7 @@ import { useUnsavedChangesGuard } from '../lib/useUnsavedChangesGuard';
 import CalcInput from '../components/CalcInput';
 import SmartProductSearch from '../components/SmartProductSearch';
 import ConfirmQuantitiesDialog from '../components/ConfirmQuantitiesDialog';
+import RequestQRDialog from '../components/RequestQRDialog';
 
 // Smart quantity formatter — display max 3 decimal places, no trailing zeros.
 // Raw precision is preserved in the database — this is display only.
@@ -224,6 +225,9 @@ export default function BranchTransferPage() {
   // Phase 1 — "Confirm Quantities" modal state (incoming-request card).
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [confirmTargetRequest, setConfirmTargetRequest] = useState(null);
+  // Phase 2.1 — "View QR" modal state (incoming + outgoing cards).
+  const [qrDialogOpen, setQrDialogOpen] = useState(false);
+  const [qrTargetRequest, setQrTargetRequest] = useState(null);
   // ── Request Stock form state ────────────────────────────────────────────
   const [reqTargetBranch, setReqTargetBranch] = useState('');
   const [reqRows, setReqRows] = useState([{ id: Date.now(), product: null, qty: '' }]);
@@ -2033,6 +2037,13 @@ export default function BranchTransferPage() {
                               {req.approval_status && req.approval_status !== 'pending' ? 'Re-confirm Quantities' : 'Confirm Quantities'}
                             </Button>
                           )}
+                          <Button size="sm" variant="outline"
+                            onClick={() => { setQrTargetRequest(req); setQrDialogOpen(true); }}
+                            className="h-10 px-4 text-xs border-slate-300 text-slate-700 hover:bg-slate-50"
+                            data-testid={`view-qr-incoming-${req.id}`}>
+                            <Smartphone size={12} className="mr-1" />
+                            View QR
+                          </Button>
                           {req.approval_status && req.approval_status !== 'pending' && (
                             <Badge className={`text-xs px-2.5 py-1 ${
                               req.approval_status === 'approved' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
@@ -2173,6 +2184,12 @@ export default function BranchTransferPage() {
                             <Button size="sm" variant="outline" onClick={() => handlePrintRequest(req, 'dot_matrix')}
                               className="h-9 px-3 text-xs" data-testid={`print-dot-outgoing-${req.id}`}>
                               <Printer size={12} className="mr-1" /> Dot Matrix
+                            </Button>
+                            <Button size="sm" variant="outline"
+                              onClick={() => { setQrTargetRequest(req); setQrDialogOpen(true); }}
+                              className="h-9 px-3 text-xs border-slate-300 text-slate-700 hover:bg-slate-50"
+                              data-testid={`view-qr-outgoing-${req.id}`}>
+                              <Smartphone size={12} className="mr-1" /> View QR
                             </Button>
                             {(req.status === 'requested' || req.status === 'draft' || req.status === 'in_progress') && (
                               <Button size="sm" variant="outline" onClick={() => handleCancelRequest(req)}
@@ -3461,6 +3478,19 @@ export default function BranchTransferPage() {
           (branches.find(b => b.id === confirmTargetRequest?.supply_branch_id) || {}).name || ''
         }
         onConfirmed={() => { setConfirmDialogOpen(false); loadRequests(); }}
+      />
+
+      {/* Phase 2.1 — View QR modal (incoming + outgoing request cards). */}
+      <RequestQRDialog
+        open={qrDialogOpen}
+        onOpenChange={setQrDialogOpen}
+        request={qrTargetRequest}
+        requestingBranchName={
+          (branches.find(b => b.id === qrTargetRequest?.branch_id) || {}).name || ''
+        }
+        supplyBranchName={
+          (branches.find(b => b.id === qrTargetRequest?.supply_branch_id) || {}).name || ''
+        }
       />
 
       {/* Smart Capital Pricing Dialog for Branch Transfers */}
