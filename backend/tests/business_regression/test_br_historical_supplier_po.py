@@ -526,3 +526,106 @@ async def test_br_hs_po_12_list_with_outstanding_total(
     )
     assert len(res["rows"]) == 2
     assert res["outstanding_total"] == 1000.0
+
+
+
+# ═════════════════════════════════════════════════════════════════════
+# Test 13 — "Visual only at create / actual cash only on pay" contract
+# Locks the user-stated semantic: encoding a Historical Supplier PO
+# must NEVER touch the expense ledger or wallet balance. Cash leaves
+# only when a payment is recorded.
+# ═════════════════════════════════════════════════════════════════════
+@pytest.mark.asyncio
+async def test_br_hs_po_13_creation_does_not_move_cash_or_expense(
+    tenant, hs_users, record_result
+):
+    main = tenant["branches"]["main"]
+    org_id = tenant["org_id"]
+
+    # Seed a known cashier wallet balance + snapshot expense count.
+    OPENING_CASH = 50_000.0
+    await _raw_db.fund_wallets.update_one(
+        {"branch_id": main, "type": "cashier"},
+        {"$setOnInsert": {"id": _uid("wallet"),
+                          "organization_id": org_id,
+                          "branch_id": main, "type": "cashier",
+                          "active": True},
+         "$set": {"balance": OPENING_CASH}},
+        upsert=True,
+    )
+    expenses_before = await _raw_db.expenses.count_documents(
+        {"branch_id": main}
+    )
+    wallet_before = (await _raw_db.fund_wallets.find_one(
+        {"branch_id": main, "type": "cashier"}, {"_id": 0, "balance": 1}
+    ))["balance"]
+
+    # ── Create a ₱7,500 historical PO ─────────────────────────────────
+    created = await create_historical_supplier_po(
+        {**_payload(main, amount=7500.0, ref="br_hs_po13"),
+         "pin": hs_users["admin_pin"]},
+        user=hs_users["admin_user"],
+    )
+    po_id = created["id"]
+
+    expenses_after_create = await _raw_db.expenses.count_documents(
+        {"branch_id": main}
+    )
+    wallet_after_create = (await _raw_db.fund_wallets.find_one(
+        {"branch_id": main, "type": "cashier"}, {"_id": 0, "balance": 1}
+    ))["balance"]
+
+    record_result(
+        scenario="br_hs_po.13_visual_only_contract",
+        step="create_does_not_write_expense_or_move_cash",
+        expected={
+            "expenses_delta": 0,
+            "wallet_delta": 0.0,
+        },
+        actual={
+            "expenses_delta": expenses_after_create - expenses_before,
+            "wallet_delta": round(wallet_after_create - wallet_before, 2),
+        },
+        evidence={"po_id": po_id},
+    )
+    assert expenses_after_create == expenses_before, (
+        "Historical Supplier PO creation must NOT write to db.expenses — "
+        "it would inflate same-day expense reports."
+    )
+    assert wallet_after_create == wallet_before, (
+        "Historical Supplier PO creation must NOT move cashier wallet — "
+        "no cash leaves the drawer until a payment is recorded."
+    )
+
+    # ── Pay ₱3,000 → cash should leave the drawer; still NO expense row.
+    await pay_historical_supplier_po(po_id, data={
+        "amount": 3000.0, "payment_method": "Cash",
+        "pin": hs_users["admin_pin"],
+    }, user=hs_users["admin_user"])
+
+    expenses_after_pay = await _raw_db.expenses.count_documents(
+        {"branch_id": main}
+    )
+    wallet_after_pay = (await _raw_db.fund_wallets.find_one(
+        {"branch_id": main, "type": "cashier"}, {"_id": 0, "balance": 1}
+    ))["balance"]
+
+    record_result(
+        scenario="br_hs_po.13_visual_only_contract",
+        step="payment_moves_cash_but_writes_no_expense_row",
+        expected={
+            "expenses_delta": 0,
+            "wallet_delta": -3000.0,
+        },
+        actual={
+            "expenses_delta": expenses_after_pay - expenses_before,
+            "wallet_delta": round(wallet_after_pay - wallet_before, 2),
+        },
+        evidence={"po_id": po_id},
+    )
+    # Payments deduct from the cashier wallet (real cash leaves the drawer)
+    # but do NOT create a `db.expenses` row — historical PO payments live in
+    # the historical_supplier_pos.payments[] array, not in the expense ledger.
+    # This keeps same-day Z-report expense totals clean.
+    assert expenses_after_pay == expenses_before
+    assert round(wallet_after_pay - wallet_before, 2) == -3000.0
