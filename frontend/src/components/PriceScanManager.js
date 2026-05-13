@@ -301,6 +301,7 @@ export default function PriceScanManager() {
         await api.post(`${BACKEND_URL}/api/products/smart-price-update`, {
           product_id: issue.product_id,
           prices: cleaned,
+          branch_id: currentBranch?.id || '',
           pin: adminPin,
         });
         toast.success(`${issue.product_name} prices updated`);
@@ -352,6 +353,7 @@ export default function PriceScanManager() {
           await api.post(`${BACKEND_URL}/api/products/smart-price-update`, {
             product_id: alert.product_id,
             prices: parentChanges,
+            branch_id: alert.branch_id || currentBranch?.id || '',
             pin: adminPin,
           });
           parentApplied = true;
@@ -362,6 +364,7 @@ export default function PriceScanManager() {
             await api.post(`${BACKEND_URL}/api/products/smart-price-update`, {
               product_id: cu.product_id,
               prices: cu.prices,
+              branch_id: alert.branch_id || currentBranch?.id || '',
               pin: adminPin,
             });
             childApplied.push(cu.product_name);
@@ -400,6 +403,7 @@ export default function PriceScanManager() {
             await api.post(`${BACKEND_URL}/api/products/smart-price-update`, {
               product_id: issue.product_id,
               prices: cleaned,
+              branch_id: currentBranch?.id || '',
               pin: adminPin,
             });
             fixed++;
@@ -531,6 +535,32 @@ export default function PriceScanManager() {
             </div>
           </div>
 
+          {/* Scope banner — clarifies which prices this dialog will mutate
+              (branch override vs global). Echoes the architecture: when
+              you're in a specific branch you write to `branch_prices`;
+              when you're in "All Branches" you write to global product
+              prices (which only seed NEW branches — existing branch
+              overrides are unaffected). */}
+          {currentBranch?.id ? (
+            <div className="px-6 py-2 bg-blue-50 border-b border-blue-200 flex items-center gap-2 text-[12px]"
+                 data-testid="price-scope-banner-branch">
+              <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />
+              <span className="text-blue-900">
+                You are changing prices for <strong>{currentBranch.name}</strong> only.
+                Other branches and the global default are <strong>not</strong> affected.
+              </span>
+            </div>
+          ) : (
+            <div className="px-6 py-2 bg-amber-50 border-b border-amber-200 flex items-center gap-2 text-[12px]"
+                 data-testid="price-scope-banner-global">
+              <div className="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0" />
+              <span className="text-amber-900">
+                <strong>All Branches</strong> view — you are changing the <strong>global</strong> default.
+                New branches inherit this; existing branch overrides remain untouched.
+                Switch to a specific branch to update its prices only.
+              </span>
+            </div>
+          )}
           <div className="px-6 py-2 flex items-center gap-4 text-xs border-b bg-slate-50">
             {/* Tabs */}
             <button
@@ -931,22 +961,59 @@ export default function PriceScanManager() {
                               {a.changed_by_name && <div className="text-slate-400">by {a.changed_by_name}</div>}
                             </td>
                             <td className="px-2 py-2">
-                              <div className="flex flex-col gap-1">
-                                <Button size="sm"
-                                  onClick={() => handleSaveCapAlert(a)}
-                                  className="h-7 text-[11px] bg-[#1A4D2E] hover:bg-[#14532d] text-white"
-                                  data-testid={`cap-update-${a.id}`}>
-                                  <Lock size={10} className="mr-1" />
-                                  Update Prices
-                                </Button>
-                                <Button size="sm" variant="outline"
-                                  onClick={() => ackCapAlert(a.id)}
-                                  className="h-7 text-[11px] text-slate-600"
-                                  data-testid={`ack-cap-${a.id}`}>
-                                  <Check size={10} className="mr-1" />
-                                  Acknowledge
-                                </Button>
-                              </div>
+                              {(() => {
+                                // Detect any pending price edits (parent or any child)
+                                // so we can rename the primary button + warn on ack.
+                                const parentEdits = capEditPrices[a.id] || {};
+                                const hasParentEdit = Object.entries(parentEdits).some(([k, v]) => {
+                                  const num = parseFloat(v);
+                                  if (isNaN(num) || num <= 0) return false;
+                                  const cur = parseFloat(a.prices?.[k] || 0);
+                                  return Math.abs(num - cur) >= 0.005;
+                                });
+                                const hasChildEdit = (a.children || []).some(c => {
+                                  const e = (capChildEditPrices[a.id] || {})[c.product_id] || {};
+                                  return Object.entries(e).some(([k, v]) => {
+                                    const num = parseFloat(v);
+                                    if (isNaN(num) || num <= 0) return false;
+                                    const cur = parseFloat(c.prices?.[k] || 0);
+                                    return Math.abs(num - cur) >= 0.005;
+                                  });
+                                });
+                                const hasEdits = hasParentEdit || hasChildEdit;
+                                return (
+                                  <div className="flex flex-col gap-1">
+                                    <Button size="sm"
+                                      onClick={() => {
+                                        // No edits → straight ack (no PIN required).
+                                        // Has edits → PIN-gated update + auto-ack.
+                                        if (hasEdits) handleSaveCapAlert(a);
+                                        else ackCapAlert(a.id);
+                                      }}
+                                      className="h-7 text-[11px] bg-[#1A4D2E] hover:bg-[#14532d] text-white"
+                                      data-testid={`cap-update-${a.id}`}>
+                                      {hasEdits ? <Lock size={10} className="mr-1" /> : <Check size={10} className="mr-1" />}
+                                      {hasEdits ? 'Update & Acknowledge' : 'Acknowledge'}
+                                    </Button>
+                                    {hasEdits && (
+                                      <Button size="sm" variant="outline"
+                                        onClick={() => {
+                                          if (!window.confirm(
+                                            'You have unsaved price changes for this product.\n\n' +
+                                            'Click Cancel to go back and use "Update & Acknowledge" to save them.\n\n' +
+                                            'Click OK to dismiss this alert without saving any price changes.'
+                                          )) return;
+                                          ackCapAlert(a.id);
+                                        }}
+                                        className="h-7 text-[11px] text-slate-600"
+                                        data-testid={`ack-cap-${a.id}`}>
+                                        <X size={10} className="mr-1" />
+                                        Dismiss without saving
+                                      </Button>
+                                    )}
+                                  </div>
+                                );
+                              })()}
                             </td>
                           </tr>
                           {/* Child repack rows (when expanded). Same column

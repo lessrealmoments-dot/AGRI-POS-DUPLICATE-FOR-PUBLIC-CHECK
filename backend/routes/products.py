@@ -1300,6 +1300,45 @@ async def smart_price_update(data: dict, user=Depends(get_current_user)):
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
+    # ── Branch scope ───────────────────────────────────────────────────
+    # When `branch_id` is provided, the update is scoped to that branch's
+    # `branch_prices` row (merges with any existing per-scheme override so
+    # we don't accidentally wipe wholesale when only retail is edited).
+    # When `branch_id` is empty/None, write to the global product.prices
+    # (legacy behaviour for the "All Branches" view).
+    branch_id = (data.get("branch_id") or "").strip()
+    scope = "branch" if branch_id else "global"
+
+    if branch_id:
+        existing = await db.branch_prices.find_one(
+            {"product_id": pid, "branch_id": branch_id},
+            {"_id": 0, "prices": 1},
+        )
+        merged_prices = dict((existing or {}).get("prices") or {})
+        merged_prices.update(cleaned)
+        update_doc = {
+            "product_id": pid,
+            "branch_id": branch_id,
+            "prices": merged_prices,
+            "updated_at": now_iso(),
+            "updated_by_id": user["id"],
+            "updated_by_name": user.get("full_name", user.get("username", "")),
+        }
+        if existing:
+            await db.branch_prices.update_one(
+                {"product_id": pid, "branch_id": branch_id},
+                {"$set": update_doc},
+            )
+        else:
+            update_doc["id"] = new_id()
+            update_doc["created_at"] = now_iso()
+            await db.branch_prices.insert_one(update_doc)
+        await mark_price_reviewed(pid, branch_id, source="smart_price")
+        return {"ok": True, "product_id": pid, "branch_id": branch_id,
+                "scope": scope, "prices": merged_prices,
+                "pin_method": verifier.get("method", "")}
+
+    # ── Global path (legacy) — "All Branches" view ──────────────────────
     merged = dict(product.get("prices") or {})
     merged.update(cleaned)
 
@@ -1316,7 +1355,7 @@ async def smart_price_update(data: dict, user=Depends(get_current_user)):
     for inv in inv_rows:
         await mark_price_reviewed(pid, inv["branch_id"], source="smart_price")
 
-    return {"ok": True, "product_id": pid, "prices": merged,
+    return {"ok": True, "product_id": pid, "scope": scope, "prices": merged,
             "pin_method": verifier.get("method", "")}
 
 

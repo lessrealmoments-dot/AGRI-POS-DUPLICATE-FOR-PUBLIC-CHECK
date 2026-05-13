@@ -1,0 +1,98 @@
+{
+  "generated_at": "2026-05-13T10:05:34.548687+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 5,
+  "pass_count": 5,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br_sps.1_branch_id_writes_branch_only",
+      "step": "global_unchanged_branch_set",
+      "expected": {
+        "scope": "branch",
+        "global_retail": 100.0,
+        "branch_retail": 125.0
+      },
+      "actual": {
+        "scope": "branch",
+        "global_retail": 100.0,
+        "branch_retail": 125.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "product_id": "br_sps-p-ced366cf"
+      },
+      "recorded_at": "2026-05-13T10:05:33.592045+00:00"
+    },
+    {
+      "scenario": "br_sps.2_no_branch_id_writes_global",
+      "step": "global_retail_updated",
+      "expected": {
+        "scope": "global",
+        "global_retail": 225.0
+      },
+      "actual": {
+        "scope": "global",
+        "global_retail": 225.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "product_id": "br_sps-p-c6c870cd"
+      },
+      "recorded_at": "2026-05-13T10:05:33.822076+00:00"
+    },
+    {
+      "scenario": "br_sps.3_branch_scope_merges",
+      "step": "existing_wholesale_override_preserved",
+      "expected": {
+        "retail": 110.0,
+        "wholesale": 88.0
+      },
+      "actual": {
+        "retail": 110.0,
+        "wholesale": 88.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "product_id": "br_sps-p-d12b1901"
+      },
+      "recorded_at": "2026-05-13T10:05:34.049927+00:00"
+    },
+    {
+      "scenario": "br_sps.4_no_cross_branch_contamination",
+      "step": "branch_b_retail_unchanged_after_branch_a_update",
+      "expected": {
+        "branch_b_retail": 175.0,
+        "branch_a_retail": 105.0
+      },
+      "actual": {
+        "branch_b_retail": 175.0,
+        "branch_a_retail": 105.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "product_id": "br_sps-p-8f7945dc",
+        "branch_a": "p2b-br-2b40f792",
+        "branch_b": "br-b2-br-07e137b6"
+      },
+      "recorded_at": "2026-05-13T10:05:34.279177+00:00"
+    },
+    {
+      "scenario": "br_sps.5_manager_pin_rejected",
+      "step": "manager_pin_403_even_for_branch_scope",
+      "expected": {
+        "state": "err",
+        "status": 403
+      },
+      "actual": {
+        "state": "err",
+        "status": 403
+      },
+      "status": "PASS",
+      "evidence": {
+        "product_id": "br_sps-p-ae46d608"
+      },
+      "recorded_at": "2026-05-13T10:05:34.506353+00:00"
+    }
+  ]
+}
