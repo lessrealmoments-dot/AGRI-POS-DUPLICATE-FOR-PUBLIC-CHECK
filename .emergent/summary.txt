@@ -1,38 +1,67 @@
-<analysis>**original_problem_statement**: Finalize Phase 4 Cleanup, conduct Phase 5 Deployment Readiness Assessment, and apply surgical deployment fixes. Extend Phase 5+ Business Flow Regression Suite. Ensure robust E2E automated test suite mimicking real POS operations with zero database pollution. Most recently, diagnose and fix an urgent production bug where prepared-order completions were creating customer balances but the invoices/receipts disappeared due to missing s, and refine UI for dot-matrix printing and branch transfers. 
+<analysis>**original_problem_statement**: Overhaul the Branch Transfer workflow by implementing a Stock Request Confirmation Layer (Phase 1). Branch A requests stock; Branch B (or Main Branch) reviews and confirms a specific quantity () before creating a Branch Transfer Order (BTO). Stock movement must remain strictly tied to BTO receiving/accepting, and original requested quantities must remain immutable. 
+
+**PRODUCT REQUIREMENTS**:
+- Build  to save  and log approval metadata.
+- Build  to retrieve quantities and log history.
+- Modify  to prefill  from .
+- Add web modal Confirm Quantities on incoming request cards for supply branch managers/admins.
+- Ensure all actions are properly PIN/TOTP authenticated using  with a new  policy.
+- No stock movement during this phase.
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
-**what currently exists?** A React + FastAPI multi-tenant POS application. Phase 5 Deployment Assessment is COMPLETED and the app is live with recent bug fixes. The Business Regression (BR) suite is fully green (185 rows, 0 failures, zero-footprint). A major visibility bug regarding prepared orders (H-1) has been fixed, and a backfill restored ₱170k+ of AR data on production. Front-end refinements include a robust Dot-Matrix printing layout (with discounts and page numbering), enhanced Branch Transfer request recovery, and a TOTP-secured Add Old Balance feature for customer historical credit.
+**what currently exists?** 
+A stable React + FastAPI multi-tenant POS application. Phase 0 (Branch Transfer Invariant Tests) and Phase 0.5 (Branch Transfer Lifecycle/Context Fixes) have just been fully completed and tested. Pre-requisite bugs regarding  locks and unauthorized cross-branch fulfillment have been fixed. POS Terminal date/time timezone sync and dual-date BIR compliance features were also successfully patched. The codebase is perfectly primed for Phase 1 implementation.
 
 **Last working item**: 
-    - Last item agent was working: Preparing the clean next-fork handoff document () to capture stable deployed status, list completed fixes, and outline the next two potential workstreams (BR7 or SMS Notifications) without starting any code.
-    - Status: USER VERIFICATION PENDING / NONE (Awaiting user to provide the opening prompt for the next workstream)
-    - Agent Testing Done: N/A (Documentation task)
-    - Which testing method agent to use? N/A
-    - User Testing Done: Y
+    - Last item agent was working: Preparing handoff documentation for Phase 1 () and logging status to .
+    - Status: NOT STARTED (Ready for next fork)
+    - Agent Testing Done: Y (For Phase 0 & 0.5)
+    - Which testing method agent to use? Python testing via ============================= test session starts ==============================
+platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
+rootdir: /app
+plugins: asyncio-1.3.0, anyio-4.12.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 0 items
 
-**All Pending/In progress Issue list**: 
-(No active P0/P1 issues. The H-1 bug was successfully fixed and backfilled in production).
+============================ no tests ran in 0.00s =============================
+    - User Testing Done: N
+
+**All Pending/In progress Issue list**:  
+  - Issue 1: Internal invoice silent-fail (P2)
+     - Next debug checklist:  swallows failures on invoice creation.
+     - Status: NOT STARTED
+     - Is recurring issue? N
+  - Issue 2:  PUT can blank  (P2)
+     - Next debug checklist: Needs defensive assert (BT-AUD-34).
+     - Status: NOT STARTED
+     - Is recurring issue? N
+  - Issue 3: Status divergence in offline finalize (P3)
+     - Next debug checklist:  in  writes , but live  writes .
+     - Status: NOT STARTED
+     - Is recurring issue? N
 
 **In progress Task List**: 
-  (No tasks are actively in progress. The agent paused intentionally for the fork.)
+  - Task 1: Implement Phase 1 Stock Request Confirmation Layer (P0)
+     - Where to resume: Read . Begin with backend endpoints and .
+     - What will be achieved with this? Allows Main Branch/Owners to approve reduced quantities against Branch A's requests before a BTO is created, without moving stock.
+     - Status: NOT STARTED
+     - Should Test frontend/backend/both after fix? Both
+     - Blocked on something: N/A
 
-**Upcoming and Future Tasks**
-    Upcoming Tasks (Pending User Choice for Next Assessment):
-    - **Workstream A**: Implement  (Test the seam between branch transfer and repack sale). (P1)
-    - **Workstream B**: Assess new SMS feature: Prepared Order Completion SMS notification (for non-walk-in customers with valid phone numbers upon order finalization). (P1)
+**Upcoming and Future Tasks**:
+    Upcoming Tasks:
+    - Phase 2: QR/mobile confirmation (Mobile prep flow via  + one-time bearer token) (P1)
+    - Phase 3: Variance ticket polish (PIN on large losses, invoice line-item rewrite) (P1)
     
     Future Tasks:
-    - Phase 4A.2: Concurrent Held-Sales Queue (P1)
-    - Add Sync this AR to customer SMS toggle to Historical Credit (P2)
-    - Rename  to  (P2)
-    - Fix 11 hardcoded-date legacy FE unit tests using .
-    - H-7: JWT TTL 24h with no rotation/blacklist (Backlog)
-    - H-9:  per-tenant unique index (Backlog)
-    - H-10:  unique index (Backlog)
-    - H-12: Offline negative stock incident_ticket + admin notification (Backlog)
-    - H-14:  endpoint hardening (Backlog)
-    - Fix Status divergence:  writes  while live writes  (Backlog)
+    - Phase 4: Sales-movement context + slow-moving SMS engine (P2)
+    - Implement View QR modal on branch transfer cards (Phase 0.6) (P2)
+    - Phase 4A.2: Concurrent Held-Sales Queue (P2)
+    - Prepared Order Completion SMS notification (P2)
+    - Add Sync this AR to customer SMS toggle to Historical Credit (P3)
+    - Rename  to  (P3)
+    - Fix 11 hardcoded-date legacy FE unit tests using  (P3)
     - Full ============================= test session starts ==============================
 platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
 rootdir: /app
@@ -40,119 +69,105 @@ plugins: asyncio-1.3.0, anyio-4.12.1
 asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
 collected 0 items
 
-============================ no tests ran in 0.01s ============================= test suite cleanup to remove DB state pollution.
+============================ no tests ran in 0.01s ============================= test suite cleanup to remove DB state pollution (P3)
 
-**Completed work in this session**
-- Built  for readable terminal BR reporting (DONE)
-- Created  (DONE)
-- Diagnosed live bug (H-1): Draft  stripped  resulting in invisible invoices. (DONE)
-- Implemented and successfully applied  to restore orphan invoices on live prod. (DONE)
-- Implemented  covering all 5 payment types. (DONE)
-- Fixed Dot Matrix Printing: Added item-level discounts, +1pt font size, and rebuilt Trust Agreement layout with letterhead, QR, and Page X of Y (). (DONE)
-- Added Dot Matrix print button on  InvoiceDetailModal. (DONE)
-- Fixed Branch Transfer stuck  requests by making backend  re-entrant. Added Print, Cancel, and Resume Transfer buttons to UI. (DONE)
-- Added Add Old Balance feature via  (admin/owner only, TOTP protected) wired to . (DONE)
-- Created  (DONE)
+**Completed work in this session**:
+- Conducted full Branch Transfer Audit and proposed 4-phase rollout () (DONE)
+- Phase 0: Built  proving stock movement invariants (DONE)
+- Phase 0.5: Fixed BT  cancel dead-end and missing branch-context guards. Built  (DONE)
+- Fixed POS Terminal Timezone sync issue ( now pulls org TZ) (DONE)
+- Fixed POS Terminal BIR dual-date compliance ( = today,  = next day on closed days) + added BR test (DONE)
+- Prepared Phase 1 Handoff Documentation (DONE)
 
-**Earlier issues found/mentioned but not fixed**
-   - Issue 1: Status divergence in offline finalize.
-     - Debug checklist:  in  writes , but live  writes . Causes offline-synced credit invoices to be invisible under the Credit tab (though visible under All).
-     - Why to solve this issue and what will be achieved with this? Data consistency between online and offline replay flows.
-     - Should Test frontend/backend/both after fix: Backend
-     - Is recurring issue? N (Low priority, deferred to backlog).
+**Earlier issues found/mentioned but not fixed**:
+   - Issue 1: Verifier identity not consistently stamped on PO cancellation (E12 gap).
+   - Issue 2: Admins see incoming and outgoing requests mixed in the All Branches view without visual badges indicating the direction.
 
-**Known issue recurrence from previous fork**
+**Known issue recurrence from previous fork**:
   - Issue recurrence in previous fork: 11 Pre-existing Unit Test Failures (Hardcoded dates)
-  - Recurrence count: 38+
+  - Recurrence count: 39+
   - Status: NOT STARTED
 
-**Code Architecture**
+**Code Architecture**:
 
 
-**Key Technical Concepts**
-- **Zero Footprint DB Testing**: Tests dynamically mount/teardown tenant data to prevent backend state pollution.
-- **Tenant Isolation Proxy**:  auto-injects . Bypassing this via  caused the H-1 bug.
-- **Dot-Matrix Printing**: Front-end engine converts structured invoice data into HTML layouts optimized for dot-matrix fanfold paper formatting.
-- **TOTP Security**: Sensitive historical data actions (Add Old Balance) bypass manager PINs and strictly require Admin/Owner TOTP approval server-side.
+**Key Technical Concepts**:
+- **PIN-gated action policies**:  is the standard for authorization (defaults to manager/admin/TOTP).
+- **Zero Footprint DB Testing**: Tests dynamically mount/teardown tenant data. Use the  suite strictly; avoid legacy full pytest.
+- **BIR Dual-Date Model**: For closed business days,  remains the actual sale day, but  (record date) gets bumped to the next calendar day.
 
-**key DB schema**
-  - : Tracks POS sales, now securely mapped with  on all finalized states.
-  - : Audits any script-driven backfills.
+**key DB schema**:
+  - : Handles stock requests ().
+  - : Handles actual fulfillment and stock mutation.
+  - : (To be created) append-only ledger for approvals.
 
-**changes in tech stack**
+**changes in tech stack**:
   - None.
 
-**All files of reference** 
-  -  (CRITICAL: Read this first to understand the current stable state and next prompt instructions)
-  - 
-  - 
+**All files of reference**:
+  -  (CRITICAL: Read this entirely before coding Phase 1)
   - 
   - 
   - 
   - 
 
 **Areas that need refactoring**: 
-  - Full ============================= test session starts ==============================
-platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
-rootdir: /app
-plugins: asyncio-1.3.0, anyio-4.12.1
-asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
-collected 0 items
+  - Legacy test suite () pollutes database state and is brittle.
 
-============================ no tests ran in 0.01s ============================= legacy test suite cleanup to remove DB state pollution.
-
-**key api endpoints**
-  -  (Backfill logic)
-  -  (Made re-entrant)
-  -  (Reused for Add Old Balance)
-
-**Critical Info for New Agent** 
-- **STRICT WORKFLOW RULE:** Do NOT jump into coding. Wait for the user to copy-paste the suggested opening prompt regarding Workstream A (BR7) or Workstream B (SMS feature). 
-- Always conduct a codebase-aware alignment assessment prior to implementing any new feature (especially for the SMS notification provider/config discovery).
-- The production environment has been successfully patched and verified. Do not make any further patches to the draft/for_preparation completion logic unless a regression occurs.
-
-**documents and test reports created in this job** 
+**key api endpoints**:
   - 
+  - 
+  - 
+  - **NEW** (To Build): 
+  - **NEW** (To Build): 
+
+**Critical Info for New Agent**: 
+- **STRICT CONSTRAINT:** Do NOT jump into Phase 2 (QR/mobile confirmation) or implement SMS analytics yet. Your sole focus is **Phase 1: Stock Request Confirmation Layer** (web modal, backend endpoints, and prefill logic). 
+- Always read  before writing any code.
+- Write your tests in  using  and ensure zero DB pollution.
+- Test Credentials can be found at .
+
+**documents and test reports created in this job**:
   - 
   - 
   - 
 
-**Last 10 User Messages and any pending HUMAN messages** 
- 1. User: Fix the dot matrix print on sale (discount missing, bump font size by 1).
- 2. Agent: Updated  (discount column, font bumped).
- 3. User: Validate deployment command sequence without deploying yet. 
- 4. Agent: Validated commands, noted missing steps for backend restart and frontend publish, mapped out safe deploy script.
- 5. User: Note that dot matrix print option is missing from the  history.
- 6. Agent: Added Dot Matrix print button to .
- 7. User: Executed git pulls, ran dry-runs and apply for the invoice organization_id backfill on production.
- 8. Agent: Restructured the dot matrix trust receipt format to match the user's provided images (letterhead, Page X of Y, terms).
- 9. User: Add Cancel, Print buttons, and Resume Transfer flow to  to fix stuck in progress states. Add Add Old Balance feature for existing customers.
- 10. User: Before we fork, please prepare the next-fork handoff (). Do NOT code. (Pending user to initiate the actual new workstream).
+**Last 10 User Messages and any pending HUMAN messages**: 
+ 1. User: Assess redesign for Request Review, Approved Quantity, Variance Ticket without coding yet.
+ 2. Agent: Found invariant safe. Proposed Phase 0-4 rollout.
+ 3. User: Clarified that QR mobile action is for prep staff (mutates intent, not stock). Re-assess security model.
+ 4. Agent: Rebuilt QR security model using PIN auth + one-time tokens.
+ 5. User: Approved Phase 0 (Invariant Tests only). No feature code yet.
+ 6. Agent: Wrote . Passes 100%.
+ 7. User: Found bug (In-Progress dead-end) and context gaps. Asked for Phase 0.5 fix.
+ 8. Agent: Wrote . Fixed backend + frontend.
+ 9. User: Divert momentarily to fix POS Terminal Date/Time timezone sync + dual-date bug.
+ 10. Agent/User: Fixed POS terminal bugs. User directed agent to prepare handoff spec for Phase 1. 
 
-**Project Health Check:**
-  - Broken: 11 hardcoded-date FE unit tests. The legacy full backend pytest suite.
+**Project Health Check**:
+  - Broken: Legacy FE tests (11 failures).
   - Mocked: NA.
 
-**3rd Party Integrations** 
+**3rd Party Integrations**: 
   - Cloudflare R2 / Boto3 (File Storage) — requires User API Key
   - Resend (Emails) — requires User API Key
 
-**Testing status**
-  - Testing agent used after significant changes: NO (Rigorous isolated Pytest scripts run under ).
+**Testing status**:
+  - Testing agent used after significant changes: NO (Agent self-tests flawlessly with  suite)
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: .
-  - Known regressions: None. (H-1 fixed).
+  - Test files created: , , .
+  - Known regressions: None.
 
-**Credentials to test flow:**
-  - Org Admin: 
-  - Pass: 
-  - Manager PIN: 
+**Credentials to test flow**:
+  - See 
 
-**What agent forgot to execute**
-  - Nothing. Agent successfully paused without coding Workstream A or B, honoring the user constraints.
+**What agent forgot to execute**:
+  - Nothing. The agent successfully built the prerequisite foundation and paused correctly for handoff.
 
-**Debugging checklist for current issue**
-    Issue: Wait for the user to present the opening prompt for the next fork.
+**Debugging checklist for current issue**:
+    Issue: Implement Phase 1: Stock Request Confirmation Layer.
     1. Read .
-    2. Await User's response instructing whether to assess  (Workstream A) or the SMS feature (Workstream B).
-    3. Perform a deep codebase analysis *before* writing code.</analysis>
+    2. Write .
+    3. Build  and .
+    4. Ensure  prefills in .
+    5. Build Confirm Quantities modal in .</analysis>
