@@ -1,0 +1,95 @@
+{
+  "generated_at": "2026-05-13T07:41:54.694919+00:00",
+  "pytest_exitstatus": 1,
+  "row_count": 5,
+  "pass_count": 5,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br_bt_org.1_update_ignores_hostile_org",
+      "step": "org_id_unchanged_after_PUT",
+      "expected": {
+        "org_id": "p2b-org-61b90397",
+        "hostile_won": false
+      },
+      "actual": {
+        "org_id": "p2b-org-61b90397",
+        "hostile_won": false
+      },
+      "status": "PASS",
+      "evidence": {
+        "transfer_id": "0c31c18a-53ce-43f4-9ac2-7e0501977cc9",
+        "hostile": "evil-other-tenant"
+      },
+      "recorded_at": "2026-05-13T07:41:54.121611+00:00"
+    },
+    {
+      "scenario": "br_bt_org.2_update_ignores_blank_org",
+      "step": "org_id_unchanged_after_blank_payload",
+      "expected": {
+        "org_id": "p2b-org-61b90397",
+        "blanked": false
+      },
+      "actual": {
+        "org_id": "p2b-org-61b90397",
+        "blanked": false
+      },
+      "status": "PASS",
+      "evidence": {
+        "transfer_id": "b85ca6ea-75b0-4688-90e0-fe6aae36229d"
+      },
+      "recorded_at": "2026-05-13T07:41:54.133949+00:00"
+    },
+    {
+      "scenario": "br_bt_org.3_approve_preserves_org",
+      "step": "org_id_unchanged_after_approve",
+      "expected": {
+        "org_id": "p2b-org-61b90397",
+        "status": "sent"
+      },
+      "actual": {
+        "org_id": "p2b-org-61b90397",
+        "status": "sent"
+      },
+      "status": "PASS",
+      "evidence": {
+        "transfer_id": "1fc90df6-a4d0-4c01-b852-4678b44809c7"
+      },
+      "recorded_at": "2026-05-13T07:41:54.599053+00:00"
+    },
+    {
+      "scenario": "br_bt_org.4_reject_preserves_org",
+      "step": "org_id_unchanged_after_reject",
+      "expected": {
+        "org_id": "p2b-org-61b90397",
+        "status": "returned"
+      },
+      "actual": {
+        "org_id": "p2b-org-61b90397",
+        "status": "returned"
+      },
+      "status": "PASS",
+      "evidence": {
+        "transfer_id": "c8a97a43-b7fa-4ad2-9759-6fb820dd906b"
+      },
+      "recorded_at": "2026-05-13T07:41:54.606700+00:00"
+    },
+    {
+      "scenario": "br_bt_org.5_resubmit_preserves_org",
+      "step": "org_id_unchanged_after_resubmit",
+      "expected": {
+        "org_id": "p2b-org-61b90397",
+        "status": "pending_approval"
+      },
+      "actual": {
+        "org_id": "p2b-org-61b90397",
+        "status": "pending_approval"
+      },
+      "status": "PASS",
+      "evidence": {
+        "transfer_id": "1999221c-f47e-4d39-b1a7-503b9cc29eb4"
+      },
+      "recorded_at": "2026-05-13T07:41:54.616584+00:00"
+    }
+  ]
+}

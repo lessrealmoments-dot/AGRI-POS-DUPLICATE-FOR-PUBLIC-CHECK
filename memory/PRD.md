@@ -1,6 +1,54 @@
 # AgriBooks PRD
 
 
+## Phase 3.1 — `update_transfer` organization_id Hardening (Feb 13 2026) ✅
+
+### Status: COMPLETE — defensive tripwire + 6 BR regression tests; **128/128 BR pass / 394 rows**; zero footprint.
+
+### Why
+Preventive only. Current `update_transfer` (and sibling BTO writers) already use hardcoded `$set` whitelists so a rogue `organization_id` field in the payload can't reach Mongo. This phase adds a tripwire guard PLUS regression tests so a future refactor (e.g. switching to `{"$set": data}`) can't silently break tenant scoping the way the previous prepared-order bug did.
+
+### What was delivered
+1. **NEW defensive helper** `routes/branch_transfers._assert_org_preserved(transfer_id, prev_org_id)` — re-reads the row post-write and 500s loudly if `organization_id` changed unexpectedly. Tripwire only; no-op today.
+2. **Guard applied** at the end of the 4 most exposed BTO writers (each = 1 LOC):
+   - `update_transfer` (PUT `/branch-transfers/{id}`)
+   - `send_transfer`
+   - `approve_pending_transfer`
+   - `reject_pending_transfer`
+   - `resubmit_returned_transfer`
+3. **NEW BR test** `backend/tests/business_regression/test_br_bt_org_id_hardening.py` — 6 tests / 6 rows. Covers:
+   1. PUT ignores explicit hostile `organization_id` in payload.
+   2. PUT ignores blank `organization_id` (the prior prepared-order class of bug).
+   3. `/approve` preserves org_id end-to-end (and rogue payload field is ignored).
+   4. `/reject` preserves org_id end-to-end.
+   5. `/resubmit` preserves org_id end-to-end.
+   6. After a hostile update, BTO still appears in `list_transfers` (tenant-visible).
+
+### Verification
+- **New test file**: 6/6 pass.
+- **Full BR**: **128/128 pass / 394 rows / 0 fail** (was 122/388 → +6 tests / +6 rows).
+- Zero DB footprint confirmed (no `br_bt_org-*` or `evil-*` rows lingering after teardown).
+- Frontend untouched.
+- ruff clean.
+
+### Files changed (this fork)
+- MOD `backend/routes/branch_transfers.py` (helper + 5 guard call-sites)
+- NEW `backend/tests/business_regression/test_br_bt_org_id_hardening.py`
+
+### Endpoints/writers now covered by the guard
+- `PUT  /api/branch-transfers/{id}` (update)
+- `POST /api/branch-transfers/{id}/send`
+- `POST /api/branch-transfers/{id}/approve`
+- `POST /api/branch-transfers/{id}/reject`
+- `POST /api/branch-transfers/{id}/resubmit`
+
+NOT covered (intentional — out of scope to keep PR tight):
+- `terminal_receive_transfer`, `receive_transfer`, `accept_receipt`, `dispute_receipt`, `cancel_transfer`, `_apply_receipt`. These can be added in a follow-up if regression demand surfaces.
+
+### Invariant
+- After every guarded writer's `$set`, the row's `organization_id` is identical to what it was when the writer started, or the writer raises 500 and rolls forward no further work.
+
+
 ## Smart Price Scan — Capital Change Inline Update + Repack Children (Feb 13 2026) ✅
 
 ### Status: COMPLETE — Capital Changes tab has full feature parity with Below Cost AND nested repack-child rows; **122/122 BR pass / 388 rows**.

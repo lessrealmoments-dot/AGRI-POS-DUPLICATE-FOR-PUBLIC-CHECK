@@ -15,6 +15,37 @@ from utils import (
 router = APIRouter(prefix="/branch-transfers", tags=["Branch Transfers"])
 
 
+# ── Defensive tripwire ─────────────────────────────────────────────────────
+async def _assert_org_preserved(transfer_id: str, prev_org_id):
+    """Defensive guard: after any BTO writer, re-read the row and fail
+    loudly if `organization_id` was blanked or changed.
+
+    Today every BTO writer uses a hardcoded `$set` whitelist so a rogue
+    `organization_id` field in the payload can't reach Mongo — but a
+    future refactor that swaps to `{"$set": data}` would silently break
+    tenant scoping. This is a tripwire, not active load-bearing logic.
+
+    Only raises when the row still exists AND the org_id differs from
+    what the caller captured pre-write. No-ops on missing prev_org_id.
+    """
+    if not prev_org_id:
+        return
+    cur = await db.branch_transfer_orders.find_one(
+        {"id": transfer_id}, {"_id": 0, "organization_id": 1}
+    )
+    if not cur:
+        return  # legitimately deleted; not our concern
+    if cur.get("organization_id") != prev_org_id:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Org-id preservation tripwire — transfer "
+                f"{transfer_id} organization_id changed unexpectedly. "
+                "This is a regression. No further mutation allowed."
+            ),
+        )
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 async def _notify_admins_pending_approval(transfer: dict, requester: dict):
@@ -370,6 +401,7 @@ async def update_transfer(transfer_id: str, data: dict, user=Depends(get_current
         "updated_by": user.get("full_name", user["username"]),
     }
     await db.branch_transfer_orders.update_one({"id": transfer_id}, {"$set": update})
+    await _assert_org_preserved(transfer_id, order.get("organization_id"))
     updated = await db.branch_transfer_orders.find_one({"id": transfer_id}, {"_id": 0})
     return updated
 
@@ -692,6 +724,7 @@ async def approve_pending_transfer(transfer_id: str, data: dict, user=Depends(ge
             "sent_by": (verifier_user or {}).get("id") or user["id"],
         }}
     )
+    await _assert_org_preserved(transfer_id, order.get("organization_id"))
 
     # Re-use the same destination notification + invoice update + doc-code path as /send
     from_branch_doc = await db.branches.find_one({"id": order["from_branch_id"]}, {"_id": 0, "name": 1})
@@ -811,6 +844,7 @@ async def reject_pending_transfer(transfer_id: str, data: dict, user=Depends(get
             "rejection_reason": reason,
         }}
     )
+    await _assert_org_preserved(transfer_id, order.get("organization_id"))
 
     # SMS the manager who created it
     try:
@@ -876,6 +910,7 @@ async def resubmit_returned_transfer(transfer_id: str, user=Depends(get_current_
         },
          "$unset": {"rejected_by": "", "rejected_by_name": "", "rejected_at": "", "rejection_reason": ""}}
     )
+    await _assert_org_preserved(transfer_id, order.get("organization_id"))
     refreshed = await db.branch_transfer_orders.find_one({"id": transfer_id}, {"_id": 0})
     try:
         await _notify_admins_pending_approval(refreshed, user)
@@ -992,6 +1027,7 @@ async def send_transfer(transfer_id: str, user=Depends(get_current_user)):
         {"id": transfer_id},
         {"$set": {"status": "sent", "sent_at": now_iso(), "sent_by": user["id"]}}
     )
+    await _assert_org_preserved(transfer_id, order.get("organization_id"))
 
     # Notify destination branch users + admins
     from_branch = await db.branches.find_one({"id": order["from_branch_id"]}, {"_id": 0, "name": 1})
