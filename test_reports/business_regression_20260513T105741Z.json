@@ -1,0 +1,176 @@
+{
+  "generated_at": "2026-05-13T10:57:41.483501+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 9,
+  "pass_count": 9,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br_cap_change.1_enrichment",
+      "step": "alert_has_prices_movingavg_margins",
+      "expected": {
+        "has_prices": true,
+        "has_scheme_margins": true,
+        "retail_margin": 15.0,
+        "wholesale_thin": true
+      },
+      "actual": {
+        "has_prices": true,
+        "has_scheme_margins": true,
+        "retail_margin": 15.0,
+        "wholesale_thin": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "alert_id": "cap-112522f4",
+        "product_id": "br_cap-p-3e7e8284"
+      },
+      "recorded_at": "2026-05-13T10:57:40.922767+00:00"
+    },
+    {
+      "scenario": "br_cap_change.2_below_cost_visible",
+      "step": "retail_below_wholesale_not",
+      "expected": {
+        "retail_below": true,
+        "wholesale_below": false
+      },
+      "actual": {
+        "retail_below": true,
+        "wholesale_below": false
+      },
+      "status": "PASS",
+      "evidence": {
+        "alert_id": "cap-6d3f4d57"
+      },
+      "recorded_at": "2026-05-13T10:57:40.927391+00:00"
+    },
+    {
+      "scenario": "br_cap_change.3_branch_override",
+      "step": "retail_uses_branch_price_wholesale_global",
+      "expected": {
+        "retail": 95.0,
+        "wholesale": 70.0,
+        "is_branch_specific_cost": true
+      },
+      "actual": {
+        "retail": 95.0,
+        "wholesale": 70.0,
+        "is_branch_specific_cost": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "alert_id": "cap-ad9cf2a2"
+      },
+      "recorded_at": "2026-05-13T10:57:40.931991+00:00"
+    },
+    {
+      "scenario": "br_cap_change.4_update_accepts_below_cost",
+      "step": "admin_pin_accepted_even_below_cost",
+      "expected": {
+        "ok": true,
+        "retail": 95.0
+      },
+      "actual": {
+        "ok": true,
+        "retail": 95.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "product_id": "br_cap-p-a2c2e905",
+        "pin_method": "admin_pin"
+      },
+      "recorded_at": "2026-05-13T10:57:41.157400+00:00"
+    },
+    {
+      "scenario": "br_cap_change.5_manager_pin_blocked",
+      "step": "manager_pin_rejected_403",
+      "expected": {
+        "state": "err",
+        "status": 403
+      },
+      "actual": {
+        "state": "err",
+        "status": 403
+      },
+      "status": "PASS",
+      "evidence": {
+        "product_id": "br_cap-p-e9e19c64"
+      },
+      "recorded_at": "2026-05-13T10:57:41.415661+00:00"
+    },
+    {
+      "scenario": "br_cap_change.6_ack_clears",
+      "step": "alert_hidden_after_acknowledge",
+      "expected": {
+        "pre_visible": true,
+        "post_visible": false
+      },
+      "actual": {
+        "pre_visible": true,
+        "post_visible": false
+      },
+      "status": "PASS",
+      "evidence": {
+        "alert_id": "cap-7461dfdd",
+        "product_id": "br_cap-p-5b0e23ec"
+      },
+      "recorded_at": "2026-05-13T10:57:41.424419+00:00"
+    },
+    {
+      "scenario": "br_cap_change.7_threshold_floor",
+      "step": "tiny_delta_filtered_below_floor",
+      "expected": {
+        "surfaced": false
+      },
+      "actual": {
+        "surfaced": false
+      },
+      "status": "PASS",
+      "evidence": {
+        "product_id": "br_cap-p-5b8495fb"
+      },
+      "recorded_at": "2026-05-13T10:57:41.428973+00:00"
+    },
+    {
+      "scenario": "br_cap_change.8_repack_children_attached",
+      "step": "parent_alert_has_children_with_derived_capital",
+      "expected": {
+        "child_count": 2,
+        "rp1_derived_new": 50.0,
+        "rp2_derived_new": 250.0,
+        "rp2_retail_below": true,
+        "has_child_warning": true
+      },
+      "actual": {
+        "child_count": 2,
+        "rp1_derived_new": 50.0,
+        "rp2_derived_new": 250.0,
+        "rp2_retail_below": true,
+        "has_child_warning": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "parent": "br_cap-p-4bc58b64",
+        "rp1": "br_cap-rp-a014bef4",
+        "rp2": "br_cap-rp-8b19d84b"
+      },
+      "recorded_at": "2026-05-13T10:57:41.434543+00:00"
+    },
+    {
+      "scenario": "br_cap_change.9_repack_branch_override",
+      "step": "branch_specific_repack_price_shadows_global",
+      "expected": {
+        "retail": 75.0
+      },
+      "actual": {
+        "retail": 75.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "parent": "br_cap-p-0882bcf7",
+        "repack": "br_cap-rp-b9a8ad0c"
+      },
+      "recorded_at": "2026-05-13T10:57:41.440337+00:00"
+    }
+  ]
+}

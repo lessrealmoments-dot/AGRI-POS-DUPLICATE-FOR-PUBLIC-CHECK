@@ -2209,15 +2209,35 @@ export default function UnifiedSalesPage() {
         total: lineTotal(l),
       }));
     }, [mode, cart, lines]),
-    getContext: useCallback(() => ({
-      customer_id: selectedCustomer?.id || '',
-      branch_id: currentBranch?.id || '',
-      transaction_date: header.order_date,
-      subtotal,
-      freight,
-      overall_discount: overallDiscount,
-      grand_total: grandTotal,
-    }), [selectedCustomer?.id, currentBranch?.id, header.order_date, subtotal, freight, overallDiscount, grandTotal]),
+    getContext: useCallback(() => {
+      // Compute due_date from the credit term selected on the customer
+      // header (`terms_days`). Falls back to `transaction_date` so the
+      // SMS reminder engine still works for COD / no-term sales.
+      const tdate = header.order_date;
+      const tdays = parseInt(header.terms_days || 0, 10) || 0;
+      let due_date = tdate;
+      if (tdays > 0 && tdate) {
+        try {
+          const d = new Date(tdate + 'T12:00:00');
+          d.setDate(d.getDate() + tdays);
+          due_date = d.toISOString().slice(0, 10);
+        } catch { /* keep default */ }
+      }
+      return {
+        customer_id: selectedCustomer?.id || '',
+        branch_id: currentBranch?.id || '',
+        transaction_date: tdate,
+        due_date,
+        terms: header.terms || '',
+        terms_days: tdays,
+        subtotal,
+        freight,
+        overall_discount: overallDiscount,
+        grand_total: grandTotal,
+      };
+    }, [selectedCustomer?.id, currentBranch?.id, header.order_date,
+        header.terms, header.terms_days,
+        subtotal, freight, overallDiscount, grandTotal]),
     hasCustomer: useCallback(() => !!selectedCustomer?.id, [selectedCustomer?.id]),
     onCommitted: useCallback(() => {
       // Page-side post-commit cleanup. Behavior-identical to the inline
@@ -2239,6 +2259,11 @@ export default function UnifiedSalesPage() {
   // rule here in the page so the extracted CheckoutDialog stays purely
   // presentational. Behavior is byte-for-byte identical to the previous
   // inline `disabled={...}` block on the confirm-payment button.
+  //
+  // Historical Credit reason gate intentionally NOT in this list: the
+  // reason is collected inside HistoricalCreditDialog at checkout-time
+  // (not on the page-level banner), so Continue must always be clickable
+  // when the user has selected Credit on a backdated date.
   const confirmDisabled = (
     saving ||
     (paymentType === 'cash' && amountTendered < grandTotal) ||
@@ -2248,8 +2273,7 @@ export default function UnifiedSalesPage() {
       Math.abs((parseFloat(splitCash||0) + parseFloat(splitDigital||0)) - grandTotal) > 0.01
     )) ||
     ((paymentType === 'partial' || paymentType === 'credit') && !selectedCustomer) ||
-    isBackdatedNonCreditBlocked ||
-    (isHistoricalCreditMode && hc.reason.trim().length < 20)
+    isBackdatedNonCreditBlocked
   );
 
   // Handle credit sale with approval
@@ -4220,7 +4244,6 @@ export default function UnifiedSalesPage() {
         saving={saving}
         confirmDisabled={confirmDisabled}
         isHistoricalCreditMode={isHistoricalCreditMode}
-        hc={hc}
       />
 
       {/* Credit Approval Dialog — Respects PIN Policies */}
@@ -5423,6 +5446,8 @@ export default function UnifiedSalesPage() {
         daysBack={daysBack}
         itemsCount={items.length}
         grandTotal={grandTotal}
+        terms={header.terms}
+        termsDays={header.terms_days || 0}
       />
 
     </div>

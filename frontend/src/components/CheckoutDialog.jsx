@@ -79,10 +79,6 @@ export default function CheckoutDialog({
 
   // HC flags (read-only — used by the confirm-button LABEL only)
   isHistoricalCreditMode,
-  // HC state — exposed so when isHistoricalCreditMode is active and the
-  // reason is too short, the user can fill it INSIDE the dialog rather
-  // than being silently blocked by a disabled button.
-  hc,
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

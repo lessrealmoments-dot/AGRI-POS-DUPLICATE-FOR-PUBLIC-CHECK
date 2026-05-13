@@ -38,7 +38,21 @@ export default function HistoricalCreditDialog({
   daysBack,
   itemsCount,
   grandTotal,
+  terms,
+  termsDays,
 }) {
+  // Compute due_date from order_date + terms_days (mirrors the page's
+  // getContext() math so the operator can verify before TOTP). Falls
+  // back to orderDate when there's no term.
+  let dueDate = orderDate;
+  const td = parseInt(termsDays || 0, 10) || 0;
+  if (td > 0 && orderDate) {
+    try {
+      const d = new Date(orderDate + 'T12:00:00');
+      d.setDate(d.getDate() + td);
+      dueDate = d.toISOString().slice(0, 10);
+    } catch { /* keep default */ }
+  }
   return (
     <Dialog
       open={hc.dialogOpen}
@@ -77,6 +91,23 @@ export default function HistoricalCreditDialog({
               <span className="font-medium text-amber-900">{orderDate} ({daysBack} days back)</span>
             </div>
             <div className="flex justify-between">
+              <span className="text-amber-700">Terms</span>
+              <span className="font-medium text-amber-900">
+                {terms || 'COD'}{td > 0 ? ` · ${td} days` : ''}
+              </span>
+            </div>
+            <div className="flex justify-between" data-testid="historical-credit-due-date-row">
+              <span className="text-amber-700">Due date</span>
+              <span className="font-medium text-amber-900">
+                {dueDate || '—'}
+                {td > 0 && (
+                  <span className="ml-1 text-[10px] text-amber-600">
+                    (= {orderDate} + {td}d)
+                  </span>
+                )}
+              </span>
+            </div>
+            <div className="flex justify-between">
               <span className="text-amber-700">Will be encoded today as</span>
               <span className="font-medium text-amber-900">{localTodayStr()}</span>
             </div>
@@ -87,6 +118,62 @@ export default function HistoricalCreditDialog({
             <div className="flex justify-between border-t border-amber-200 pt-1 mt-1">
               <span className="text-amber-700 font-semibold">Grand total (AR)</span>
               <span className="font-bold text-amber-900">{formatPHP(grandTotal)}</span>
+            </div>
+          </div>
+
+          {/* Reason / Proof / Notebook reference — collected at checkout
+              (used to live in HistoricalCreditBanner at the top of the
+              page; moved here so the cashier doesn't have to scroll
+              past inputs every time they encode an old sale). */}
+          <div className="rounded-md border border-amber-200 bg-white p-3 space-y-2">
+            <Label className="text-[11px] font-bold text-amber-900 uppercase tracking-wide">
+              Reason for backdated entry <span className="text-red-600">*</span>
+              <span className="ml-1 text-[10px] font-normal text-amber-700 normal-case tracking-normal">
+                (min 20 characters)
+              </span>
+            </Label>
+            <textarea
+              data-testid="historical-credit-reason-input"
+              value={hc.reason}
+              onChange={e => hc.setReason(e.target.value)}
+              placeholder="Notebook AR carry-forward verified against ledger page 12, customer countersigned 2026-02-04."
+              className="w-full text-[12px] rounded border border-amber-300 bg-white px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-400 min-h-[64px]"
+              disabled={hc.committing}
+            />
+            <p className={`text-[10px] font-medium ${
+              hc.reason.trim().length >= 20 ? 'text-emerald-700' : 'text-amber-700'
+            }`}>
+              {hc.reason.trim().length} / 20 minimum
+              {hc.reason.trim().length < 20 && ' — keep typing to enable Preview'}
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+              <div>
+                <Label className="text-[10px] font-semibold text-amber-900 uppercase tracking-wide">
+                  Proof URL <span className="text-[9px] font-normal normal-case text-amber-700">(optional)</span>
+                </Label>
+                <Input
+                  data-testid="historical-credit-proof-url-input"
+                  value={hc.proofUrl}
+                  onChange={e => hc.setProofUrl(e.target.value)}
+                  placeholder="https://… (photo of notebook page)"
+                  className="h-8 text-[12px] mt-0.5 bg-white"
+                  disabled={hc.committing}
+                />
+              </div>
+              <div>
+                <Label className="text-[10px] font-semibold text-amber-900 uppercase tracking-wide">
+                  Notebook ref <span className="text-[9px] font-normal normal-case text-amber-700">(optional)</span>
+                </Label>
+                <Input
+                  data-testid="historical-credit-notebook-ref-input"
+                  value={hc.notebookRef}
+                  onChange={e => hc.setNotebookRef(e.target.value)}
+                  placeholder="Ledger 2025 — Page 12, Row 4"
+                  className="h-8 text-[12px] mt-0.5 bg-white"
+                  disabled={hc.committing}
+                />
+              </div>
             </div>
           </div>
 

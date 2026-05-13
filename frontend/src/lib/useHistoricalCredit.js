@@ -100,6 +100,10 @@ export function useHistoricalCredit({
 
   // ── Payload builder ──────────────────────────────────────────────
   // Approval code is NEVER attached on preview — only on commit.
+  // `due_date` flows through from the page (computed as
+  // `transaction_date + terms.days`) so the customer ledger reminds
+  // SMS engine respects the credit term. Falls back to transaction_date
+  // server-side when omitted (legacy behaviour).
   const buildPayload = useCallback(({ withApprovalCode = false } = {}) => {
     const ctx = typeof getContext === 'function' ? (getContext() || {}) : {};
     const items = typeof getItems === 'function' ? (getItems() || []) : [];
@@ -107,6 +111,7 @@ export function useHistoricalCredit({
       customer_id: ctx.customer_id || '',
       branch_id: ctx.branch_id || '',
       transaction_date: ctx.transaction_date || '',
+      due_date: ctx.due_date || undefined,
       items,
       subtotal: ctx.subtotal,
       freight: ctx.freight,
