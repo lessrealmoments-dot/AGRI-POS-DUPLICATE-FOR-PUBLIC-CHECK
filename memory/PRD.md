@@ -1,6 +1,57 @@
 # AgriBooks PRD
 
 
+## Smart Price Scan — Capital Change Inline Update (Feb 13 2026) ✅
+
+### Status: COMPLETE — Capital Changes tab now has full feature parity with Below Cost; **120/120 BR pass / 386 rows**.
+
+### Why
+Capital Change Notification previously showed only `old → new capital` with a single Acknowledge button. Operator had to navigate elsewhere to actually adjust retail/wholesale prices. Below Cost notification already had a rich editable table — we needed the same on Capital Changes so a single dialog handles the whole "capital moved → retune prices" loop.
+
+### What was delivered
+1. **Backend enrichment** (`routes/products.py::capital_change_alerts`):
+   - Per-alert payload now includes `effective_cost`, `moving_average`, `last_purchase`, `prices` (effective per-scheme, branch override → global), `scheme_margins[]` (per scheme: `current_price`, `margin`, `margin_pct`, `is_below_cost`, `is_thin`), `is_branch_specific_cost`, `is_repack`, `parent_name`, `units_per_parent`.
+   - Top-level `schemes[]` meta echoed (parity with `/pricing-scan`).
+   - Batched product / branch_price / branch / movements lookups — O(1) round-trips instead of O(N).
+   - `is_thin` heuristic: margin < 5% OR < ₱5 (matches existing `price-audit-summary` rule).
+2. **Frontend** (`components/PriceScanManager.js`):
+   - Capital Changes tab rebuilt as full editable table: `Product | Old Cap | New Cap (Δ%↑↓) | Moving Avg | Retail (Primary) | Wholesale (Primary) | Special/Gov (Optional) | Source | Actions`.
+   - Per-scheme `CalcInput` pre-populated with current effective price.
+   - **Live, VISIBLE-only warnings** (never block submit):
+     - Red ring + "₱X.XX below new capital" chip when new price < new capital.
+     - Amber border + "Thin margin" chip when margin < 5% or < ₱5.
+     - Emerald border + margin chip when healthy.
+   - Per-row buttons: **Update Prices** (PIN-gated → auto-acknowledges alert on success) + **Acknowledge** (existing flow).
+   - Tab header legend updated to surface the warning semantics.
+   - PIN modal copy adapted for `kind: 'capital_change'`.
+3. **NEW BR test** `backend/tests/business_regression/test_br_capital_change_price_update.py` — **7 tests / 7 rows**. Covers:
+   - Enrichment payload shape (prices + scheme_margins + moving_average echoed).
+   - Below-cost flag surfaces correctly.
+   - Branch price override shadows globals.
+   - Smart-price-update writes even when new price is below cost (warning is visible-only).
+   - Manager PIN rejected (admin/TOTP only).
+   - Acknowledge clears alert from next fetch.
+   - Sub-threshold delta (< ₱1) filtered out.
+
+### Verification
+- **NEW test file**: 7/7 pass.
+- **Full BR**: **120/120 pass / 386 rows / 0 fail** (was 113/379 → +7 tests / +7 rows).
+- `yarn build` clean (28.04s).
+- ESLint + ruff clean.
+
+### Files changed (this fork)
+- MOD `backend/routes/products.py` (`capital_change_alerts` enrichment)
+- MOD `frontend/src/components/PriceScanManager.js` (Capital Changes tab rebuild + PIN modal copy)
+- NEW `backend/tests/business_regression/test_br_capital_change_price_update.py`
+
+### Invariants
+- Backend never blocks a price update because of margin/below-cost — warning is **client-visible only**.
+- PIN policy `smart_price_update` enforces admin/TOTP at backend (managers blocked even if FE bypassed).
+- Auto-ack only fires on successful price update; failure leaves alert open.
+- Smart price update only sends changed schemes (delta < ₱0.005 filtered) to keep audit log clean.
+
+
+
 ## Phase 3.2 — Historical Supplier PO / Pre-System AP Carry-Forward (Feb 2026) ✅
 
 ### Status: COMPLETE — admin-only encoding flow + AP dashboard integration; **113/113 BR pass / 379 rows**; zero footprint; idempotent.

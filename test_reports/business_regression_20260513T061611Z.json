@@ -1,0 +1,135 @@
+{
+  "generated_at": "2026-05-13T06:16:11.304360+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 7,
+  "pass_count": 7,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br_cap_change.1_enrichment",
+      "step": "alert_has_prices_movingavg_margins",
+      "expected": {
+        "has_prices": true,
+        "has_scheme_margins": true,
+        "retail_margin": 15.0,
+        "wholesale_thin": true
+      },
+      "actual": {
+        "has_prices": true,
+        "has_scheme_margins": true,
+        "retail_margin": 15.0,
+        "wholesale_thin": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "alert_id": "cap-25c6d868",
+        "product_id": "br_cap-p-033b0113"
+      },
+      "recorded_at": "2026-05-13T06:16:10.322220+00:00"
+    },
+    {
+      "scenario": "br_cap_change.2_below_cost_visible",
+      "step": "retail_below_wholesale_not",
+      "expected": {
+        "retail_below": true,
+        "wholesale_below": false
+      },
+      "actual": {
+        "retail_below": true,
+        "wholesale_below": false
+      },
+      "status": "PASS",
+      "evidence": {
+        "alert_id": "cap-5d88b2ed"
+      },
+      "recorded_at": "2026-05-13T06:16:10.328043+00:00"
+    },
+    {
+      "scenario": "br_cap_change.3_branch_override",
+      "step": "retail_uses_branch_price_wholesale_global",
+      "expected": {
+        "retail": 95.0,
+        "wholesale": 70.0,
+        "is_branch_specific_cost": true
+      },
+      "actual": {
+        "retail": 95.0,
+        "wholesale": 70.0,
+        "is_branch_specific_cost": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "alert_id": "cap-28bbcae7"
+      },
+      "recorded_at": "2026-05-13T06:16:10.499534+00:00"
+    },
+    {
+      "scenario": "br_cap_change.4_update_accepts_below_cost",
+      "step": "admin_pin_accepted_even_below_cost",
+      "expected": {
+        "ok": true,
+        "retail": 95.0
+      },
+      "actual": {
+        "ok": true,
+        "retail": 95.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "product_id": "br_cap-p-1788427f",
+        "pin_method": "admin_pin"
+      },
+      "recorded_at": "2026-05-13T06:16:10.729020+00:00"
+    },
+    {
+      "scenario": "br_cap_change.5_manager_pin_blocked",
+      "step": "manager_pin_rejected_403",
+      "expected": {
+        "state": "err",
+        "status": 403
+      },
+      "actual": {
+        "state": "err",
+        "status": 403
+      },
+      "status": "PASS",
+      "evidence": {
+        "product_id": "br_cap-p-102b99be"
+      },
+      "recorded_at": "2026-05-13T06:16:10.980229+00:00"
+    },
+    {
+      "scenario": "br_cap_change.6_ack_clears",
+      "step": "alert_hidden_after_acknowledge",
+      "expected": {
+        "pre_visible": true,
+        "post_visible": false
+      },
+      "actual": {
+        "pre_visible": true,
+        "post_visible": false
+      },
+      "status": "PASS",
+      "evidence": {
+        "alert_id": "cap-f46e37eb",
+        "product_id": "br_cap-p-f0a28655"
+      },
+      "recorded_at": "2026-05-13T06:16:10.991334+00:00"
+    },
+    {
+      "scenario": "br_cap_change.7_threshold_floor",
+      "step": "tiny_delta_filtered_below_floor",
+      "expected": {
+        "surfaced": false
+      },
+      "actual": {
+        "surfaced": false
+      },
+      "status": "PASS",
+      "evidence": {
+        "product_id": "br_cap-p-9aa65696"
+      },
+      "recorded_at": "2026-05-13T06:16:10.997127+00:00"
+    }
+  ]
+}

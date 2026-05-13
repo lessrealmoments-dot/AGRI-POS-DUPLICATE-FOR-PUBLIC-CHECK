@@ -46,6 +46,8 @@ export default function PriceScanManager() {
   // Capital-change alerts (Stage 2)
   const [capAlerts, setCapAlerts] = useState([]);
   const [capLoading, setCapLoading] = useState(false);
+  const [capSchemes, setCapSchemes] = useState([]); // schemes meta echoed by backend
+  const [capEditPrices, setCapEditPrices] = useState({}); // { alert_id: { scheme_key: value } }
 
   // Admin PIN modal — gates ALL price changes from this dialog
   const [pinModal, setPinModal] = useState(null); // { kind: 'single'|'all', issue?, onConfirm }
@@ -160,7 +162,19 @@ export default function PriceScanManager() {
       if (currentBranch?.id) params.set('branch_id', currentBranch.id);
       params.set('days', '14');
       const r = await api.get(`${BACKEND_URL}/api/products/capital-change-alerts?${params}`);
-      setCapAlerts(r.data?.alerts || []);
+      const alerts = r.data?.alerts || [];
+      setCapAlerts(alerts);
+      setCapSchemes(r.data?.schemes || []);
+      // Initialise edit prices from current values so the row inputs render
+      // pre-populated. Operator only needs to change the cells they want.
+      const init = {};
+      alerts.forEach(a => {
+        init[a.id] = {};
+        (r.data?.schemes || []).forEach(s => {
+          init[a.id][s.key] = (a.prices && a.prices[s.key]) ? a.prices[s.key] : '';
+        });
+      });
+      setCapEditPrices(init);
     } catch { /* silent */ }
     setCapLoading(false);
   }, [user, currentBranch?.id, skipForSuperAdmin]);
@@ -185,6 +199,21 @@ export default function PriceScanManager() {
       setCapAlerts([]);
       toast.success('All alerts dismissed');
     } catch { toast.error('Failed'); }
+  };
+
+  // Capital-change row helpers — mirrors below-cost edit/save flow but
+  // posts to /smart-price-update then auto-acknowledges the alert.
+  const updateCapPrice = (alertId, schemeKey, value) => {
+    setCapEditPrices(prev => ({
+      ...prev,
+      [alertId]: { ...(prev[alertId] || {}), [schemeKey]: value },
+    }));
+  };
+
+  const handleSaveCapAlert = (alert) => {
+    // Open the same admin PIN modal — payload differentiated by kind.
+    setPinModal({ kind: 'capital_change', alert });
+    setAdminPin('');
   };
 
   const handleSkip = (skipMs) => {
@@ -248,8 +277,41 @@ export default function PriceScanManager() {
           setDialog(false);
           toast.success('All pricing issues resolved!');
         }
+      } else if (pinModal.kind === 'capital_change') {
+        const alert = pinModal.alert;
+        const prices = capEditPrices[alert.id] || {};
+        // Only send schemes whose value changed from the current effective
+        // price. This keeps the audit log clean and avoids needless writes.
+        const cleaned = {};
+        Object.entries(prices).forEach(([k, v]) => {
+          const num = parseFloat(v);
+          if (isNaN(num) || num <= 0) return;
+          const currentPrice = parseFloat(alert.prices?.[k] || 0);
+          // Skip if unchanged (small float tolerance).
+          if (Math.abs(num - currentPrice) < 0.005) return;
+          cleaned[k] = num;
+        });
+        if (!Object.keys(cleaned).length) {
+          toast.error('No price changes to apply. Use Acknowledge if no update needed.');
+          setPinSubmitting(false);
+          return;
+        }
+        await api.post(`${BACKEND_URL}/api/products/smart-price-update`, {
+          product_id: alert.product_id,
+          prices: cleaned,
+          pin: adminPin,
+        });
+        // Auto-acknowledge — operator reviewed AND adjusted, so the alert
+        // is resolved. Failure here is non-fatal; the price update already
+        // landed.
+        try {
+          await api.post(
+            `${BACKEND_URL}/api/products/capital-change-alerts/${alert.id}/acknowledge`
+          );
+        } catch { /* silent */ }
+        toast.success(`Prices updated for ${alert.product_name}`);
+        setCapAlerts(prev => prev.filter(a => a.id !== alert.id));
       } else {
-        // Bulk fix-all: one PIN unlocks the whole batch
         let fixed = 0;
         let failed = 0;
         for (const issue of issues) {
@@ -433,9 +495,20 @@ export default function PriceScanManager() {
               </>
             )}
             {tab === 'capital_changes' && (
-              <span className="text-slate-500">
-                Showing changes ≥ ₱1 from POs &amp; transfers (last 14 days). Admin overrides skipped.
-              </span>
+              <>
+                <span className="flex items-center gap-1.5">
+                  <div className="w-3 h-3 rounded bg-red-50 border border-red-500" />
+                  <span className="text-slate-600"><b>Below new capital</b> — warned, not blocked</span>
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <div className="w-3 h-3 rounded bg-amber-50 border border-amber-400" />
+                  <span className="text-slate-600">Thin margin &lt; 5%</span>
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <Lock size={11} className="text-slate-500" />
+                  <span className="text-slate-600">Admin PIN required</span>
+                </span>
+              </>
             )}
           </div>
 
@@ -613,7 +686,7 @@ export default function PriceScanManager() {
           </div>
           )}
 
-          {/* Capital Changes tab */}
+          {/* Capital Changes tab — full editable table like Below Cost. */}
           {tab === 'capital_changes' && (
             <div className="flex-1 overflow-auto" data-testid="capital-changes-list">
               {capLoading && capAlerts.length === 0 && (
@@ -628,50 +701,169 @@ export default function PriceScanManager() {
                   </p>
                 </div>
               )}
-              {capAlerts.length > 0 && (
-                <div className="divide-y divide-slate-100">
-                  {capAlerts.map(a => (
-                    <div key={a.id} className="px-6 py-3 flex items-start gap-3 hover:bg-amber-50/30" data-testid={`cap-alert-${a.id}`}>
-                      <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${a.direction === 'up' ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>
-                        {a.direction === 'up' ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-baseline gap-2 flex-wrap">
-                          <p className="text-sm font-semibold text-slate-800 truncate">{a.product_name}</p>
-                          <span className="text-[10px] text-slate-400 font-mono">{a.sku}</span>
-                          {a.branch_name && (
-                            <Badge variant="outline" className="text-[9px] py-0 px-1.5">{a.branch_name}</Badge>
-                          )}
-                        </div>
-                        <p className={`text-sm font-medium mt-0.5 ${a.direction === 'up' ? 'text-red-700' : 'text-emerald-700'}`}>
-                          Capital {a.direction === 'up' ? 'up' : 'down'} by {a.delta_pct !== null ? `${a.delta_pct >= 0 ? '+' : ''}${a.delta_pct.toFixed(1)}%` : '—'}
-                          {' '}({a.delta_amount >= 0 ? '+' : ''}{formatPHP(a.delta_amount)})
-                        </p>
-                        <p className="text-xs text-slate-500 mt-0.5">
-                          {formatPHP(a.old_capital)} → <strong>{formatPHP(a.new_capital)}</strong>
-                          <span className="ml-2 text-slate-400">·</span>
-                          <span className="ml-2">
-                            {a.source_type === 'purchase_order' ? 'PO' : 'Transfer'} {a.source_ref}
-                          </span>
-                          {a.vendor && <span className="ml-2">· Vendor: <strong>{a.vendor}</strong></span>}
-                          {a.from_branch && <span className="ml-2">· From: {a.from_branch}</span>}
-                          <span className="ml-2 text-slate-400">·</span>
-                          <span className="ml-2">{formatDateTime(a.changed_at)}</span>
-                          {a.changed_by_name && <span className="ml-2">· {a.changed_by_name}</span>}
-                        </p>
-                      </div>
-                      <Button
-                        size="sm" variant="outline"
-                        onClick={() => ackCapAlert(a.id)}
-                        className="h-7 text-[11px] flex-shrink-0"
-                        data-testid={`ack-cap-${a.id}`}
-                      >
-                        <Check size={11} className="mr-1" /> Acknowledge
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {capAlerts.length > 0 && (() => {
+                const capPrimary = capSchemes.filter(s => ['retail', 'wholesale'].includes(s.key));
+                const capOther = capSchemes.filter(s => !['retail', 'wholesale'].includes(s.key));
+                return (
+                  <table className="w-full text-sm border-collapse" data-testid="capital-changes-table">
+                    <thead className="sticky top-0 z-10">
+                      <tr className="bg-slate-100 border-b-2 border-slate-300">
+                        <th className="text-left px-3 py-2.5 text-xs uppercase text-slate-600 font-semibold" style={{minWidth:'220px'}}>Product</th>
+                        <th className="text-right px-3 py-2.5 text-xs uppercase text-slate-600 font-semibold" style={{minWidth:'90px'}}>Old Cap</th>
+                        <th className="text-right px-3 py-2.5 text-xs uppercase text-slate-600 font-semibold" style={{minWidth:'120px'}}>New Cap</th>
+                        <th className="text-right px-3 py-2.5 text-xs uppercase text-slate-600 font-semibold" style={{minWidth:'90px'}}>Moving Avg</th>
+                        <th className="px-1 py-2.5 w-px bg-slate-200" />
+                        {capPrimary.map(s => (
+                          <th key={s.key} className="text-center px-3 py-2.5 text-xs uppercase font-semibold text-[#1A4D2E] bg-emerald-50/50" style={{minWidth:'140px'}}>
+                            {s.name}
+                            <span className="ml-1 text-[9px] bg-emerald-100 text-emerald-700 px-1 py-0.5 rounded font-bold">Primary</span>
+                          </th>
+                        ))}
+                        {capOther.map(s => (
+                          <th key={s.key} className="text-center px-3 py-2.5 text-xs uppercase font-semibold text-slate-400" style={{minWidth:'120px'}}>
+                            {s.name}
+                            <span className="ml-1 text-[9px] bg-slate-100 text-slate-500 px-1 py-0.5 rounded">Optional</span>
+                          </th>
+                        ))}
+                        <th className="text-center px-3 py-2.5 text-xs uppercase text-slate-600 font-semibold w-44">Source</th>
+                        <th className="w-36 px-3 py-2.5"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {capAlerts.map(a => {
+                        const newCap = parseFloat(a.new_capital || 0);
+                        const marginByKey = {};
+                        (a.scheme_margins || []).forEach(sm => { marginByKey[sm.scheme_key] = sm; });
+                        const renderPriceCell = (s, primary) => {
+                          const currentPrice = parseFloat(a.prices?.[s.key] || 0);
+                          const editVal = capEditPrices[a.id]?.[s.key] ?? '';
+                          const editNum = parseFloat(editVal);
+                          const hasEdit = !isNaN(editNum) && editNum > 0;
+                          // Live warning against NEW capital — visible but never blocks save.
+                          const willBeBelow = hasEdit && editNum < newCap;
+                          const newMargin = hasEdit ? editNum - newCap : null;
+                          const newMarginPct = hasEdit && editNum > 0 ? (newMargin / editNum * 100) : null;
+                          const isThin = hasEdit && !willBeBelow && (newMargin < 5.0 || (newMarginPct !== null && newMarginPct < 5.0));
+                          // Existing margin pre-edit, surfaced as context chip.
+                          const sm = marginByKey[s.key];
+                          return (
+                            <td key={s.key} className={`px-2 py-2 ${primary ? 'bg-emerald-50/30' : 'bg-slate-50/30'}`}>
+                              <div>
+                                <div className={`text-[10px] mb-0.5 font-mono ${sm?.is_below_cost ? 'text-red-500 line-through' : sm?.is_thin ? 'text-amber-600' : 'text-slate-400'}`}>
+                                  was: {currentPrice > 0 ? formatPHP(currentPrice) : '—'}
+                                  {sm?.is_below_cost && <span className="ml-1 text-[9px] font-bold text-red-600">BELOW COST</span>}
+                                  {sm?.is_thin && !sm?.is_below_cost && <span className="ml-1 text-[9px] font-bold text-amber-600">THIN</span>}
+                                </div>
+                                <CalcInput value={editVal}
+                                  onChange={(v) => updateCapPrice(a.id, s.key, v)}
+                                  placeholder={primary ? `min ₱${newCap.toFixed(2)}` : 'optional'}
+                                  className={`h-8 text-sm text-right font-mono w-full ${
+                                    willBeBelow
+                                      ? 'border-red-500 bg-red-50 text-red-700 font-bold ring-1 ring-red-400'
+                                      : isThin
+                                      ? 'border-amber-400 bg-amber-50 text-amber-800'
+                                      : hasEdit
+                                      ? 'border-emerald-400 bg-emerald-50 text-emerald-800 font-bold'
+                                      : 'border-slate-200'
+                                  }`}
+                                  data-testid={`cap-price-${a.id}-${s.key}`} />
+                                {/* Warning chips — visible but non-blocking. */}
+                                {willBeBelow && (
+                                  <p className="text-[9px] text-red-600 mt-0.5 text-right font-bold flex items-center justify-end gap-1">
+                                    <AlertTriangle size={9} /> ₱{(newCap - editNum).toFixed(2)} below new capital
+                                  </p>
+                                )}
+                                {isThin && !willBeBelow && (
+                                  <p className="text-[9px] text-amber-700 mt-0.5 text-right font-semibold">
+                                    Thin margin: +{formatPHP(newMargin)} ({newMarginPct?.toFixed(1)}%)
+                                  </p>
+                                )}
+                                {hasEdit && !willBeBelow && !isThin && (
+                                  <p className="text-[9px] text-emerald-600 mt-0.5 text-right font-mono">
+                                    +{formatPHP(newMargin)} ({newMarginPct?.toFixed(1)}%)
+                                  </p>
+                                )}
+                              </div>
+                            </td>
+                          );
+                        };
+                        return (
+                          <tr key={a.id} className="border-b border-slate-100 hover:bg-amber-50/20" data-testid={`cap-alert-${a.id}`}>
+                            <td className="px-3 py-2">
+                              <div className="flex items-center gap-2 mb-0.5">
+                                <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 ${a.direction === 'up' ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                                  {a.direction === 'up' ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
+                                </div>
+                                <p className="font-semibold text-sm text-slate-800 truncate">
+                                  {a.product_name}
+                                  {a.is_repack && (
+                                    <span className="ml-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 align-middle">REPACK</span>
+                                  )}
+                                </p>
+                              </div>
+                              <p className="text-[10px] text-slate-400 font-mono">
+                                {a.sku} {a.category && `· ${a.category}`}
+                                {a.is_repack && a.parent_name && (
+                                  <span className="ml-1 text-purple-500"> from {a.parent_name} ({a.units_per_parent}/parent)</span>
+                                )}
+                              </p>
+                              {a.branch_name && (
+                                <Badge variant="outline" className="text-[9px] py-0 px-1.5 mt-0.5">{a.branch_name}</Badge>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              <span className="text-sm font-mono text-slate-500 line-through">{formatPHP(a.old_capital)}</span>
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              <span className={`text-sm font-mono font-bold ${a.direction === 'up' ? 'text-red-700' : 'text-emerald-700'}`}>
+                                {formatPHP(a.new_capital)}
+                              </span>
+                              <p className={`text-[10px] font-semibold ${a.direction === 'up' ? 'text-red-600' : 'text-emerald-600'}`}>
+                                {a.delta_amount >= 0 ? '+' : ''}{formatPHP(a.delta_amount)}
+                                {a.delta_pct !== null && (
+                                  <span className="ml-1 opacity-75">({a.delta_pct >= 0 ? '+' : ''}{a.delta_pct.toFixed(1)}%)</span>
+                                )}
+                              </p>
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              <span className="text-sm font-mono">{formatPHP(a.moving_average)}</span>
+                              <p className="text-[9px] text-slate-400">Avg cost</p>
+                            </td>
+                            <td className="px-1 bg-slate-100 w-px" />
+                            {capPrimary.map(s => renderPriceCell(s, true))}
+                            {capOther.map(s => renderPriceCell(s, false))}
+                            <td className="px-3 py-2 text-[10px] text-slate-500">
+                              <div>{a.source_type === 'purchase_order' ? 'PO' : 'Transfer'} <strong>{a.source_ref}</strong></div>
+                              {a.vendor && <div>Vendor: {a.vendor}</div>}
+                              {a.from_branch && <div>From: {a.from_branch}</div>}
+                              <div className="text-slate-400">{formatDateTime(a.changed_at)}</div>
+                              {a.changed_by_name && <div className="text-slate-400">by {a.changed_by_name}</div>}
+                            </td>
+                            <td className="px-2 py-2">
+                              <div className="flex flex-col gap-1">
+                                <Button size="sm"
+                                  onClick={() => handleSaveCapAlert(a)}
+                                  className="h-7 text-[11px] bg-[#1A4D2E] hover:bg-[#14532d] text-white"
+                                  data-testid={`cap-update-${a.id}`}>
+                                  <Lock size={10} className="mr-1" />
+                                  Update Prices
+                                </Button>
+                                <Button size="sm" variant="outline"
+                                  onClick={() => ackCapAlert(a.id)}
+                                  className="h-7 text-[11px] text-slate-600"
+                                  data-testid={`ack-cap-${a.id}`}>
+                                  <Check size={10} className="mr-1" />
+                                  Acknowledge
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                );
+              })()}
             </div>
           )}
 
@@ -725,6 +917,8 @@ export default function PriceScanManager() {
             <p className="text-sm text-slate-600">
               {pinModal?.kind === 'all'
                 ? `Apply price updates to ${issues.length} product${issues.length === 1 ? '' : 's'}.`
+                : pinModal?.kind === 'capital_change'
+                ? `Apply price update to ${pinModal?.alert?.product_name} (capital ${pinModal?.alert?.direction === 'up' ? 'increased' : 'decreased'}). Alert will be acknowledged automatically.`
                 : `Apply price update to ${pinModal?.issue?.product_name}.`}
             </p>
             <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">

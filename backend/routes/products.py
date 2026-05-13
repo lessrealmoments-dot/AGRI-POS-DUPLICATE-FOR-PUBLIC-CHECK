@@ -904,34 +904,171 @@ async def capital_change_alerts(
 
     rows = await db.capital_changes.find(q, {"_id": 0}).sort("changed_at", -1).to_list(500)
 
-    # Enrich + filter on delta floor
-    alerts = []
+    # Pre-load price schemes once — emitted at root so the UI can render
+    # editable columns identical to the Below Cost tab.
+    schemes = await db.price_schemes.find({"active": True}, {"_id": 0}).to_list(50)
+    scheme_meta = [{"key": s["key"], "name": s["name"]} for s in schemes]
+
+    # First pass: filter on delta floor + collect product/branch ids so we
+    # can batch the enrichment lookups instead of doing one query per alert.
+    surviving: list[dict] = []
     for r in rows:
         old_cap = float(r.get("old_capital") or 0)
         new_cap = float(r.get("new_capital") or 0)
         delta_amount = round(new_cap - old_cap, 4)
         if abs(delta_amount) < CAPITAL_DELTA_FLOOR:
             continue
+        surviving.append({"row": r, "old_cap": old_cap, "new_cap": new_cap,
+                          "delta_amount": delta_amount})
+
+    pid_set = {s["row"].get("product_id") for s in surviving if s["row"].get("product_id")}
+    bid_set = {s["row"].get("branch_id") for s in surviving if s["row"].get("branch_id")}
+
+    # Batch product lookup — fields we need for enrichment + the
+    # editable price table.
+    product_map: dict[str, dict] = {}
+    if pid_set:
+        async for p in db.products.find(
+            {"id": {"$in": list(pid_set)}},
+            {"_id": 0, "id": 1, "name": 1, "sku": 1, "category": 1, "unit": 1,
+             "cost_price": 1, "prices": 1, "is_repack": 1, "parent_id": 1,
+             "units_per_parent": 1, "repack_unit": 1},
+        ):
+            product_map[p["id"]] = p
+
+    # Resolve parent rows for repacks (for parent_name + base capital).
+    parent_ids = {p.get("parent_id") for p in product_map.values()
+                  if p.get("is_repack") and p.get("parent_id")}
+    parent_map: dict[str, dict] = {}
+    if parent_ids:
+        async for p in db.products.find(
+            {"id": {"$in": list(parent_ids)}},
+            {"_id": 0, "id": 1, "name": 1, "cost_price": 1, "prices": 1},
+        ):
+            parent_map[p["id"]] = p
+
+    # Batch branch name lookup.
+    branch_map: dict[str, dict] = {}
+    if bid_set:
+        async for b in db.branches.find(
+            {"id": {"$in": list(bid_set)}},
+            {"_id": 0, "id": 1, "name": 1},
+        ):
+            branch_map[b["id"]] = b
+
+    # Batch branch_prices (capital override + per-scheme price override)
+    # keyed by (product_id, branch_id) pairs.
+    bp_pairs = [(s["row"].get("product_id"), s["row"].get("branch_id"))
+                for s in surviving
+                if s["row"].get("product_id") and s["row"].get("branch_id")]
+    bp_lookup: dict[tuple, dict] = {}
+    if bp_pairs:
+        # Mongo $or on (product_id, branch_id) tuples.
+        or_clauses = [{"product_id": pid, "branch_id": bid}
+                      for (pid, bid) in bp_pairs]
+        async for bp in db.branch_prices.find(
+            {"$or": or_clauses},
+            {"_id": 0, "product_id": 1, "branch_id": 1, "cost_price": 1, "prices": 1},
+        ):
+            bp_lookup[(bp["product_id"], bp["branch_id"])] = bp
+
+    # Enrich
+    alerts = []
+    for s in surviving:
+        r = s["row"]
+        old_cap = s["old_cap"]
+        new_cap = s["new_cap"]
+        delta_amount = s["delta_amount"]
         delta_pct = (delta_amount / old_cap * 100.0) if old_cap > 0 else None
 
-        # Pull product + branch names cheaply
-        product = await db.products.find_one(
-            {"id": r.get("product_id")},
-            {"_id": 0, "id": 1, "name": 1, "sku": 1, "category": 1, "unit": 1},
-        )
-        branch = await db.branches.find_one(
-            {"id": r.get("branch_id")},
-            {"_id": 0, "id": 1, "name": 1},
-        )
+        pid = r.get("product_id") or ""
+        bid = r.get("branch_id") or ""
+        product = product_map.get(pid) or {}
+        branch = branch_map.get(bid) or {}
+        bp = bp_lookup.get((pid, bid)) or {}
+
+        is_repack = bool(product.get("is_repack"))
+        parent = parent_map.get(product.get("parent_id") or "") if is_repack else None
+
+        # Effective cost: prefer the new_capital from the change event itself
+        # (it's the freshest source of truth at the moment of the event).
+        # If the row is missing it for some reason, fall back to branch
+        # override → global cost.
+        effective_cost = new_cap
+        if effective_cost <= 0:
+            effective_cost = float(bp.get("cost_price") or product.get("cost_price") or 0)
+
+        # Build effective price map (branch override → global).
+        # For repacks, base prices live on the repack product itself but
+        # capital flows from parent — we don't try to recompute repack
+        # prices here, just surface what's currently set.
+        global_prices = {k: float(v or 0) for k, v in (product.get("prices") or {}).items()}
+        effective_prices = dict(global_prices)
+        for k, v in (bp.get("prices") or {}).items():
+            try:
+                effective_prices[k] = float(v or 0)
+            except Exception:
+                continue
+
+        # Per-scheme margin context vs NEW capital. Thin = margin <5% OR <₱5.
+        scheme_margins = []
+        for sm in scheme_meta:
+            key = sm["key"]
+            current_price = effective_prices.get(key, 0)
+            if current_price <= 0:
+                continue
+            margin = round(current_price - effective_cost, 4)
+            margin_pct = (margin / current_price * 100.0) if current_price > 0 else None
+            is_below_cost = current_price < effective_cost
+            is_thin = (not is_below_cost) and (margin < 5.0 or (margin_pct is not None and margin_pct < 5.0))
+            scheme_margins.append({
+                "scheme_key": key,
+                "scheme_name": sm["name"],
+                "current_price": current_price,
+                "margin": margin,
+                "margin_pct": margin_pct,
+                "is_below_cost": is_below_cost,
+                "is_thin": is_thin,
+            })
+
+        # Moving average + last purchase from movements (last 30 days).
+        # For repacks, derive from parent's movements scaled by units_per_parent.
+        lookup_id = product.get("parent_id") if is_repack and product.get("parent_id") else pid
+        units_per = max(int(product.get("units_per_parent") or 1), 1) if is_repack else 1
+        moving_average = effective_cost
+        last_purchase = effective_cost
+        if lookup_id:
+            from datetime import datetime, timedelta, timezone as _tz
+            mv_cutoff = (datetime.now(_tz.utc) - timedelta(days=30)).isoformat()
+            mv_q = {
+                "product_id": lookup_id,
+                "type": {"$in": ["purchase", "transfer_in"]},
+                "quantity_change": {"$gt": 0},
+                "created_at": {"$gte": mv_cutoff},
+            }
+            if bid:
+                mv_q["branch_id"] = bid
+            mv_rows = await db.movements.find(
+                mv_q,
+                {"_id": 0, "quantity_change": 1, "price_at_time": 1, "created_at": 1},
+            ).sort("created_at", -1).to_list(1000)
+            if mv_rows:
+                total_qty = sum(m["quantity_change"] for m in mv_rows)
+                total_val = sum(m["quantity_change"] * float(m.get("price_at_time") or 0)
+                                for m in mv_rows)
+                if total_qty > 0:
+                    moving_average = round(total_val / total_qty / units_per, 4)
+                last_purchase = round(float(mv_rows[0].get("price_at_time") or 0) / units_per, 4)
+
         alerts.append({
             "id": r["id"],
-            "product_id": r.get("product_id"),
-            "product_name": (product or {}).get("name", "Unknown product"),
-            "sku": (product or {}).get("sku", ""),
-            "category": (product or {}).get("category", ""),
-            "unit": (product or {}).get("unit", ""),
-            "branch_id": r.get("branch_id"),
-            "branch_name": (branch or {}).get("name", ""),
+            "product_id": pid,
+            "product_name": product.get("name", "Unknown product"),
+            "sku": product.get("sku", ""),
+            "category": product.get("category", ""),
+            "unit": product.get("unit", product.get("repack_unit", "")),
+            "branch_id": bid,
+            "branch_name": branch.get("name", ""),
             "old_capital": old_cap,
             "new_capital": new_cap,
             "delta_amount": delta_amount,
@@ -945,6 +1082,16 @@ async def capital_change_alerts(
             "to_branch": r.get("to_branch", ""),
             "changed_by_name": r.get("changed_by_name", ""),
             "changed_at": r.get("changed_at", ""),
+            # ── Enriched (Smart Price Scan parity) ─────────────────────
+            "effective_cost": effective_cost,
+            "moving_average": moving_average,
+            "last_purchase": last_purchase,
+            "prices": effective_prices,
+            "scheme_margins": scheme_margins,
+            "is_branch_specific_cost": bool(bp.get("cost_price") is not None),
+            "is_repack": is_repack,
+            "parent_name": (parent or {}).get("name", "") if is_repack else "",
+            "units_per_parent": int(product.get("units_per_parent") or 1) if is_repack else 1,
         })
 
     return {
@@ -953,6 +1100,7 @@ async def capital_change_alerts(
         "branch_id": branch_id,
         "days": days,
         "threshold_amount": CAPITAL_DELTA_FLOOR,
+        "schemes": scheme_meta,
     }
 
 
