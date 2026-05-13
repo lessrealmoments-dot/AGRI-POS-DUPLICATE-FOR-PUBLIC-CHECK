@@ -2557,7 +2557,15 @@ async def mark_po_reviewed(po_id: str, data: dict, user=Depends(get_current_user
 
 @router.get("/payables-by-supplier")
 async def get_payables_by_supplier(user=Depends(get_current_user), branch_id: Optional[str] = None):
-    """Get unpaid POs grouped by supplier for Pay Supplier page."""
+    """Get unpaid POs grouped by supplier for Pay Supplier page.
+
+    Phase 3.2 extension: also merges in `historical_supplier_pos` rows so
+    pre-system carry-forward debts are payable from the same screen.
+    Each historical row is shape-aligned to the regular PO row (same keys
+    the FE reads) and marked with `kind: "historical"` so the FE knows to
+    route the pay call to `/historical-supplier-pos/{id}/pay` instead of
+    `/purchase-orders/{id}/pay`.
+    """
     query = {"payment_status": {"$in": ["unpaid", "partial"]}, "status": {"$ne": "cancelled"}}
     if branch_id:
         query["branch_id"] = branch_id
@@ -2575,6 +2583,44 @@ async def get_payables_by_supplier(user=Depends(get_current_user), branch_id: Op
         due = po.get("due_date", "")
         if due and due < today:
             by_vendor[v]["has_overdue"] = True
+
+    # ── Phase 3.2 — merge historical (pre-system) supplier POs ──────────
+    hs_query = {"status": {"$in": ["outstanding", "partial"]}}
+    if branch_id:
+        hs_query["branch_id"] = branch_id
+    hs_rows = await db.historical_supplier_pos.find(
+        hs_query, {"_id": 0}
+    ).sort("pre_system_date", 1).to_list(1000)
+    for hs in hs_rows:
+        bal = float(hs.get("balance", 0) or 0)
+        if bal <= 0:
+            continue
+        v = hs.get("supplier_name", "Unknown Supplier")
+        if v not in by_vendor:
+            by_vendor[v] = {"vendor": v, "total_owed": 0, "pos": [], "has_overdue": False}
+        by_vendor[v]["total_owed"] = round(by_vendor[v]["total_owed"] + bal, 2)
+        # Pre-system date is always older than today → always overdue.
+        by_vendor[v]["has_overdue"] = True
+        by_vendor[v]["pos"].append({
+            # Shape-aligned to a regular PO row so the FE can render
+            # uniformly. `kind: "historical"` is the only differentiator.
+            "kind": "historical",
+            "id": hs["id"],
+            "po_number": hs.get("reference_number") or f"HPO-{hs['id'][:6]}",
+            "vendor": v,
+            "branch_id": hs.get("branch_id"),
+            "po_type": "historical",
+            "payment_status": hs.get("status", "outstanding"),
+            "status": hs.get("status", "outstanding"),
+            "grand_total": float(hs.get("amount", 0) or 0),
+            "amount_paid": float(hs.get("amount_paid", 0) or 0),
+            "balance": bal,
+            "due_date": hs.get("pre_system_date", ""),
+            "pre_system_date": hs.get("pre_system_date", ""),
+            "created_at": hs.get("created_at", ""),
+            "items": [],  # no line items on historical entries
+            "description": hs.get("description", ""),
+        })
 
     return sorted(by_vendor.values(), key=lambda x: (not x["has_overdue"], x["vendor"]))
 

@@ -1,0 +1,83 @@
+{
+  "generated_at": "2026-05-13T09:01:42.821424+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 4,
+  "pass_count": 4,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br_pay_hsp.1_outstanding_appears",
+      "step": "hsp_visible_with_kind_historical",
+      "expected": {
+        "hist_count": 1,
+        "total_owed": 7500.0,
+        "has_overdue": true
+      },
+      "actual": {
+        "hist_count": 1,
+        "total_owed": 7500.0,
+        "has_overdue": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "464d6ed8-e3bb-44d5-a2c8-e36ae72a1d31",
+        "po_number": "HPO-B5-001000"
+      },
+      "recorded_at": "2026-05-13T09:01:41.625116+00:00"
+    },
+    {
+      "scenario": "br_pay_hsp.2_merge_under_same_vendor",
+      "step": "single_vendor_row_combines_regular_and_historical",
+      "expected": {
+        "reg_count": 1,
+        "hist_count": 1,
+        "total_owed": 6500.0
+      },
+      "actual": {
+        "reg_count": 1,
+        "hist_count": 1,
+        "total_owed": 6500.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "reg_po_id": "po-264f8036",
+        "hsp_id": "6e4e58f5-fa66-4c64-9847-53023a626284"
+      },
+      "recorded_at": "2026-05-13T09:01:41.854857+00:00"
+    },
+    {
+      "scenario": "br_pay_hsp.3_paid_hsp_hidden",
+      "step": "vendor_row_omitted_when_only_hsp_is_paid",
+      "expected": {
+        "vendor_listed": false
+      },
+      "actual": {
+        "vendor_listed": false
+      },
+      "status": "PASS",
+      "evidence": {
+        "hsp_id": "cc80d806-bcf5-4b37-bb16-807544eeb79e"
+      },
+      "recorded_at": "2026-05-13T09:01:42.313802+00:00"
+    },
+    {
+      "scenario": "br_pay_hsp.4_partial_remaining",
+      "step": "hsp_listed_with_remaining_balance",
+      "expected": {
+        "hist_count": 1,
+        "balance": 2000.0,
+        "payment_status": "partial"
+      },
+      "actual": {
+        "hist_count": 1,
+        "balance": 2000.0,
+        "payment_status": "partial"
+      },
+      "status": "PASS",
+      "evidence": {
+        "hsp_id": "c70ae2c7-71e7-4bd9-8ab3-3842b5bf0b5a"
+      },
+      "recorded_at": "2026-05-13T09:01:42.775540+00:00"
+    }
+  ]
+}

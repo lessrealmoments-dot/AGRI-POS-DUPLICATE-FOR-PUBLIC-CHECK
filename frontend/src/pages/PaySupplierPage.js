@@ -249,13 +249,31 @@ export default function PaySupplierPage() {
     let totalPaid = 0, errors = [], paidPoIds = [], closedDayHit = false;
 
     for (const alloc of allocations) {
+      // Locate the source row so we can route historical entries to the
+      // dedicated pay endpoint (Phase 3.2). The payables-by-supplier
+      // endpoint marks pre-system carry-forwards with `kind:'historical'`.
+      const poRow = selected.pos.find(p => p.id === alloc.po_id);
+      const isHistorical = poRow?.kind === 'historical';
       try {
-        await api.post(`/purchase-orders/${alloc.po_id}/pay`, {
-          amount: alloc.amount, fund_source: fundSource,
-          method: payMethod, reference: payRef,
-          payment_date: payDate, pin: payPin,
-          ...(lateEncodePayload ? { late_encode: lateEncodePayload } : {}),
-        });
+        if (isHistorical) {
+          // Historical Supplier PO — admin-PIN gated, different payload shape.
+          // No `late_encode` (the entry IS the late carry-forward already).
+          await api.post(`/historical-supplier-pos/${alloc.po_id}/pay`, {
+            amount: alloc.amount,
+            payment_method: payMethod,
+            fund_source: fundSource,
+            reference: payRef,
+            note: payMemo,
+            pin: payPin,
+          });
+        } else {
+          await api.post(`/purchase-orders/${alloc.po_id}/pay`, {
+            amount: alloc.amount, fund_source: fundSource,
+            method: payMethod, reference: payRef,
+            payment_date: payDate, pin: payPin,
+            ...(lateEncodePayload ? { late_encode: lateEncodePayload } : {}),
+          });
+        }
         totalPaid += alloc.amount;
         paidPoIds.push(alloc.po_id);
       } catch (e) {
@@ -264,7 +282,7 @@ export default function PaySupplierPage() {
           toast.error(detail.message); setProcessing(false); return;
         }
         const msg = typeof detail === 'string' ? detail : 'Payment failed';
-        if (/already closed|late.{0,3}encode/i.test(msg) && !lateEncodePayload) {
+        if (/already closed|late.{0,3}encode/i.test(msg) && !lateEncodePayload && !isHistorical) {
           closedDayHit = true; break;
         }
         errors.push(msg);
@@ -587,6 +605,13 @@ export default function PaySupplierPage() {
                               data-testid={`po-link-${po.id}`}>
                               {po.po_number}
                             </button>
+                            {po.kind === 'historical' && (
+                              <Badge className="ml-1.5 text-[9px] bg-amber-100 text-amber-700 border-amber-200 align-middle"
+                                title="Pre-system carry-forward — admin PIN required to pay"
+                                data-testid={`po-row-historical-${po.id}`}>
+                                Pre-system
+                              </Badge>
+                            )}
                           </td>
 
                           <td className="px-3 py-2.5 text-xs">
