@@ -1,195 +1,102 @@
-# AgriBooks — Fork Handoff Document
-**Created:** March 2026 (pre-fork)
-**Purpose:** Complete state capture for the next agent in the fork.
+# Fork Handoff — Feb 2026 (post-Phase 3.2)
 
----
+## TL;DR for the next agent
 
-## What Was Completed This Session (In Order)
+Read `/app/memory/PRD.md` top section first — it has full detail. This file is a 60-second briefing.
 
-### 1. Notification System Phase 5 — Scheduled Compliance Deadlines
-- APScheduler daily job `_daily_compliance_check` in `main.py` at 8:30 AM
-- Fires `compliance_deadline` notifications: expired docs (critical), expiring within 30d (warning), missing monthly filings after 15th (SSS, PhilHealth, Pag-IBIG, BIR 1601-C, 0619-E, 2550M — warning)
-- Dedup via `metadata.dedup_key` to prevent re-firing same alert
-- `create_notification()` in `notifications.py` extended with `severity_override` param
-- Frontend `NotificationsPage.js`: `compliance_deadline` TYPE_CONFIG with orange FileWarning icon + ComplianceDetail expandable row
-- Tested: iteration_144.json — 22/23 backend, 100% frontend
+### Current state (everything is GREEN)
+- **Full Business Regression: 113/113 tests pass / 379 rows / 0 fail**
+- Frontend `yarn build`: clean (~27s)
+- Zero DB footprint on every BR re-run
+- Backend supervisor: running clean
+- No outstanding bugs
 
-### 2. Security Alert Enrichment — Phases 1-3
-- **Phase 1** `_raise_security_alert()`: now resolves branch_name, adds user_role, user_email. Message: "Test Manager (Manager) entered wrong PIN 6x at Branch 1 — Transaction Verification: Verify PO-XXX"
-- **Phase 2** `_raise_qr_security_alert()`: accepts terminal_id, resolves "AgriSmart Terminal at Branch X" from terminal_sessions. Enriches with doc_id, doc_number, counterparty, doc_amount. qr_actions.py passes terminal_id at all 3 terminal-only call sites (release_stocks, receive_payment, transfer_receive)
-- **Phase 3** Frontend `SecurityAlertDetail` in NotificationsPage.js: WHO+WHAT cards (auth) / TERMINAL+DOCUMENT cards (QR). Clickable doc number opens ReviewDetailDialog. Lock banner for locked docs
-- Also added "View Receipt" button to authenticated PIN alerts when doc_id is available
-- Tested: iteration_145.json — 28/28 backend, 11/11 frontend
+### Phases delivered in this session (chronological)
+| Phase | What | Tests | Status |
+|---|---|---|---|
+| 1 | Stock Request Confirmation Layer (approved_qty + web modal) | 18 / 31 rows | ✅ |
+| 1.1 | Approval summary chips on request cards | UI only | ✅ |
+| 2 | QR/Mobile Stock Request Confirmation via `/doc/{code}` | 12 / 23 rows | ✅ |
+| 2.1 | View QR modal on request cards | UI only | ✅ |
+| 3 | Variance PIN gate + Internal Invoice line-item rewrite + silent-fail hardening + incident ticket polish | 12 / 26 rows | ✅ |
+| 3.2 | Historical Supplier PO (pre-system AP carry-forward, admin/TOTP only) | 12 / 20 rows | ✅ |
 
-### 3. Modal Registry PDF
-- Full audit of all 23 modal/dialog components in the app
-- PDF saved to R2: `agribooks-docs/reports/modal-registry-2026-03/agribooks_modal_registry.pdf`
-- Groups A-G, Redundancy Map, Quick Reference Cheat Sheet
-- Key redundancies identified (see below)
+### Last working item
+Phase 3.2 complete — admin-only "Old POs" flow on AP widget. User wanted a way to record pre-system supplier debt repeatedly without polluting current-period expense reports. Solved: dedicated `historical_supplier_pos` collection, admin_pin/TOTP only (no manager_pin), shows on AP dashboard with `kind: "historical"` chip, payments deduct from same fund wallets as regular supplier POs.
 
-### 4. Modal Consolidation Phase 1 — A1 Absorbs A3
-- `ReviewDetailDialog.js` (A1) extended with backward-compat props: `poId`, `poNumber`, `onUpdated`, `onOpenChange`
-- When `poNumber` passed: resolves UUID via `/api/invoices/by-number/{poNumber}` → `/dashboard/review-detail`
-- **7 pages migrated** from PODetailModal (A3) → ReviewDetailDialog (A1):
-  - CloseWizardPage.js (showReviewAction=false, view-only)
-  - PaySupplierPage.js (onUpdated={loadSuppliers})
-  - QuickSearch.js (both poId + poNumber paths)
-  - AuditCenterPage.js (showReviewAction=true)
-  - SuppliersPage.js (onUpdated={fetchData})
-  - TransactionSearchPage.jsx (poId path)
-  - DashboardPage.js (view-only)
-- `PODetailModal.js` now has **zero imports** — orphaned, safe to delete later
-- Z-reports: zero impact (UI-only migration)
-- Lint: all clean. API chain verified.
+## DON'T touch / DON'T regress
+- `_apply_receipt` in `branch_transfers.py` — sole stock mutator, Phase 0 invariants guard it.
+- The Phase 1 helper `_apply_confirmation` in `purchase_orders.py` — shared by web + QR confirmation. Don't duplicate.
+- `routes/verify.py` PIN policies — there are now ~30+ events. Don't remove any; only add new ones at the bottom of the list.
+- TENANT_COLLECTIONS in `config.py` — `request_approval_log`, `audit_log`, `incident_tickets`, `historical_supplier_pos` were added this session for auto-org-scoping. Keep them there.
 
----
-
-## The 4-Phase Modal Consolidation Plan (IN PROGRESS)
-
-### Phase 1 — A1 absorbs A3 (PO modals) ✅ DONE
-See above.
-
-### Phase 2 — A2 absorbs A4 (Invoice/Sale modals) — NEXT TO DO
-**Goal:** Add `compact={true}` prop to `InvoiceDetailModal` (A2) that renders a single-view identical to `SaleDetailModal` (A4). Then migrate 9 pages from A4 → A2 with `compact` prop.
-
-**Files to change:**
-- `components/InvoiceDetailModal.js` — add `compact` prop. When `compact=true`: hide tabs (Releases/Payment History tabs), show simplified single-view layout matching A4's current layout
-- Migrate these 9 pages (all view-only except where noted):
-  - `pages/SalesPage.js` — click sale row → opens SaleDetailModal
-  - `pages/AccountingPage.js` — has saleId
-  - `pages/ExpensesPage.js` — has invoiceNumber  
-  - `pages/CustomersPage.js` — has invoiceNumber
-  - `pages/CloseWizardPage.js` — already has SaleDetailModal import (detailType==='sale')
-  - `pages/ReportsPage.js` — has saleId
-  - `pages/DailyLogPage.js` — has saleId
-  - `pages/PaymentsPage.js` — has invoiceNumber
-  - `pages/PendingReleasesPage.jsx` — has saleId
-  - `pages/InternalInvoicesPage.js` — has saleId
-- Add backward-compat `saleId` and `invoiceNumber` props to A2 (InvoiceDetailModal already accepts invoiceNumber but check saleId too)
-- SaleDetailModal.js → zero imports → orphaned (like PODetailModal after Phase 1)
-
-**Prop mapping A4 → A2:**
-- A4: `{ open, onOpenChange, saleId, invoiceNumber, onUpdated }`
-- A2: `{ open, onOpenChange, invoiceId, invoiceNumber, expenseId, onUpdated, compact }`
-- A4 uses `saleId` — A2 uses `invoiceId` (same thing, invoices collection)
-- Need to add `saleId` as backward-compat alias for `invoiceId` in A2
-
-**Z-report safeguard:** A4 in CloseWizardPage is view-only (no onUpdated). A4's void/edit actions call the same `/api/invoices/{id}/void` and `/api/invoices/{id}/edit` endpoints — these remain identical in A2.
-
-### Phase 3 — C1 + C2 merge into AuthDialog — AFTER PHASE 2
-**Goal:** Single `AuthDialog` component with `mode="pin"|"totp"|"either"` prop.
-
-**Files to change:**
-- New `components/AuthDialog.js` — unified PIN/TOTP entry dialog
-  - Props: `open, onClose, mode, action, docType, docId, docLabel, title, description, onVerified`
-  - When `mode="pin"`: same as current C1 (VerifyPinDialog)
-  - When `mode="totp"`: same as current C2 (TotpVerifyDialog)
-  - When `mode="either"`: accepts both
-- Make `VerifyPinDialog.js` → thin wrapper around `<AuthDialog mode="pin" />`
-- Make `TotpVerifyDialog.js` → thin wrapper around `<AuthDialog mode="totp" />`
-- No page changes needed immediately (wrappers preserve backward compat)
-
-**Z-report safeguard:** Auth dialogs call `/api/verify/{docType}/{docId}` and `/api/auth/verify-totp` — endpoints untouched.
-
-### Phase 4 — Extract F7 Fund Transfer Dialog — AFTER PHASE 3
-**Goal:** Extract duplicated fund transfer inline dialogs from FundManagementPage and AccountingPage into `components/FundTransferDialog.js`.
-
-**Files to change:**
-- New `components/FundTransferDialog.js` — handles Cashier↔Safe, Safe→Bank, Capital Injection with PIN
-  - Props: `open, onClose, type, amount, onSuccess`
-  - Calls: `/api/accounting/transfer-funds`
-- Update `pages/FundManagementPage.js` — replace inline dialog with `<FundTransferDialog />`
-- Update `pages/AccountingPage.js` — replace inline dialog with `<FundTransferDialog />`
-
-**Z-report safeguard:** Fund transfers update wallet balances which appear in Z-reports, but the API call is unchanged — only the UI is extracted.
-
----
-
-## Other Pending Work (Non-Modal)
-
-### P0 — Compliance Calendar Widget on Dashboard
-- **What:** New dashboard widget showing expired/expiring docs + monthly filing status
-- **API:** `GET /api/documents/compliance/summary` — ALREADY EXISTS, returns: `{expired: [], expiring_soon: [], monthly_coverage: {}}`
-- **Where:** `pages/DashboardPage.js` — add new widget to the dashboard grid
-- **Widget content:**
-  - Red card: "X expired" (click → /documents)
-  - Amber card: "X expiring within 30d" (click → /documents)
-  - Monthly filing tracker: 6 dots (SSS/PhilHealth/Pag-IBIG/BIR 1601-C/0619-E/2550M) — green=filed, red=missing
-- **Note:** Scheduler (Phase 5 notifications) already fires alerts for these — widget is the visual dashboard companion
-
-### P1 — Terminal Quick Stock Check
-- New mode in terminal floating mode selector
-- Scan barcode → instant stock level card (no PIN, read-only)
-- Backend: reuse `GET /api/products?search=` + inventory lookup
-- Frontend: new `TerminalStockCheck.jsx` component, add to TerminalShell mode selector
-
-### P1 — Terminal Price Check
-- Scan barcode → price card (respects `products.view_cost` permission)
-- New `TerminalPriceCheck.jsx`
-
-### P1 — Discount Cashier Drill-Down Report
-- Aggregate `discount_audit_log` by cashier in `/reports` Discounts tab
-- Show: cashier name, total discounts this month, discount count, avg %, sorted by amount
-
-### P1 — AP Payment History per Supplier
-- Show recent payment history in `PaySupplierPage.js` below PO list
-- Query: `expenses` where fund_source linked to supplier's POs
-
-### P2 — Backlog
-- Shared receipt clickable link in ReviewDetailDialog (PO-XXXX → opens that PO's dialog)
-- Admin tool for corrupted POs
-- Visual trail for partial invoices
-- Smart journal entries for back-dated sales
-
-### P3 — Future
-- Refactor SuperAdminPage.jsx (1000+ lines)
-- Fix react-hooks/exhaustive-deps ESLint warnings
-- Native Android APK (Capacitor + AAR)
-
----
-
-## Current State of Key Files
-
-### Modal Hierarchy (CANONICAL — use these going forward)
-| Use Case | Component | File |
+## What was NOT done (deferred / blocked / future)
+| Priority | Item | Notes |
 |---|---|---|
-| View/Verify/Pay a PO | `ReviewDetailDialog` (A1) | `components/ReviewDetailDialog.js` |
-| View/Verify a Sale/Invoice | `InvoiceDetailModal` (A2) | `components/InvoiceDetailModal.js` |
-| View a Sale (compact) | `SaleDetailModal` (A4) — **MIGRATE TO A2 in Phase 2** | `components/SaleDetailModal.js` |
-| View a Transfer | `TransferDetailModal` (A5) | `components/TransferDetailModal.js` |
-| View an Expense | `ExpenseDetailModal` (A6) | `components/ExpenseDetailModal.js` |
-| Customer AR Statement | `CustomerStatementModal` (B1) | `components/CustomerStatementModal.js` |
-| PIN entry | `VerifyPinDialog` (C1) | `components/VerifyPinDialog.js` |
-| TOTP entry | `TotpVerifyDialog` (C2) | `components/TotpVerifyDialog.js` |
-| Receipt upload | `UploadQRDialog` (D1) | `components/UploadQRDialog.js` |
-| Receipt view | `ViewQRDialog` (D2) | `components/ViewQRDialog.js` |
+| P0 next | Supplier Ledger view | Combine regular POs + historical POs into single "Pay {supplier}" page. Natural next step after 3.2. |
+| P1 | Phase 3.1 — `update_transfer` org_id defensive hardening | Defensive only — current code uses `$set` with whitelist so the bug is theoretical. ~30 LOC + 3 BR tests. |
+| P1 | FE polish for Phase 3 variance | Internal invoice print should show `qty (was X)` + "Variance accepted by {verifier}". `variance_history[]` data is already in DB. |
+| P1 | CSV bulk-import for historical POs | Suggested as enhancement in last finish summary. Same admin-PIN gate, ~80 LOC. |
+| P1 | Tenant-configurable variance threshold | Currently `BT_VARIANCE_PIN_THRESHOLD = 5000.0` constant in `accept_receipt`. |
+| P2 | Prepared Order SMS | Needs Resend/Twilio integration playbook + API keys from user. |
+| P2 | Slow-moving stock SMS engine (Phase 4) | Owner deferred. |
+| P2 | Concurrent Held-Sales Queue (Phase 4A.2) | |
+| P3 | `_finalize_draft_offline` status divergence (`credit` vs `open`) in `sync.py` | |
+| P3 | 11 legacy FE unit tests using hardcoded dates | Needs `freezegun`. |
+| P3 | Rename `/sales` → `/sales-history` | |
+| P3 | Surface `invoice_creation_failed` badge on BTO cards | Backend flag exists; FE doesn't read it yet. |
+| P3 | Variance Log tab on internal invoice detail page | Read `variance_history[]` (~60 LOC). |
 
-### Dead Files (zero imports — safe to delete when confident)
-- `components/PODetailModal.js` — replaced by ReviewDetailDialog (A1)
+## Earlier known issues (still open from previous forks)
+1. Internal invoice silent-fail (P2) — **FIXED in Phase 3** ✅
+2. `update_transfer` PUT can blank `organization_id` (P2/BT-AUD-34) — defensive only, still open. Code uses `$set` + whitelist; no exploit path today.
+3. `_finalize_draft_offline` writes `status="credit"` while live `/unified-sale` writes `status="open"` (P3) — still open.
+4. Verifier identity not consistently stamped on PO cancellation (E12 gap) — still open.
+5. Admins see incoming + outgoing requests mixed in "All Branches" view without direction badges — still open.
 
-### ReviewDetailDialog backward-compat props (added this session):
-```jsx
-// All these work now:
-<ReviewDetailDialog recordType="purchase_order" recordId={uuid} ... />  // original
-<ReviewDetailDialog poId={uuid} ... />                                   // alias
-<ReviewDetailDialog poNumber="PO-B1-001014" ... />                       // resolves UUID
-<ReviewDetailDialog poNumber="PO-X" onOpenChange={fn} onUpdated={fn} />  // full backward compat
+## Critical files (current)
+### Backend
+- `routes/purchase_orders.py` — Stock requests; Phase 1 `confirm-request` endpoint + shared `_apply_confirmation` helper at line ~1660.
+- `routes/branch_transfers.py` — BTOs; Phase 3 PIN gate + invoice rewrite call in `accept_receipt`; silent-fail hardening at ~line 467.
+- `routes/qr_actions.py` — Phase 2 `POST /qr-actions/{code}/confirm_stock_request`.
+- `routes/doc_lookup.py` — Enriched `view_document_open` for branch_request POs.
+- `routes/internal_invoices.py` — Phase 3 `rewrite_invoice_items_to_received` helper.
+- `routes/historical_supplier_po.py` — Phase 3.2 NEW route file.
+- `routes/verify.py` — PIN policies (~30 events).
+- `routes/dashboard.py` — `accounts_payable_summary` merges historical POs.
+- `config.py` — `TENANT_COLLECTIONS` (includes audit_log, incident_tickets, historical_supplier_pos).
+
+### Frontend
+- `pages/BranchTransferPage.js` — Phase 1.1 chips + Phase 1 + 2.1 dialog mounts.
+- `pages/DocViewerPage.jsx` — Phase 2 `StockRequestConfirmPanel` (inline panel).
+- `components/ConfirmQuantitiesDialog.jsx` — Phase 1 web modal.
+- `components/RequestQRDialog.jsx` — Phase 2.1 View QR modal.
+- `components/HistoricalSupplierPODialog.jsx` — Phase 3.2 admin-only modal.
+- `components/dashboard/AccountsPayableWidget.js` — Phase 3.2 "Old POs" button.
+
+## Test infrastructure
+- BR suite at `backend/tests/business_regression/` is the source of truth.
+- Each test file uses module-scoped `tenant` fixture from `conftest.py` + `record_result` for structured reporting.
+- Zero-footprint cleanup: TENANT_COLLECTIONS members auto-cleaned via `cleanup_business_tenant()` in `_fixtures.py`.
+- BR report json at `/app/test_reports/business_regression_latest.json`.
+- DO NOT run full `pytest tests/` — many legacy tests have hardcoded dates and pollute DB state. Stick to `tests/business_regression/`.
+
+## Test credentials
+See `/app/memory/test_credentials.md` — unchanged this session. All BR-fixture users (`br_sr_conf-*`, `br_sr_qr-*`, `br_bt_var-*`, `br_hs_po-*`) are ephemeral and auto-cleaned per run.
+
+## Run cheat sheet
+```bash
+# Full BR (4–8s)
+cd /app/backend && python3 -m pytest tests/business_regression/ -v
+
+# Single phase
+python3 -m pytest tests/business_regression/test_br_historical_supplier_po.py -v
+
+# Frontend
+cd /app/frontend && yarn build  # ~27s
 ```
 
----
-
-## Credentials
-- Super Admin: `janmarkeahig@gmail.com` / `Aa@58798546521325`
-- Company Admin: `jovelyneahig@gmail.com` / `Aa@050772`
-- Manager PIN: `521325`
-- App URL: `https://stock-confirm-layer.preview.emergentagent.com`
-
-## Test Reports From This Session
-- `iteration_144.json` — Compliance Deadline Notifications
-- `iteration_145.json` — Security Alert Enrichment Phases 1-3
-
-## Key Architecture Reminders
-- Z-reports read from MongoDB directly (invoices, expenses, payments collections). Modal UI changes NEVER affect Z-report data.
-- All QR actions (release_stocks, receive_payment, transfer_receive) require terminal_id — verified before PIN check
-- `create_notification()` in `notifications.py` is the SINGLE helper for all new notifications — always use it
-- ReviewDetailDialog uses `/dashboard/review-detail/{type}/{id}` endpoint (richer than direct PO endpoint)
+## Active integrations / env
+- Cloudflare R2 / Boto3 (file storage) — user-supplied
+- Resend (emails) — user-supplied
+- No LLM integrations active this session
