@@ -469,8 +469,61 @@ async def create_transfer(data: dict, user=Depends(get_current_user)):
         invoice = await create_internal_invoice(transfer, user)
         transfer["invoice_id"] = invoice["id"]
         transfer["invoice_number"] = invoice["invoice_number"]
-    except Exception:
-        pass  # Invoice creation failure should not block transfer creation
+    except Exception as inv_err:
+        # Phase 3 — replace silent except: pass. BTO still proceeds
+        # (losing one invoice is recoverable; losing a BTO is not), but
+        # we surface the failure via:
+        #   - structured log
+        #   - audit_log row (`internal_invoice_creation_failed`)
+        #   - BTO flags (`invoice_creation_failed`, `invoice_creation_error`,
+        #     `invoice_creation_failed_at`) so the UI + downstream
+        #     `update_invoice_status` callers can detect the missing invoice.
+        import logging
+        import traceback
+        logging.getLogger("branch_transfers").error(
+            f"create_internal_invoice failed for BTO "
+            f"{transfer.get('order_number','?')} ({transfer['id']}): {inv_err}\n"
+            f"{traceback.format_exc()}"
+        )
+        failure_at = now_iso()
+        transfer["invoice_creation_failed"] = True
+        transfer["invoice_creation_error"] = str(inv_err)
+        transfer["invoice_creation_failed_at"] = failure_at
+        try:
+            await db.branch_transfer_orders.update_one(
+                {"id": transfer["id"]},
+                {"$set": {
+                    "invoice_creation_failed": True,
+                    "invoice_creation_error": str(inv_err),
+                    "invoice_creation_failed_at": failure_at,
+                }},
+            )
+            await db.audit_log.insert_one({
+                "id": new_id(),
+                "type": "internal_invoice_creation_failed",
+                "entity_type": "branch_transfer",
+                "entity_id": transfer["id"],
+                "description": (
+                    f"Internal invoice creation failed for BTO "
+                    f"{transfer.get('order_number','?')}: {inv_err}"
+                ),
+                "metadata": {
+                    "order_number": transfer.get("order_number", ""),
+                    "from_branch_id": transfer.get("from_branch_id", ""),
+                    "to_branch_id": transfer.get("to_branch_id", ""),
+                    "error": str(inv_err),
+                },
+                "branch_id": transfer.get("from_branch_id", ""),
+                "user_id": user.get("id", ""),
+                "user_name": user.get("full_name", user.get("username", "")),
+                "created_at": failure_at,
+            })
+        except Exception as audit_err:
+            # The audit-log write itself failing should NOT block BTO
+            # creation; just log it.
+            logging.getLogger("branch_transfers").error(
+                f"failed to write internal_invoice_creation_failed audit row: {audit_err}"
+            )
 
     # If this draft was Submitted for Approval, notify all admins via SMS
     if transfer["status"] == "pending_approval":
@@ -1687,6 +1740,35 @@ async def accept_receipt(transfer_id: str, data: dict, user=Depends(get_current_
     accept_note = data.get("note", "").strip()
     action = data.get("action", "accept")
 
+    # ── Phase 3 — High-value variance PIN/TOTP gate ──────────────────────────
+    # Capital loss is computed from shortages only (excesses are
+    # surplus, not a loss). When the total exceeds the threshold, a
+    # source-branch manager PIN, admin PIN, or TOTP is required. Below
+    # the threshold, the JWT path is sufficient (operational speed).
+    BT_VARIANCE_PIN_THRESHOLD = 5000.0
+    total_capital_loss = sum(s.get("capital_variance", 0) for s in shortages)
+    total_retail_loss = sum(s.get("retail_variance", 0) for s in shortages)
+    pin_verifier = None
+    if total_capital_loss > BT_VARIANCE_PIN_THRESHOLD:
+        pin = str(data.get("pin", "") or "").strip()
+        if not pin:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"This variance is above the ₱{BT_VARIANCE_PIN_THRESHOLD:,.0f} "
+                    f"threshold (capital loss ₱{total_capital_loss:,.2f}). "
+                    f"PIN/TOTP is required."
+                ),
+            )
+        from routes.verify import verify_pin_for_action
+        pin_verifier = await verify_pin_for_action(
+            pin, "transfer_variance_accept", branch_id=from_branch_id)
+        if not pin_verifier:
+            raise HTTPException(
+                status_code=403,
+                detail="Invalid PIN — use source-branch manager PIN, admin PIN, or TOTP.",
+            )
+
     # Apply inventory movement
     result = await _apply_receipt(
         order, items, shortages, excesses, from_branch_id, to_branch_id,
@@ -1695,9 +1777,6 @@ async def accept_receipt(transfer_id: str, data: dict, user=Depends(get_current_
     )
 
     # Record acceptance
-    total_capital_loss = sum(s.get("capital_variance", 0) for s in shortages)
-    total_retail_loss = sum(s.get("retail_variance", 0) for s in shortages)
-
     update_fields = {
         "accepted_by": user["id"],
         "accepted_by_name": user.get("full_name", user["username"]),
@@ -1707,9 +1786,31 @@ async def accept_receipt(transfer_id: str, data: dict, user=Depends(get_current_
         "total_capital_loss": total_capital_loss,
         "total_retail_loss": total_retail_loss,
     }
+    # Phase 3 — Stamp variance PIN verifier identity onto the BTO so
+    # the audit log + UI can prove "this loss was accepted by [name] via
+    # [admin_pin|manager_pin|totp]".
+    if pin_verifier:
+        update_fields["variance_pin_verified_by_id"] = pin_verifier.get("verifier_id", "")
+        update_fields["variance_pin_verified_by_name"] = pin_verifier.get("verifier_name", "")
+        update_fields["variance_pin_verified_method"] = pin_verifier.get("method", "")
+        update_fields["variance_pin_verified_at"] = now_iso()
 
     # Log variance as audit record
     if shortages or excesses:
+        audit_metadata = {
+            "order_number": order["order_number"],
+            "from_branch": from_name,
+            "to_branch": to_name,
+            "shortages": shortages,
+            "excesses": excesses,
+            "total_capital_loss": total_capital_loss,
+            "total_retail_loss": total_retail_loss,
+            "action": action,
+        }
+        if pin_verifier:
+            audit_metadata["pin_verified_by_id"] = pin_verifier.get("verifier_id", "")
+            audit_metadata["pin_verified_by_name"] = pin_verifier.get("verifier_name", "")
+            audit_metadata["pin_verified_method"] = pin_verifier.get("method", "")
         await db.audit_log.insert_one({
             "id": new_id(),
             "type": "transfer_variance_accepted",
@@ -1720,21 +1821,30 @@ async def accept_receipt(transfer_id: str, data: dict, user=Depends(get_current_
                 f"Shortages: {len(shortages)}, Excesses: {len(excesses)}. "
                 f"Capital loss: {total_capital_loss:.2f}. Note: {accept_note or 'N/A'}"
             ),
-            "metadata": {
-                "order_number": order["order_number"],
-                "from_branch": from_name,
-                "to_branch": to_name,
-                "shortages": shortages,
-                "excesses": excesses,
-                "total_capital_loss": total_capital_loss,
-                "total_retail_loss": total_retail_loss,
-                "action": action,
-            },
+            "metadata": audit_metadata,
             "branch_id": from_branch_id,
             "user_id": user["id"],
             "user_name": user.get("full_name", user["username"]),
             "created_at": now_iso(),
         })
+
+    # Phase 3 — rewrite invoice line items so the paper invoice reflects
+    # what was actually accepted/received. Pending_items is the source
+    # of truth for `qty_received`. Skipped when there is no variance
+    # (exact receive path leaves the invoice's original lines alone).
+    if shortages or excesses:
+        try:
+            from routes.internal_invoices import rewrite_invoice_items_to_received
+            await rewrite_invoice_items_to_received(
+                transfer_id, items,
+                accepted_by=user, accept_note=accept_note,
+                pin_verifier=pin_verifier,
+            )
+        except Exception as rewrite_err:
+            import logging
+            logging.getLogger("branch_transfers").error(
+                f"invoice rewrite failed for BTO {order.get('order_number','?')}: {rewrite_err}"
+            )
 
     # Create incident ticket if requested
     incident_ticket_id = None
@@ -1743,11 +1853,43 @@ async def accept_receipt(transfer_id: str, data: dict, user=Depends(get_current_
         ticket_number = f"INC-{ticket_count + 1:05d}"
         incident_ticket_id = new_id()
 
+        # Phase 3 — denormalize the full qty chain (requested / approved
+        # / sent / received) + link the source request PO so the ticket
+        # is a self-sufficient audit row.
+        request_po_id = order.get("request_po_id", "") or ""
+        request_po_number = order.get("request_po_number", "") or ""
+        po_items_by_pid = {}
+        if request_po_id:
+            po_row = await db.purchase_orders.find_one(
+                {"id": request_po_id},
+                {"_id": 0, "items": 1, "po_number": 1},
+            )
+            if po_row:
+                for it in (po_row.get("items") or []):
+                    po_items_by_pid[it.get("product_id", "")] = it
+                if not request_po_number:
+                    request_po_number = po_row.get("po_number", "")
+
+        def _enrich_variance_line(line, line_type):
+            pid = line.get("product_id", "")
+            po_line = po_items_by_pid.get(pid, {})
+            requested_qty = float(po_line.get("quantity", 0) or 0)
+            approved_raw = po_line.get("approved_qty")
+            approved_qty = float(approved_raw) if (approved_raw is not None and approved_raw != "") else None
+            return {
+                **line,
+                "type": line_type,
+                "requested_qty": requested_qty,
+                "approved_qty": approved_qty,
+                "sent_qty": float(line.get("qty_ordered", 0) or 0),
+                "received_qty": float(line.get("qty_received", 0) or 0),
+            }
+
         variance_items = []
         for s in shortages:
-            variance_items.append({**s, "type": "shortage"})
+            variance_items.append(_enrich_variance_line(s, "shortage"))
         for e in excesses:
-            variance_items.append({**e, "type": "excess"})
+            variance_items.append(_enrich_variance_line(e, "excess"))
 
         ticket = {
             "id": incident_ticket_id,
@@ -1758,6 +1900,14 @@ async def accept_receipt(transfer_id: str, data: dict, user=Depends(get_current_
             "from_branch_name": from_name,
             "to_branch_id": to_branch_id,
             "to_branch_name": to_name,
+            # Phase 3 — denormalized links + verifier identity.
+            "request_po_id": request_po_id,
+            "request_po_number": request_po_number,
+            "invoice_id": order.get("invoice_id", ""),
+            "invoice_number": order.get("invoice_number", ""),
+            "pin_verified_by_id": (pin_verifier or {}).get("verifier_id", ""),
+            "pin_verified_by_name": (pin_verifier or {}).get("verifier_name", ""),
+            "pin_verified_method": (pin_verifier or {}).get("method", ""),
             "items": variance_items,
             "total_capital_loss": total_capital_loss,
             "total_retail_loss": total_retail_loss,

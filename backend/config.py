@@ -68,6 +68,9 @@ TENANT_COLLECTIONS = {
     'parked_branch_transfers',       # Manager "park transfer" / draft transfer staging
     # Phase 1 — Stock Request Confirmation Layer (append-only audit ledger).
     'request_approval_log',
+    # Phase 3 — Branch Transfer variance + invoice integrity audit rows.
+    'audit_log',
+    'incident_tickets',
 }
 
 

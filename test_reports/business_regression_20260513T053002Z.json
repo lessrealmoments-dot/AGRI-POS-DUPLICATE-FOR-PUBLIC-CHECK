@@ -1,0 +1,783 @@
+{
+  "generated_at": "2026-05-13T05:30:02.132919+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 26,
+  "pass_count": 26,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br_bt_var.1_invoice_qty_matches_received_after_shortage",
+      "step": "line_qty_rewritten_to_7",
+      "expected": {
+        "qty": 7.0
+      },
+      "actual": {
+        "qty": 7.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "5a9bdf10-6478-4e6e-97c4-19766b3311ba",
+        "qty_before": 10.0,
+        "qty_after": 7.0,
+        "line_total_after": 420.0,
+        "original_sent_qty": 10.0
+      },
+      "recorded_at": "2026-05-13T05:30:01.842677+00:00"
+    },
+    {
+      "scenario": "br_bt_var.1_invoice_qty_matches_received_after_shortage",
+      "step": "line_total_recomputed",
+      "expected": {
+        "line_total": 420.0
+      },
+      "actual": {
+        "line_total": 420.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "5a9bdf10-6478-4e6e-97c4-19766b3311ba",
+        "qty_before": 10.0,
+        "qty_after": 7.0,
+        "line_total_after": 420.0,
+        "original_sent_qty": 10.0
+      },
+      "recorded_at": "2026-05-13T05:30:01.842680+00:00"
+    },
+    {
+      "scenario": "br_bt_var.1_invoice_qty_matches_received_after_shortage",
+      "step": "original_sent_qty_preserved",
+      "expected": {
+        "sent": 10.0
+      },
+      "actual": {
+        "sent": 10.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "5a9bdf10-6478-4e6e-97c4-19766b3311ba",
+        "qty_before": 10.0,
+        "qty_after": 7.0,
+        "line_total_after": 420.0,
+        "original_sent_qty": 10.0
+      },
+      "recorded_at": "2026-05-13T05:30:01.842682+00:00"
+    },
+    {
+      "scenario": "br_bt_var.2_invoice_qty_matches_received_after_excess",
+      "step": "line_qty_rewritten_to_12",
+      "expected": {
+        "qty": 12.0
+      },
+      "actual": {
+        "qty": 12.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "5c73d0a8-ce8b-4d72-bd5e-3e2d23ae8e51",
+        "qty_after": 12.0,
+        "line_total": 720.0
+      },
+      "recorded_at": "2026-05-13T05:30:01.861269+00:00"
+    },
+    {
+      "scenario": "br_bt_var.3_invoice_grand_total_matches_received_total",
+      "step": "grand_total_equals_received_total",
+      "expected": {
+        "grand": 480.0
+      },
+      "actual": {
+        "grand": 480.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "5b24f26f-378a-4e78-b9af-aa64620c3809",
+        "subtotal": 480.0,
+        "grand_total": 480.0,
+        "received_total": 480.0,
+        "expected": 480.0
+      },
+      "recorded_at": "2026-05-13T05:30:01.883032+00:00"
+    },
+    {
+      "scenario": "br_bt_var.3_invoice_grand_total_matches_received_total",
+      "step": "subtotal_equals_received_total",
+      "expected": {
+        "sub": 480.0
+      },
+      "actual": {
+        "sub": 480.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "5b24f26f-378a-4e78-b9af-aa64620c3809",
+        "subtotal": 480.0,
+        "grand_total": 480.0,
+        "received_total": 480.0,
+        "expected": 480.0
+      },
+      "recorded_at": "2026-05-13T05:30:01.883040+00:00"
+    },
+    {
+      "scenario": "br_bt_var.4_silent_invoice_creation_failure_logged",
+      "step": "bto_flag_set",
+      "expected": {
+        "failed": true
+      },
+      "actual": {
+        "failed": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "7c822205-2073-49b5-bb58-9c1ca8240147",
+        "invoice_creation_failed": true,
+        "invoice_creation_error": "simulated invoice DB outage",
+        "audit_count": 1
+      },
+      "recorded_at": "2026-05-13T05:30:01.888789+00:00"
+    },
+    {
+      "scenario": "br_bt_var.4_silent_invoice_creation_failure_logged",
+      "step": "audit_log_row_written",
+      "expected": {
+        "count": 1
+      },
+      "actual": {
+        "count": 1
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "7c822205-2073-49b5-bb58-9c1ca8240147",
+        "invoice_creation_failed": true,
+        "invoice_creation_error": "simulated invoice DB outage",
+        "audit_count": 1
+      },
+      "recorded_at": "2026-05-13T05:30:01.888799+00:00"
+    },
+    {
+      "scenario": "br_bt_var.4_silent_invoice_creation_failure_logged",
+      "step": "bto_still_created",
+      "expected": {
+        "id_set": true
+      },
+      "actual": {
+        "id_set": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "7c822205-2073-49b5-bb58-9c1ca8240147",
+        "invoice_creation_failed": true,
+        "invoice_creation_error": "simulated invoice DB outage",
+        "audit_count": 1
+      },
+      "recorded_at": "2026-05-13T05:30:01.888802+00:00"
+    },
+    {
+      "scenario": "br_bt_var.5_high_value_variance_requires_pin",
+      "step": "rejected_without_pin",
+      "expected": {
+        "state": "err"
+      },
+      "actual": {
+        "state": "err"
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "e23fcb81-599e-4694-a007-089dc8985c37",
+        "state": "err",
+        "result": [
+          400,
+          "This variance is above the \u20b15,000 threshold (capital loss \u20b16,000.00). PIN/TOTP is required."
+        ],
+        "status_after": "received_pending"
+      },
+      "recorded_at": "2026-05-13T05:30:01.905303+00:00"
+    },
+    {
+      "scenario": "br_bt_var.5_high_value_variance_requires_pin",
+      "step": "status_unchanged",
+      "expected": {
+        "status": "received_pending"
+      },
+      "actual": {
+        "status": "received_pending"
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "e23fcb81-599e-4694-a007-089dc8985c37",
+        "state": "err",
+        "result": [
+          400,
+          "This variance is above the \u20b15,000 threshold (capital loss \u20b16,000.00). PIN/TOTP is required."
+        ],
+        "status_after": "received_pending"
+      },
+      "recorded_at": "2026-05-13T05:30:01.905311+00:00"
+    },
+    {
+      "scenario": "br_bt_var.6_low_value_variance_skips_pin",
+      "step": "accepted_without_pin",
+      "expected": {
+        "state": "ok"
+      },
+      "actual": {
+        "state": "ok"
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "0d4fc259-9760-40d3-a172-7ac67cfa3f7b",
+        "state": "ok",
+        "status_after": "received"
+      },
+      "recorded_at": "2026-05-13T05:30:01.923637+00:00"
+    },
+    {
+      "scenario": "br_bt_var.6_low_value_variance_skips_pin",
+      "step": "status_accepted",
+      "expected": {
+        "status": "received"
+      },
+      "actual": {
+        "status": "received"
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "0d4fc259-9760-40d3-a172-7ac67cfa3f7b",
+        "state": "ok",
+        "status_after": "received"
+      },
+      "recorded_at": "2026-05-13T05:30:01.923641+00:00"
+    },
+    {
+      "scenario": "br_bt_var.7_wrong_branch_pin_rejected",
+      "step": "403_rejected",
+      "expected": {
+        "state": "err"
+      },
+      "actual": {
+        "state": "err"
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "f043fa7a-0ec6-44b0-a4f9-7cca039488a3",
+        "state": "err",
+        "result": [
+          403,
+          "Invalid PIN \u2014 use source-branch manager PIN, admin PIN, or TOTP."
+        ],
+        "status_after": "received_pending"
+      },
+      "recorded_at": "2026-05-13T05:30:01.937738+00:00"
+    },
+    {
+      "scenario": "br_bt_var.7_wrong_branch_pin_rejected",
+      "step": "status_unchanged",
+      "expected": {
+        "status": "received_pending"
+      },
+      "actual": {
+        "status": "received_pending"
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "f043fa7a-0ec6-44b0-a4f9-7cca039488a3",
+        "state": "err",
+        "result": [
+          403,
+          "Invalid PIN \u2014 use source-branch manager PIN, admin PIN, or TOTP."
+        ],
+        "status_after": "received_pending"
+      },
+      "recorded_at": "2026-05-13T05:30:01.937744+00:00"
+    },
+    {
+      "scenario": "br_bt_var.8_admin_pin_accepts_high_variance",
+      "step": "200_succeeded",
+      "expected": {
+        "state": "ok"
+      },
+      "actual": {
+        "state": "ok"
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "9fbb5711-4801-47b4-91f9-aef617347517",
+        "state": "ok",
+        "status_after": "received",
+        "pin_verified_by_id": "br_bt_var-admin-d1df42e3",
+        "pin_verified_method": "manager_pin"
+      },
+      "recorded_at": "2026-05-13T05:30:01.955696+00:00"
+    },
+    {
+      "scenario": "br_bt_var.8_admin_pin_accepts_high_variance",
+      "step": "verifier_method_recorded",
+      "expected": {
+        "method_in_set": true
+      },
+      "actual": {
+        "method_in_set": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "9fbb5711-4801-47b4-91f9-aef617347517",
+        "state": "ok",
+        "status_after": "received",
+        "pin_verified_by_id": "br_bt_var-admin-d1df42e3",
+        "pin_verified_method": "manager_pin"
+      },
+      "recorded_at": "2026-05-13T05:30:01.955709+00:00"
+    },
+    {
+      "scenario": "br_bt_var.9_incident_ticket_full_qty_chain",
+      "step": "requested_qty_present",
+      "expected": {
+        "requested": 12.0
+      },
+      "actual": {
+        "requested": 12.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "b7393b1b-3f5b-4f07-99e2-6fe3dfdb3d64",
+        "ticket": {
+          "id": "d969e839-3c68-4015-86df-f71201432f9d",
+          "ticket_number": "INC-00001",
+          "transfer_id": "b7393b1b-3f5b-4f07-99e2-6fe3dfdb3d64",
+          "order_number": "BTO-20260513-0009",
+          "from_branch_id": "p2b-br-75ca5b6b",
+          "from_branch_name": "Branch 5b6b",
+          "to_branch_id": "br-b2-br-870ea5e2",
+          "to_branch_name": "Branch B a5e2",
+          "request_po_id": "8d5c698f-1cf3-4025-80bb-994c566dce80",
+          "request_po_number": "PO-BB-001000",
+          "invoice_id": "4b20e9d6-d7b5-4def-88ed-5b331176ab48",
+          "invoice_number": "INV-BB-001007",
+          "pin_verified_by_id": "",
+          "pin_verified_by_name": "",
+          "pin_verified_method": "",
+          "items": [
+            {
+              "product_id": "prd-5fa4089c",
+              "product_name": "br_bt_var9 P",
+              "sku": "SKU-a4089c",
+              "unit": "pc",
+              "qty_ordered": 10.0,
+              "qty_received": 6.0,
+              "variance": 4.0,
+              "transfer_capital": 60.0,
+              "branch_retail": 100.0,
+              "capital_variance": 240.0,
+              "retail_variance": 400.0,
+              "type": "shortage",
+              "requested_qty": 12.0,
+              "approved_qty": null,
+              "sent_qty": 10.0,
+              "received_qty": 6.0
+            }
+          ],
+          "total_capital_loss": 240.0,
+          "total_retail_loss": 400.0,
+          "status": "open",
+          "priority": "medium",
+          "created_by_id": "p2b-adm-92ee3e87",
+          "created_by_name": "P2B Tester",
+          "assigned_to_id": "",
+          "assigned_to_name": "",
+          "resolution_note": "",
+          "recovery_amount": 0,
+          "timeline": [
+            {
+              "action": "created",
+              "by_id": "p2b-adm-92ee3e87",
+              "by_name": "P2B Tester",
+              "detail": "Incident created from transfer BTO-20260513-0009 variance. br_bt_var9 incident",
+              "at": "2026-05-13T05:30:01.995526+00:00"
+            }
+          ],
+          "created_at": "2026-05-13T05:30:01.995529+00:00",
+          "updated_at": "2026-05-13T05:30:01.995531+00:00",
+          "organization_id": "p2b-org-3dc28f8e"
+        }
+      },
+      "recorded_at": "2026-05-13T05:30:01.998425+00:00"
+    },
+    {
+      "scenario": "br_bt_var.9_incident_ticket_full_qty_chain",
+      "step": "approved_qty_present_or_null",
+      "expected": {
+        "approved_in_line": true
+      },
+      "actual": {
+        "approved_in_line": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "b7393b1b-3f5b-4f07-99e2-6fe3dfdb3d64",
+        "ticket": {
+          "id": "d969e839-3c68-4015-86df-f71201432f9d",
+          "ticket_number": "INC-00001",
+          "transfer_id": "b7393b1b-3f5b-4f07-99e2-6fe3dfdb3d64",
+          "order_number": "BTO-20260513-0009",
+          "from_branch_id": "p2b-br-75ca5b6b",
+          "from_branch_name": "Branch 5b6b",
+          "to_branch_id": "br-b2-br-870ea5e2",
+          "to_branch_name": "Branch B a5e2",
+          "request_po_id": "8d5c698f-1cf3-4025-80bb-994c566dce80",
+          "request_po_number": "PO-BB-001000",
+          "invoice_id": "4b20e9d6-d7b5-4def-88ed-5b331176ab48",
+          "invoice_number": "INV-BB-001007",
+          "pin_verified_by_id": "",
+          "pin_verified_by_name": "",
+          "pin_verified_method": "",
+          "items": [
+            {
+              "product_id": "prd-5fa4089c",
+              "product_name": "br_bt_var9 P",
+              "sku": "SKU-a4089c",
+              "unit": "pc",
+              "qty_ordered": 10.0,
+              "qty_received": 6.0,
+              "variance": 4.0,
+              "transfer_capital": 60.0,
+              "branch_retail": 100.0,
+              "capital_variance": 240.0,
+              "retail_variance": 400.0,
+              "type": "shortage",
+              "requested_qty": 12.0,
+              "approved_qty": null,
+              "sent_qty": 10.0,
+              "received_qty": 6.0
+            }
+          ],
+          "total_capital_loss": 240.0,
+          "total_retail_loss": 400.0,
+          "status": "open",
+          "priority": "medium",
+          "created_by_id": "p2b-adm-92ee3e87",
+          "created_by_name": "P2B Tester",
+          "assigned_to_id": "",
+          "assigned_to_name": "",
+          "resolution_note": "",
+          "recovery_amount": 0,
+          "timeline": [
+            {
+              "action": "created",
+              "by_id": "p2b-adm-92ee3e87",
+              "by_name": "P2B Tester",
+              "detail": "Incident created from transfer BTO-20260513-0009 variance. br_bt_var9 incident",
+              "at": "2026-05-13T05:30:01.995526+00:00"
+            }
+          ],
+          "created_at": "2026-05-13T05:30:01.995529+00:00",
+          "updated_at": "2026-05-13T05:30:01.995531+00:00",
+          "organization_id": "p2b-org-3dc28f8e"
+        }
+      },
+      "recorded_at": "2026-05-13T05:30:01.998429+00:00"
+    },
+    {
+      "scenario": "br_bt_var.9_incident_ticket_full_qty_chain",
+      "step": "sent_and_received_present",
+      "expected": {
+        "sent": 10.0,
+        "received": 6.0
+      },
+      "actual": {
+        "sent": 10.0,
+        "received": 6.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "b7393b1b-3f5b-4f07-99e2-6fe3dfdb3d64",
+        "ticket": {
+          "id": "d969e839-3c68-4015-86df-f71201432f9d",
+          "ticket_number": "INC-00001",
+          "transfer_id": "b7393b1b-3f5b-4f07-99e2-6fe3dfdb3d64",
+          "order_number": "BTO-20260513-0009",
+          "from_branch_id": "p2b-br-75ca5b6b",
+          "from_branch_name": "Branch 5b6b",
+          "to_branch_id": "br-b2-br-870ea5e2",
+          "to_branch_name": "Branch B a5e2",
+          "request_po_id": "8d5c698f-1cf3-4025-80bb-994c566dce80",
+          "request_po_number": "PO-BB-001000",
+          "invoice_id": "4b20e9d6-d7b5-4def-88ed-5b331176ab48",
+          "invoice_number": "INV-BB-001007",
+          "pin_verified_by_id": "",
+          "pin_verified_by_name": "",
+          "pin_verified_method": "",
+          "items": [
+            {
+              "product_id": "prd-5fa4089c",
+              "product_name": "br_bt_var9 P",
+              "sku": "SKU-a4089c",
+              "unit": "pc",
+              "qty_ordered": 10.0,
+              "qty_received": 6.0,
+              "variance": 4.0,
+              "transfer_capital": 60.0,
+              "branch_retail": 100.0,
+              "capital_variance": 240.0,
+              "retail_variance": 400.0,
+              "type": "shortage",
+              "requested_qty": 12.0,
+              "approved_qty": null,
+              "sent_qty": 10.0,
+              "received_qty": 6.0
+            }
+          ],
+          "total_capital_loss": 240.0,
+          "total_retail_loss": 400.0,
+          "status": "open",
+          "priority": "medium",
+          "created_by_id": "p2b-adm-92ee3e87",
+          "created_by_name": "P2B Tester",
+          "assigned_to_id": "",
+          "assigned_to_name": "",
+          "resolution_note": "",
+          "recovery_amount": 0,
+          "timeline": [
+            {
+              "action": "created",
+              "by_id": "p2b-adm-92ee3e87",
+              "by_name": "P2B Tester",
+              "detail": "Incident created from transfer BTO-20260513-0009 variance. br_bt_var9 incident",
+              "at": "2026-05-13T05:30:01.995526+00:00"
+            }
+          ],
+          "created_at": "2026-05-13T05:30:01.995529+00:00",
+          "updated_at": "2026-05-13T05:30:01.995531+00:00",
+          "organization_id": "p2b-org-3dc28f8e"
+        }
+      },
+      "recorded_at": "2026-05-13T05:30:01.998432+00:00"
+    },
+    {
+      "scenario": "br_bt_var.10_incident_ticket_links_po_and_invoice",
+      "step": "request_po_id_set",
+      "expected": {
+        "po_id": "a9246f34-69db-47bd-a276-6175b99f60e6"
+      },
+      "actual": {
+        "po_id": "a9246f34-69db-47bd-a276-6175b99f60e6"
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "614c0a0e-3aff-4d84-8bef-478d80f4c5e9",
+        "ticket": {
+          "id": "1cc060dd-0ce6-4cd9-96ed-ccb69f2b465c",
+          "ticket_number": "INC-00002",
+          "transfer_id": "614c0a0e-3aff-4d84-8bef-478d80f4c5e9",
+          "order_number": "BTO-20260513-0010",
+          "from_branch_id": "p2b-br-75ca5b6b",
+          "from_branch_name": "Branch 5b6b",
+          "to_branch_id": "br-b2-br-870ea5e2",
+          "to_branch_name": "Branch B a5e2",
+          "request_po_id": "a9246f34-69db-47bd-a276-6175b99f60e6",
+          "request_po_number": "PO-BB-001001",
+          "invoice_id": "aaacac0c-b0b0-4108-aac3-f3e5cbc1f070",
+          "invoice_number": "INV-BB-001008",
+          "pin_verified_by_id": "",
+          "pin_verified_by_name": "",
+          "pin_verified_method": "",
+          "items": [
+            {
+              "product_id": "prd-3382a049",
+              "product_name": "br_bt_var10 P",
+              "sku": "SKU-82a049",
+              "unit": "pc",
+              "qty_ordered": 10.0,
+              "qty_received": 7.0,
+              "variance": 3.0,
+              "transfer_capital": 60.0,
+              "branch_retail": 100.0,
+              "capital_variance": 180.0,
+              "retail_variance": 300.0,
+              "type": "shortage",
+              "requested_qty": 10.0,
+              "approved_qty": null,
+              "sent_qty": 10.0,
+              "received_qty": 7.0
+            }
+          ],
+          "total_capital_loss": 180.0,
+          "total_retail_loss": 300.0,
+          "status": "open",
+          "priority": "medium",
+          "created_by_id": "p2b-adm-92ee3e87",
+          "created_by_name": "P2B Tester",
+          "assigned_to_id": "",
+          "assigned_to_name": "",
+          "resolution_note": "",
+          "recovery_amount": 0,
+          "timeline": [
+            {
+              "action": "created",
+              "by_id": "p2b-adm-92ee3e87",
+              "by_name": "P2B Tester",
+              "detail": "Incident created from transfer BTO-20260513-0010 variance. br_bt_var10",
+              "at": "2026-05-13T05:30:02.025146+00:00"
+            }
+          ],
+          "created_at": "2026-05-13T05:30:02.025148+00:00",
+          "updated_at": "2026-05-13T05:30:02.025149+00:00",
+          "organization_id": "p2b-org-3dc28f8e"
+        }
+      },
+      "recorded_at": "2026-05-13T05:30:02.028072+00:00"
+    },
+    {
+      "scenario": "br_bt_var.10_incident_ticket_links_po_and_invoice",
+      "step": "invoice_number_set",
+      "expected": {
+        "inv": "INV-BB-001008"
+      },
+      "actual": {
+        "inv": "INV-BB-001008"
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "614c0a0e-3aff-4d84-8bef-478d80f4c5e9",
+        "ticket": {
+          "id": "1cc060dd-0ce6-4cd9-96ed-ccb69f2b465c",
+          "ticket_number": "INC-00002",
+          "transfer_id": "614c0a0e-3aff-4d84-8bef-478d80f4c5e9",
+          "order_number": "BTO-20260513-0010",
+          "from_branch_id": "p2b-br-75ca5b6b",
+          "from_branch_name": "Branch 5b6b",
+          "to_branch_id": "br-b2-br-870ea5e2",
+          "to_branch_name": "Branch B a5e2",
+          "request_po_id": "a9246f34-69db-47bd-a276-6175b99f60e6",
+          "request_po_number": "PO-BB-001001",
+          "invoice_id": "aaacac0c-b0b0-4108-aac3-f3e5cbc1f070",
+          "invoice_number": "INV-BB-001008",
+          "pin_verified_by_id": "",
+          "pin_verified_by_name": "",
+          "pin_verified_method": "",
+          "items": [
+            {
+              "product_id": "prd-3382a049",
+              "product_name": "br_bt_var10 P",
+              "sku": "SKU-82a049",
+              "unit": "pc",
+              "qty_ordered": 10.0,
+              "qty_received": 7.0,
+              "variance": 3.0,
+              "transfer_capital": 60.0,
+              "branch_retail": 100.0,
+              "capital_variance": 180.0,
+              "retail_variance": 300.0,
+              "type": "shortage",
+              "requested_qty": 10.0,
+              "approved_qty": null,
+              "sent_qty": 10.0,
+              "received_qty": 7.0
+            }
+          ],
+          "total_capital_loss": 180.0,
+          "total_retail_loss": 300.0,
+          "status": "open",
+          "priority": "medium",
+          "created_by_id": "p2b-adm-92ee3e87",
+          "created_by_name": "P2B Tester",
+          "assigned_to_id": "",
+          "assigned_to_name": "",
+          "resolution_note": "",
+          "recovery_amount": 0,
+          "timeline": [
+            {
+              "action": "created",
+              "by_id": "p2b-adm-92ee3e87",
+              "by_name": "P2B Tester",
+              "detail": "Incident created from transfer BTO-20260513-0010 variance. br_bt_var10",
+              "at": "2026-05-13T05:30:02.025146+00:00"
+            }
+          ],
+          "created_at": "2026-05-13T05:30:02.025148+00:00",
+          "updated_at": "2026-05-13T05:30:02.025149+00:00",
+          "organization_id": "p2b-org-3dc28f8e"
+        }
+      },
+      "recorded_at": "2026-05-13T05:30:02.028076+00:00"
+    },
+    {
+      "scenario": "br_bt_var.11_exact_receive_invoice_unchanged",
+      "step": "line_qty_unchanged",
+      "expected": {
+        "qty": 10.0
+      },
+      "actual": {
+        "qty": 10.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "ec4051d2-c0f6-4d05-81e7-17b44db1777c",
+        "qty_before": 10.0,
+        "qty_after": 10.0,
+        "total_before": 600.0,
+        "total_after": 600.0,
+        "items_have_original_sent_qty": false
+      },
+      "recorded_at": "2026-05-13T05:30:02.047756+00:00"
+    },
+    {
+      "scenario": "br_bt_var.11_exact_receive_invoice_unchanged",
+      "step": "grand_total_unchanged",
+      "expected": {
+        "total": 600.0
+      },
+      "actual": {
+        "total": 600.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "ec4051d2-c0f6-4d05-81e7-17b44db1777c",
+        "qty_before": 10.0,
+        "qty_after": 10.0,
+        "total_before": 600.0,
+        "total_after": 600.0,
+        "items_have_original_sent_qty": false
+      },
+      "recorded_at": "2026-05-13T05:30:02.047763+00:00"
+    },
+    {
+      "scenario": "br_bt_var.12_pin_verifier_metadata_on_audit_log",
+      "step": "audit_metadata_contains_method",
+      "expected": {
+        "method_set": true
+      },
+      "actual": {
+        "method_set": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "57fe2db2-b0e4-47c7-8a60-55320ef973c0",
+        "audit_count": 1,
+        "pin_verified_by_name": "Org Admin (br_bt_var)",
+        "pin_verified_method": "manager_pin",
+        "bto_pin_verifier_id": "br_bt_var-admin-d1df42e3",
+        "bto_pin_method": "manager_pin"
+      },
+      "recorded_at": "2026-05-13T05:30:02.078249+00:00"
+    },
+    {
+      "scenario": "br_bt_var.12_pin_verifier_metadata_on_audit_log",
+      "step": "bto_carries_verifier_method",
+      "expected": {
+        "method_set": true
+      },
+      "actual": {
+        "method_set": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "57fe2db2-b0e4-47c7-8a60-55320ef973c0",
+        "audit_count": 1,
+        "pin_verified_by_name": "Org Admin (br_bt_var)",
+        "pin_verified_method": "manager_pin",
+        "bto_pin_verifier_id": "br_bt_var-admin-d1df42e3",
+        "bto_pin_method": "manager_pin"
+      },
+      "recorded_at": "2026-05-13T05:30:02.078257+00:00"
+    }
+  ]
+}

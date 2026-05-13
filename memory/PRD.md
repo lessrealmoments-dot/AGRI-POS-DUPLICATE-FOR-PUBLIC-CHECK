@@ -1,6 +1,75 @@
 # AgriBooks PRD
 
 
+## Phase 3 — Branch Transfer Variance + Internal Invoice Integrity (Feb 2026) ✅
+
+### Status: COMPLETE — **101/101 BR / 359 rows green** (was 89/333); 10 RED tests turned GREEN; zero new DB footprint; idempotent re-run.
+
+### What was delivered (this fork)
+1. **NEW PIN policy `transfer_variance_accept`** (`routes/verify.py`) — defaults `["admin_pin", "manager_pin", "totp"]`; allow-list `["admin", "owner", "manager", "super_admin"]`; branch-scoped via `verify_pin_for_action(..., branch_id=from_branch_id)`.
+2. **High-value variance PIN gate** in `routes/branch_transfers.py::accept_receipt`:
+   - Constant `BT_VARIANCE_PIN_THRESHOLD = 5000.0` (capital loss in pesos).
+   - Above threshold: PIN required → `verify_pin_for_action(..., branch_id=from_branch_id)`; non-empty verifier required; otherwise 400/403.
+   - At/Below threshold: existing JWT path untouched — operational speed preserved.
+   - Verifier stamped onto BTO as `variance_pin_verified_by_id/name/method/at` and into `audit_log[type=transfer_variance_accepted].metadata.pin_verified_*`.
+3. **Internal invoice line-item rewrite** (`routes/internal_invoices.py::rewrite_invoice_items_to_received`):
+   - Called from `accept_receipt` ONLY when `shortages or excesses` exist.
+   - Rewrites per line: sets `qty = qty_received`, `qty_received`, `line_total = qty_received * transfer_capital`; preserves `original_sent_qty` once.
+   - Recomputes `subtotal`, `grand_total`, `received_total` from the new line totals.
+   - Appends `variance_history[]` row with verifier identity + accept_note.
+   - Exact-receive path leaves line items untouched (no variance → no rewrite).
+4. **Silent invoice creation failure hardening** (`branch_transfers.py:466–522`):
+   - Replaced `except Exception: pass` with structured logger + `audit_log[type=internal_invoice_creation_failed]` row.
+   - BTO stamps `invoice_creation_failed=True`, `invoice_creation_error`, `invoice_creation_failed_at`.
+   - BTO creation **never blocked** by invoice failure (recoverable).
+5. **Incident ticket polish** — denormalized fields on every ticket born from `accept_with_incident`:
+   - `request_po_id`, `request_po_number`, `invoice_id`, `invoice_number`.
+   - Per line: `requested_qty`, `approved_qty`, `sent_qty`, `received_qty` (fetched from the linked PO when present; sent/received from variance entry).
+   - `pin_verified_by_id`, `pin_verified_by_name`, `pin_verified_method` (when high-value PIN gate triggered).
+6. **`audit_log` + `incident_tickets` registered in `TENANT_COLLECTIONS`** (`config.py`) — auto-injects `organization_id` on every existing audit insert across the codebase. Cleanup helper now sweeps them automatically. Backwards-compatible with the 15+ existing `db.audit_log.insert_one` call sites; `_raw_db.audit_log.*` superadmin paths remain unaffected.
+
+### Verification
+- **NEW Phase 3 test `test_br_bt_variance_invoice_integrity.py`** — 12 tests / 26 rows / 0 fail.
+- **RED before fix**: tests 1, 2, 3, 4, 5, 7, 9, 10, 11, 12 failed (10/12) — implementations turn them green.
+- **Full BR**: **101/101 pass / 359 rows / 0 fail** (was 89/333 → +12 tests / +26 rows). Re-run identical (idempotent).
+- **Zero net DB footprint** — `audit_log` count identical before/after re-run (139 → 139).
+- Backend supervisor restart: clean.
+
+### Files changed (this fork)
+- NEW `backend/tests/business_regression/test_br_bt_variance_invoice_integrity.py` (~720 LOC, 12 tests)
+- MOD `backend/routes/verify.py` (registered `transfer_variance_accept` policy)
+- MOD `backend/routes/internal_invoices.py` (NEW `rewrite_invoice_items_to_received` helper)
+- MOD `backend/routes/branch_transfers.py`:
+  - Silent invoice fail hardening at `create_transfer` (~50 LOC)
+  - PIN gate + verifier stamp in `accept_receipt` (~45 LOC)
+  - Invoice rewrite call in `accept_receipt` (~15 LOC)
+  - Incident ticket polish (~50 LOC — denormalized chain + PO lookup + verifier)
+- MOD `backend/config.py` (`TENANT_COLLECTIONS` += `audit_log`, `incident_tickets`)
+
+### Phase 3 invariants honoured
+- **Stock movement invariant untouched** — `_apply_receipt` is the sole inventory mutator; still called once on `accept_receipt`. Phase 0 tests still green.
+- **Low-value variance fast path preserved** — no PIN below ₱5000 capital loss.
+- **No tenant-configurable threshold yet** — constant for now.
+- **No SMS, no FE invoice UI polish** — backend correctness first.
+- **No update_transfer org_id hardening** — deferred to Phase 3.1.
+- **No QR/confirmation/request-lifecycle changes** — all earlier phases untouched.
+
+### Remaining gaps
+- **Frontend invoice display** does not yet show `original_sent_qty` or the `variance_history[]` audit row. The current printed invoice has correct totals; line-item delta is in DB but invisible. Small FE polish prompt could land an "Adjusted from sent qty 10 → received 7" inline note.
+- **`internal_invoice_creation_failed` admin badge** not yet shown on BTO cards. The BTO carries the flag; FE polish could surface it.
+- **Re-receive variance after partial accept** — the `_apply_receipt` invariant covers the first accept; re-confirm path is not tested here.
+- **Threshold tenant-configurability** — explicit P1 backlog. Owners may want ₱10k for some orgs, ₱2k for others.
+
+### Recommendation for next prompt
+1. **Phase 3.1 — `update_transfer` `organization_id` hardening** (1–2 hours): add `_assert_org_preserved(transfer_id, prev_org_id)` helper called at end of every BTO writer (`update_transfer`, `approve_pending_transfer`, `reject_pending_transfer`, `resubmit_returned_transfer`, `terminal_receive_transfer`, `send_transfer`, `_apply_receipt`). 2 BR tests. Defensive only — current code uses `$set` + whitelist, so this locks the invariant against future regressions.
+2. **Frontend invoice variance display** (~80 LOC, 1 hour): on the internal invoice PDF/print view show `qty (was X)` and a compact "Variance accepted by {verifier} via {method} on {date}" line. Closes the user-facing audit loop.
+3. **Prepared Order SMS** (Resend/Twilio) — defer; integration key needed.
+
+**My pick: Phase 3.1 next** — small, defensive, low risk, naturally closes the BT integrity series. Then a tiny FE invoice polish to surface the new Phase 3 fields. Then we can move to a fresh domain (SMS or slow-moving analytics) with the BT module fully audited.
+
+---
+
+
 ## Phase 2 — Stock Request Confirmation via QR/Mobile (Feb 2026) ✅
 
 ### Status: COMPLETE — Phase-1 helper extracted; QR route delegates; mobile panel live; **89/89 BR tests green (333 rows); zero DB footprint; idempotent re-run; frontend build clean.**

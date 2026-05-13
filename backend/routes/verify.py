@@ -243,6 +243,12 @@ PIN_POLICY_ACTIONS = [
     {"key": "customer_merge",         "label": "Merge Duplicate Customers",       "module": "Customers",         "defaults": ["admin_pin", "manager_pin", "totp"]},
     # Branch Transfer — approve pending (manager-submitted) transfer + retail-set
     {"key": "transfer_approve",       "label": "Approve Pending Branch Transfer", "module": "Branch Transfers",  "defaults": ["admin_pin", "manager_pin", "totp"]},
+    # Phase 3 — Variance accept above the capital-loss threshold.
+    # Branch-scoped to `from_branch_id` (the branch absorbing the loss).
+    # Below threshold, the JWT path is sufficient — no PIN required.
+    {"key": "transfer_variance_accept", "label": "Accept High-Value Transfer Variance", "module": "Branch Transfers",
+     "defaults": ["admin_pin", "manager_pin", "totp"],
+     "allowed_approver_roles": ["admin", "owner", "manager", "super_admin"]},
     # Phase 1 — Stock Request Confirmation Layer.
     # The supply branch's manager (or admin/owner) confirms an `approved_qty`
     # per line BEFORE a BTO is created. PIN is branch-scoped — manager PINs

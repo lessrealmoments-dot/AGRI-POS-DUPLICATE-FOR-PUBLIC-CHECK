@@ -100,6 +100,79 @@ async def update_invoice_status(transfer_id: str, new_status: str, extra_fields:
     )
 
 
+async def rewrite_invoice_items_to_received(
+    transfer_id: str,
+    pending_items: list,
+    *,
+    accepted_by: dict,
+    accept_note: str = "",
+    pin_verifier: dict = None,
+):
+    """Phase 3 — rewrite the internal invoice line items so they match
+    the ACCEPTED received quantities (not the original sent qty).
+
+    * Per line: store `original_sent_qty` once (preserved across accepts)
+      and overwrite `qty` + `line_total` with received values.
+    * Recompute `subtotal` and `grand_total` from the new line totals.
+    * Append a `variance_history[]` row with the verifier metadata.
+    * `received_total` is kept in sync (also written by accept_receipt).
+
+    Returns the updated invoice (without `_id`). Idempotent on re-call —
+    pending_items[].qty_received is the source of truth.
+    """
+    invoice = await db.internal_invoices.find_one(
+        {"transfer_id": transfer_id}, {"_id": 0}
+    )
+    if not invoice:
+        return None
+
+    pending_map = {p.get("product_id"): p for p in (pending_items or [])}
+    new_items = []
+    for it in (invoice.get("items") or []):
+        pid = it.get("product_id", "")
+        updated = dict(it)
+        # Preserve the original sent qty exactly once.
+        if "original_sent_qty" not in updated:
+            updated["original_sent_qty"] = float(it.get("qty", 0) or 0)
+        pend = pending_map.get(pid)
+        if pend is not None:
+            qty_received = float(pend.get("qty_received", 0) or 0)
+            transfer_capital = float(updated.get("transfer_capital", 0) or 0)
+            updated["qty"] = qty_received
+            updated["qty_received"] = qty_received
+            updated["line_total"] = round(qty_received * transfer_capital, 2)
+        new_items.append(updated)
+
+    new_subtotal = round(sum(float(i.get("line_total", 0) or 0) for i in new_items), 2)
+
+    history_row = {
+        "at": now_iso(),
+        "subtotal_after": new_subtotal,
+        "accepted_by_id": (accepted_by or {}).get("id", ""),
+        "accepted_by_name": (accepted_by or {}).get("full_name") or (accepted_by or {}).get("username", ""),
+        "accept_note": accept_note,
+    }
+    if pin_verifier:
+        history_row["pin_verified_by_id"] = pin_verifier.get("verifier_id", "")
+        history_row["pin_verified_by_name"] = pin_verifier.get("verifier_name", "")
+        history_row["pin_verified_method"] = pin_verifier.get("method", "")
+
+    await db.internal_invoices.update_one(
+        {"transfer_id": transfer_id},
+        {"$set": {
+            "items": new_items,
+            "subtotal": new_subtotal,
+            "grand_total": new_subtotal,
+            "received_total": new_subtotal,
+            "has_variance": True,
+        },
+        "$push": {"variance_history": history_row}},
+    )
+    return await db.internal_invoices.find_one(
+        {"transfer_id": transfer_id}, {"_id": 0}
+    )
+
+
 # ── API Endpoints ─────────────────────────────────────────────────────────────
 
 @router.get("")
