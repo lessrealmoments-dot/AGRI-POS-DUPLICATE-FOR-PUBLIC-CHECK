@@ -478,7 +478,7 @@ function orderSlipFullPage(data, biz, docCode) {
   const linkedOff = inv.linked_offline_receipt_number || (offlineDraftPending ? (inv.offline_receipt_number || inv.invoice_number) : '');
   const linkedDraftNum = inv.original_draft_invoice_number || inv.draft_invoice_number || (offlineDraftPending ? inv.draft_invoice_number : '');
 
-  let html = buildPageHeader(biz, 'Order Slip', inv.invoice_number || '', inv.created_at || inv.order_date, [
+  let html = buildPageHeader(biz, 'Order Slip', inv.invoice_number || '', inv.invoice_date || inv.created_at || inv.order_date, [
     inv.cashier_name ? `Cashier: ${inv.cashier_name}` : '',
     inv.release_mode === 'full' ? 'Status: FULLY RELEASED' : inv.release_mode === 'partial' ? 'Status: PARTIAL RELEASE' : '',
   ].filter(Boolean));
@@ -584,7 +584,7 @@ function orderSlipFullPage(data, biz, docCode) {
 // ── Charge Agreement (Credit / Partial Sales) ──────────────────────────────
 function trustReceiptFullPage(data, biz, docCode) {
   const inv = data;
-  let html = buildPageHeader(biz, 'Charge Agreement', inv.invoice_number || '', inv.created_at || inv.order_date, [
+  let html = buildPageHeader(biz, 'Charge Agreement', inv.invoice_number || '', inv.invoice_date || inv.created_at || inv.order_date, [
     inv.terms && inv.terms !== 'COD' ? `Terms: ${inv.terms}` : '',
     inv.due_date ? `Due: ${fmtDate(inv.due_date)}` : '',
     inv.release_mode === 'full' ? 'Status: FULLY RELEASED' : inv.release_mode === 'partial' ? 'Status: PARTIAL RELEASE' : '',
@@ -875,7 +875,7 @@ function qrImgTagDM(code, inv) {
         <div class="dm-qr-code">${code}</div>
         <div class="dm-qr-scan">Scan to view document</div>
         ${inv.invoice_number ? `<div class="dm-qr-sub">Receipt No: ${inv.invoice_number}</div>` : ''}
-        ${inv.created_at || inv.order_date ? `<div class="dm-qr-sub">Date: ${fmtDate(inv.created_at || inv.order_date)}</div>` : ''}
+        ${inv.invoice_date || inv.created_at || inv.order_date ? `<div class="dm-qr-sub">Date: ${fmtDate(inv.invoice_date || inv.created_at || inv.order_date)}</div>` : ''}
         ${inv.customer_name ? `<div class="dm-qr-sub">Customer: ${inv.customer_name}</div>` : ''}
       </div>
     </div>`;
@@ -900,7 +900,7 @@ function orderSlipDotMatrix(data, biz, docCode) {
   html += `<table class="dm-meta-table">`;
   html += `<tr>
     <td class="dm-label">Receipt No:</td><td>${inv.invoice_number || ''}</td>
-    <td class="dm-label">Date:</td><td>${fmtDateMaybeTime(inv.created_at || inv.order_date)}</td>
+    <td class="dm-label">Date:</td><td>${fmtDateMaybeTime(inv.invoice_date || inv.created_at || inv.order_date)}</td>
   </tr>`;
   html += `<tr>
     <td class="dm-label">Cashier:</td><td>${inv.cashier_name || ''}</td>
@@ -1038,7 +1038,7 @@ function trustReceiptDotMatrix(data, biz, docCode) {
           <div class="dm-lh-invbox">
             <table>
               <tr><td>Invoice #</td><td class="dm-inv-val">${inv.invoice_number || ''}</td></tr>
-              <tr><td>Date</td><td class="dm-inv-val">${fmtDate(inv.created_at || inv.order_date)}</td></tr>
+              <tr><td>Date</td><td class="dm-inv-val">${fmtDate(inv.invoice_date || inv.created_at || inv.order_date)}</td></tr>
             </table>
           </div>
         </td>
@@ -1195,7 +1195,7 @@ function orderSlipThermal(data, biz, docCode) {
   let html = buildThermalHeader(biz);
   html += `<div class="doc-title">ORDER SLIP</div>`;
   html += `<div class="meta-row"><span class="label">No:</span><span>${inv.invoice_number || ''}</span></div>`;
-  html += `<div class="meta-row"><span class="label">Date:</span><span>${fmtDateMaybeTime(inv.created_at || inv.order_date)}</span></div>`;
+  html += `<div class="meta-row"><span class="label">Date:</span><span>${fmtDateMaybeTime(inv.invoice_date || inv.created_at || inv.order_date)}</span></div>`;
   if (inv.customer_name && inv.customer_name !== 'Walk-in') html += `<div class="meta-row"><span class="label">Customer:</span><span>${inv.customer_name}</span></div>`;
   html += `<div class="meta-row"><span class="label">Cashier:</span><span>${inv.cashier_name || ''}</span></div>`;
   // Stock release status
@@ -1230,7 +1230,7 @@ function trustReceiptThermal(data, biz, docCode) {
   let html = buildThermalHeader(biz);
   html += `<div class="doc-title">CHARGE AGREEMENT</div>`;
   html += `<div class="meta-row"><span class="label">No:</span><span>${inv.invoice_number || ''}</span></div>`;
-  html += `<div class="meta-row"><span class="label">Date:</span><span>${fmtDateMaybeTime(inv.created_at || inv.order_date)}</span></div>`;
+  html += `<div class="meta-row"><span class="label">Date:</span><span>${fmtDateMaybeTime(inv.invoice_date || inv.created_at || inv.order_date)}</span></div>`;
   html += `<div class="meta-row"><span class="label">Customer:</span><span>${inv.customer_name || ''}</span></div>`;
   if (inv.due_date) html += `<div class="meta-row"><span class="label">Due:</span><span>${fmtDate(inv.due_date)}</span></div>`;
   // Stock release status

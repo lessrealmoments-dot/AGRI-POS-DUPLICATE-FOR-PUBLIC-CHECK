@@ -95,6 +95,11 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   // /daily-close/unclosed-days endpoint the web POS uses. Falls back to
   // null on failure — we'll then use today and let backend reject.
   const [lastCloseDate, setLastCloseDate] = useState(null);
+  // BIR dual-date confirm: once cashier acknowledges "sale_date=today,
+  // record_date=tomorrow" for one sale this session, suppress the
+  // confirm for subsequent sales so they don't get a popup per ring-up.
+  // Resets on next mount / session change.
+  const [dualDateAck, setDualDateAck] = useState(false);
   useEffect(() => {
     const bid = session?.branchId || session?.branch_id;
     if (!bid || !isOnline) return;
@@ -598,14 +603,38 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
     const saleId = ensureSaleId();
     const envelopeId = newEnvelopeId();
     const today = localTodayStr();
-    // Iter 243 + TZ fix (2026-02): If today is already closed, bump to the
-    // calendar day after `today`. We do PURE STRING arithmetic on the
-    // YYYY-MM-DD value `localTodayStr()` returned — avoids the classic
-    // `new Date(s).toISOString().slice(0,10)` UTC trap, which can shift one
-    // calendar day for devices whose JS-engine TZ differs from the org TZ.
-    let saleDate = today;
-    if (lastCloseDate && lastCloseDate >= today) {
-      saleDate = nextCalendarDay(today);
+    // BIR dual-date model (2026-02):
+    //   - invoice_date / "Sale Date" = cashier's wall-clock today. This
+    //     is the legal BIR sale date (when goods left the shelf) and is
+    //     what prints on the customer's receipt. ALWAYS today.
+    //   - order_date / "Record Date" = bookkeeping date. Backend uses
+    //     this for the close-day guard, sales_log.date, and reports
+    //     that "group by sale day". When today is already closed
+    //     (cashier reopened for a late sale), we bump this to the next
+    //     calendar day so the closed totals stay locked. Pure-string
+    //     arithmetic — no UTC round-trip.
+    const invoiceDate = today;
+    const recordDate = (lastCloseDate && lastCloseDate >= today)
+      ? nextCalendarDay(today)
+      : today;
+    const recordBumped = recordDate !== invoiceDate;
+
+    // Last-mile confirm: only when today is closed AND we're about to
+    // post-date the record. Cashiers can opt-out for the remainder of
+    // this session after first confirm via `dualDateAck` below.
+    if (recordBumped && !dualDateAck) {
+      const ok = window.confirm(
+        `Today (${today}) is closed.\n\n` +
+        `• Sale Date on receipt: ${invoiceDate} (actual day sold — BIR).\n` +
+        `• Record Date in books: ${recordDate} (next open business day).\n\n` +
+        `Continue?`
+      );
+      if (!ok) {
+        processingRef.current = false;
+        setSaving(false);
+        return;
+      }
+      setDualDateAck(true);
     }
 
     const paymentMethod = paymentType === 'cash' ? 'Cash'
@@ -639,7 +668,15 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
       balance: paymentType === 'credit' ? grandTotal : 0,
       terms: paymentType === 'credit' ? 'Credit' : 'COD',
       terms_days: paymentType === 'credit' ? creditDays : 0,
-      prefix: 'KS', order_date: saleDate, invoice_date: saleDate,
+      prefix: 'KS',
+      // BIR dual-date — sale_date is BIR-immutable, record_date can shift
+      // forward when today is closed. Backend uses order_date for the
+      // close-day guard / sales_log.date / reports; invoice_date is what
+      // prints on the receipt as legal sale date.
+      order_date: recordDate,
+      invoice_date: invoiceDate,
+      record_bumped_to: recordBumped ? recordDate : undefined,
+      record_bumped_reason: recordBumped ? 'today_closed' : undefined,
       payment_method: paymentMethod, payment_type: paymentType,
       fund_source: 'cashier', sale_type: selectedCustomer ? 'credit' : 'walk_in',
       mode: 'quick', source: 'agrismart_terminal', terminal_id: session.terminalId,
@@ -873,13 +910,24 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
     <div className="flex flex-col h-full" data-testid="terminal-sales">
       {todayIsClosed && (
         <div
-          className="px-3 py-2 bg-amber-50 border-b border-amber-200 flex items-center gap-2"
+          className="px-3 py-2 bg-amber-50 border-b border-amber-200 flex items-start gap-2"
           data-testid="terminal-next-day-banner"
         >
-          <AlertTriangle size={14} className="text-amber-600 shrink-0" />
-          <div className="text-xs leading-tight">
-            <div className="font-semibold text-amber-800">Today ({today}) is closed.</div>
-            <div className="text-amber-700">All new sales will be dated <span className="font-mono font-semibold">{nextSaleDate}</span>.</div>
+          <AlertTriangle size={14} className="text-amber-600 shrink-0 mt-0.5" />
+          <div className="text-xs leading-snug">
+            <div className="font-semibold text-amber-800">
+              Today ({today}) is closed.
+            </div>
+            <div className="text-amber-700" data-testid="dual-date-explainer">
+              • <span className="font-medium">Sale Date</span> on receipts:{' '}
+              <span className="font-mono font-semibold">{today}</span>{' '}
+              (actual day sold — BIR).
+            </div>
+            <div className="text-amber-700">
+              • <span className="font-medium">Record Date</span> in books:{' '}
+              <span className="font-mono font-semibold">{nextSaleDate}</span>{' '}
+              (next open business day).
+            </div>
           </div>
         </div>
       )}

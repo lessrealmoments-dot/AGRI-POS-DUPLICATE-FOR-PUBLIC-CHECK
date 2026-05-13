@@ -1,0 +1,206 @@
+{
+  "generated_at": "2026-05-13T03:26:17.027153+00:00",
+  "pytest_exitstatus": 1,
+  "row_count": 9,
+  "pass_count": 6,
+  "fail_count": 3,
+  "rows": [
+    {
+      "scenario": "br_pos_dual_date.1_open_day_sale_uses_today_for_both",
+      "step": "order_date_today",
+      "expected": {
+        "date": "2026-05-13"
+      },
+      "actual": {
+        "date": "2026-05-13"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-ad65cabb",
+        "branch_id": "p2b-br-e875dc20",
+        "today": "2026-05-13",
+        "invoice_id": "909f8d59-96f5-4b26-8074-a32e4a1a92b7",
+        "invoice_number": "SI-BD-001000",
+        "order_date": "2026-05-13",
+        "invoice_date": "2026-05-13",
+        "sales_log_date": null
+      },
+      "recorded_at": "2026-05-13T03:26:16.884449+00:00"
+    },
+    {
+      "scenario": "br_pos_dual_date.1_open_day_sale_uses_today_for_both",
+      "step": "invoice_date_today",
+      "expected": {
+        "date": "2026-05-13"
+      },
+      "actual": {
+        "date": "2026-05-13"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-ad65cabb",
+        "branch_id": "p2b-br-e875dc20",
+        "today": "2026-05-13",
+        "invoice_id": "909f8d59-96f5-4b26-8074-a32e4a1a92b7",
+        "invoice_number": "SI-BD-001000",
+        "order_date": "2026-05-13",
+        "invoice_date": "2026-05-13",
+        "sales_log_date": null
+      },
+      "recorded_at": "2026-05-13T03:26:16.884458+00:00"
+    },
+    {
+      "scenario": "br_pos_dual_date.1_open_day_sale_uses_today_for_both",
+      "step": "sales_log_groups_under_today",
+      "expected": {
+        "date": "2026-05-13"
+      },
+      "actual": {
+        "date": null
+      },
+      "status": "FAIL",
+      "evidence": {
+        "org_id": "p2b-org-ad65cabb",
+        "branch_id": "p2b-br-e875dc20",
+        "today": "2026-05-13",
+        "invoice_id": "909f8d59-96f5-4b26-8074-a32e4a1a92b7",
+        "invoice_number": "SI-BD-001000",
+        "order_date": "2026-05-13",
+        "invoice_date": "2026-05-13",
+        "sales_log_date": null
+      },
+      "recorded_at": "2026-05-13T03:26:16.884461+00:00"
+    },
+    {
+      "scenario": "br_pos_dual_date.2_closed_day_carryover_keeps_invoice_today",
+      "step": "invoice_date_remains_today",
+      "expected": {
+        "date": "2026-05-13"
+      },
+      "actual": {
+        "date": "2026-05-13"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-ad65cabb",
+        "branch_id": "p2b-br-e875dc20",
+        "today": "2026-05-13",
+        "tomorrow": "2026-05-14",
+        "invoice_id": "f20ccabf-c412-4010-b650-53be4e9f0f10",
+        "invoice_number": "SI-BD-001001",
+        "order_date": "2026-05-14",
+        "invoice_date": "2026-05-13",
+        "sales_log_date": null
+      },
+      "recorded_at": "2026-05-13T03:26:16.935367+00:00"
+    },
+    {
+      "scenario": "br_pos_dual_date.2_closed_day_carryover_keeps_invoice_today",
+      "step": "order_date_bumped_to_tomorrow",
+      "expected": {
+        "date": "2026-05-14"
+      },
+      "actual": {
+        "date": "2026-05-14"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-ad65cabb",
+        "branch_id": "p2b-br-e875dc20",
+        "today": "2026-05-13",
+        "tomorrow": "2026-05-14",
+        "invoice_id": "f20ccabf-c412-4010-b650-53be4e9f0f10",
+        "invoice_number": "SI-BD-001001",
+        "order_date": "2026-05-14",
+        "invoice_date": "2026-05-13",
+        "sales_log_date": null
+      },
+      "recorded_at": "2026-05-13T03:26:16.935376+00:00"
+    },
+    {
+      "scenario": "br_pos_dual_date.2_closed_day_carryover_keeps_invoice_today",
+      "step": "sales_log_groups_under_tomorrow_not_today",
+      "expected": {
+        "date": "2026-05-14"
+      },
+      "actual": {
+        "date": null
+      },
+      "status": "FAIL",
+      "evidence": {
+        "org_id": "p2b-org-ad65cabb",
+        "branch_id": "p2b-br-e875dc20",
+        "today": "2026-05-13",
+        "tomorrow": "2026-05-14",
+        "invoice_id": "f20ccabf-c412-4010-b650-53be4e9f0f10",
+        "invoice_number": "SI-BD-001001",
+        "order_date": "2026-05-14",
+        "invoice_date": "2026-05-13",
+        "sales_log_date": null
+      },
+      "recorded_at": "2026-05-13T03:26:16.935380+00:00"
+    },
+    {
+      "scenario": "br_pos_dual_date.3_reports_group_by_order_date",
+      "step": "not_visible_under_today",
+      "expected": {
+        "visible": false
+      },
+      "actual": {
+        "visible": false
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-ad65cabb",
+        "branch_id": "p2b-br-e875dc20",
+        "today": "2026-05-13",
+        "tomorrow": "2026-05-14",
+        "invoice_id": "2588808f-3d20-4338-838e-bc4dce2f047d",
+        "log_visible_under_today": false,
+        "log_visible_under_tomorrow": false
+      },
+      "recorded_at": "2026-05-13T03:26:16.961570+00:00"
+    },
+    {
+      "scenario": "br_pos_dual_date.3_reports_group_by_order_date",
+      "step": "visible_under_tomorrow",
+      "expected": {
+        "visible": true
+      },
+      "actual": {
+        "visible": false
+      },
+      "status": "FAIL",
+      "evidence": {
+        "org_id": "p2b-org-ad65cabb",
+        "branch_id": "p2b-br-e875dc20",
+        "today": "2026-05-13",
+        "tomorrow": "2026-05-14",
+        "invoice_id": "2588808f-3d20-4338-838e-bc4dce2f047d",
+        "log_visible_under_today": false,
+        "log_visible_under_tomorrow": false
+      },
+      "recorded_at": "2026-05-13T03:26:16.961580+00:00"
+    },
+    {
+      "scenario": "br_pos_dual_date.4_forward_date_cap_still_enforced",
+      "step": "rejected_403",
+      "expected": {
+        "status_code": 403
+      },
+      "actual": {
+        "status_code": 403
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-ad65cabb",
+        "branch_id": "p2b-br-e875dc20",
+        "today": "2026-05-13",
+        "attempted_order_date": "2026-05-15",
+        "error_status": 403,
+        "error_detail": "Cannot forward-date sale to 2026-05-15. Maximum allowed is 2026-05-14. Forward-dating beyond the next open business day is blocked to prevent stock from deducting before a sale appears on any Z-Report."
+      },
+      "recorded_at": "2026-05-13T03:26:16.978445+00:00"
+    }
+  ]
+}

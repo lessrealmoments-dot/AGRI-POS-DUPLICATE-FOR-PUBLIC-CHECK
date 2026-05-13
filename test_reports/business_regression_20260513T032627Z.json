@@ -1,0 +1,75 @@
+{
+  "generated_at": "2026-05-13T03:26:27.075375+00:00",
+  "pytest_exitstatus": 1,
+  "row_count": 3,
+  "pass_count": 2,
+  "fail_count": 1,
+  "rows": [
+    {
+      "scenario": "br_pos_dual_date.1_open_day_sale_uses_today_for_both",
+      "step": "order_date_today",
+      "expected": {
+        "date": "2026-05-13"
+      },
+      "actual": {
+        "date": "2026-05-13"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-99acdff8",
+        "branch_id": "p2b-br-ee847ba9",
+        "today": "2026-05-13",
+        "invoice_id": "1ccbbd46-a817-45c7-b1b5-2eb073138e2b",
+        "invoice_number": "SI-B7-001000",
+        "order_date": "2026-05-13",
+        "invoice_date": "2026-05-13",
+        "sales_log_date": null
+      },
+      "recorded_at": "2026-05-13T03:26:27.010488+00:00"
+    },
+    {
+      "scenario": "br_pos_dual_date.1_open_day_sale_uses_today_for_both",
+      "step": "invoice_date_today",
+      "expected": {
+        "date": "2026-05-13"
+      },
+      "actual": {
+        "date": "2026-05-13"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-99acdff8",
+        "branch_id": "p2b-br-ee847ba9",
+        "today": "2026-05-13",
+        "invoice_id": "1ccbbd46-a817-45c7-b1b5-2eb073138e2b",
+        "invoice_number": "SI-B7-001000",
+        "order_date": "2026-05-13",
+        "invoice_date": "2026-05-13",
+        "sales_log_date": null
+      },
+      "recorded_at": "2026-05-13T03:26:27.010495+00:00"
+    },
+    {
+      "scenario": "br_pos_dual_date.1_open_day_sale_uses_today_for_both",
+      "step": "sales_log_groups_under_today",
+      "expected": {
+        "date": "2026-05-13"
+      },
+      "actual": {
+        "date": null
+      },
+      "status": "FAIL",
+      "evidence": {
+        "org_id": "p2b-org-99acdff8",
+        "branch_id": "p2b-br-ee847ba9",
+        "today": "2026-05-13",
+        "invoice_id": "1ccbbd46-a817-45c7-b1b5-2eb073138e2b",
+        "invoice_number": "SI-B7-001000",
+        "order_date": "2026-05-13",
+        "invoice_date": "2026-05-13",
+        "sales_log_date": null
+      },
+      "recorded_at": "2026-05-13T03:26:27.010498+00:00"
+    }
+  ]
+}
