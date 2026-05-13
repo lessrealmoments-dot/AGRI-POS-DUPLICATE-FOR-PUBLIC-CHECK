@@ -4251,3 +4251,48 @@ Inventory still mutates only on receive/accept.
     scanning from screen).
   * New BR test file `test_br_stock_request_approval.py`.
 
+
+
+---
+
+## Phase 1 — Stock Request Confirmation Layer (PENDING — Forked 2026-02-13)
+
+**Status**: Spec frozen, NOT YET IMPLEMENTED. See full handoff at
+`/app/memory/PHASE_1_STOCK_REQUEST_CONFIRMATION_HANDOFF.md`.
+
+### Quick recap of stable baseline (Phase 0 + 0.5 + dual-date)
+- 5 BR Branch-Transfer-related files, 32 of 59 BR tests, 94 of 279 rows
+- 59 BR tests / 279 rows / 0 fail (full suite)
+- Frontend build clean
+- Production live @ agri-books.com
+
+### Phase 1 scope (web only — no QR yet)
+- New endpoints: `POST /purchase-orders/{po_id}/confirm-request`,
+  `GET /purchase-orders/{po_id}/confirmation`
+- Modify `generate-branch-transfer` to prefer `approved_qty`
+- New PIN policy: `confirm_stock_request` (admin + manager + TOTP,
+  branch-scoped to supply_branch_id)
+- New PO fields: `approval_status`, `approved_at`, `approved_by_id`,
+  `approved_by_name`, `approval_method`, `approval_note`
+- Per-line: `items[].approved_qty`, `items[].approved_note`
+- New collection: `request_approval_log` (append-only)
+- New FE: `ConfirmQuantitiesDialog.jsx` + wire into BranchTransferPage
+- New BR file: `test_br_stock_request_approval.py` (~18 tests, ~50 rows)
+
+### Hard rules
+- `items[].quantity` (original requested qty) NEVER overwritten
+- No stock movement during confirm
+- No BTO created during confirm
+- No internal invoice created during confirm
+- Requesting-branch manager 403 (admin override allowed + audited)
+- Phase 0 / 0.5 BR tests must remain green
+
+### Out of scope (deferred to Phase 2+)
+- QR / mobile confirmation on `DocViewerPage.jsx`
+- "View QR" modal on transfer/request cards
+- Slow-moving SMS engine
+- Variance polish (Phase 3)
+- Active-branch JWT field
+
+### Estimated size: ~500 LOC including tests, ~1 day
+
