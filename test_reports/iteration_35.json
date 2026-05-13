@@ -57,7 +57,7 @@
   "rca_of_issue": {
     "bug": "GET /purchase-orders returns 405 Method Not Allowed",
     "root_cause": "The async def list_purchase_orders() function in /app/backend/routes/purchase_orders.py was defined WITHOUT the @router.get('') decorator. The function existed but was never registered as a GET route handler.",
-    "reproduction": "curl GET https://stock-confirm-layer.preview.emergentagent.com/api/purchase-orders → {detail: Method Not Allowed}",
+    "reproduction": "curl GET https://qr-mobile-confirm.preview.emergentagent.com/api/purchase-orders → {detail: Method Not Allowed}",
     "mitigation": "Added @router.get('') decorator immediately before the function definition at line 96 of purchase_orders.py. Server hot-reloaded automatically. Now returns 200 with purchase_orders list and total."
   }
 }

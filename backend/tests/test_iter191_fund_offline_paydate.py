@@ -23,7 +23,7 @@ MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "test_database")
 BASE = os.environ.get(
     "REACT_APP_BACKEND_URL",
-    "https://stock-confirm-layer.preview.emergentagent.com",
+    "https://qr-mobile-confirm.preview.emergentagent.com",
 ).rstrip("/")
 API = BASE + "/api"
 

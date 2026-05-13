@@ -15,7 +15,7 @@ import requests
 import uuid
 
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://stock-confirm-layer.preview.emergentagent.com")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://qr-mobile-confirm.preview.emergentagent.com")
 API = f"{BASE_URL}/api"
 
 
