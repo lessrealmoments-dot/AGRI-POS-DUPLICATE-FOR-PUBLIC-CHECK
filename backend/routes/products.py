@@ -1092,7 +1092,118 @@ async def capital_change_alerts(
             "is_repack": is_repack,
             "parent_name": (parent or {}).get("name", "") if is_repack else "",
             "units_per_parent": int(product.get("units_per_parent") or 1) if is_repack else 1,
+            # children populated in the second pass below (parent rows only).
+            "children": [],
         })
+
+    # ── Second pass: attach repack children to parent alerts ─────────────
+    # When a parent product's capital changes, its repack SKUs' derived
+    # capital (parent_cap / units_per_parent) shifts in lock-step. The
+    # repacks themselves don't get their own `capital_changes` row, so we
+    # surface them as nested rows under the parent alert with derived
+    # capital + their own per-scheme margin context.
+    parent_alert_ids = [a["product_id"] for a in alerts if not a["is_repack"]]
+    if parent_alert_ids:
+        # Find every active repack whose parent is in our alerts list.
+        child_rows = await db.products.find(
+            {"active": True, "is_repack": True,
+             "parent_id": {"$in": parent_alert_ids}},
+            {"_id": 0, "id": 1, "name": 1, "sku": 1, "category": 1, "unit": 1,
+             "repack_unit": 1, "parent_id": 1, "units_per_parent": 1,
+             "prices": 1, "cost_price": 1},
+        ).to_list(2000)
+
+        # Batch branch_prices for children at the relevant branches.
+        child_ids = [c["id"] for c in child_rows]
+        child_bp: dict[tuple, dict] = {}
+        if child_ids:
+            # Build pairs of (child_id, branch_id) for every (child, alert.branch)
+            # combo. Alerts can land in different branches even for the same
+            # parent, so we need the cross product.
+            child_branch_pairs = set()
+            for a in alerts:
+                if a["is_repack"] or not a["branch_id"]:
+                    continue
+                for c in child_rows:
+                    if c.get("parent_id") == a["product_id"]:
+                        child_branch_pairs.add((c["id"], a["branch_id"]))
+            if child_branch_pairs:
+                or_clauses = [{"product_id": pid_, "branch_id": bid_}
+                              for (pid_, bid_) in child_branch_pairs]
+                async for bp_doc in db.branch_prices.find(
+                    {"$or": or_clauses},
+                    {"_id": 0, "product_id": 1, "branch_id": 1, "prices": 1},
+                ):
+                    child_bp[(bp_doc["product_id"], bp_doc["branch_id"])] = bp_doc
+
+        # Group children by parent
+        children_by_parent: dict[str, list] = {}
+        for c in child_rows:
+            children_by_parent.setdefault(c["parent_id"], []).append(c)
+
+        for a in alerts:
+            if a["is_repack"]:
+                continue
+            kids = children_by_parent.get(a["product_id"], [])
+            if not kids:
+                continue
+            new_cap = float(a["new_capital"] or 0)
+            old_cap = float(a["old_capital"] or 0)
+            bid_a = a["branch_id"]
+            child_payload = []
+            for c in kids:
+                units = max(int(c.get("units_per_parent") or 1), 1)
+                derived_cost = round(new_cap / units, 4)
+                derived_old = round(old_cap / units, 4)
+                # Effective child prices: branch override → global
+                child_global = {k: float(v or 0)
+                                for k, v in (c.get("prices") or {}).items()}
+                child_eff = dict(child_global)
+                child_bp_doc = child_bp.get((c["id"], bid_a)) or {}
+                for k, v in (child_bp_doc.get("prices") or {}).items():
+                    try:
+                        child_eff[k] = float(v or 0)
+                    except Exception:
+                        continue
+
+                # Per-scheme margins vs derived capital
+                child_margins = []
+                for sm in scheme_meta:
+                    key = sm["key"]
+                    cp = child_eff.get(key, 0)
+                    if cp <= 0:
+                        continue
+                    m = round(cp - derived_cost, 4)
+                    mp = (m / cp * 100.0) if cp > 0 else None
+                    below = cp < derived_cost
+                    thin = (not below) and (m < 5.0 or (mp is not None and mp < 5.0))
+                    child_margins.append({
+                        "scheme_key": key, "scheme_name": sm["name"],
+                        "current_price": cp, "margin": m, "margin_pct": mp,
+                        "is_below_cost": below, "is_thin": thin,
+                    })
+
+                # has_warning flag — used by FE to auto-expand smartly.
+                has_warning = any(m["is_below_cost"] or m["is_thin"]
+                                  for m in child_margins)
+
+                child_payload.append({
+                    "product_id": c["id"],
+                    "product_name": c.get("name", ""),
+                    "sku": c.get("sku", ""),
+                    "category": c.get("category", ""),
+                    "unit": c.get("unit", c.get("repack_unit", "")),
+                    "units_per_parent": units,
+                    "derived_old_capital": derived_old,
+                    "derived_new_capital": derived_cost,
+                    "derived_delta_amount": round(derived_cost - derived_old, 4),
+                    "prices": child_eff,
+                    "scheme_margins": child_margins,
+                    "has_warning": has_warning,
+                })
+            a["children"] = child_payload
+            # Surface a parent-level flag for the FE smart-expand default.
+            a["has_child_warning"] = any(k["has_warning"] for k in child_payload)
 
     return {
         "alerts": alerts,

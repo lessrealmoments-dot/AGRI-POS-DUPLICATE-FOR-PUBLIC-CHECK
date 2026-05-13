@@ -95,6 +95,22 @@ async def _seed_product(org_id, branch_id, *, name, cost, prices):
     return pid
 
 
+async def _seed_repack(org_id, branch_id, parent_id, *, name, units_per_parent,
+                       prices):
+    """Seed a repack child of `parent_id` (no inventory required for these
+    scans since the scan only honours product rows + branch_prices)."""
+    pid = _uid("br_cap-rp")
+    sku = pid[-6:].upper()
+    await _raw_db.products.insert_one({
+        "id": pid, "organization_id": org_id,
+        "name": name, "sku": sku, "category": "Test",
+        "unit": "kg", "repack_unit": "kg", "active": True, "is_repack": True,
+        "parent_id": parent_id, "units_per_parent": units_per_parent,
+        "prices": prices,
+    })
+    return pid
+
+
 async def _seed_capital_change(org_id, pid, bid, *, old, new,
                                 source_ref="PO-TEST", vendor="Vendor X",
                                 method="latest"):
@@ -391,3 +407,133 @@ async def test_br_cap_7_sub_threshold_filtered(
         evidence={"product_id": pid},
     )
     assert not ids
+
+
+
+# ═════════════════════════════════════════════════════════════════════
+# Test 8 — Repack children attached to parent capital change alert
+# ═════════════════════════════════════════════════════════════════════
+@pytest.mark.asyncio
+async def test_br_cap_8_parent_alert_includes_repack_children(
+    tenant, cap_users, record_result
+):
+    """When a parent product's capital changes, its active repack SKUs
+    must surface as `children[]` on the parent alert with derived
+    capital + their own scheme_margins. This is the key invariant for
+    'set repack prices together with parent'."""
+    org_id = tenant["org_id"]
+    main = tenant["branches"]["main"]
+    # Parent: 25kg sack, capital jumps 1000 → 1250
+    parent_pid = await _seed_product(
+        org_id, main, name="CAP Parent 25kg",
+        cost=1250.0, prices={"retail": 1500.0, "wholesale": 1400.0},
+    )
+    # Repack #1: 1kg loose at retail ₱55, derived new cap = 1250/25 = 50.
+    # Margin = 5, margin_pct ≈ 9.1% — healthy.
+    rp1 = await _seed_repack(
+        org_id, main, parent_pid, name="CAP Repack 1kg loose",
+        units_per_parent=25, prices={"retail": 55.0},
+    )
+    # Repack #2: 5kg pack at retail ₱220, derived new cap = 1250/5 = 250.
+    # Retail 220 < 250 → BELOW DERIVED COST → should flag has_warning.
+    rp2 = await _seed_repack(
+        org_id, main, parent_pid, name="CAP Repack 5kg",
+        units_per_parent=5, prices={"retail": 220.0, "wholesale": 240.0},
+    )
+    await _seed_capital_change(
+        org_id, parent_pid, main, old=1000.0, new=1250.0,
+        source_ref="PO-REPACK-1",
+    )
+
+    res = await capital_change_alerts(
+        branch_id=main, days=14, user=cap_users["admin_user"],
+    )
+    a = next(x for x in res["alerts"] if x["product_id"] == parent_pid)
+    assert "children" in a
+    children_by_id = {c["product_id"]: c for c in a["children"]}
+    assert rp1 in children_by_id
+    assert rp2 in children_by_id
+
+    c1 = children_by_id[rp1]
+    c2 = children_by_id[rp2]
+
+    # Derived capital correctness
+    assert c1["derived_new_capital"] == 50.0
+    assert c1["derived_old_capital"] == 40.0  # 1000/25
+    assert c2["derived_new_capital"] == 250.0
+
+    # Repack #1 retail 55 > 50 → healthy.
+    c1_margins = {m["scheme_key"]: m for m in c1["scheme_margins"]}
+    assert c1_margins["retail"]["is_below_cost"] is False
+
+    # Repack #2 retail 220 < 250 → must flag below cost; wholesale 240 < 250 too.
+    c2_margins = {m["scheme_key"]: m for m in c2["scheme_margins"]}
+    assert c2_margins["retail"]["is_below_cost"] is True
+    assert c2_margins["wholesale"]["is_below_cost"] is True
+    assert c2["has_warning"] is True
+
+    # Parent-level has_child_warning surfaced for smart-expand on FE.
+    assert a["has_child_warning"] is True
+
+    record_result(
+        scenario="br_cap_change.8_repack_children_attached",
+        step="parent_alert_has_children_with_derived_capital",
+        expected={
+            "child_count": 2,
+            "rp1_derived_new": 50.0,
+            "rp2_derived_new": 250.0,
+            "rp2_retail_below": True,
+            "has_child_warning": True,
+        },
+        actual={
+            "child_count": len(a["children"]),
+            "rp1_derived_new": c1["derived_new_capital"],
+            "rp2_derived_new": c2["derived_new_capital"],
+            "rp2_retail_below": c2_margins["retail"]["is_below_cost"],
+            "has_child_warning": a["has_child_warning"],
+        },
+        evidence={"parent": parent_pid, "rp1": rp1, "rp2": rp2},
+    )
+
+
+# ═════════════════════════════════════════════════════════════════════
+# Test 9 — Branch price override on the repack child shadows globals
+# ═════════════════════════════════════════════════════════════════════
+@pytest.mark.asyncio
+async def test_br_cap_9_repack_child_branch_override_honoured(
+    tenant, cap_users, record_result
+):
+    org_id = tenant["org_id"]
+    main = tenant["branches"]["main"]
+    parent_pid = await _seed_product(
+        org_id, main, name="CAP Parent Override",
+        cost=500.0, prices={"retail": 600.0},
+    )
+    rp = await _seed_repack(
+        org_id, main, parent_pid, name="CAP Repack Override 1kg",
+        units_per_parent=10, prices={"retail": 60.0},
+    )
+    # Branch override on the child: retail 75
+    await _raw_db.branch_prices.insert_one({
+        "id": _uid("bp"), "organization_id": org_id,
+        "product_id": rp, "branch_id": main,
+        "prices": {"retail": 75.0},
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    })
+    await _seed_capital_change(
+        org_id, parent_pid, main, old=480.0, new=500.0,
+        source_ref="PO-REPACK-OV-1",
+    )
+    res = await capital_change_alerts(
+        branch_id=main, days=14, user=cap_users["admin_user"],
+    )
+    a = next(x for x in res["alerts"] if x["product_id"] == parent_pid)
+    child = next(c for c in a["children"] if c["product_id"] == rp)
+    record_result(
+        scenario="br_cap_change.9_repack_branch_override",
+        step="branch_specific_repack_price_shadows_global",
+        expected={"retail": 75.0},
+        actual={"retail": child["prices"].get("retail")},
+        evidence={"parent": parent_pid, "repack": rp},
+    )
+    assert child["prices"]["retail"] == 75.0

@@ -6,7 +6,7 @@
  *   2) "Capital Changes" — recent capital-cost moves from POs/transfers
  *      worth reviewing. ≥₱1 threshold. Skips admin-overridden ones.
  */
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, Fragment } from 'react';
 import { useAuth, api } from '../contexts/AuthContext';
 import { formatPHP } from '../lib/utils';
 import { Button } from './ui/button';
@@ -14,7 +14,7 @@ import { Input } from './ui/input';
 import { Badge } from './ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { AlertTriangle, RefreshCw, Check, Clock, ChevronDown, X, TrendingUp, TrendingDown, Lock } from 'lucide-react';
+import { AlertTriangle, RefreshCw, Check, Clock, ChevronDown, ChevronRight, X, TrendingUp, TrendingDown, Lock, Package } from 'lucide-react';
 import { toast } from 'sonner';
 import CalcInput from './CalcInput';
 import { formatDateTime, formatTime } from '../lib/dateFormat';
@@ -48,6 +48,8 @@ export default function PriceScanManager() {
   const [capLoading, setCapLoading] = useState(false);
   const [capSchemes, setCapSchemes] = useState([]); // schemes meta echoed by backend
   const [capEditPrices, setCapEditPrices] = useState({}); // { alert_id: { scheme_key: value } }
+  const [capChildEditPrices, setCapChildEditPrices] = useState({}); // { alert_id: { child_product_id: { scheme_key: value } } }
+  const [capExpanded, setCapExpanded] = useState({}); // { alert_id: bool } — child-row expand state
 
   // Admin PIN modal — gates ALL price changes from this dialog
   const [pinModal, setPinModal] = useState(null); // { kind: 'single'|'all', issue?, onConfirm }
@@ -168,13 +170,29 @@ export default function PriceScanManager() {
       // Initialise edit prices from current values so the row inputs render
       // pre-populated. Operator only needs to change the cells they want.
       const init = {};
+      const childInit = {};
+      const expandInit = {};
       alerts.forEach(a => {
         init[a.id] = {};
         (r.data?.schemes || []).forEach(s => {
           init[a.id][s.key] = (a.prices && a.prices[s.key]) ? a.prices[s.key] : '';
         });
+        // Child repack rows — pre-populate per child + smart auto-expand
+        // when any child has a thin/below-cost warning.
+        if (a.children && a.children.length) {
+          childInit[a.id] = {};
+          a.children.forEach(c => {
+            childInit[a.id][c.product_id] = {};
+            (r.data?.schemes || []).forEach(s => {
+              childInit[a.id][c.product_id][s.key] = (c.prices && c.prices[s.key]) ? c.prices[s.key] : '';
+            });
+          });
+          expandInit[a.id] = !!a.has_child_warning;
+        }
       });
       setCapEditPrices(init);
+      setCapChildEditPrices(childInit);
+      setCapExpanded(expandInit);
     } catch { /* silent */ }
     setCapLoading(false);
   }, [user, currentBranch?.id, skipForSuperAdmin]);
@@ -208,6 +226,20 @@ export default function PriceScanManager() {
       ...prev,
       [alertId]: { ...(prev[alertId] || {}), [schemeKey]: value },
     }));
+  };
+
+  const updateCapChildPrice = (alertId, childId, schemeKey, value) => {
+    setCapChildEditPrices(prev => ({
+      ...prev,
+      [alertId]: {
+        ...(prev[alertId] || {}),
+        [childId]: { ...((prev[alertId] || {})[childId] || {}), [schemeKey]: value },
+      },
+    }));
+  };
+
+  const toggleCapExpanded = (alertId) => {
+    setCapExpanded(prev => ({ ...prev, [alertId]: !prev[alertId] }));
   };
 
   const handleSaveCapAlert = (alert) => {
@@ -279,37 +311,79 @@ export default function PriceScanManager() {
         }
       } else if (pinModal.kind === 'capital_change') {
         const alert = pinModal.alert;
-        const prices = capEditPrices[alert.id] || {};
-        // Only send schemes whose value changed from the current effective
-        // price. This keeps the audit log clean and avoids needless writes.
-        const cleaned = {};
-        Object.entries(prices).forEach(([k, v]) => {
+        // Collect the parent's changed prices.
+        const parentPrices = capEditPrices[alert.id] || {};
+        const parentChanges = {};
+        Object.entries(parentPrices).forEach(([k, v]) => {
           const num = parseFloat(v);
           if (isNaN(num) || num <= 0) return;
           const currentPrice = parseFloat(alert.prices?.[k] || 0);
-          // Skip if unchanged (small float tolerance).
           if (Math.abs(num - currentPrice) < 0.005) return;
-          cleaned[k] = num;
+          parentChanges[k] = num;
         });
-        if (!Object.keys(cleaned).length) {
+        // Collect each child repack's changed prices.
+        const childUpdates = []; // [{product_id, prices}]
+        (alert.children || []).forEach(c => {
+          const childEdits = (capChildEditPrices[alert.id] || {})[c.product_id] || {};
+          const cleaned = {};
+          Object.entries(childEdits).forEach(([k, v]) => {
+            const num = parseFloat(v);
+            if (isNaN(num) || num <= 0) return;
+            const currentPrice = parseFloat(c.prices?.[k] || 0);
+            if (Math.abs(num - currentPrice) < 0.005) return;
+            cleaned[k] = num;
+          });
+          if (Object.keys(cleaned).length) {
+            childUpdates.push({ product_id: c.product_id,
+                                product_name: c.product_name,
+                                prices: cleaned });
+          }
+        });
+        if (!Object.keys(parentChanges).length && !childUpdates.length) {
           toast.error('No price changes to apply. Use Acknowledge if no update needed.');
           setPinSubmitting(false);
           return;
         }
-        await api.post(`${BACKEND_URL}/api/products/smart-price-update`, {
-          product_id: alert.product_id,
-          prices: cleaned,
-          pin: adminPin,
-        });
-        // Auto-acknowledge — operator reviewed AND adjusted, so the alert
-        // is resolved. Failure here is non-fatal; the price update already
-        // landed.
+        let parentApplied = false;
+        const childApplied = [];
+        const childFailed = [];
+        // Apply parent first (so a PIN-failure short-circuits before children).
+        if (Object.keys(parentChanges).length) {
+          await api.post(`${BACKEND_URL}/api/products/smart-price-update`, {
+            product_id: alert.product_id,
+            prices: parentChanges,
+            pin: adminPin,
+          });
+          parentApplied = true;
+        }
+        // Apply each child. Same PIN — backend re-validates per call.
+        for (const cu of childUpdates) {
+          try {
+            await api.post(`${BACKEND_URL}/api/products/smart-price-update`, {
+              product_id: cu.product_id,
+              prices: cu.prices,
+              pin: adminPin,
+            });
+            childApplied.push(cu.product_name);
+          } catch (e) {
+            childFailed.push(cu.product_name);
+            // PIN error here is unrecoverable — bail.
+            if (e.response?.status === 403) throw e;
+          }
+        }
+        // Auto-acknowledge — operator reviewed AND adjusted.
         try {
           await api.post(
             `${BACKEND_URL}/api/products/capital-change-alerts/${alert.id}/acknowledge`
           );
         } catch { /* silent */ }
-        toast.success(`Prices updated for ${alert.product_name}`);
+        const parts = [];
+        if (parentApplied) parts.push(alert.product_name);
+        if (childApplied.length) parts.push(`${childApplied.length} repack${childApplied.length === 1 ? '' : 's'}`);
+        toast.success(`Prices updated: ${parts.join(' + ')}`);
+        if (childFailed.length) {
+          toast.error(`Failed: ${childFailed.join(', ')}`);
+        }
         setCapAlerts(prev => prev.filter(a => a.id !== alert.id));
       } else {
         let fixed = 0;
@@ -788,9 +862,20 @@ export default function PriceScanManager() {
                           );
                         };
                         return (
-                          <tr key={a.id} className="border-b border-slate-100 hover:bg-amber-50/20" data-testid={`cap-alert-${a.id}`}>
+                          <Fragment key={a.id}>
+                          <tr className="border-b border-slate-100 hover:bg-amber-50/20" data-testid={`cap-alert-${a.id}`}>
                             <td className="px-3 py-2">
                               <div className="flex items-center gap-2 mb-0.5">
+                                {a.children && a.children.length > 0 ? (
+                                  <button
+                                    onClick={() => toggleCapExpanded(a.id)}
+                                    className="w-5 h-5 rounded hover:bg-slate-200 flex items-center justify-center text-slate-500"
+                                    data-testid={`cap-expand-${a.id}`}
+                                    title={`${a.children.length} repack child${a.children.length === 1 ? '' : 'ren'}`}
+                                  >
+                                    {capExpanded[a.id] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                  </button>
+                                ) : null}
                                 <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 ${a.direction === 'up' ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>
                                   {a.direction === 'up' ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
                                 </div>
@@ -798,6 +883,12 @@ export default function PriceScanManager() {
                                   {a.product_name}
                                   {a.is_repack && (
                                     <span className="ml-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 align-middle">REPACK</span>
+                                  )}
+                                  {a.children && a.children.length > 0 && (
+                                    <span className="ml-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 align-middle inline-flex items-center gap-0.5">
+                                      <Package size={9} />{a.children.length} repack{a.children.length === 1 ? '' : 's'}
+                                      {a.has_child_warning && <AlertTriangle size={9} className="text-red-600" />}
+                                    </span>
                                   )}
                                 </p>
                               </div>
@@ -858,6 +949,107 @@ export default function PriceScanManager() {
                               </div>
                             </td>
                           </tr>
+                          {/* Child repack rows (when expanded). Same column
+                              count as parent — uses derived capital from
+                              parent_new_cap / units_per_parent. Updating
+                              these rides on the parent's single PIN unlock. */}
+                          {capExpanded[a.id] && (a.children || []).map(c => {
+                            const childMarginByKey = {};
+                            (c.scheme_margins || []).forEach(sm => { childMarginByKey[sm.scheme_key] = sm; });
+                            const renderChildCell = (s, primary) => {
+                              const currentPrice = parseFloat(c.prices?.[s.key] || 0);
+                              const editVal = (capChildEditPrices[a.id]?.[c.product_id] || {})[s.key] ?? '';
+                              const editNum = parseFloat(editVal);
+                              const hasEdit = !isNaN(editNum) && editNum > 0;
+                              const willBeBelow = hasEdit && editNum < c.derived_new_capital;
+                              const newMargin = hasEdit ? editNum - c.derived_new_capital : null;
+                              const newMarginPct = hasEdit && editNum > 0 ? (newMargin / editNum * 100) : null;
+                              const isThin = hasEdit && !willBeBelow && (newMargin < 5.0 || (newMarginPct !== null && newMarginPct < 5.0));
+                              const sm = childMarginByKey[s.key];
+                              return (
+                                <td key={s.key} className={`px-2 py-1.5 ${primary ? 'bg-purple-50/30' : 'bg-slate-50/30'}`}>
+                                  <div>
+                                    <div className={`text-[10px] mb-0.5 font-mono ${sm?.is_below_cost ? 'text-red-500 line-through' : sm?.is_thin ? 'text-amber-600' : 'text-slate-400'}`}>
+                                      was: {currentPrice > 0 ? formatPHP(currentPrice) : '—'}
+                                      {sm?.is_below_cost && <span className="ml-1 text-[9px] font-bold text-red-600">BELOW COST</span>}
+                                      {sm?.is_thin && !sm?.is_below_cost && <span className="ml-1 text-[9px] font-bold text-amber-600">THIN</span>}
+                                    </div>
+                                    <CalcInput value={editVal}
+                                      onChange={(v) => updateCapChildPrice(a.id, c.product_id, s.key, v)}
+                                      placeholder={primary ? `min ₱${c.derived_new_capital.toFixed(2)}` : 'optional'}
+                                      className={`h-7 text-xs text-right font-mono w-full ${
+                                        willBeBelow
+                                          ? 'border-red-500 bg-red-50 text-red-700 font-bold ring-1 ring-red-400'
+                                          : isThin
+                                          ? 'border-amber-400 bg-amber-50 text-amber-800'
+                                          : hasEdit
+                                          ? 'border-emerald-400 bg-emerald-50 text-emerald-800 font-bold'
+                                          : 'border-slate-200'
+                                      }`}
+                                      data-testid={`cap-child-price-${a.id}-${c.product_id}-${s.key}`} />
+                                    {willBeBelow && (
+                                      <p className="text-[9px] text-red-600 mt-0.5 text-right font-bold flex items-center justify-end gap-1">
+                                        <AlertTriangle size={9} /> ₱{(c.derived_new_capital - editNum).toFixed(2)} below derived cap
+                                      </p>
+                                    )}
+                                    {isThin && !willBeBelow && (
+                                      <p className="text-[9px] text-amber-700 mt-0.5 text-right font-semibold">
+                                        Thin: +{formatPHP(newMargin)} ({newMarginPct?.toFixed(1)}%)
+                                      </p>
+                                    )}
+                                    {hasEdit && !willBeBelow && !isThin && (
+                                      <p className="text-[9px] text-emerald-600 mt-0.5 text-right font-mono">
+                                        +{formatPHP(newMargin)} ({newMarginPct?.toFixed(1)}%)
+                                      </p>
+                                    )}
+                                  </div>
+                                </td>
+                              );
+                            };
+                            return (
+                              <tr key={`${a.id}-child-${c.product_id}`}
+                                  className="border-b border-purple-100/60 bg-purple-50/10 hover:bg-purple-50/30"
+                                  data-testid={`cap-child-row-${a.id}-${c.product_id}`}>
+                                <td className="px-3 py-1.5 pl-10">
+                                  <div className="flex items-center gap-1.5">
+                                    <Package size={11} className="text-purple-500 flex-shrink-0" />
+                                    <p className="text-xs font-semibold text-purple-900 truncate">
+                                      {c.product_name}
+                                      <span className="ml-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 align-middle">REPACK</span>
+                                    </p>
+                                  </div>
+                                  <p className="text-[10px] text-slate-400 font-mono ml-5">
+                                    {c.sku} · {c.units_per_parent}/parent · derived
+                                  </p>
+                                </td>
+                                <td className="px-3 py-1.5 text-right">
+                                  <span className="text-xs font-mono text-slate-500 line-through">{formatPHP(c.derived_old_capital)}</span>
+                                  <p className="text-[9px] text-slate-400">/{c.units_per_parent}</p>
+                                </td>
+                                <td className="px-3 py-1.5 text-right">
+                                  <span className={`text-xs font-mono font-bold ${a.direction === 'up' ? 'text-red-700' : 'text-emerald-700'}`}>
+                                    {formatPHP(c.derived_new_capital)}
+                                  </span>
+                                  <p className={`text-[9px] font-semibold ${a.direction === 'up' ? 'text-red-600' : 'text-emerald-600'}`}>
+                                    {c.derived_delta_amount >= 0 ? '+' : ''}{formatPHP(c.derived_delta_amount)}
+                                  </p>
+                                </td>
+                                <td className="px-3 py-1.5 text-right text-[10px] text-slate-400">
+                                  —
+                                </td>
+                                <td className="px-1 bg-slate-100 w-px" />
+                                {capPrimary.map(s => renderChildCell(s, true))}
+                                {capOther.map(s => renderChildCell(s, false))}
+                                <td className="px-3 py-1.5 text-[10px] text-purple-600 italic">
+                                  Derived from {a.product_name}
+                                </td>
+                                <td className="px-2 py-1.5 text-[9px] text-slate-400 italic text-center">
+                                  Saves<br/>with parent
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          </Fragment>
                         );
                       })}
                     </tbody>
