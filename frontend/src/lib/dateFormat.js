@@ -126,6 +126,23 @@ export function localTodayStr() {
   }
 }
 
+/** Calendar day after the given YYYY-MM-DD, using pure string arithmetic.
+ *  Avoids the `new Date(s).toISOString().slice(0,10)` UTC trap that shifts
+ *  one day on devices whose JS-engine TZ differs from the org TZ. Returns
+ *  '' for malformed input. */
+export function nextCalendarDay(ymd) {
+  if (!ymd || typeof ymd !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return '';
+  // Construct a UTC-midnight Date from the components, add 24h, format.
+  // Using UTC throughout (not local) means no TZ shift can happen.
+  const [y, m, d] = ymd.split('-').map(Number);
+  const utc = new Date(Date.UTC(y, m - 1, d));
+  utc.setUTCDate(utc.getUTCDate() + 1);
+  const yy = utc.getUTCFullYear();
+  const mm = String(utc.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(utc.getUTCDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
 /** Convert a server-issued UTC ISO string into the wall-clock time
  *  string the user actually saw at that moment. Used for the sales_log
  *  "time" column and any place we display a recorded time. */
@@ -153,6 +170,7 @@ const _api = {
   formatTimeFull,
   formatDateLong,
   localTodayStr,
+  nextCalendarDay,
   timeFromIso,
   format24To12,
 };

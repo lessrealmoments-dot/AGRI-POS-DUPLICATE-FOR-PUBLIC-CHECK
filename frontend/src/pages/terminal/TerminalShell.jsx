@@ -683,6 +683,17 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
       // Fetch business info for receipt printing
       api.get('/settings/business-info').then(r => setBusinessInfo(r.data || {})).catch(() => {});
 
+      // Cache org-configured timezone — single source of truth for all
+      // date/time stamps shown on this terminal (sales dates, "Last Sent",
+      // "Created at", receipt headers, etc.). Refreshed on every sync so
+      // an owner who changes the TZ in the web Settings sees it propagate
+      // to terminals within a sync cycle.
+      api.get('/settings/timezone').then(r => {
+        if (r?.data?.timezone) {
+          try { localStorage.setItem('agribooks.org_tz', r.data.timezone); } catch (e) { /* private mode */ }
+        }
+      }).catch(() => { /* offline / endpoint unavailable — keep cached value */ });
+
       setBackgroundSyncStatus('done');
       // Trigger TerminalSales to re-read cache
       setSyncVersion(v => v + 1);
@@ -772,6 +783,12 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
           setSyncVersion(v => v + 1); // Update last-synced display
           toast.success(`Data synced — ${posRes.data.products?.length || 0} products loaded`);
           api.get('/settings/business-info').then(r => setBusinessInfo(r.data || {})).catch(() => {});
+          // Cache org timezone alongside business info (single source of truth).
+          api.get('/settings/timezone').then(r => {
+            if (r?.data?.timezone) {
+              try { localStorage.setItem('agribooks.org_tz', r.data.timezone); } catch (e) { /* private mode */ }
+            }
+          }).catch(() => {});
         } catch (e) {
           console.error('Sync failed:', e);
           await loadOfflineData();

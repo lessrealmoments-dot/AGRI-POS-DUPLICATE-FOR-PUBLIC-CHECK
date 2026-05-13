@@ -38,15 +38,23 @@ export function extractApiError(err, fallback = 'Something went wrong') {
 // Backend stores all *_at timestamps as UTC ISO strings (e.g. 2026-02-03T07:00:00+00:00).
 // Naively slicing produces UTC wall-clock — for PH staff a 3pm sale would
 // appear as "07:00 early morning". These helpers convert to the org's
-// configured timezone (cached in localStorage as `agribooks.org_tz` by AuthContext).
+// configured timezone (cached in localStorage as `agribooks.org_tz` by
+// AuthContext on the main app, and by TerminalShell.backgroundSync on the
+// POS terminal — single source of truth driven by the web Settings page).
 // Safe with null / undefined / non-ISO inputs.
+//
+// Fallback rationale: if the localStorage cache is missing (first run on
+// a fresh terminal, private-mode browser, etc.) we use Asia/Manila — the
+// product's primary market — instead of the browser's local TZ. This
+// matches lib/dateFormat.js so the two formatter families never disagree.
 //
 // Use:
 //   fmtDateTime(iso) → "2026-02-03 15:00"   (was buggy `.slice(0,16).replace('T',' ')`)
 //   fmtDate(iso)     → "2026-02-03"          (was buggy `.slice(0,10)` on UTC ISO)
 //   fmtTime(iso)     → "15:00"
+const DEFAULT_TZ = 'Asia/Manila';
 const _tz = () => {
-  try { return localStorage.getItem('agribooks.org_tz') || undefined; } catch { return undefined; }
+  try { return localStorage.getItem('agribooks.org_tz') || DEFAULT_TZ; } catch { return DEFAULT_TZ; }
 };
 
 const _looksLikePlainDate = (s) =>

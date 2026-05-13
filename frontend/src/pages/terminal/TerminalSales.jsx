@@ -12,7 +12,7 @@ import {
   getProducts, getCustomers, getPriceSchemes,
   addPendingSale, getPendingSaleCount, getInventoryItem, getBranchPrice,
 } from '../../lib/offlineDB';
-import { localTodayStr } from '../../lib/dateFormat';
+import { localTodayStr, nextCalendarDay } from '../../lib/dateFormat';
 import { newEnvelopeId } from '../../lib/syncManager';
 import CropCreditTypeDialog from '../../components/CropCreditTypeDialog';
 import { invalidateBalanceCache } from '../../components/CustomerBalanceBadge';
@@ -598,14 +598,14 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
     const saleId = ensureSaleId();
     const envelopeId = newEnvelopeId();
     const today = localTodayStr();
-    // Iter 243: If today is already closed, auto-bump to tomorrow (next open
-    // day). Terminal cannot choose arbitrary dates — this is intentional.
-    // See /app/frontend/src/lib/nextOpenDate.js for rationale.
+    // Iter 243 + TZ fix (2026-02): If today is already closed, bump to the
+    // calendar day after `today`. We do PURE STRING arithmetic on the
+    // YYYY-MM-DD value `localTodayStr()` returned — avoids the classic
+    // `new Date(s).toISOString().slice(0,10)` UTC trap, which can shift one
+    // calendar day for devices whose JS-engine TZ differs from the org TZ.
     let saleDate = today;
     if (lastCloseDate && lastCloseDate >= today) {
-      const d = new Date(today + 'T12:00:00');
-      d.setDate(d.getDate() + 1);
-      saleDate = d.toISOString().slice(0, 10);
+      saleDate = nextCalendarDay(today);
     }
 
     const paymentMethod = paymentType === 'cash' ? 'Cash'
@@ -867,12 +867,7 @@ export default function TerminalSales({ api, session, isOnline, pendingCount, se
   // all subsequent sales will be dated to the next business day. Not dismissable.
   const today = localTodayStr();
   const todayIsClosed = Boolean(lastCloseDate && lastCloseDate >= today);
-  let nextSaleDate = today;
-  if (todayIsClosed) {
-    const d = new Date(today + 'T12:00:00');
-    d.setDate(d.getDate() + 1);
-    nextSaleDate = d.toISOString().slice(0, 10);
-  }
+  const nextSaleDate = todayIsClosed ? nextCalendarDay(today) : today;
 
   return (
     <div className="flex flex-col h-full" data-testid="terminal-sales">
