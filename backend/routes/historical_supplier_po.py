@@ -51,6 +51,7 @@ from utils import (
 )
 from routes.verify import verify_pin_for_action
 from routes.accounting import deduct_from_fund_source, derive_fund_source
+from utils.numbering import generate_next_number
 
 router = APIRouter(prefix="/historical-supplier-pos",
                     tags=["Historical Supplier PO"])
@@ -176,6 +177,14 @@ async def create_historical_supplier_po(
 
     branch = await db.branches.find_one({"id": branch_id}, {"_id": 0, "name": 1})
     branch_name = branch.get("name", "") if branch else ""
+
+    # Auto-generate a standard reference_number when the operator leaves it
+    # blank. Format mirrors regular POs (`PO-{BC}-NNNNNN`) but uses the
+    # distinct `HPO` prefix so historical (pre-system) entries are visually
+    # distinguishable from active POs on every screen / report — and they
+    # share no sequence with active POs (own collection, own counter).
+    if not reference_number:
+        reference_number = await generate_next_number("HPO", branch_id)
 
     doc = {
         "id": new_id(),

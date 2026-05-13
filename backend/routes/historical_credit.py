@@ -334,7 +334,13 @@ async def create_historical_credit(data: dict, user=Depends(get_current_user)):
     action = _classify_inventory_action(stopper, payload["allow_inventory_deduction"])
 
     invoice_id = new_id()
-    invoice_number = await generate_next_number(payload["branch_id"], "SI")
+    # Fix: `generate_next_number(prefix, branch_id)` — earlier code passed
+    # the arguments swapped, producing ugly numbers like
+    # `{branch_uuid}-XX-001000` (branch_id used as prefix, "SI" as branch_id).
+    # Historical credit invoices share the same SI sequence as regular sales
+    # invoices because they ARE sales invoices, just late-encoded — keeps a
+    # gapless per-branch invoice trail.
+    invoice_number = await generate_next_number("SI", payload["branch_id"])
     encoded_at = now_iso()
     encoded_by = user.get("id")
     encoded_by_name = user.get("full_name") or user.get("username") or ""

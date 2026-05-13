@@ -1,0 +1,76 @@
+{
+  "generated_at": "2026-05-13T08:44:45.921925+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 4,
+  "pass_count": 2,
+  "fail_count": 2,
+  "rows": [
+    {
+      "scenario": "br_num.1_hsp_auto_reference",
+      "step": "reference_matches_standard_format",
+      "expected": {
+        "prefix": "HPO-",
+        "regex_match": true
+      },
+      "actual": {
+        "prefix": "HPO-",
+        "regex_match": true,
+        "value": "HPO-B4-001000"
+      },
+      "status": "FAIL",
+      "evidence": {
+        "po_id": "e467a17d-87f0-4651-a3f6-bb5fa2541cba"
+      },
+      "recorded_at": "2026-05-13T08:44:45.185097+00:00"
+    },
+    {
+      "scenario": "br_num.2_hsp_user_reference_preserved",
+      "step": "user_string_kept_verbatim",
+      "expected": {
+        "reference_number": "OLD-PAPER-INVOICE-2024-001"
+      },
+      "actual": {
+        "reference_number": "OLD-PAPER-INVOICE-2024-001"
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "4026dc9d-e655-461d-b8c5-665805796273"
+      },
+      "recorded_at": "2026-05-13T08:44:45.417894+00:00"
+    },
+    {
+      "scenario": "br_num.3_hsp_sequential",
+      "step": "second_auto_is_first_plus_one",
+      "expected": {
+        "delta": 1
+      },
+      "actual": {
+        "delta": 1
+      },
+      "status": "PASS",
+      "evidence": {
+        "a": "HPO-B4-001001",
+        "b": "HPO-B4-001002"
+      },
+      "recorded_at": "2026-05-13T08:44:45.871635+00:00"
+    },
+    {
+      "scenario": "br_num.4_historical_credit_si_format",
+      "step": "invoice_number_is_si_branch_seq",
+      "expected": {
+        "prefix": "SI-",
+        "regex_match": true
+      },
+      "actual": {
+        "prefix": "SI-",
+        "regex_match": true,
+        "value": "SI-B4-001000"
+      },
+      "status": "FAIL",
+      "evidence": {
+        "branch_id": "p2b-br-50e949b7"
+      },
+      "recorded_at": "2026-05-13T08:44:45.874087+00:00"
+    }
+  ]
+}
