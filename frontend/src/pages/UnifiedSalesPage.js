@@ -2975,7 +2975,12 @@ export default function UnifiedSalesPage() {
   };
 
   return (
-    <div className="h-[calc(100vh-80px)] flex flex-col animate-fadeIn" data-testid="unified-sales-page">
+    <div
+      className={`${(isHistoricalCreditMode || isBackdatedNonCreditBlocked)
+        ? 'min-h-[calc(100vh-80px)]'
+        : 'h-[calc(100vh-80px)]'} flex flex-col animate-fadeIn`}
+      data-testid="unified-sales-page"
+    >
       {/* Unclosed Days Banner */}
       {mainTab === 'sale' && currentBranch?.id && (
         <UnclosedDaysBanner
@@ -3596,7 +3601,11 @@ export default function UnifiedSalesPage() {
       )}
 
       {/* Main Content */}
-      <div className="flex-1 flex gap-4 px-1 overflow-hidden">
+      <div
+        className={`flex-1 flex gap-4 px-1 ${
+          (isHistoricalCreditMode || isBackdatedNonCreditBlocked) ? '' : 'overflow-hidden'
+        }`}
+      >
         {mode === 'quick' ? (
           // QUICK MODE: Product grid + Cart
           <>
