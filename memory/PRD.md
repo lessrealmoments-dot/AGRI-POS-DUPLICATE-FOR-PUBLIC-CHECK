@@ -1,6 +1,71 @@
 # AgriBooks PRD
 
 
+## Phase 1 — Stock Request Confirmation Layer (Feb 2026) ✅
+
+### Status: COMPLETE — backend endpoints + PIN policy + frontend modal; 18/18 BR tests green; Phase 0 + 0.5 still green; build clean; zero DB footprint.
+
+### What was delivered (this fork)
+1. **NEW endpoint `POST /api/purchase-orders/{po_id}/confirm-request`** (`routes/purchase_orders.py`):
+   - Saves `items[].approved_qty` and `items[].approved_note` without ever mutating the original `items[].quantity` (requested qty stays immutable).
+   - Stamps PO-level `approval_status` (one of `approved` / `partial` / `excess` / `declined`), `approved_at`, `approved_by_id`, `approved_by_name`, `approval_method`, `approval_note`, `approval_caller_id`/`name`.
+   - PIN/TOTP gate via NEW `confirm_stock_request` policy, **branch-scoped to `supply_branch_id`** (so a Branch A manager's PIN cannot confirm Branch B's request).
+   - Non-privileged callers must belong to the supply branch (admin/owner override).
+   - Soft-locks when a non-cancelled linked BTO already exists ("Cancel the linked transfer draft {order_number} before re-confirming.").
+   - **Excess invariant**: when any line has `approved_qty > requested_qty`, the per-line `approved_note` (or the PO-level `approval_note`) MUST be non-empty — 400 otherwise.
+   - Appends one row per confirmation to new collection `request_approval_log` (tenant-scoped via `TENANT_COLLECTIONS`).
+   - Fires an in-app `stock_request_confirmed` notification to the requesting branch (admins + branch users). NO SMS (deferred).
+   - No stock movement, no BTO creation, no internal invoice.
+
+2. **NEW endpoint `GET /api/purchase-orders/{po_id}/confirmation`** — read-only side-by-side ledger `{items: [{product_id, requested_qty, approved_qty, approved_note}], approval_metadata, log: [...]}`. Available to both requesting + supplying branches.
+
+3. **Modified `POST /api/purchase-orders/{po_id}/generate-branch-transfer`** — when a line has `approved_qty`, `qty` (send quantity) prefills from `approved_qty` instead of `min(requested, available)`. `requested_qty` still surfaced for transparency. Response now also carries top-level `approval_status` / `approved_by_name` / `approval_note` so the composer can show a "Pre-filled from confirmed quantities" banner.
+
+4. **NEW PIN policy `confirm_stock_request`** (`routes/verify.py`) — defaults `["admin_pin", "manager_pin", "totp"]`, allow-list `["admin", "owner", "manager", "super_admin"]`, branch-scoped via `verify_pin_for_action(..., branch_id=supply_branch_id)`.
+
+5. **NEW frontend component `frontend/src/components/ConfirmQuantitiesDialog.jsx`** (~290 lines) — per-line editable approved qty + note, live full/partial/excess/declined chips, overall approval note, PIN field, "excess without note" client-side block, sonner toasts, posts to `/confirm-request`. All elements carry `data-testid` (`confirm-quantities-dialog`, `confirm-pin`, `approved-qty-{idx}`, `approved-note-{idx}`, `approval-note`, `confirm-submit-btn`, `confirm-cancel-btn`, `confirm-blocked-hint`).
+
+6. **Wired `BranchTransferPage.js`**:
+   - Incoming-request card: new "Confirm Quantities" button (testid `confirm-quantities-${req.id}`) — visible to supply branch manager + admins on `status` ∈ `{requested, draft}`. Becomes "Re-confirm Quantities" once `approval_status` is set. New `approval-status-incoming-${req.id}` badge.
+   - Outgoing-request card: per-line "x{requested} · approved {approved}" inline display + new `approval-status-outgoing-${req.id}` badge with "Approved by {name}" + approval note.
+
+7. **NEW BR test `backend/tests/business_regression/test_br_stock_request_approval.py`** (18 tests / 31 rows): no-stock-move, immutable requested_qty, per-line approved_qty, full metadata stamp, append-only log, requester-branch 403, supplier 200, wrong-branch PIN rejected, source PIN accepted, admin override, generate-transfer prefill, generate-transfer still shows requested, soft-lock after BTO, re-confirm appends log, no BTO created, GET ledger, excess requires note, in-app notification fired.
+
+8. **`request_approval_log` registered in `TENANT_COLLECTIONS`** (`config.py`) — auto-tenant-injection on insert + read; cleanup helper sweeps it automatically.
+
+### Verification
+- **BR new file**: 18/18 pass / 31 rows / 0 fail.
+- **BR full suite (Phase 0 + 0.5 + 1)**: 77/77 pass / 310 rows / 0 fail (was 59 / 279).
+- Re-run idempotency: identical pass + zero footprint (`(none)` lingering rows by `br_sr_conf*`).
+- Frontend `yarn build`: clean in 28s.
+- ESLint: clean on `ConfirmQuantitiesDialog.jsx` and `BranchTransferPage.js`.
+- Backend supervisor restart: clean.
+- Live login page reachable @ preview URL.
+
+### Files changed (this fork)
+- NEW `backend/tests/business_regression/test_br_stock_request_approval.py`
+- NEW `frontend/src/components/ConfirmQuantitiesDialog.jsx`
+- MOD `backend/routes/purchase_orders.py` (+ ~280 LOC: new endpoints + prefill)
+- MOD `backend/routes/verify.py` (registered `confirm_stock_request` policy)
+- MOD `backend/config.py` (`TENANT_COLLECTIONS` += `request_approval_log`)
+- MOD `frontend/src/pages/BranchTransferPage.js` (import + state + button + dialog + outgoing badge)
+
+### Phase 1 owner-decisions honoured
+- **approved_qty CAN exceed requested_qty**, BUT a note is required when it does (per-line `approved_note` or overall `approval_note`). Audited via the new log.
+- **In-app notification only** (`stock_request_confirmed`) — no SMS yet.
+- Strict scope kept: web-only, no QR/mobile, no SMS, no analytics, no stock movement, no BTO creation, no internal invoice creation.
+- `requested_qty` immutable; `approved_qty` audited with verifier identity (`approved_by_id`, `approved_by_name`, `approval_method`).
+- Generate / Resume Transfer prefills from `approved_qty` when present.
+- Phase 0 + 0.5 tests still green (77/77).
+
+### Recommendation for next pass
+- **Phase 2** — QR/mobile confirmation flow on `DocViewerPage` (mobile prep flow + one-time bearer token).
+- **Phase 3** — Variance ticket polish (PIN on large losses, invoice line-item rewrite).
+- **Phase 0.6** — "View QR" modal on transfer cards.
+
+---
+
+
 ## Phase 5 — Surgical Deployment Fixes + Receipt-PIN Tenant Audit (Feb 2026) ✅
 
 ### Status: COMPLETE — both surgical fixes shipped; public receipt PIN flow audited READ-ONLY.

@@ -66,6 +66,8 @@ TENANT_COLLECTIONS = {
     'signature_sessions',            # Digital signature capture sessions
     'parked_sales',                  # Cashier "park sale" / draft cart staging
     'parked_branch_transfers',       # Manager "park transfer" / draft transfer staging
+    # Phase 1 — Stock Request Confirmation Layer (append-only audit ledger).
+    'request_approval_log',
 }
 
 

@@ -1593,6 +1593,337 @@ async def get_capital_preview(po_id: str, user=Depends(get_current_user)):
     }
 
 
+@router.post("/{po_id}/confirm-request")
+async def confirm_stock_request(po_id: str, data: dict = None,
+                                user=Depends(get_current_user)):
+    """Phase 1 — Confirm `approved_qty` for each line on a branch_request PO.
+
+    Strict rules:
+      * No stock movement; no BTO is created; no internal invoice is
+        created. This route ONLY mutates `items[].approved_qty`,
+        `items[].approved_note`, and PO-level approval metadata, plus
+        appends one row to `request_approval_log`.
+      * Original `items[].quantity` (requested qty) is NEVER overwritten.
+      * Branch-context: non-privileged caller must belong to
+        `po.supply_branch_id`.
+      * PIN/TOTP via `confirm_stock_request` policy, branch-scoped to
+        `supply_branch_id`. The verifier identity is stamped as
+        `approved_by_*` (separate from caller identity in audit log).
+      * Soft-lock: if a non-cancelled BTO is already linked to this PO,
+        confirmation is rejected with an actionable 400.
+      * Excess: when any line has `approved_qty > requested_qty`, that
+        line's `approved_note` (or the PO-level `approval_note`) MUST be
+        non-empty — otherwise 400.
+    """
+    check_perm(user, "purchase_orders", "update")
+    data = data or {}
+
+    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
+    if not po:
+        raise HTTPException(status_code=404, detail="PO not found")
+    if po.get("po_type") != "branch_request":
+        raise HTTPException(status_code=400,
+            detail="Only branch request POs can be confirmed.")
+    if po.get("status") in ("cancelled", "fulfilled", "partially_fulfilled"):
+        raise HTTPException(status_code=400,
+            detail=f"Cannot confirm a request in status '{po.get('status')}'.")
+
+    supply_branch_id = po.get("supply_branch_id", "")
+    if not supply_branch_id:
+        raise HTTPException(status_code=400,
+            detail="Request has no supply branch — cannot confirm.")
+
+    # Branch-context: non-privileged caller must belong to supply branch.
+    from utils.auth import is_privileged, user_branch_ids
+    if not is_privileged(user):
+        if supply_branch_id not in user_branch_ids(user):
+            raise HTTPException(status_code=403,
+                detail="Only the supplying branch can confirm this request.")
+
+    # Soft-lock: a non-cancelled BTO already exists → reject.
+    linked_bto = await db.branch_transfer_orders.find_one(
+        {"request_po_id": po_id, "status": {"$nin": ["cancelled"]}},
+        {"_id": 0, "id": 1, "order_number": 1, "status": 1},
+    )
+    if linked_bto:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Cancel the linked transfer draft "
+                f"{linked_bto.get('order_number') or linked_bto.get('id')} "
+                f"before re-confirming the request."
+            ),
+        )
+
+    # PIN/TOTP verification — branch-scoped to supply branch.
+    pin = str(data.get("pin", "") or "").strip()
+    if not pin:
+        raise HTTPException(status_code=400,
+            detail="PIN or TOTP is required to confirm a stock request.")
+    from routes.verify import verify_pin_for_action
+    verifier = await verify_pin_for_action(
+        pin, "confirm_stock_request", branch_id=supply_branch_id)
+    if not verifier:
+        raise HTTPException(status_code=403,
+            detail="Invalid PIN or unauthorized for this supply branch.")
+
+    # Build approval map: product_id → (approved_qty, approved_note)
+    raw_items = data.get("items") or []
+    if not raw_items:
+        raise HTTPException(status_code=400,
+            detail="No items provided for confirmation.")
+    approval_map: dict = {}
+    for it in raw_items:
+        pid = (it or {}).get("product_id", "")
+        if not pid:
+            continue
+        try:
+            qty = float(it.get("approved_qty"))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400,
+                detail=f"Invalid approved_qty for product {pid}.")
+        if qty < 0:
+            raise HTTPException(status_code=400,
+                detail=f"approved_qty must be ≥ 0 (product {pid}).")
+        approval_map[pid] = {
+            "approved_qty": qty,
+            "approved_note": str(it.get("approved_note") or "").strip(),
+        }
+
+    approval_note_global = str(data.get("approval_note") or "").strip()
+
+    # Walk existing PO items and update only the matched lines. Untouched
+    # lines retain their previous `approved_qty` (re-confirm preserves
+    # prior state for omitted items, but the canonical flow sends ALL
+    # lines back).
+    items_diff = []
+    new_items = []
+    total_full = 0
+    total_partial = 0
+    total_excess = 0
+    total_declined = 0
+    excess_lines_without_note = []
+    for it in po.get("items", []):
+        pid = it.get("product_id", "")
+        requested = float(it.get("quantity", 0) or 0)
+        if pid in approval_map:
+            appr = approval_map[pid]
+            new_appr_qty = float(appr["approved_qty"])
+            new_note = appr["approved_note"]
+            updated = dict(it)
+            updated["approved_qty"] = new_appr_qty
+            updated["approved_note"] = new_note
+            new_items.append(updated)
+            delta = new_appr_qty - requested
+            if new_appr_qty == 0:
+                total_declined += 1
+            elif new_appr_qty < requested:
+                total_partial += 1
+            elif new_appr_qty > requested:
+                total_excess += 1
+                if not new_note and not approval_note_global:
+                    excess_lines_without_note.append(it.get("product_name") or pid)
+            else:
+                total_full += 1
+            items_diff.append({
+                "product_id": pid,
+                "product_name": it.get("product_name", ""),
+                "requested": requested,
+                "approved": new_appr_qty,
+                "delta": delta,
+                "note": new_note,
+            })
+        else:
+            new_items.append(it)
+
+    if excess_lines_without_note:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "A note is required when approved_qty exceeds requested_qty "
+                f"(lines: {', '.join(excess_lines_without_note[:3])})."
+            ),
+        )
+
+    # Derive PO-level approval_status.
+    if total_excess > 0:
+        approval_status = "excess"
+    elif total_declined > 0 and total_full == 0 and total_partial == 0:
+        approval_status = "declined"
+    elif total_partial > 0 or total_declined > 0:
+        approval_status = "partial"
+    else:
+        approval_status = "approved"
+
+    now = now_iso()
+    verifier_id = verifier.get("verifier_id") or verifier.get("id") or ""
+    verifier_name = verifier.get("verifier_name") or verifier.get("name") or ""
+    verifier_method = verifier.get("method") or ""
+
+    await db.purchase_orders.update_one(
+        {"id": po_id},
+        {"$set": {
+            "items": new_items,
+            "approval_status": approval_status,
+            "approved_at": now,
+            "approved_by_id": verifier_id,
+            "approved_by_name": verifier_name,
+            "approval_method": verifier_method,
+            "approval_note": approval_note_global,
+            "approval_caller_id": user.get("id", ""),
+            "approval_caller_name": user.get("full_name") or user.get("username", ""),
+        }},
+    )
+
+    # Append-only audit row.
+    org_id = po.get("organization_id") or user.get("organization_id") or ""
+    await db.request_approval_log.insert_one({
+        "id": new_id(),
+        "po_id": po_id,
+        "po_number": po.get("po_number", ""),
+        "organization_id": org_id,
+        "supply_branch_id": supply_branch_id,
+        "requesting_branch_id": po.get("branch_id", ""),
+        "approval_status": approval_status,
+        "approval_note": approval_note_global,
+        "items_diff": items_diff,
+        "approved_by_id": verifier_id,
+        "approved_by_name": verifier_name,
+        "approval_method": verifier_method,
+        "caller_id": user.get("id", ""),
+        "caller_name": user.get("full_name") or user.get("username", ""),
+        "created_at": now,
+    })
+
+    # In-app notification to the requesting branch (admins + their managers).
+    try:
+        requesting_branch_id = po.get("branch_id", "")
+        requesting_branch = await db.branches.find_one(
+            {"id": requesting_branch_id}, {"_id": 0, "name": 1})
+        req_name = (requesting_branch or {}).get("name") or requesting_branch_id
+        supply_branch = await db.branches.find_one(
+            {"id": supply_branch_id}, {"_id": 0, "name": 1})
+        supply_name = (supply_branch or {}).get("name") or supply_branch_id
+
+        target_users = await db.users.find(
+            {"$or": [
+                {"role": "admin", "active": True},
+                {"branch_ids": requesting_branch_id, "active": True},
+                {"branch_id": requesting_branch_id, "active": True},
+            ]},
+            {"_id": 0, "id": 1},
+        ).to_list(50)
+        target_ids = list({u["id"] for u in target_users if u.get("id")})
+
+        line_summary = ", ".join(
+            f"{d['product_name']} {d['requested']:g}→{d['approved']:g}"
+            for d in items_diff[:3]
+        )
+        if len(items_diff) > 3:
+            line_summary += f" +{len(items_diff) - 3} more"
+
+        await db.notifications.insert_one({
+            "id": new_id(),
+            "type": "stock_request_confirmed",
+            "title": f"Stock Request {po.get('po_number','')} Confirmed",
+            "message": (
+                f"{supply_name} confirmed your request "
+                f"({approval_status}): {line_summary}"
+            ),
+            "branch_id": requesting_branch_id,
+            "branch_name": req_name,
+            "metadata": {
+                "po_id": po_id,
+                "po_number": po.get("po_number", ""),
+                "approval_status": approval_status,
+                "supply_branch_id": supply_branch_id,
+                "supply_branch_name": supply_name,
+                "approved_by_name": verifier_name,
+            },
+            "target_user_ids": target_ids,
+            "read_by": [],
+            "created_at": now,
+        })
+    except Exception as e:
+        logger.warning(f"stock_request_confirmed notification failed: {e}")
+
+    return {
+        "po_id": po_id,
+        "po_number": po.get("po_number", ""),
+        "approval_status": approval_status,
+        "approved_at": now,
+        "approved_by_id": verifier_id,
+        "approved_by_name": verifier_name,
+        "approval_method": verifier_method,
+        "approval_note": approval_note_global,
+        "items": [
+            {
+                "product_id": d["product_id"],
+                "product_name": d["product_name"],
+                "requested_qty": d["requested"],
+                "approved_qty": d["approved"],
+                "delta": d["delta"],
+                "approved_note": d["note"],
+            }
+            for d in items_diff
+        ],
+    }
+
+
+@router.get("/{po_id}/confirmation")
+async def get_stock_request_confirmation(po_id: str,
+                                         user=Depends(get_current_user)):
+    """Phase 1 — read-only side-by-side ledger of requested vs approved
+    quantities for a branch_request PO, plus the append-only log.
+
+    Open to anyone in the org with `purchase_orders.read`. Branch-context
+    enforcement is NOT applied here — both the requesting and supplying
+    branches need visibility for the UI.
+    """
+    check_perm(user, "purchase_orders", "read")
+    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
+    if not po:
+        raise HTTPException(status_code=404, detail="PO not found")
+    if po.get("po_type") != "branch_request":
+        raise HTTPException(status_code=400,
+            detail="Only branch request POs have a confirmation ledger.")
+
+    items = []
+    for it in po.get("items", []):
+        appr_raw = it.get("approved_qty")
+        has_appr = appr_raw is not None and appr_raw != ""
+        items.append({
+            "product_id": it.get("product_id", ""),
+            "product_name": it.get("product_name", ""),
+            "unit": it.get("unit", ""),
+            "requested_qty": float(it.get("quantity", 0) or 0),
+            "approved_qty": float(appr_raw) if has_appr else None,
+            "approved_note": it.get("approved_note", "") or "",
+        })
+
+    log_rows = await db.request_approval_log.find(
+        {"po_id": po_id}, {"_id": 0}
+    ).sort("created_at", 1).to_list(200)
+
+    return {
+        "po_id": po_id,
+        "po_number": po.get("po_number", ""),
+        "po_status": po.get("status", ""),
+        "supply_branch_id": po.get("supply_branch_id", ""),
+        "requesting_branch_id": po.get("branch_id", ""),
+        "items": items,
+        "approval_metadata": {
+            "approval_status": po.get("approval_status") or "pending",
+            "approved_at": po.get("approved_at") or "",
+            "approved_by_id": po.get("approved_by_id") or "",
+            "approved_by_name": po.get("approved_by_name") or "",
+            "approval_method": po.get("approval_method") or "",
+            "approval_note": po.get("approval_note") or "",
+        },
+        "log": log_rows,
+    }
+
+
 @router.post("/{po_id}/generate-branch-transfer")
 async def generate_branch_transfer_from_request(po_id: str, user=Depends(get_current_user)):
     """
@@ -1661,7 +1992,15 @@ async def generate_branch_transfer_from_request(po_id: str, user=Depends(get_cur
         )
 
         requested_qty = float(item.get("quantity", 1))
-        send_qty = min(requested_qty, available_stock)  # default = min of requested & available
+        approved_qty_raw = item.get("approved_qty")
+        has_approved = approved_qty_raw is not None and approved_qty_raw != ""
+        # Phase 1 — prefer `approved_qty` (set by the supply branch via
+        # `/confirm-request`) over the legacy min(requested, available)
+        # heuristic. The composer can still adjust afterwards.
+        if has_approved:
+            send_qty = float(approved_qty_raw)
+        else:
+            send_qty = min(requested_qty, available_stock)
 
         transfer_items.append({
             "product_id": product_id,
@@ -1670,6 +2009,8 @@ async def generate_branch_transfer_from_request(po_id: str, user=Depends(get_cur
             "category": product.get("category", "General"),
             "unit": product.get("unit", item.get("unit", "")),
             "requested_qty": requested_qty,
+            "approved_qty": float(approved_qty_raw) if has_approved else None,
+            "approved_note": item.get("approved_note", "") or "",
             "available_stock": available_stock,
             "qty": send_qty,
             "branch_capital": branch_capital,
@@ -1697,6 +2038,12 @@ async def generate_branch_transfer_from_request(po_id: str, user=Depends(get_cur
         "show_retail": po.get("show_retail", True),
         "items": transfer_items,
         "notes": po.get("notes", ""),
+        # Phase 1 — expose approval status so the composer can show a
+        # "pre-filled from confirmed quantities" banner.
+        "approval_status": po.get("approval_status") or "pending",
+        "approved_at": po.get("approved_at") or "",
+        "approved_by_name": po.get("approved_by_name") or "",
+        "approval_note": po.get("approval_note") or "",
     }
 
 

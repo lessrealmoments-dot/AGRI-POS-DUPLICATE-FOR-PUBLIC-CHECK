@@ -23,7 +23,7 @@ import {
   Plus, Trash2, Send, CheckCircle2, Search, RefreshCw, Settings2,
   AlertTriangle, ChevronDown, ChevronUp, Building2, Package, X,
   TrendingUp, TrendingDown, Clock, ArrowRight, Eye, XCircle, Pencil, Upload, Check,
-  ClipboardCheck, FileText, Smartphone, Lock, Pause, FolderOpen, Trash, Tag, Shield, Printer
+  ClipboardCheck, FileText, Smartphone, Lock, Pause, FolderOpen, Trash, Tag, Shield, ShieldCheck, Printer
 } from 'lucide-react';
 import { localTodayStr } from '../lib/dateFormat';
 import PrintEngine from '../lib/PrintEngine';
@@ -31,6 +31,7 @@ import { toast } from 'sonner';
 import { useUnsavedChangesGuard } from '../lib/useUnsavedChangesGuard';
 import CalcInput from '../components/CalcInput';
 import SmartProductSearch from '../components/SmartProductSearch';
+import ConfirmQuantitiesDialog from '../components/ConfirmQuantitiesDialog';
 
 // Smart quantity formatter — display max 3 decimal places, no trailing zeros.
 // Raw precision is preserved in the database — this is display only.
@@ -170,6 +171,9 @@ export default function BranchTransferPage() {
   const [stockRequests, setStockRequests] = useState([]);
   const [requestsLoading, setRequestsLoading] = useState(false);
   const [generatingTransfer, setGeneratingTransfer] = useState(null); // request id being processed
+  // Phase 1 — "Confirm Quantities" modal state (incoming-request card).
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+  const [confirmTargetRequest, setConfirmTargetRequest] = useState(null);
   // ── Request Stock form state ────────────────────────────────────────────
   const [reqTargetBranch, setReqTargetBranch] = useState('');
   const [reqRows, setReqRows] = useState([{ id: Date.now(), product: null, qty: '' }]);
@@ -1971,6 +1975,27 @@ export default function BranchTransferPage() {
                             </Button>
                           )}
                           {(req.status === 'requested' || req.status === 'draft') && (isAdmin || (currentBranch?.id && req.supply_branch_id === currentBranch.id)) && (
+                            <Button size="sm" variant="outline"
+                              onClick={() => { setConfirmTargetRequest(req); setConfirmDialogOpen(true); }}
+                              className="h-10 px-4 text-xs border-violet-300 text-violet-700 hover:bg-violet-50"
+                              data-testid={`confirm-quantities-${req.id}`}>
+                              <ShieldCheck size={12} className="mr-1" />
+                              {req.approval_status && req.approval_status !== 'pending' ? 'Re-confirm Quantities' : 'Confirm Quantities'}
+                            </Button>
+                          )}
+                          {req.approval_status && req.approval_status !== 'pending' && (
+                            <Badge className={`text-xs px-2.5 py-1 ${
+                              req.approval_status === 'approved' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : req.approval_status === 'partial' ? 'bg-yellow-50 text-yellow-700 border border-yellow-200'
+                              : req.approval_status === 'excess' ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                              : req.approval_status === 'declined' ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                              : 'bg-slate-50 text-slate-600'
+                            }`}
+                            data-testid={`approval-status-incoming-${req.id}`}>
+                              Approved: {req.approval_status}
+                            </Badge>
+                          )}
+                          {(req.status === 'requested' || req.status === 'draft') && (isAdmin || (currentBranch?.id && req.supply_branch_id === currentBranch.id)) && (
                             <Button size="sm" onClick={() => handleGenerateTransfer(req)} disabled={generatingTransfer === req.id}
                               className="h-10 px-5 bg-[#1A4D2E] hover:bg-[#14532d] text-white text-sm font-semibold" data-testid={`gen-transfer-${req.id}`}>
                               {generatingTransfer === req.id ? <RefreshCw size={14} className="animate-spin mr-2" /> : <ArrowRight size={14} className="mr-2" />}
@@ -2036,13 +2061,45 @@ export default function BranchTransferPage() {
                           <span className="text-sm text-slate-400">{req.purchase_date}</span>
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
-                          {(req.items || []).slice(0, 4).map((item, i) => (
-                            <span key={i} className="text-sm bg-blue-50 border border-blue-100 rounded-lg px-3 py-1.5 text-slate-600">
-                              {item.product_name} <span className="text-slate-400 font-mono">x{item.quantity}</span>
-                            </span>
-                          ))}
+                          {(req.items || []).slice(0, 4).map((item, i) => {
+                            const hasAppr = item.approved_qty !== null && item.approved_qty !== undefined && item.approved_qty !== '';
+                            const a = parseFloat(item.approved_qty || 0);
+                            const r = parseFloat(item.quantity || 0);
+                            const apprColor = !hasAppr ? '' : a === 0 ? 'text-rose-600'
+                              : a < r ? 'text-yellow-700' : a > r ? 'text-amber-700' : 'text-emerald-700';
+                            return (
+                              <span key={i} className="text-sm bg-blue-50 border border-blue-100 rounded-lg px-3 py-1.5 text-slate-600">
+                                {item.product_name} <span className="text-slate-400 font-mono">x{item.quantity}</span>
+                                {hasAppr && (
+                                  <span className={`ml-1 font-mono text-xs ${apprColor}`} data-testid={`outgoing-line-approved-${i}`}>
+                                    · approved {fmtQty(a)}
+                                  </span>
+                                )}
+                              </span>
+                            );
+                          })}
                           {req.items?.length > 4 && <span className="text-sm text-slate-400 self-center">+{req.items.length - 4} more</span>}
                         </div>
+                        {req.approval_status && req.approval_status !== 'pending' && (
+                          <div className="mt-2 flex items-center gap-2 text-xs">
+                            <Badge className={`text-xs px-2.5 py-0.5 ${
+                              req.approval_status === 'approved' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : req.approval_status === 'partial' ? 'bg-yellow-50 text-yellow-700 border border-yellow-200'
+                              : req.approval_status === 'excess' ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                              : req.approval_status === 'declined' ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                              : 'bg-slate-50 text-slate-600'
+                            }`}
+                            data-testid={`approval-status-outgoing-${req.id}`}>
+                              Approved: {req.approval_status}
+                            </Badge>
+                            {req.approved_by_name && (
+                              <span className="text-slate-500">by {req.approved_by_name}</span>
+                            )}
+                            {req.approval_note && (
+                              <span className="text-slate-500 italic">— "{req.approval_note}"</span>
+                            )}
+                          </div>
+                        )}
                         {req.notes && <p className="text-sm text-slate-500 mt-2 italic">&quot;{req.notes}&quot;</p>}
                         <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
                           <span className="text-xs text-slate-400">by {req.created_by_name} · {fmtDate(req.created_at)}</span>
@@ -3332,6 +3389,20 @@ export default function BranchTransferPage() {
             setViewOrder(prev => ({ ...prev, verified: true, verified_by_name: result.verified_by, verification_status: result.status }));
           }
         }}
+      />
+
+      {/* Phase 1 — Stock Request Confirmation Layer modal. */}
+      <ConfirmQuantitiesDialog
+        open={confirmDialogOpen}
+        onOpenChange={setConfirmDialogOpen}
+        request={confirmTargetRequest}
+        requestingBranchName={
+          (branches.find(b => b.id === confirmTargetRequest?.branch_id) || {}).name || ''
+        }
+        supplyBranchName={
+          (branches.find(b => b.id === confirmTargetRequest?.supply_branch_id) || {}).name || ''
+        }
+        onConfirmed={() => { setConfirmDialogOpen(false); loadRequests(); }}
       />
 
       {/* Smart Capital Pricing Dialog for Branch Transfers */}
