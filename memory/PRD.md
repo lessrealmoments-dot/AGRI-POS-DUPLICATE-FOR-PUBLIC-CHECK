@@ -1,6 +1,44 @@
 # AgriBooks PRD
 
 
+## Stock-Request QR — Mint-on-Miss for Legacy POs (Feb 13 2026) ✅
+
+### Status: COMPLETE — frontend-only patch; **131/131 BR pass / 397 rows**; production-data-safe.
+
+### Why
+Some pre-Phase-2 branch-request POs (user-reported example: `PO-SB-001005`) lack a `doc_codes` row because they were created before auto-doc-code generation was wired into `create_purchase_order` for `po_type="branch_request"`. The View-QR dialog used to read-only-lookup via `GET /doc/by-ref/...` and dead-end on these POs with "No QR code is available for this request yet." — making the mobile Confirm Quantities flow unreachable for affected POs. The print path on the same page already minted on demand via `POST /doc/generate-code`; the QR dialog did not.
+
+### What was delivered
+1. **Frontend patch only** — `components/RequestQRDialog.jsx`:
+   - `useEffect` flow now follows a **lookup-first, mint-on-miss** pattern:
+     - Try `GET /api/doc/by-ref/purchase_order/{po_id}` first (fast path for current POs).
+     - If empty, fall back to `POST /api/doc/generate-code` (idempotent; same call the print path already uses).
+   - Doc header comment updated to describe the new behaviour.
+   - No backend route added/changed — the `generate-code` endpoint is pre-existing and idempotent.
+2. **NEW BR test** `backend/tests/business_regression/test_br_sr_qr_mint_on_miss.py` — 3 cases / 3 rows:
+   - Legacy PO (doc_code stripped) becomes scannable after `generate-code`; `view_document_open` lists `confirm_stock_request` action.
+   - `generate-code` returns the same code on a second call (idempotency lock).
+   - Linked-BTO lockout still applies after mint (action omitted when an active BTO exists).
+
+### Verification
+- **Test file**: 3/3 pass.
+- **Full BR**: **131/131 pass / 397 rows / 0 fail** (was 128/394 → +3 tests / +3 rows).
+- `yarn build` clean (28.26s).
+- ESLint clean.
+
+### Files changed (this fork)
+- MOD `frontend/src/components/RequestQRDialog.jsx` (mint-on-miss fallback)
+- NEW `backend/tests/business_regression/test_br_sr_qr_mint_on_miss.py`
+
+### Production deployment notes
+- No DB migration required. No backfill required. No backend restart required.
+- After the standard frontend redeploy, ANY legacy branch-request PO without a `doc_code` will mint one the first time someone clicks **View QR** on its card. The user can then scan from phone and `confirm_stock_request` will be available on `/doc/{code}` exactly the same as for current POs.
+- Linked-BTO and approval-status lockouts continue to apply — minting a code does NOT bypass any state gate. A request that already has a linked BTO will still show the QR (for printing reference) but the mobile viewer will omit the confirm action.
+
+### Invariants preserved
+- No backend behaviour changed. `generate-code` was already idempotent and tenant-scoped via `get_current_user`.
+- The `view_document_open(code)` eligibility logic (status in `{requested, draft}` AND no linked BTO) is unchanged — the patch only makes sure a scannable code EXISTS; eligibility is decided downstream.
+
 ## Phase 3.1 — `update_transfer` organization_id Hardening (Feb 13 2026) ✅
 
 ### Status: COMPLETE — defensive tripwire + 6 BR regression tests; **128/128 BR pass / 394 rows**; zero footprint.

@@ -1,0 +1,1410 @@
+{
+  "generated_at": "2026-05-13T08:05:18.409377+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 46,
+  "pass_count": 46,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br_bt.1_create_request_does_not_move_stock",
+      "step": "po_row_persisted_as_requested",
+      "expected": {
+        "po_created": true,
+        "po_type": "branch_request",
+        "status": "requested",
+        "supply_branch_id": "p2b-br-d6b9ea6d"
+      },
+      "actual": {
+        "po_created": true,
+        "po_type": "branch_request",
+        "status": "requested",
+        "supply_branch_id": "p2b-br-d6b9ea6d"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "request_po_id": "97fa7ca2-9183-420e-8dc7-67ee182bb314",
+        "request_po_number": "PO-BB-001000",
+        "product_id": "prd-5c4ceea8",
+        "source_stock_before": 50.0,
+        "source_stock_after": 50.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0
+      },
+      "recorded_at": "2026-05-13T08:05:18.221334+00:00"
+    },
+    {
+      "scenario": "br_bt.1_create_request_does_not_move_stock",
+      "step": "source_supply_branch_stock_unchanged",
+      "expected": {
+        "stock": 50.0
+      },
+      "actual": {
+        "stock": 50.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "request_po_id": "97fa7ca2-9183-420e-8dc7-67ee182bb314",
+        "request_po_number": "PO-BB-001000",
+        "product_id": "prd-5c4ceea8",
+        "source_stock_before": 50.0,
+        "source_stock_after": 50.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0
+      },
+      "recorded_at": "2026-05-13T08:05:18.221349+00:00"
+    },
+    {
+      "scenario": "br_bt.1_create_request_does_not_move_stock",
+      "step": "destination_requesting_branch_stock_unchanged",
+      "expected": {
+        "stock": 0.0
+      },
+      "actual": {
+        "stock": 0.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "request_po_id": "97fa7ca2-9183-420e-8dc7-67ee182bb314",
+        "request_po_number": "PO-BB-001000",
+        "product_id": "prd-5c4ceea8",
+        "source_stock_before": 50.0,
+        "source_stock_after": 50.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0
+      },
+      "recorded_at": "2026-05-13T08:05:18.221351+00:00"
+    },
+    {
+      "scenario": "br_bt.2_generate_transfer_does_not_move_stock",
+      "step": "po_status_remains_requested_until_bto_created",
+      "expected": {
+        "status": "requested"
+      },
+      "actual": {
+        "status": "requested"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "request_po_id": "37785dd8-a96e-49be-b8f7-4f71ced715e5",
+        "request_po_number": "PO-BB-001001",
+        "product_id": "prd-5cdcc5ca",
+        "source_stock_before": 40.0,
+        "source_stock_after": 40.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "po_status_after_generate": "requested",
+        "prefill_items_count": 1
+      },
+      "recorded_at": "2026-05-13T08:05:18.236059+00:00"
+    },
+    {
+      "scenario": "br_bt.2_generate_transfer_does_not_move_stock",
+      "step": "prefill_contains_requested_and_available",
+      "expected": {
+        "items": 1,
+        "has_requested_qty": true,
+        "has_available_stock": true,
+        "has_send_qty": true
+      },
+      "actual": {
+        "items": 1,
+        "has_requested_qty": true,
+        "has_available_stock": true,
+        "has_send_qty": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "request_po_id": "37785dd8-a96e-49be-b8f7-4f71ced715e5",
+        "request_po_number": "PO-BB-001001",
+        "product_id": "prd-5cdcc5ca",
+        "source_stock_before": 40.0,
+        "source_stock_after": 40.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "po_status_after_generate": "requested",
+        "prefill_items_count": 1
+      },
+      "recorded_at": "2026-05-13T08:05:18.236072+00:00"
+    },
+    {
+      "scenario": "br_bt.2_generate_transfer_does_not_move_stock",
+      "step": "source_supply_stock_unchanged_through_generate",
+      "expected": {
+        "stock": 40.0
+      },
+      "actual": {
+        "stock": 40.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "request_po_id": "37785dd8-a96e-49be-b8f7-4f71ced715e5",
+        "request_po_number": "PO-BB-001001",
+        "product_id": "prd-5cdcc5ca",
+        "source_stock_before": 40.0,
+        "source_stock_after": 40.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "po_status_after_generate": "requested",
+        "prefill_items_count": 1
+      },
+      "recorded_at": "2026-05-13T08:05:18.236075+00:00"
+    },
+    {
+      "scenario": "br_bt.2_generate_transfer_does_not_move_stock",
+      "step": "destination_stock_unchanged_through_generate",
+      "expected": {
+        "stock": 0.0
+      },
+      "actual": {
+        "stock": 0.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "request_po_id": "37785dd8-a96e-49be-b8f7-4f71ced715e5",
+        "request_po_number": "PO-BB-001001",
+        "product_id": "prd-5cdcc5ca",
+        "source_stock_before": 40.0,
+        "source_stock_after": 40.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "po_status_after_generate": "requested",
+        "prefill_items_count": 1
+      },
+      "recorded_at": "2026-05-13T08:05:18.236077+00:00"
+    },
+    {
+      "scenario": "br_bt.2_generate_transfer_does_not_move_stock",
+      "step": "generate_does_not_create_bto",
+      "expected": {
+        "bto_count": 0
+      },
+      "actual": {
+        "bto_count": 0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "request_po_id": "37785dd8-a96e-49be-b8f7-4f71ced715e5",
+        "request_po_number": "PO-BB-001001",
+        "product_id": "prd-5cdcc5ca",
+        "source_stock_before": 40.0,
+        "source_stock_after": 40.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "po_status_after_generate": "requested",
+        "prefill_items_count": 1
+      },
+      "recorded_at": "2026-05-13T08:05:18.236080+00:00"
+    },
+    {
+      "scenario": "br_bt.3_bto_draft_create_does_not_move_stock",
+      "step": "bto_persisted_as_draft",
+      "expected": {
+        "status": "draft"
+      },
+      "actual": {
+        "status": "draft"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "6e1e23fa-3fc8-40f9-98c7-f51624304aa2",
+        "order_number": "BTO-20260513-0001",
+        "product_id": "prd-558d1144",
+        "source_stock_before": 40.0,
+        "source_stock_after": 40.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "status_after": "draft",
+        "movement_count": 0
+      },
+      "recorded_at": "2026-05-13T08:05:18.247557+00:00"
+    },
+    {
+      "scenario": "br_bt.3_bto_draft_create_does_not_move_stock",
+      "step": "source_stock_unchanged_after_draft",
+      "expected": {
+        "stock": 40.0
+      },
+      "actual": {
+        "stock": 40.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "6e1e23fa-3fc8-40f9-98c7-f51624304aa2",
+        "order_number": "BTO-20260513-0001",
+        "product_id": "prd-558d1144",
+        "source_stock_before": 40.0,
+        "source_stock_after": 40.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "status_after": "draft",
+        "movement_count": 0
+      },
+      "recorded_at": "2026-05-13T08:05:18.247563+00:00"
+    },
+    {
+      "scenario": "br_bt.3_bto_draft_create_does_not_move_stock",
+      "step": "destination_stock_unchanged_after_draft",
+      "expected": {
+        "stock": 0.0
+      },
+      "actual": {
+        "stock": 0.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "6e1e23fa-3fc8-40f9-98c7-f51624304aa2",
+        "order_number": "BTO-20260513-0001",
+        "product_id": "prd-558d1144",
+        "source_stock_before": 40.0,
+        "source_stock_after": 40.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "status_after": "draft",
+        "movement_count": 0
+      },
+      "recorded_at": "2026-05-13T08:05:18.247565+00:00"
+    },
+    {
+      "scenario": "br_bt.3_bto_draft_create_does_not_move_stock",
+      "step": "no_movement_rows_logged_on_draft",
+      "expected": {
+        "movement_count": 0
+      },
+      "actual": {
+        "movement_count": 0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "6e1e23fa-3fc8-40f9-98c7-f51624304aa2",
+        "order_number": "BTO-20260513-0001",
+        "product_id": "prd-558d1144",
+        "source_stock_before": 40.0,
+        "source_stock_after": 40.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "status_after": "draft",
+        "movement_count": 0
+      },
+      "recorded_at": "2026-05-13T08:05:18.247567+00:00"
+    },
+    {
+      "scenario": "br_bt.4_send_does_not_move_stock",
+      "step": "status_transitions_draft_to_sent",
+      "expected": {
+        "status_before": "draft",
+        "status_after": "sent"
+      },
+      "actual": {
+        "status_before": "draft",
+        "status_after": "sent"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "08c25ff9-abe9-49a2-b359-71340f654419",
+        "order_number": "BTO-20260513-0002",
+        "product_id": "prd-15be850a",
+        "source_stock_before": 40.0,
+        "source_stock_after": 40.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "status_before": "draft",
+        "status_after": "sent",
+        "movement_count": 0
+      },
+      "recorded_at": "2026-05-13T08:05:18.261805+00:00"
+    },
+    {
+      "scenario": "br_bt.4_send_does_not_move_stock",
+      "step": "source_stock_unchanged_on_send",
+      "expected": {
+        "stock": 40.0
+      },
+      "actual": {
+        "stock": 40.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "08c25ff9-abe9-49a2-b359-71340f654419",
+        "order_number": "BTO-20260513-0002",
+        "product_id": "prd-15be850a",
+        "source_stock_before": 40.0,
+        "source_stock_after": 40.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "status_before": "draft",
+        "status_after": "sent",
+        "movement_count": 0
+      },
+      "recorded_at": "2026-05-13T08:05:18.261814+00:00"
+    },
+    {
+      "scenario": "br_bt.4_send_does_not_move_stock",
+      "step": "destination_stock_unchanged_on_send",
+      "expected": {
+        "stock": 0.0
+      },
+      "actual": {
+        "stock": 0.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "08c25ff9-abe9-49a2-b359-71340f654419",
+        "order_number": "BTO-20260513-0002",
+        "product_id": "prd-15be850a",
+        "source_stock_before": 40.0,
+        "source_stock_after": 40.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "status_before": "draft",
+        "status_after": "sent",
+        "movement_count": 0
+      },
+      "recorded_at": "2026-05-13T08:05:18.261816+00:00"
+    },
+    {
+      "scenario": "br_bt.4_send_does_not_move_stock",
+      "step": "no_movement_rows_logged_on_send",
+      "expected": {
+        "movement_count": 0
+      },
+      "actual": {
+        "movement_count": 0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "08c25ff9-abe9-49a2-b359-71340f654419",
+        "order_number": "BTO-20260513-0002",
+        "product_id": "prd-15be850a",
+        "source_stock_before": 40.0,
+        "source_stock_after": 40.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "status_before": "draft",
+        "status_after": "sent",
+        "movement_count": 0
+      },
+      "recorded_at": "2026-05-13T08:05:18.261819+00:00"
+    },
+    {
+      "scenario": "br_bt.5_exact_receive_moves_stock_once",
+      "step": "first_receive_decrements_source",
+      "expected": {
+        "stock": 22.0
+      },
+      "actual": {
+        "stock": 22.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "b565872a-c99b-44e5-8cba-f8c8274df0cd",
+        "order_number": "BTO-20260513-0003",
+        "product_id": "prd-fad3c969",
+        "transfer_qty": 8,
+        "source_stock_before": 30.0,
+        "source_stock_after": 22.0,
+        "source_stock_after_second_call": 22.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 8.0,
+        "destination_stock_after_second_call": 8.0,
+        "status_after_first": "received",
+        "movement_count_after_first": 2,
+        "movement_count_after_second": 2,
+        "second_call_status_code": 400,
+        "second_call_detail": "Transfer is not in a receivable state"
+      },
+      "recorded_at": "2026-05-13T08:05:18.282434+00:00"
+    },
+    {
+      "scenario": "br_bt.5_exact_receive_moves_stock_once",
+      "step": "first_receive_increments_destination",
+      "expected": {
+        "stock": 8.0
+      },
+      "actual": {
+        "stock": 8.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "b565872a-c99b-44e5-8cba-f8c8274df0cd",
+        "order_number": "BTO-20260513-0003",
+        "product_id": "prd-fad3c969",
+        "transfer_qty": 8,
+        "source_stock_before": 30.0,
+        "source_stock_after": 22.0,
+        "source_stock_after_second_call": 22.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 8.0,
+        "destination_stock_after_second_call": 8.0,
+        "status_after_first": "received",
+        "movement_count_after_first": 2,
+        "movement_count_after_second": 2,
+        "second_call_status_code": 400,
+        "second_call_detail": "Transfer is not in a receivable state"
+      },
+      "recorded_at": "2026-05-13T08:05:18.282443+00:00"
+    },
+    {
+      "scenario": "br_bt.5_exact_receive_moves_stock_once",
+      "step": "first_receive_logs_two_movements",
+      "expected": {
+        "movement_count": 2,
+        "out_qty": -8.0,
+        "in_qty": 8.0
+      },
+      "actual": {
+        "movement_count": 2,
+        "out_qty": -8.0,
+        "in_qty": 8.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "b565872a-c99b-44e5-8cba-f8c8274df0cd",
+        "order_number": "BTO-20260513-0003",
+        "product_id": "prd-fad3c969",
+        "transfer_qty": 8,
+        "source_stock_before": 30.0,
+        "source_stock_after": 22.0,
+        "source_stock_after_second_call": 22.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 8.0,
+        "destination_stock_after_second_call": 8.0,
+        "status_after_first": "received",
+        "movement_count_after_first": 2,
+        "movement_count_after_second": 2,
+        "second_call_status_code": 400,
+        "second_call_detail": "Transfer is not in a receivable state"
+      },
+      "recorded_at": "2026-05-13T08:05:18.282452+00:00"
+    },
+    {
+      "scenario": "br_bt.5_exact_receive_moves_stock_once",
+      "step": "first_receive_status_received",
+      "expected": {
+        "status": "received"
+      },
+      "actual": {
+        "status": "received"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "b565872a-c99b-44e5-8cba-f8c8274df0cd",
+        "order_number": "BTO-20260513-0003",
+        "product_id": "prd-fad3c969",
+        "transfer_qty": 8,
+        "source_stock_before": 30.0,
+        "source_stock_after": 22.0,
+        "source_stock_after_second_call": 22.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 8.0,
+        "destination_stock_after_second_call": 8.0,
+        "status_after_first": "received",
+        "movement_count_after_first": 2,
+        "movement_count_after_second": 2,
+        "second_call_status_code": 400,
+        "second_call_detail": "Transfer is not in a receivable state"
+      },
+      "recorded_at": "2026-05-13T08:05:18.282454+00:00"
+    },
+    {
+      "scenario": "br_bt.5_exact_receive_moves_stock_once",
+      "step": "second_receive_rejected_no_stock_move",
+      "expected": {
+        "rejected": true,
+        "movement_count_after": 2,
+        "source_stock_after": 22.0,
+        "destination_stock_after": 8.0
+      },
+      "actual": {
+        "rejected": true,
+        "movement_count_after": 2,
+        "source_stock_after": 22.0,
+        "destination_stock_after": 8.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "b565872a-c99b-44e5-8cba-f8c8274df0cd",
+        "order_number": "BTO-20260513-0003",
+        "product_id": "prd-fad3c969",
+        "transfer_qty": 8,
+        "source_stock_before": 30.0,
+        "source_stock_after": 22.0,
+        "source_stock_after_second_call": 22.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 8.0,
+        "destination_stock_after_second_call": 8.0,
+        "status_after_first": "received",
+        "movement_count_after_first": 2,
+        "movement_count_after_second": 2,
+        "second_call_status_code": 400,
+        "second_call_detail": "Transfer is not in a receivable state"
+      },
+      "recorded_at": "2026-05-13T08:05:18.282457+00:00"
+    },
+    {
+      "scenario": "br_bt.6_variance_receive_does_not_move_stock",
+      "step": "status_flips_to_received_pending",
+      "expected": {
+        "status": "received_pending"
+      },
+      "actual": {
+        "status": "received_pending"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "8dc37c91-b34f-4c61-838b-d08e75e8ae9d",
+        "order_number": "BTO-20260513-0004",
+        "product_id": "prd-2825d281",
+        "sent_qty": 10,
+        "received_qty": 8,
+        "variance": 2,
+        "source_stock_before": 30.0,
+        "source_stock_after": 30.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "status_after": "received_pending",
+        "movement_count": 0,
+        "shortages_recorded": 1,
+        "excesses_recorded": 0
+      },
+      "recorded_at": "2026-05-13T08:05:18.297614+00:00"
+    },
+    {
+      "scenario": "br_bt.6_variance_receive_does_not_move_stock",
+      "step": "source_stock_unchanged_on_variance",
+      "expected": {
+        "stock": 30.0
+      },
+      "actual": {
+        "stock": 30.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "8dc37c91-b34f-4c61-838b-d08e75e8ae9d",
+        "order_number": "BTO-20260513-0004",
+        "product_id": "prd-2825d281",
+        "sent_qty": 10,
+        "received_qty": 8,
+        "variance": 2,
+        "source_stock_before": 30.0,
+        "source_stock_after": 30.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "status_after": "received_pending",
+        "movement_count": 0,
+        "shortages_recorded": 1,
+        "excesses_recorded": 0
+      },
+      "recorded_at": "2026-05-13T08:05:18.297618+00:00"
+    },
+    {
+      "scenario": "br_bt.6_variance_receive_does_not_move_stock",
+      "step": "destination_stock_unchanged_on_variance",
+      "expected": {
+        "stock": 0.0
+      },
+      "actual": {
+        "stock": 0.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "8dc37c91-b34f-4c61-838b-d08e75e8ae9d",
+        "order_number": "BTO-20260513-0004",
+        "product_id": "prd-2825d281",
+        "sent_qty": 10,
+        "received_qty": 8,
+        "variance": 2,
+        "source_stock_before": 30.0,
+        "source_stock_after": 30.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "status_after": "received_pending",
+        "movement_count": 0,
+        "shortages_recorded": 1,
+        "excesses_recorded": 0
+      },
+      "recorded_at": "2026-05-13T08:05:18.297621+00:00"
+    },
+    {
+      "scenario": "br_bt.6_variance_receive_does_not_move_stock",
+      "step": "variance_data_persisted",
+      "expected": {
+        "pending_items_count": 1,
+        "shortages_count": 1,
+        "excesses_count": 0,
+        "has_shortage": true
+      },
+      "actual": {
+        "pending_items_count": 1,
+        "shortages_count": 1,
+        "excesses_count": 0,
+        "has_shortage": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "8dc37c91-b34f-4c61-838b-d08e75e8ae9d",
+        "order_number": "BTO-20260513-0004",
+        "product_id": "prd-2825d281",
+        "sent_qty": 10,
+        "received_qty": 8,
+        "variance": 2,
+        "source_stock_before": 30.0,
+        "source_stock_after": 30.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "status_after": "received_pending",
+        "movement_count": 0,
+        "shortages_recorded": 1,
+        "excesses_recorded": 0
+      },
+      "recorded_at": "2026-05-13T08:05:18.297624+00:00"
+    },
+    {
+      "scenario": "br_bt.6_variance_receive_does_not_move_stock",
+      "step": "no_movement_rows_logged_on_variance",
+      "expected": {
+        "movement_count": 0
+      },
+      "actual": {
+        "movement_count": 0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "8dc37c91-b34f-4c61-838b-d08e75e8ae9d",
+        "order_number": "BTO-20260513-0004",
+        "product_id": "prd-2825d281",
+        "sent_qty": 10,
+        "received_qty": 8,
+        "variance": 2,
+        "source_stock_before": 30.0,
+        "source_stock_after": 30.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "status_after": "received_pending",
+        "movement_count": 0,
+        "shortages_recorded": 1,
+        "excesses_recorded": 0
+      },
+      "recorded_at": "2026-05-13T08:05:18.297630+00:00"
+    },
+    {
+      "scenario": "br_bt.7_accept_receipt_moves_stock_once",
+      "step": "source_decremented_by_received_qty",
+      "expected": {
+        "stock": 23.0,
+        "delta": -7.0
+      },
+      "actual": {
+        "stock": 23.0,
+        "delta": -7.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "89cfa81f-5e8b-46e3-8ea5-8292da9e264e",
+        "order_number": "BTO-20260513-0005",
+        "product_id": "prd-4194f7e5",
+        "sent_qty": 10,
+        "received_qty": 7,
+        "source_stock_before": 30.0,
+        "source_stock_after": 23.0,
+        "source_stock_after_second_call": 23.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 7.0,
+        "destination_stock_after_second_call": 7.0,
+        "status_after": "received",
+        "movement_count_after_first": 2,
+        "movement_count_after_second": 2,
+        "second_call_status_code": 400,
+        "second_call_detail": "Transfer is not pending receipt confirmation"
+      },
+      "recorded_at": "2026-05-13T08:05:18.321863+00:00"
+    },
+    {
+      "scenario": "br_bt.7_accept_receipt_moves_stock_once",
+      "step": "destination_incremented_by_received_qty",
+      "expected": {
+        "stock": 7.0
+      },
+      "actual": {
+        "stock": 7.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "89cfa81f-5e8b-46e3-8ea5-8292da9e264e",
+        "order_number": "BTO-20260513-0005",
+        "product_id": "prd-4194f7e5",
+        "sent_qty": 10,
+        "received_qty": 7,
+        "source_stock_before": 30.0,
+        "source_stock_after": 23.0,
+        "source_stock_after_second_call": 23.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 7.0,
+        "destination_stock_after_second_call": 7.0,
+        "status_after": "received",
+        "movement_count_after_first": 2,
+        "movement_count_after_second": 2,
+        "second_call_status_code": 400,
+        "second_call_detail": "Transfer is not pending receipt confirmation"
+      },
+      "recorded_at": "2026-05-13T08:05:18.321868+00:00"
+    },
+    {
+      "scenario": "br_bt.7_accept_receipt_moves_stock_once",
+      "step": "status_received_with_shortage_flag",
+      "expected": {
+        "status": "received",
+        "has_shortage": true
+      },
+      "actual": {
+        "status": "received",
+        "has_shortage": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "89cfa81f-5e8b-46e3-8ea5-8292da9e264e",
+        "order_number": "BTO-20260513-0005",
+        "product_id": "prd-4194f7e5",
+        "sent_qty": 10,
+        "received_qty": 7,
+        "source_stock_before": 30.0,
+        "source_stock_after": 23.0,
+        "source_stock_after_second_call": 23.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 7.0,
+        "destination_stock_after_second_call": 7.0,
+        "status_after": "received",
+        "movement_count_after_first": 2,
+        "movement_count_after_second": 2,
+        "second_call_status_code": 400,
+        "second_call_detail": "Transfer is not pending receipt confirmation"
+      },
+      "recorded_at": "2026-05-13T08:05:18.321871+00:00"
+    },
+    {
+      "scenario": "br_bt.7_accept_receipt_moves_stock_once",
+      "step": "movements_logged_once",
+      "expected": {
+        "movement_count": 2
+      },
+      "actual": {
+        "movement_count": 2
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "89cfa81f-5e8b-46e3-8ea5-8292da9e264e",
+        "order_number": "BTO-20260513-0005",
+        "product_id": "prd-4194f7e5",
+        "sent_qty": 10,
+        "received_qty": 7,
+        "source_stock_before": 30.0,
+        "source_stock_after": 23.0,
+        "source_stock_after_second_call": 23.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 7.0,
+        "destination_stock_after_second_call": 7.0,
+        "status_after": "received",
+        "movement_count_after_first": 2,
+        "movement_count_after_second": 2,
+        "second_call_status_code": 400,
+        "second_call_detail": "Transfer is not pending receipt confirmation"
+      },
+      "recorded_at": "2026-05-13T08:05:18.321873+00:00"
+    },
+    {
+      "scenario": "br_bt.7_accept_receipt_moves_stock_once",
+      "step": "second_accept_rejected_no_double_movement",
+      "expected": {
+        "rejected": true,
+        "source_stock_after": 23.0,
+        "destination_stock_after": 7.0,
+        "movement_count_after": 2
+      },
+      "actual": {
+        "rejected": true,
+        "source_stock_after": 23.0,
+        "destination_stock_after": 7.0,
+        "movement_count_after": 2
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "89cfa81f-5e8b-46e3-8ea5-8292da9e264e",
+        "order_number": "BTO-20260513-0005",
+        "product_id": "prd-4194f7e5",
+        "sent_qty": 10,
+        "received_qty": 7,
+        "source_stock_before": 30.0,
+        "source_stock_after": 23.0,
+        "source_stock_after_second_call": 23.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 7.0,
+        "destination_stock_after_second_call": 7.0,
+        "status_after": "received",
+        "movement_count_after_first": 2,
+        "movement_count_after_second": 2,
+        "second_call_status_code": 400,
+        "second_call_detail": "Transfer is not pending receipt confirmation"
+      },
+      "recorded_at": "2026-05-13T08:05:18.321876+00:00"
+    },
+    {
+      "scenario": "br_bt.8_dispute_does_not_move_stock",
+      "step": "status_flips_to_disputed",
+      "expected": {
+        "status": "disputed"
+      },
+      "actual": {
+        "status": "disputed"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "d14fe814-ee34-4d99-8fe8-949fb91d5b2e",
+        "order_number": "BTO-20260513-0006",
+        "product_id": "prd-ab374d02",
+        "sent_qty": 10,
+        "received_qty": 6,
+        "source_stock_before": 30.0,
+        "source_stock_after": 30.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "status_after": "disputed",
+        "movement_count": 0,
+        "dispute_note": "br_bt8 source disputes the short count"
+      },
+      "recorded_at": "2026-05-13T08:05:18.338983+00:00"
+    },
+    {
+      "scenario": "br_bt.8_dispute_does_not_move_stock",
+      "step": "source_stock_unchanged_after_dispute",
+      "expected": {
+        "stock": 30.0
+      },
+      "actual": {
+        "stock": 30.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "d14fe814-ee34-4d99-8fe8-949fb91d5b2e",
+        "order_number": "BTO-20260513-0006",
+        "product_id": "prd-ab374d02",
+        "sent_qty": 10,
+        "received_qty": 6,
+        "source_stock_before": 30.0,
+        "source_stock_after": 30.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "status_after": "disputed",
+        "movement_count": 0,
+        "dispute_note": "br_bt8 source disputes the short count"
+      },
+      "recorded_at": "2026-05-13T08:05:18.338988+00:00"
+    },
+    {
+      "scenario": "br_bt.8_dispute_does_not_move_stock",
+      "step": "destination_stock_unchanged_after_dispute",
+      "expected": {
+        "stock": 0.0
+      },
+      "actual": {
+        "stock": 0.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "d14fe814-ee34-4d99-8fe8-949fb91d5b2e",
+        "order_number": "BTO-20260513-0006",
+        "product_id": "prd-ab374d02",
+        "sent_qty": 10,
+        "received_qty": 6,
+        "source_stock_before": 30.0,
+        "source_stock_after": 30.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "status_after": "disputed",
+        "movement_count": 0,
+        "dispute_note": "br_bt8 source disputes the short count"
+      },
+      "recorded_at": "2026-05-13T08:05:18.338991+00:00"
+    },
+    {
+      "scenario": "br_bt.8_dispute_does_not_move_stock",
+      "step": "no_movement_rows_logged_on_dispute",
+      "expected": {
+        "movement_count": 0
+      },
+      "actual": {
+        "movement_count": 0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "d14fe814-ee34-4d99-8fe8-949fb91d5b2e",
+        "order_number": "BTO-20260513-0006",
+        "product_id": "prd-ab374d02",
+        "sent_qty": 10,
+        "received_qty": 6,
+        "source_stock_before": 30.0,
+        "source_stock_after": 30.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "status_after": "disputed",
+        "movement_count": 0,
+        "dispute_note": "br_bt8 source disputes the short count"
+      },
+      "recorded_at": "2026-05-13T08:05:18.338993+00:00"
+    },
+    {
+      "scenario": "br_bt.8_dispute_does_not_move_stock",
+      "step": "dispute_note_persisted",
+      "expected": {
+        "has_note": true
+      },
+      "actual": {
+        "has_note": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "d14fe814-ee34-4d99-8fe8-949fb91d5b2e",
+        "order_number": "BTO-20260513-0006",
+        "product_id": "prd-ab374d02",
+        "sent_qty": 10,
+        "received_qty": 6,
+        "source_stock_before": 30.0,
+        "source_stock_after": 30.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "status_after": "disputed",
+        "movement_count": 0,
+        "dispute_note": "br_bt8 source disputes the short count"
+      },
+      "recorded_at": "2026-05-13T08:05:18.338996+00:00"
+    },
+    {
+      "scenario": "br_bt.9_insufficient_source_stock_atomic",
+      "step": "receive_rejected_400",
+      "expected": {
+        "status_code": 400,
+        "rejected": true
+      },
+      "actual": {
+        "status_code": 400,
+        "rejected": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "093da9b1-69a2-4aa7-bcfd-8868b920adee",
+        "order_number": "BTO-20260513-0007",
+        "p_ok_product_id": "prd-3e94bf1d",
+        "p_short_product_id": "prd-4d69c5d1",
+        "p_ok_source_before": 20.0,
+        "p_ok_source_after": 20.0,
+        "p_short_source_before": 2.0,
+        "p_short_source_after": 2.0,
+        "p_ok_destination_before": 0.0,
+        "p_ok_destination_after": 0.0,
+        "p_short_destination_before": 0.0,
+        "p_short_destination_after": 0.0,
+        "error_status": 400,
+        "error_detail": "Insufficient stock for 'br_bt9 Short' in source branch: have 2, need 8. No inventory changed.",
+        "status_after": "sent",
+        "movement_count": 0
+      },
+      "recorded_at": "2026-05-13T08:05:18.354361+00:00"
+    },
+    {
+      "scenario": "br_bt.9_insufficient_source_stock_atomic",
+      "step": "ok_item_source_not_partially_decremented",
+      "expected": {
+        "stock": 20.0
+      },
+      "actual": {
+        "stock": 20.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "093da9b1-69a2-4aa7-bcfd-8868b920adee",
+        "order_number": "BTO-20260513-0007",
+        "p_ok_product_id": "prd-3e94bf1d",
+        "p_short_product_id": "prd-4d69c5d1",
+        "p_ok_source_before": 20.0,
+        "p_ok_source_after": 20.0,
+        "p_short_source_before": 2.0,
+        "p_short_source_after": 2.0,
+        "p_ok_destination_before": 0.0,
+        "p_ok_destination_after": 0.0,
+        "p_short_destination_before": 0.0,
+        "p_short_destination_after": 0.0,
+        "error_status": 400,
+        "error_detail": "Insufficient stock for 'br_bt9 Short' in source branch: have 2, need 8. No inventory changed.",
+        "status_after": "sent",
+        "movement_count": 0
+      },
+      "recorded_at": "2026-05-13T08:05:18.354369+00:00"
+    },
+    {
+      "scenario": "br_bt.9_insufficient_source_stock_atomic",
+      "step": "ok_item_destination_not_partially_incremented",
+      "expected": {
+        "stock": 0.0
+      },
+      "actual": {
+        "stock": 0.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "093da9b1-69a2-4aa7-bcfd-8868b920adee",
+        "order_number": "BTO-20260513-0007",
+        "p_ok_product_id": "prd-3e94bf1d",
+        "p_short_product_id": "prd-4d69c5d1",
+        "p_ok_source_before": 20.0,
+        "p_ok_source_after": 20.0,
+        "p_short_source_before": 2.0,
+        "p_short_source_after": 2.0,
+        "p_ok_destination_before": 0.0,
+        "p_ok_destination_after": 0.0,
+        "p_short_destination_before": 0.0,
+        "p_short_destination_after": 0.0,
+        "error_status": 400,
+        "error_detail": "Insufficient stock for 'br_bt9 Short' in source branch: have 2, need 8. No inventory changed.",
+        "status_after": "sent",
+        "movement_count": 0
+      },
+      "recorded_at": "2026-05-13T08:05:18.354372+00:00"
+    },
+    {
+      "scenario": "br_bt.9_insufficient_source_stock_atomic",
+      "step": "short_item_source_unchanged",
+      "expected": {
+        "stock": 2.0
+      },
+      "actual": {
+        "stock": 2.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "093da9b1-69a2-4aa7-bcfd-8868b920adee",
+        "order_number": "BTO-20260513-0007",
+        "p_ok_product_id": "prd-3e94bf1d",
+        "p_short_product_id": "prd-4d69c5d1",
+        "p_ok_source_before": 20.0,
+        "p_ok_source_after": 20.0,
+        "p_short_source_before": 2.0,
+        "p_short_source_after": 2.0,
+        "p_ok_destination_before": 0.0,
+        "p_ok_destination_after": 0.0,
+        "p_short_destination_before": 0.0,
+        "p_short_destination_after": 0.0,
+        "error_status": 400,
+        "error_detail": "Insufficient stock for 'br_bt9 Short' in source branch: have 2, need 8. No inventory changed.",
+        "status_after": "sent",
+        "movement_count": 0
+      },
+      "recorded_at": "2026-05-13T08:05:18.354374+00:00"
+    },
+    {
+      "scenario": "br_bt.9_insufficient_source_stock_atomic",
+      "step": "short_item_destination_unchanged",
+      "expected": {
+        "stock": 0.0
+      },
+      "actual": {
+        "stock": 0.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "093da9b1-69a2-4aa7-bcfd-8868b920adee",
+        "order_number": "BTO-20260513-0007",
+        "p_ok_product_id": "prd-3e94bf1d",
+        "p_short_product_id": "prd-4d69c5d1",
+        "p_ok_source_before": 20.0,
+        "p_ok_source_after": 20.0,
+        "p_short_source_before": 2.0,
+        "p_short_source_after": 2.0,
+        "p_ok_destination_before": 0.0,
+        "p_ok_destination_after": 0.0,
+        "p_short_destination_before": 0.0,
+        "p_short_destination_after": 0.0,
+        "error_status": 400,
+        "error_detail": "Insufficient stock for 'br_bt9 Short' in source branch: have 2, need 8. No inventory changed.",
+        "status_after": "sent",
+        "movement_count": 0
+      },
+      "recorded_at": "2026-05-13T08:05:18.354376+00:00"
+    },
+    {
+      "scenario": "br_bt.9_insufficient_source_stock_atomic",
+      "step": "no_movement_rows_logged_on_rejection",
+      "expected": {
+        "movement_count": 0
+      },
+      "actual": {
+        "movement_count": 0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "093da9b1-69a2-4aa7-bcfd-8868b920adee",
+        "order_number": "BTO-20260513-0007",
+        "p_ok_product_id": "prd-3e94bf1d",
+        "p_short_product_id": "prd-4d69c5d1",
+        "p_ok_source_before": 20.0,
+        "p_ok_source_after": 20.0,
+        "p_short_source_before": 2.0,
+        "p_short_source_after": 2.0,
+        "p_ok_destination_before": 0.0,
+        "p_ok_destination_after": 0.0,
+        "p_short_destination_before": 0.0,
+        "p_short_destination_after": 0.0,
+        "error_status": 400,
+        "error_detail": "Insufficient stock for 'br_bt9 Short' in source branch: have 2, need 8. No inventory changed.",
+        "status_after": "sent",
+        "movement_count": 0
+      },
+      "recorded_at": "2026-05-13T08:05:18.354378+00:00"
+    },
+    {
+      "scenario": "br_bt.10_cancel_blocks_after_inventory_moved",
+      "step": "cancel_rejected_400",
+      "expected": {
+        "status_code": 400,
+        "rejected": true
+      },
+      "actual": {
+        "status_code": 400,
+        "rejected": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "74cab183-4411-45c0-993c-7c7cdf40d915",
+        "order_number": "BTO-20260513-0008",
+        "product_id": "prd-c81b1866",
+        "transfer_qty": 5,
+        "source_stock_before": 20.0,
+        "source_stock_after_receive": 15.0,
+        "source_stock_after_cancel_attempt": 15.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after_receive": 5.0,
+        "destination_stock_after_cancel_attempt": 5.0,
+        "status_after_cancel_attempt": "received",
+        "error_status": 400,
+        "error_detail": "Cannot cancel \u2014 inventory has already been partially or fully received. Use Accept/Dispute flow to resolve discrepancies."
+      },
+      "recorded_at": "2026-05-13T08:05:18.370967+00:00"
+    },
+    {
+      "scenario": "br_bt.10_cancel_blocks_after_inventory_moved",
+      "step": "bto_status_remains_received",
+      "expected": {
+        "status": "received"
+      },
+      "actual": {
+        "status": "received"
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "74cab183-4411-45c0-993c-7c7cdf40d915",
+        "order_number": "BTO-20260513-0008",
+        "product_id": "prd-c81b1866",
+        "transfer_qty": 5,
+        "source_stock_before": 20.0,
+        "source_stock_after_receive": 15.0,
+        "source_stock_after_cancel_attempt": 15.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after_receive": 5.0,
+        "destination_stock_after_cancel_attempt": 5.0,
+        "status_after_cancel_attempt": "received",
+        "error_status": 400,
+        "error_detail": "Cannot cancel \u2014 inventory has already been partially or fully received. Use Accept/Dispute flow to resolve discrepancies."
+      },
+      "recorded_at": "2026-05-13T08:05:18.370970+00:00"
+    },
+    {
+      "scenario": "br_bt.10_cancel_blocks_after_inventory_moved",
+      "step": "source_stock_not_rolled_back_by_blocked_cancel",
+      "expected": {
+        "stock": 15.0
+      },
+      "actual": {
+        "stock": 15.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "74cab183-4411-45c0-993c-7c7cdf40d915",
+        "order_number": "BTO-20260513-0008",
+        "product_id": "prd-c81b1866",
+        "transfer_qty": 5,
+        "source_stock_before": 20.0,
+        "source_stock_after_receive": 15.0,
+        "source_stock_after_cancel_attempt": 15.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after_receive": 5.0,
+        "destination_stock_after_cancel_attempt": 5.0,
+        "status_after_cancel_attempt": "received",
+        "error_status": 400,
+        "error_detail": "Cannot cancel \u2014 inventory has already been partially or fully received. Use Accept/Dispute flow to resolve discrepancies."
+      },
+      "recorded_at": "2026-05-13T08:05:18.370973+00:00"
+    },
+    {
+      "scenario": "br_bt.10_cancel_blocks_after_inventory_moved",
+      "step": "destination_stock_not_rolled_back_by_blocked_cancel",
+      "expected": {
+        "stock": 5.0
+      },
+      "actual": {
+        "stock": 5.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-157924e5",
+        "source_branch_id": "p2b-br-d6b9ea6d",
+        "destination_branch_id": "br-b2-br-940bc51a",
+        "transfer_id": "74cab183-4411-45c0-993c-7c7cdf40d915",
+        "order_number": "BTO-20260513-0008",
+        "product_id": "prd-c81b1866",
+        "transfer_qty": 5,
+        "source_stock_before": 20.0,
+        "source_stock_after_receive": 15.0,
+        "source_stock_after_cancel_attempt": 15.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after_receive": 5.0,
+        "destination_stock_after_cancel_attempt": 5.0,
+        "status_after_cancel_attempt": "received",
+        "error_status": 400,
+        "error_detail": "Cannot cancel \u2014 inventory has already been partially or fully received. Use Accept/Dispute flow to resolve discrepancies."
+      },
+      "recorded_at": "2026-05-13T08:05:18.370975+00:00"
+    }
+  ]
+}

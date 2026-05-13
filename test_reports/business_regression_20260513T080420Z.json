@@ -1,0 +1,64 @@
+{
+  "generated_at": "2026-05-13T08:04:20.070138+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 3,
+  "pass_count": 3,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br_sr_qr_mint.1_legacy_po_becomes_scannable",
+      "step": "confirm_action_available_after_mint",
+      "expected": {
+        "doc_type": "purchase_order",
+        "is_branch_request": true,
+        "confirm_action_listed": true
+      },
+      "actual": {
+        "doc_type": "purchase_order",
+        "is_branch_request": true,
+        "confirm_action_listed": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "a87d8034-1b45-4964-b6bb-e7b70fdb115f",
+        "code": "YDJPGAC2"
+      },
+      "recorded_at": "2026-05-13T08:04:20.005365+00:00"
+    },
+    {
+      "scenario": "br_sr_qr_mint.2_idempotent",
+      "step": "second_mint_returns_same_code",
+      "expected": {
+        "same_code": true
+      },
+      "actual": {
+        "same_code": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "72d7c781-2d43-4596-af1a-abf17c7c0f3a",
+        "first": "MUAYGSCT",
+        "second": "MUAYGSCT"
+      },
+      "recorded_at": "2026-05-13T08:04:20.015273+00:00"
+    },
+    {
+      "scenario": "br_sr_qr_mint.3_linked_bto_blocks",
+      "step": "confirm_action_omitted_when_linked_bto_exists",
+      "expected": {
+        "confirm_listed": false,
+        "has_linked_bto": true
+      },
+      "actual": {
+        "confirm_listed": false,
+        "has_linked_bto": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "1bee1dd5-ce88-43ef-bbf2-770d558fcd46",
+        "code": "6RQSZXB4"
+      },
+      "recorded_at": "2026-05-13T08:04:20.029129+00:00"
+    }
+  ]
+}

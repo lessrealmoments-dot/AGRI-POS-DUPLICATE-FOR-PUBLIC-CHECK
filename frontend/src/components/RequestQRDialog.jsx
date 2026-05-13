@@ -5,9 +5,11 @@
  * supply-branch staff can scan it from the PC and use the Phase 2
  * mobile Confirm Quantities panel on `/doc/{code}`.
  *
- * - No new doc_code minted (relies on `GET /api/doc/by-ref/.../{po_id}`,
- *   which returns the code created at PO insertion).
- * - No backend touched.
+ * - Lookup-first, mint-on-miss: tries `GET /api/doc/by-ref/.../{po_id}`
+ *   for the existing code (auto-generated at PO creation in Phase 2);
+ *   if that returns nothing (older POs that pre-date auto-doc-code
+ *   generation), falls back to the idempotent
+ *   `POST /api/doc/generate-code` so the PO becomes scannable.
  * - Read-only render: QR image + human URL + 8-char short code + copy.
  *
  * Props:
@@ -45,13 +47,31 @@ export default function RequestQRDialog({
     setLoading(true);
     setError('');
     setCode('');
+    // 1. Try the read-only lookup first — fast path for POs that already
+    //    have a code (auto-generated at PO creation in Phase 2).
+    // 2. If the lookup returns nothing, mint a code on the fly via the
+    //    idempotent `/doc/generate-code` endpoint. This covers older POs
+    //    that pre-date auto-doc-code generation and would otherwise be
+    //    stuck without a scannable QR.
     api.get(`/doc/by-ref/purchase_order/${request.id}`)
       .then((res) => {
-        if (cancelled) return;
-        if (!res.data?.code) {
-          setError('No QR code is available for this request yet.');
-        } else {
+        if (cancelled) return res;
+        if (res.data?.code) {
           setCode(res.data.code);
+          return null; // resolved
+        }
+        // No code yet — mint one. Same payload the print path uses.
+        return api.post('/doc/generate-code', {
+          doc_type: 'purchase_order',
+          doc_id: request.id,
+        });
+      })
+      .then((res) => {
+        if (cancelled || !res) return;
+        if (res.data?.code) {
+          setCode(res.data.code);
+        } else {
+          setError('No QR code is available for this request yet.');
         }
       })
       .catch((e) => {
