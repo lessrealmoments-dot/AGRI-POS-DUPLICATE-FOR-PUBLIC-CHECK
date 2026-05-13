@@ -71,6 +71,8 @@ TENANT_COLLECTIONS = {
     # Phase 3 — Branch Transfer variance + invoice integrity audit rows.
     'audit_log',
     'incident_tickets',
+    # Phase 3.2 — Historical Supplier PO (pre-system AP carry-forward).
+    'historical_supplier_pos',
 }
 
 

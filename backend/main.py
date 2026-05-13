@@ -68,6 +68,7 @@ from routes.close_reminder import start_scheduler_on_startup as _start_close_rem
 from routes.print_jobs import router as print_jobs_router
 from routes.balance_reconciliation import router as balance_reconciliation_router
 from routes.historical_credit import router as historical_credit_router
+from routes.historical_supplier_po import router as historical_supplier_po_router
 
 # =============================================================================
 # APP SETUP
@@ -253,6 +254,7 @@ api_router.include_router(balance_reconciliation_router)
 
 # Phase 3 — Historical Credit Encoding / Notebook AR (admin-only AR reconstruction)
 api_router.include_router(historical_credit_router)
+api_router.include_router(historical_supplier_po_router)
 
 # =============================================================================
 # WEBSOCKET ROUTES (must be on app directly with /api prefix)

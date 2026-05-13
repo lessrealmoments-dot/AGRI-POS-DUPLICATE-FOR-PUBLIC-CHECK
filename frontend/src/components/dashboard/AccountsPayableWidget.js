@@ -1,18 +1,22 @@
 import { useState, useEffect, useCallback } from 'react';
-import { api } from '../../contexts/AuthContext';
+import { api, useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { formatPHP } from '../../lib/utils';
 import ReviewDetailDialog from '../ReviewDetailDialog';
-import { FileText, AlertTriangle, Clock, ChevronRight, RefreshCw, CheckCircle2, Camera } from 'lucide-react';
+import HistoricalSupplierPODialog from '../HistoricalSupplierPODialog';
+import { FileText, AlertTriangle, Clock, ChevronRight, RefreshCw, CheckCircle2, Camera, Archive } from 'lucide-react';
 
 export default function AccountsPayableWidget({ branchId }) {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedPO, setSelectedPO] = useState(null);
+  const [historicalOpen, setHistoricalOpen] = useState(false);
+  const isAdmin = ['admin', 'owner', 'super_admin'].includes((user?.role || '').toLowerCase());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -49,28 +53,40 @@ export default function AccountsPayableWidget({ branchId }) {
     );
   };
 
-  const PORow = ({ po, variant }) => (
+  const PORow = ({ po, variant }) => {
+    const isHistorical = po.kind === 'historical';
+    return (
     <div className={`flex items-center justify-between text-xs rounded px-2.5 py-1.5 ${
       variant === 'overdue' ? 'bg-red-50' : 'bg-amber-50'
     }`}>
       <div className="flex-1 min-w-0">
         <button className="font-semibold font-mono text-blue-600 hover:underline cursor-pointer"
-          onClick={() => setSelectedPO(po.po_id)} data-testid={`ap-po-${po.po_id}`}>
+          onClick={() => isHistorical ? setHistoricalOpen(true) : setSelectedPO(po.po_id)}
+          data-testid={`ap-po-${po.po_id}`}>
           {po.po_number}
         </button>
+        {isHistorical && (
+          <Badge className="ml-1 text-[9px] bg-violet-100 text-violet-700 border-violet-200"
+            data-testid={`ap-po-historical-${po.po_id}`}>
+            pre-system
+          </Badge>
+        )}
         <p className="text-slate-500 text-[10px] truncate">{po.vendor}</p>
       </div>
       <div className="flex items-center gap-2 shrink-0">
-        <ReviewBadge status={po.receipt_review_status} />
+        {!isHistorical && <ReviewBadge status={po.receipt_review_status} />}
         <div className="text-right">
           <p className={`font-bold ${variant === 'overdue' ? 'text-red-700' : 'text-amber-700'}`}>{formatPHP(po.balance)}</p>
           <p className={`text-[10px] ${variant === 'overdue' ? 'text-red-500' : 'text-amber-500'}`}>
-            {variant === 'overdue' ? `${Math.abs(po.days_left)}d overdue` : po.days_left === 0 ? 'Due today' : `${po.days_left}d left`}
+            {isHistorical
+              ? 'carry-forward'
+              : variant === 'overdue' ? `${Math.abs(po.days_left)}d overdue` : po.days_left === 0 ? 'Due today' : `${po.days_left}d left`}
           </p>
         </div>
       </div>
     </div>
-  );
+    );
+  };
 
   return (
     <>
@@ -80,9 +96,19 @@ export default function AccountsPayableWidget({ branchId }) {
             <CardTitle className="text-sm font-semibold flex items-center gap-2" style={{ fontFamily: 'Manrope' }}>
               <FileText size={15} className="text-red-600" /> Accounts Payable
             </CardTitle>
-            <Button variant="ghost" size="sm" className="h-7 text-xs text-slate-500" onClick={() => navigate('/pay-supplier')}>
-              Pay <ChevronRight size={12} />
-            </Button>
+            <div className="flex items-center gap-1">
+              {isAdmin && (
+                <Button variant="ghost" size="sm" className="h-7 text-xs text-violet-700 hover:bg-violet-50"
+                  onClick={() => setHistoricalOpen(true)}
+                  data-testid="ap-add-historical-btn"
+                  title="Record a pre-system supplier PO">
+                  <Archive size={12} className="mr-1" /> Old POs
+                </Button>
+              )}
+              <Button variant="ghost" size="sm" className="h-7 text-xs text-slate-500" onClick={() => navigate('/pay-supplier')}>
+                Pay <ChevronRight size={12} />
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -155,6 +181,15 @@ export default function AccountsPayableWidget({ branchId }) {
         showPayAction={true}
         onReviewed={() => { setSelectedPO(null); load(); }}
       />
+
+      {isAdmin && (
+        <HistoricalSupplierPODialog
+          open={historicalOpen}
+          onOpenChange={setHistoricalOpen}
+          defaultBranchId={branchId && branchId !== 'all' ? branchId : ''}
+          onChange={load}
+        />
+      )}
     </>
   );
 }

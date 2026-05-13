@@ -1,0 +1,154 @@
+{
+  "generated_at": "2026-05-13T05:45:50.628648+00:00",
+  "pytest_exitstatus": 1,
+  "row_count": 7,
+  "pass_count": 4,
+  "fail_count": 3,
+  "rows": [
+    {
+      "scenario": "br_hs_po.1_manager_role_blocked",
+      "step": "403_for_manager_role",
+      "expected": {
+        "state": "err"
+      },
+      "actual": {
+        "state": "err"
+      },
+      "status": "PASS",
+      "evidence": {
+        "state": "err",
+        "result": [
+          403,
+          "Admin or owner role required."
+        ]
+      },
+      "recorded_at": "2026-05-13T05:45:50.449092+00:00"
+    },
+    {
+      "scenario": "br_hs_po.2_manager_pin_rejected_for_admin_caller",
+      "step": "403_when_manager_pin_used",
+      "expected": {
+        "state": "err"
+      },
+      "actual": {
+        "state": "err"
+      },
+      "status": "PASS",
+      "evidence": {
+        "state": "err",
+        "result": [
+          403,
+          {
+            "error": "approval_invalid",
+            "message": "Invalid PIN. This action requires the admin PIN or a TOTP code from an owner / admin / super-admin. Manager PINs are not accepted."
+          }
+        ]
+      },
+      "recorded_at": "2026-05-13T05:45:50.453576+00:00"
+    },
+    {
+      "scenario": "br_hs_po.3_admin_pin_creates_entry",
+      "step": "200_succeeded",
+      "expected": {
+        "state": "ok"
+      },
+      "actual": {
+        "state": "err"
+      },
+      "status": "FAIL",
+      "evidence": {
+        "state": "err",
+        "result": [
+          403,
+          {
+            "error": "approval_invalid",
+            "message": "Invalid PIN. This action requires the admin PIN or a TOTP code from an owner / admin / super-admin. Manager PINs are not accepted."
+          }
+        ]
+      },
+      "recorded_at": "2026-05-13T05:45:50.456718+00:00"
+    },
+    {
+      "scenario": "br_hs_po.3_admin_pin_creates_entry",
+      "step": "balance_equals_amount",
+      "expected": {
+        "balance": 12345.67
+      },
+      "actual": {
+        "balance": null
+      },
+      "status": "FAIL",
+      "evidence": {
+        "state": "err",
+        "result": [
+          403,
+          {
+            "error": "approval_invalid",
+            "message": "Invalid PIN. This action requires the admin PIN or a TOTP code from an owner / admin / super-admin. Manager PINs are not accepted."
+          }
+        ]
+      },
+      "recorded_at": "2026-05-13T05:45:50.456725+00:00"
+    },
+    {
+      "scenario": "br_hs_po.3_admin_pin_creates_entry",
+      "step": "status_outstanding",
+      "expected": {
+        "status": "outstanding"
+      },
+      "actual": {
+        "status": null
+      },
+      "status": "FAIL",
+      "evidence": {
+        "state": "err",
+        "result": [
+          403,
+          {
+            "error": "approval_invalid",
+            "message": "Invalid PIN. This action requires the admin PIN or a TOTP code from an owner / admin / super-admin. Manager PINs are not accepted."
+          }
+        ]
+      },
+      "recorded_at": "2026-05-13T05:45:50.456728+00:00"
+    },
+    {
+      "scenario": "br_hs_po.4_future_date_rejected",
+      "step": "400_for_future_date",
+      "expected": {
+        "state": "err"
+      },
+      "actual": {
+        "state": "err"
+      },
+      "status": "PASS",
+      "evidence": {
+        "state": "err",
+        "result": [
+          400,
+          "pre_system_date 2099-01-01 must be before today (2026-05-13). This flow is for OLD supplier debt only \u2014 use a regular Purchase Order for current purchases."
+        ]
+      },
+      "recorded_at": "2026-05-13T05:45:50.492935+00:00"
+    },
+    {
+      "scenario": "br_hs_po.5_invalid_amount_rejected",
+      "step": "400_for_zero_amount",
+      "expected": {
+        "state": "err"
+      },
+      "actual": {
+        "state": "err"
+      },
+      "status": "PASS",
+      "evidence": {
+        "state": "err",
+        "result": [
+          400,
+          "amount must be > 0"
+        ]
+      },
+      "recorded_at": "2026-05-13T05:45:50.493728+00:00"
+    }
+  ]
+}

@@ -270,6 +270,27 @@ PIN_POLICY_ACTIONS = [
      "defaults": ["totp"],
      "allowed_approver_roles": ["owner", "admin", "super_admin"],
      "allowed_approver_user_ids": []},
+    # Phase 3.2 — Historical Supplier PO (pre-system AP carry-forward).
+    # Admin PIN or TOTP only — manager PINs are explicitly NOT in the
+    # defaults. Owner / admin / super-admin only via approver allow-list.
+    {"key": "historical_supplier_po_add",
+     "label": "Add Historical Supplier PO",
+     "module": "Accounts Payable",
+     "defaults": ["admin_pin", "totp"],
+     "allowed_approver_roles": ["owner", "admin", "super_admin"],
+     "allowed_approver_user_ids": []},
+    {"key": "historical_supplier_po_pay",
+     "label": "Pay Historical Supplier PO",
+     "module": "Accounts Payable",
+     "defaults": ["admin_pin", "totp"],
+     "allowed_approver_roles": ["owner", "admin", "super_admin"],
+     "allowed_approver_user_ids": []},
+    {"key": "historical_supplier_po_void",
+     "label": "Void Historical Supplier PO",
+     "module": "Accounts Payable",
+     "defaults": ["admin_pin", "totp"],
+     "allowed_approver_roles": ["owner", "admin", "super_admin"],
+     "allowed_approver_user_ids": []},
 ]
 
 # Build quick lookup: action_key → default methods

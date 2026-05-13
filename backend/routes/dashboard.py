@@ -847,6 +847,17 @@ async def accounts_payable_summary(
         "receipt_review_status": 1, "grand_total": 1, "total_paid": 1,
     }).to_list(500)
 
+    # Phase 3.2 — also include outstanding historical (pre-system) supplier POs.
+    # These show on AP alongside regular POs so the owner sees the FULL
+    # real-world payable picture without those entries polluting expense /
+    # COGS reports (they live in their own collection).
+    hs_match = {"status": {"$in": ["outstanding", "partial"]}}
+    hs_match = apply_branch_filter(hs_match, branch_filter)
+    hs_rows = await db.historical_supplier_pos.find(hs_match, {
+        "_id": 0, "id": 1, "supplier_name": 1, "reference_number": 1,
+        "balance": 1, "branch_id": 1, "pre_system_date": 1, "created_at": 1,
+    }).to_list(500)
+
     today = await today_local(user.get("organization_id") or "")
     overdue = []
     due_this_week = []
@@ -876,6 +887,26 @@ async def accounts_payable_summary(
             due_this_week.append(entry)
         else:
             upcoming.append(entry)
+
+    # Phase 3.2 — append historical (pre-system) PO entries. Bucketed
+    # as `overdue` since they are pre-system carry-forward (always older
+    # than today). Marked with `kind: "historical"` so the UI can render
+    # a distinct chip.
+    for hs in hs_rows:
+        bal = float(hs.get("balance", 0) or 0)
+        if bal <= 0:
+            continue
+        total += bal
+        overdue.append({
+            "po_id": hs["id"], "po_number": hs.get("reference_number", "") or f"HIST-{hs['id'][:8]}",
+            "vendor": hs.get("supplier_name", "Unknown Supplier"),
+            "balance": round(bal, 2),
+            "due_date": hs.get("pre_system_date", ""),
+            "days_left": None,
+            "branch_id": hs.get("branch_id"),
+            "receipt_review_status": "",
+            "kind": "historical",
+        })
 
     return {
         "total_payable": round(total, 2),

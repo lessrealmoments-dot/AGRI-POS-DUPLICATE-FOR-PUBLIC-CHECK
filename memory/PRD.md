@@ -1,6 +1,67 @@
 # AgriBooks PRD
 
 
+## Phase 3.2 — Historical Supplier PO / Pre-System AP Carry-Forward (Feb 2026) ✅
+
+### Status: COMPLETE — admin-only encoding flow + AP dashboard integration; **113/113 BR pass / 379 rows**; zero footprint; idempotent.
+
+### Why
+Owners transitioning to AgriBooks started with only opening inventory + opening AR — no historical POs and no supplier opening balances. As old suppliers come to collect (3-month credit terms etc.), recording the debt as a regular PO would (a) inflate inventory (if the SKU is stockable), (b) pollute current-period expense / COGS / sales-vs-expense reports. This feature stores pre-system supplier debt in its own collection so it shows on the AP dashboard for visibility BUT stays out of every period-revenue report.
+
+### What was delivered
+1. **NEW backend route file `backend/routes/historical_supplier_po.py`** (~380 LOC):
+   - `POST /api/historical-supplier-pos` — admin/owner only; PIN policy `historical_supplier_po_add`; rejects `pre_system_date >= today`; rejects `amount <= 0`; rejects manager PINs.
+   - `GET /api/historical-supplier-pos` — list with `status` / `branch_id` / `supplier_name` filters; returns `outstanding_total`.
+   - `GET /api/historical-supplier-pos/{id}` — full row incl. payments history.
+   - `POST /api/historical-supplier-pos/{id}/pay` — admin PIN policy `historical_supplier_po_pay`; rejects over-payment; deducts from chosen fund wallet via existing `deduct_from_fund_source`; appends payment to `payments[]`; transitions `outstanding → partial → paid`.
+   - `POST /api/historical-supplier-pos/{id}/void` — admin PIN policy `historical_supplier_po_void`; requires reason ≥10 chars; refuses fully-paid entries.
+2. **NEW PIN policies** in `routes/verify.py` (3): `historical_supplier_po_add`, `historical_supplier_po_pay`, `historical_supplier_po_void`. All defaults `["admin_pin", "totp"]` — **no `manager_pin`**. Allow-list `["owner", "admin", "super_admin"]`. Audited via `audit_log[type=historical_supplier_po_*]`.
+3. **AP Dashboard integration** (`routes/dashboard.py::accounts_payable_summary`): outstanding/partial historical entries are merged into the `overdue` bucket with `kind: "historical"` so the FE renders a "pre-system" chip. Total payable now reflects FULL real-world AP (regular POs + historical carry-forward).
+4. **TENANT_COLLECTIONS** += `historical_supplier_pos` (auto-tenant scoping, auto-cleanup).
+5. **NEW frontend component `frontend/src/components/HistoricalSupplierPODialog.jsx`** (~470 LOC):
+   - Two-tab modal (List + Add) with full Pay/Void mini-dialogs.
+   - Branch dropdown, date input clamped to ≤ yesterday, admin PIN field with explicit "Manager PINs are rejected" placeholder, outstanding total summary, status chips (`outstanding/partial/paid/voided`).
+   - All testids set (`historical-supplier-po-dialog`, `hspo-tab-*`, `hspo-add-*`, `hspo-pay-*`, `hspo-void-*`, `hspo-row-${id}`, `hspo-outstanding-total`, `hspo-empty`).
+6. **AP widget wiring** (`AccountsPayableWidget.js`): admin-gated "Old POs" button (testid `ap-add-historical-btn`) in the AP widget header; `kind="historical"` rows show "pre-system" badge and "carry-forward" subtitle instead of "Nd overdue". Clicking a historical row opens the dialog instead of `ReviewDetailDialog`.
+7. **NEW BR test `backend/tests/business_regression/test_br_historical_supplier_po.py`** — 12 tests / 20 rows. Covers: manager role 403, manager PIN rejected, admin PIN creates entry, future date rejected, zero/negative amount rejected, creation does NOT touch inventory, appears on AP summary as `kind="historical"`, payment outstanding → partial → paid, over-payment rejected, void requires reason + admin PIN, audit_log rows written, list+outstanding total.
+
+### Verification
+- **NEW Phase 3.2 test**: 12/12 pass / 20 rows.
+- **Full BR**: **113/113 pass / 379 rows / 0 fail** (was 101/359 → +12 tests / +20 rows).
+- Re-run idempotent.
+- **Zero net DB footprint** (no `br_hs_po*` rows lingering).
+- `yarn build` clean (26.16s).
+- ESLint clean on both new + modified files.
+
+### Files changed (this fork)
+- NEW `backend/routes/historical_supplier_po.py`
+- NEW `backend/tests/business_regression/test_br_historical_supplier_po.py`
+- NEW `frontend/src/components/HistoricalSupplierPODialog.jsx`
+- MOD `backend/routes/verify.py` (3 new PIN policies)
+- MOD `backend/routes/dashboard.py` (`accounts_payable_summary` merges historical rows)
+- MOD `backend/main.py` (router registration)
+- MOD `backend/config.py` (`TENANT_COLLECTIONS` += `historical_supplier_pos`)
+- MOD `frontend/src/components/dashboard/AccountsPayableWidget.js` (admin button + historical chip)
+
+### Phase 3.2 invariants honoured
+- No inventory mutation on create — separate collection, no `inventory_movements` row.
+- Not included in expense / COGS / sales-vs-expense reports — only surfaces on the dedicated AP summary endpoint.
+- Manager PIN/TOTP cannot create, pay, or void — strict admin gate at both RBAC + PIN layers.
+- `pre_system_date < today` enforced server-side — can't be abused to log today's POs through this path.
+- Payments deduct from the same fund wallets as regular supplier payments — no parallel cash bucket.
+- All mutations write `audit_log` rows under the org's tenant scope.
+
+### Recommendation for next prompt
+1. **Phase 3.1 — `update_transfer` org_id hardening** (defensive; 1–2 hrs).
+2. **FE polish for Phase 3 variance** — surface `qty (was X)` + "Variance accepted by {verifier}" on internal invoice print.
+3. **Supplier ledger view** — combine regular POs + historical POs by supplier into a single "Pay Acme Trading" page (~½ day).
+4. **Prepared Order SMS** (Resend/Twilio integration — defer until keys).
+
+**My pick: option 3 (Supplier Ledger)** — naturally consumes the new historical collection and gives the owner one place to settle a vendor regardless of whether the debt is pre- or post-cutover.
+
+---
+
+
 ## Phase 3 — Branch Transfer Variance + Internal Invoice Integrity (Feb 2026) ✅
 
 ### Status: COMPLETE — **101/101 BR / 359 rows green** (was 89/333); 10 RED tests turned GREEN; zero new DB footprint; idempotent re-run.
