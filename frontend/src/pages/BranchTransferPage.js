@@ -58,6 +58,56 @@ const STATUS_COLORS = {
   cancelled: 'bg-red-100 text-red-600',
 };
 
+// Phase 1.1 — Derive a tiny per-request approval summary purely from
+// the existing `items[]` already returned by `/purchase-orders` and
+// `/purchase-orders/incoming-requests`. No backend change.
+//   full      = approved_qty == quantity
+//   reduced   = 0 < approved_qty < quantity
+//   declined  = approved_qty == 0 (but explicitly set)
+//   excess    = approved_qty > quantity
+//   pending   = approved_qty missing / not yet confirmed
+// Returns null when ALL lines are pending (nothing meaningful to show).
+function deriveApprovalSummary(req) {
+  const items = (req && req.items) || [];
+  if (!items.length) return null;
+  let full = 0, reduced = 0, declined = 0, excess = 0, pending = 0;
+  for (const it of items) {
+    const r = parseFloat(it.quantity || 0);
+    const raw = it.approved_qty;
+    const hasAppr = raw !== null && raw !== undefined && raw !== '';
+    if (!hasAppr) { pending += 1; continue; }
+    const a = parseFloat(raw || 0);
+    if (a === 0) declined += 1;
+    else if (a < r) reduced += 1;
+    else if (a > r) excess += 1;
+    else full += 1;
+  }
+  if (pending === items.length) return null;
+  return { full, reduced, declined, excess, pending, total: items.length };
+}
+
+function ApprovalSummaryChips({ summary, testidPrefix = 'approval-summary' }) {
+  if (!summary) return null;
+  const parts = [];
+  if (summary.full)     parts.push({ k: 'full',     label: `${summary.full} full`,         cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' });
+  if (summary.reduced)  parts.push({ k: 'reduced',  label: `${summary.reduced} reduced`,   cls: 'bg-yellow-50 text-yellow-700 border-yellow-200' });
+  if (summary.excess)   parts.push({ k: 'excess',   label: `${summary.excess} increased`,  cls: 'bg-amber-50 text-amber-700 border-amber-200' });
+  if (summary.declined) parts.push({ k: 'declined', label: `${summary.declined} declined`, cls: 'bg-rose-50 text-rose-700 border-rose-200' });
+  if (summary.pending)  parts.push({ k: 'pending',  label: `${summary.pending} pending`,   cls: 'bg-slate-50 text-slate-600 border-slate-200' });
+  return (
+    <span className="text-[11px] text-slate-500 flex items-center gap-1 flex-wrap" data-testid={testidPrefix}>
+      <span className="font-semibold text-slate-600">Request Review:</span>
+      {parts.map((p) => (
+        <span key={p.k}
+          className={`px-2 py-0.5 rounded border ${p.cls}`}
+          data-testid={`${testidPrefix}-${p.k}`}>
+          {p.label}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function newRow() {
   return {
     id: Math.random().toString(36).slice(2),
@@ -1995,6 +2045,10 @@ export default function BranchTransferPage() {
                               Approved: {req.approval_status}
                             </Badge>
                           )}
+                          {(() => {
+                            const s = deriveApprovalSummary(req);
+                            return s ? <ApprovalSummaryChips summary={s} testidPrefix={`approval-summary-incoming-${req.id}`} /> : null;
+                          })()}
                           {(req.status === 'requested' || req.status === 'draft') && (isAdmin || (currentBranch?.id && req.supply_branch_id === currentBranch.id)) && (
                             <Button size="sm" onClick={() => handleGenerateTransfer(req)} disabled={generatingTransfer === req.id}
                               className="h-10 px-5 bg-[#1A4D2E] hover:bg-[#14532d] text-white text-sm font-semibold" data-testid={`gen-transfer-${req.id}`}>
@@ -2081,7 +2135,7 @@ export default function BranchTransferPage() {
                           {req.items?.length > 4 && <span className="text-sm text-slate-400 self-center">+{req.items.length - 4} more</span>}
                         </div>
                         {req.approval_status && req.approval_status !== 'pending' && (
-                          <div className="mt-2 flex items-center gap-2 text-xs">
+                          <div className="mt-2 flex items-center gap-2 text-xs flex-wrap">
                             <Badge className={`text-xs px-2.5 py-0.5 ${
                               req.approval_status === 'approved' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                               : req.approval_status === 'partial' ? 'bg-yellow-50 text-yellow-700 border border-yellow-200'
@@ -2092,6 +2146,10 @@ export default function BranchTransferPage() {
                             data-testid={`approval-status-outgoing-${req.id}`}>
                               Approved: {req.approval_status}
                             </Badge>
+                            {(() => {
+                              const s = deriveApprovalSummary(req);
+                              return s ? <ApprovalSummaryChips summary={s} testidPrefix={`approval-summary-outgoing-${req.id}`} /> : null;
+                            })()}
                             {req.approved_by_name && (
                               <span className="text-slate-500">by {req.approved_by_name}</span>
                             )}
