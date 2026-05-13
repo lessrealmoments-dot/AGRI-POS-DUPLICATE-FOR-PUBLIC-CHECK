@@ -20,6 +20,9 @@
  *   open               — boolean
  *   onOpenChange(bool)
  *   defaultBranchId    — preselects the branch in the Add form
+ *   defaultSupplierName — preselects the supplier name in the Add form
+ *                        AND filters the List tab to that supplier
+ *   defaultTab         — 'list' (default) or 'add' to open straight to Add
  *   onChange()         — fires after any successful mutation so the
  *                        parent (AP widget) can refresh
  */
@@ -69,9 +72,10 @@ const errMsg = (e, fallback = 'Request failed.') => {
 
 
 export default function HistoricalSupplierPODialog({
-  open, onOpenChange, defaultBranchId = '', onChange,
+  open, onOpenChange, defaultBranchId = '', defaultSupplierName = '',
+  defaultTab = 'list', onChange,
 }) {
-  const [tab, setTab] = useState('list');
+  const [tab, setTab] = useState(defaultTab);
   const [rows, setRows] = useState([]);
   const [outstandingTotal, setOutstandingTotal] = useState(0);
   const [loadingList, setLoadingList] = useState(false);
@@ -80,7 +84,7 @@ export default function HistoricalSupplierPODialog({
 
   // Add-form state
   const [form, setForm] = useState({
-    supplier_name: '',
+    supplier_name: defaultSupplierName,
     reference_number: '',
     branch_id: defaultBranchId,
     pre_system_date: todayMinusOne(),
@@ -89,6 +93,18 @@ export default function HistoricalSupplierPODialog({
     pin: '',
   });
   const [submitting, setSubmitting] = useState(false);
+
+  // Re-seed tab + form when the dialog opens or the caller swaps the
+  // preselected supplier (e.g. Suppliers page changes selected vendor).
+  useEffect(() => {
+    if (!open) return;
+    setTab(defaultTab || 'list');
+    setForm(prev => ({
+      ...prev,
+      supplier_name: defaultSupplierName || prev.supplier_name,
+      branch_id: defaultBranchId || prev.branch_id,
+    }));
+  }, [open, defaultSupplierName, defaultBranchId, defaultTab]);
 
   // Pay/Void dialog state
   const [actionRow, setActionRow] = useState(null);
@@ -105,7 +121,11 @@ export default function HistoricalSupplierPODialog({
     if (!open) return;
     setLoadingList(true);
     try {
-      const params = filterStatus !== 'all' ? { status: filterStatus } : {};
+      const params = {};
+      if (filterStatus !== 'all') params.status = filterStatus;
+      // When opened from a specific supplier card, scope the list so the
+      // operator only sees that supplier's history.
+      if (defaultSupplierName) params.supplier_name = defaultSupplierName;
       const res = await api.get('/historical-supplier-pos', { params });
       setRows(res.data?.rows || []);
       setOutstandingTotal(res.data?.outstanding_total || 0);
@@ -114,7 +134,7 @@ export default function HistoricalSupplierPODialog({
     } finally {
       setLoadingList(false);
     }
-  }, [open, filterStatus]);
+  }, [open, filterStatus, defaultSupplierName]);
 
   useEffect(() => { loadList(); }, [loadList]);
 

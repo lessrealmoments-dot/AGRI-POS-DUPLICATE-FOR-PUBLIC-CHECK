@@ -10,14 +10,19 @@ import { Separator } from '../components/ui/separator';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { Search, Truck, FileText, DollarSign, ArrowRight, CheckCircle, AlertCircle, History, Plus, Edit2, Phone, Mail, MapPin } from 'lucide-react';
+import { Search, Truck, FileText, DollarSign, ArrowRight, CheckCircle, AlertCircle, History, Plus, Edit2, Phone, Mail, MapPin, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 import ReviewDetailDialog from '../components/ReviewDetailDialog';
+import HistoricalSupplierPODialog from '../components/HistoricalSupplierPODialog';
 
 export default function SuppliersPage() {
-  const { currentBranch, hasPerm } = useAuth();
+  const { currentBranch, hasPerm, user } = useAuth();
   const canCreateSupplier = hasPerm('suppliers', 'create');
   const canEditSupplier = hasPerm('suppliers', 'edit');
+  // Historical Supplier PO is admin/owner only (matches dashboard AP widget gate).
+  const canAddOldBalance = ['admin', 'owner', 'super_admin'].includes(user?.role || '');
+  const [historicalDialog, setHistoricalDialog] = useState(false);
+  const [historicalDefaultTab, setHistoricalDefaultTab] = useState('list');
   const [vendors, setVendors] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -254,6 +259,17 @@ export default function SuppliersPage() {
                           <Edit2 size={12} className="mr-1" /> Edit
                         </Button>
                       )}
+                      {canAddOldBalance && (
+                        <Button
+                          variant="outline" size="sm"
+                          onClick={() => { setHistoricalDefaultTab('add'); setHistoricalDialog(true); }}
+                          className="border-amber-300 text-amber-700 hover:bg-amber-50"
+                          data-testid="supplier-add-old-balance-btn"
+                          title="Encode pre-system supplier debt (admin PIN required)"
+                        >
+                          <Clock size={12} className="mr-1" /> Add Old Balance
+                        </Button>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -303,7 +319,7 @@ export default function SuppliersPage() {
               <Card className="border-slate-200">
                 <CardContent className="p-0">
                   <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 flex-wrap">
                       <h2 className="font-bold text-lg" style={{ fontFamily: 'Manrope' }}>{selectedVendor}</h2>
                       {!selectedSupplierDetails && canCreateSupplier && (
                         <Button variant="outline" size="sm" data-testid="save-as-supplier-btn" onClick={() => {
@@ -312,6 +328,28 @@ export default function SuppliersPage() {
                           setSupplierDialog(true);
                         }}>
                           <Plus size={12} className="mr-1" /> Save as Supplier
+                        </Button>
+                      )}
+                      {!selectedSupplierDetails && canAddOldBalance && (
+                        <Button
+                          variant="outline" size="sm"
+                          onClick={() => { setHistoricalDefaultTab('add'); setHistoricalDialog(true); }}
+                          className="border-amber-300 text-amber-700 hover:bg-amber-50"
+                          data-testid="vendor-add-old-balance-btn"
+                          title="Encode pre-system supplier debt (admin PIN required)"
+                        >
+                          <Clock size={12} className="mr-1" /> Add Old Balance
+                        </Button>
+                      )}
+                      {canAddOldBalance && (
+                        <Button
+                          variant="ghost" size="sm"
+                          onClick={() => { setHistoricalDefaultTab('list'); setHistoricalDialog(true); }}
+                          className="text-amber-700 hover:bg-amber-50"
+                          data-testid="vendor-view-old-balance-btn"
+                          title="View pre-system supplier debt history"
+                        >
+                          <History size={12} className="mr-1" /> Old Balances
                         </Button>
                       )}
                     </div>
@@ -528,6 +566,19 @@ export default function SuppliersPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Historical Supplier PO (pre-system carry-forward). Pre-selects
+          the currently viewed vendor so the operator only sees that
+          supplier's history. Admin/owner only — backend re-validates
+          via PIN policy. */}
+      <HistoricalSupplierPODialog
+        open={historicalDialog}
+        onOpenChange={setHistoricalDialog}
+        defaultBranchId={currentBranch?.id || ''}
+        defaultSupplierName={selectedVendor || ''}
+        defaultTab={historicalDefaultTab}
+        onChange={() => fetchData()}
+      />
     </div>
   );
 }

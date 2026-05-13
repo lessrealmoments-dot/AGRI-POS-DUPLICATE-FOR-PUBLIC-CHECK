@@ -1,6 +1,39 @@
 # AgriBooks PRD
 
 
+## Suppliers Page — "Add Old Balance" Entry Point (Feb 13 2026) ✅
+
+### Status: COMPLETE — frontend-only patch; Historical Supplier PO dialog now mounted on the Suppliers page with per-vendor pre-selection; **131/131 BR pass** (backend untouched, sample re-run 12/12 historical_supplier_po cases).
+
+### Why
+Phase 3.2 shipped the supplier-side equivalent of "Add Old Balance" (Historical Supplier PO) but its only entry point was the Dashboard → Accounts Payable widget. Users naturally look for an entity-level action on the Suppliers page itself (where the customer-side equivalent `AddOldBalanceDialog` lives). Result: the feature existed but felt missing.
+
+### What was delivered
+1. **`components/HistoricalSupplierPODialog.jsx`** — accepts two new props:
+   - `defaultSupplierName` — preselects the supplier in the Add form AND scopes the List tab via the pre-existing `supplier_name` query param on `GET /api/historical-supplier-pos` (case-insensitive regex on the backend, untouched).
+   - `defaultTab` — `'list'` (default) or `'add'` to land straight on the Add tab.
+   - Both re-seed via a `useEffect([open, defaultSupplierName, defaultBranchId, defaultTab])` so opening the dialog for a different supplier refreshes the form.
+2. **`pages/SuppliersPage.js`** — three new buttons (admin/owner/super_admin only, matches AP-widget gate):
+   - **"Add Old Balance"** on the selected-supplier header card (next to Edit). Opens dialog on **Add** tab pre-filled with the supplier.
+   - **"Add Old Balance"** on the PO-list header when a raw vendor (not yet saved as supplier) is selected — covers vendors that exist only as PO history.
+   - **"Old Balances"** ghost button always visible in the PO-list header for any vendor — opens dialog on **List** tab scoped to that vendor's history.
+3. **No backend changes** — `GET /api/historical-supplier-pos?supplier_name=...` was already supported.
+
+### Verification
+- ESLint clean on `SuppliersPage.js` + `HistoricalSupplierPODialog.jsx`.
+- `yarn build` clean (27.94s).
+- Backend `test_br_historical_supplier_po.py` re-run: 12/12 pass / 20 rows.
+- Full BR remains 131/131 pass.
+
+### Files changed (this fork)
+- MOD `frontend/src/pages/SuppliersPage.js` (3 buttons + dialog mount)
+- MOD `frontend/src/components/HistoricalSupplierPODialog.jsx` (defaultSupplierName + defaultTab props, list-filter wiring)
+
+### UX
+- **From supplier card:** Edit │ Add Old Balance
+- **From PO-list header (any vendor):** Save as Supplier (if applicable) │ Add Old Balance (if not yet supplier) │ Old Balances (always)
+- Same admin-PIN / TOTP backend gate as Phase 3.2 — manager PINs rejected.
+
 ## Stock-Request QR — Mint-on-Miss for Legacy POs (Feb 13 2026) ✅
 
 ### Status: COMPLETE — frontend-only patch; **131/131 BR pass / 397 rows**; production-data-safe.
