@@ -867,6 +867,208 @@ async def delete_category(name: str, user=Depends(get_current_user)):
 
 
 
+# ── Capital Change Report (printable per-product cost history) ─────────────
+# Surfaces every product whose capital cost has moved within the selected
+# window (default: PO arrivals only). Used by the Capital Change Report page
+# to build a printable price-list update sheet, grouped by category. Each
+# product carries its full chronological change sequence so the UI can
+# render either a "pill chain" or a month-bucket view.
+
+@router.get("/capital-change-report")
+async def capital_change_report(
+    range: str = "30d",                          # 30d|60d|90d|180d|365d|all
+    category: Optional[str] = None,
+    branch_id: Optional[str] = None,
+    search: Optional[str] = None,
+    source_type: str = "purchase_order",         # purchase_order|manual_edit|all
+    user=Depends(get_current_user),
+):
+    """Return products whose capital cost moved inside the selected window.
+
+    The response is grouped by category and includes per-product:
+      - full chronological change list (oldest → newest)
+      - by_month bucket (YYYY-MM → list of changes)
+      - net_delta / net_delta_pct vs the first capital seen in the window
+      - increases / decreases counters
+
+    Default filters to source_type=purchase_order because that is the
+    natural driver of the operator's printed price list updates.
+    """
+    check_perm(user, "products", "view")
+
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    range_days_map = {"30d": 30, "60d": 60, "90d": 90, "180d": 180, "365d": 365}
+    cutoff_iso: Optional[str] = None
+    if range != "all":
+        days = range_days_map.get(range, 30)
+        cutoff_iso = (now - timedelta(days=days)).isoformat()
+
+    q: dict = {}
+    if cutoff_iso:
+        q["changed_at"] = {"$gte": cutoff_iso}
+    if branch_id and branch_id != "all":
+        q["branch_id"] = branch_id
+    if source_type and source_type != "all":
+        q["source_type"] = source_type
+
+    rows = await db.capital_changes.find(q, {"_id": 0}).sort("changed_at", 1).to_list(50000)
+
+    empty_summary = {
+        "products_affected": 0, "total_changes": 0,
+        "increases": 0, "decreases": 0, "categories_affected": 0,
+    }
+    if not rows:
+        return {
+            "range": range, "from": cutoff_iso, "to": now.isoformat(),
+            "filters": {"category": category, "branch_id": branch_id,
+                        "source_type": source_type, "search": search},
+            "categories": [], "summary": empty_summary, "all_categories": [],
+        }
+
+    # Group rows by product_id ----------------------------------------------
+    by_product: dict[str, list] = {}
+    for r in rows:
+        pid = r.get("product_id")
+        if not pid:
+            continue
+        by_product.setdefault(pid, []).append(r)
+
+    pids = list(by_product.keys())
+    products_cur = db.products.find(
+        {"id": {"$in": pids}},
+        {"_id": 0, "id": 1, "name": 1, "sku": 1, "category": 1,
+         "unit": 1, "is_repack": 1, "parent_id": 1, "cost_price": 1},
+    )
+    pmap: dict[str, dict] = {}
+    async for p in products_cur:
+        pmap[p["id"]] = p
+
+    # Branch name lookup (for change-level annotation) ----------------------
+    bids = list({r.get("branch_id") for rs in by_product.values()
+                 for r in rs if r.get("branch_id")})
+    bmap: dict[str, str] = {}
+    if bids:
+        async for b in db.branches.find(
+            {"id": {"$in": bids}}, {"_id": 0, "id": 1, "name": 1}
+        ):
+            bmap[b["id"]] = b.get("name", "")
+
+    search_l = (search or "").strip().lower()
+    categories: dict[str, list] = {}
+    summary = {"products_affected": 0, "total_changes": 0,
+               "increases": 0, "decreases": 0}
+
+    for pid, raw_changes in by_product.items():
+        prod = pmap.get(pid)
+        if not prod:
+            continue
+        cat = prod.get("category") or "Uncategorized"
+        if category and cat != category:
+            continue
+        name = prod.get("name", "")
+        sku = prod.get("sku", "")
+        if search_l and search_l not in name.lower() and search_l not in sku.lower():
+            continue
+
+        # Already sorted asc by changed_at (mongo sort).
+        enriched: list[dict] = []
+        increases = 0
+        decreases = 0
+        for c in raw_changes:
+            try:
+                old_c = float(c.get("old_capital") or 0)
+                new_c = float(c.get("new_capital") or 0)
+            except (TypeError, ValueError):
+                continue
+            direction = "flat"
+            if new_c > old_c + 0.001:
+                direction = "up"
+                increases += 1
+            elif new_c < old_c - 0.001:
+                direction = "down"
+                decreases += 1
+            enriched.append({
+                "changed_at": c.get("changed_at"),
+                "old_capital": old_c,
+                "new_capital": new_c,
+                "delta": round(new_c - old_c, 4),
+                "delta_pct": round(((new_c - old_c) / old_c * 100), 2) if old_c > 0 else None,
+                "direction": direction,
+                "source_type": c.get("source_type") or "",
+                "source_ref": c.get("source_ref") or "",
+                "vendor": c.get("vendor") or "",
+                "method": c.get("method") or "",
+                "branch_id": c.get("branch_id") or "",
+                "branch_name": bmap.get(c.get("branch_id") or "", ""),
+                "changed_by": c.get("changed_by_name") or "",
+            })
+
+        if not enriched:
+            continue
+
+        # Build YYYY-MM bucket
+        by_month: dict[str, list] = {}
+        for e in enriched:
+            mo = (e["changed_at"] or "")[:7]
+            if not mo:
+                continue
+            by_month.setdefault(mo, []).append(e)
+
+        first_cap = enriched[0]["old_capital"]
+        last_cap = enriched[-1]["new_capital"]
+        net_delta = round(last_cap - first_cap, 4)
+        net_delta_pct = round((net_delta / first_cap * 100), 2) if first_cap > 0 else None
+
+        categories.setdefault(cat, []).append({
+            "product_id": pid,
+            "name": name,
+            "sku": sku,
+            "category": cat,
+            "unit": prod.get("unit") or "",
+            "is_repack": bool(prod.get("is_repack")),
+            "first_capital": first_cap,
+            "current_capital": last_cap,
+            "net_delta": net_delta,
+            "net_delta_pct": net_delta_pct,
+            "change_count": len(enriched),
+            "increases": increases,
+            "decreases": decreases,
+            "changes": enriched,
+            "by_month": by_month,
+        })
+        summary["products_affected"] += 1
+        summary["total_changes"] += len(enriched)
+        summary["increases"] += increases
+        summary["decreases"] += decreases
+
+    # All categories present (for filter dropdown — independent of `category` filter)
+    all_cats = sorted({(pmap.get(pid) or {}).get("category") or "Uncategorized"
+                       for pid in by_product.keys() if pmap.get(pid)})
+
+    cat_list = []
+    for cat_name in sorted(categories.keys()):
+        prods_sorted = sorted(categories[cat_name], key=lambda x: x["name"].lower())
+        cat_list.append({
+            "category": cat_name,
+            "products": prods_sorted,
+            "count": len(prods_sorted),
+        })
+
+    summary["categories_affected"] = len(cat_list)
+
+    return {
+        "range": range,
+        "from": cutoff_iso,
+        "to": now.isoformat(),
+        "filters": {"category": category, "branch_id": branch_id,
+                    "source_type": source_type, "search": search},
+        "categories": cat_list,
+        "summary": summary,
+        "all_categories": all_cats,
+    }
+
+
 # ── Capital Change Alerts (Stage 2 of Smart Price) ─────────────────────────
 # Surfaces recent capital-cost changes from POs and branch transfers, with
 # noise filtered out:

@@ -88,6 +88,7 @@ const NAV_SECTIONS = [
       { path: '/employees',       label: 'Employees',    icon: Briefcase, perm: 'settings.manage_users',       featureFlag: 'employee_management' },
       { path: '/price-schemes',   label: 'Price Schemes', icon: Tags,     perm: 'price_schemes.view' },
       { path: '/price-manager',   label: 'Price Manager', icon: TrendingUp, perm: 'products.edit' },
+      { path: '/capital-change-report', label: 'Capital Changes', icon: BarChart3, perm: 'products.edit' },
       { path: '/team',            label: 'Team',         icon: UserCog,   perm: 'settings.manage_users' },
       { path: '/import',          label: 'Import Center', icon: Upload,   perm: 'products.create', adminOnly: true },
       { path: '/downloads',       label: 'App Downloads', icon: Smartphone, perm: null, adminOnly: true },

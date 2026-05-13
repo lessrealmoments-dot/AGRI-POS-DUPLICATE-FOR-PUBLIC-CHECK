@@ -1,63 +1,58 @@
-<analysis>**original_problem_statement**: Continue executing the multi-phase rollout for the Branch Transfer Overhaul, starting with Phase 1: Stock Request Confirmation Layer, and extending into Phase 2 (QR/Mobile Confirmation), Phase 3 (Variance & Invoice Integrity), and related Accounts Payable capabilities. 
+<analysis>**original_problem_statement**: Continue executing the multi-phase rollout for the Branch Transfer Overhaul, starting with Phase 1: Stock Request Confirmation Layer, and extending into Phase 2 (QR/Mobile Confirmation), Phase 3 (Variance & Invoice Integrity), and related Accounts Payable capabilities. The application is currently undergoing heavy polish, UI enhancement, legacy data gap bridging (Historical AP/AR), SMS integration updates, and workflow logic fixes.
 
 **PRODUCT REQUIREMENTS**:
-- Build web & mobile QR confirmation flow for stock requests (Phase 1 & Phase 2).
-- Establish PIN/TOTP-gated policies for approving stock request quantities and accepting high-value branch transfer variances.
-- Ensure stock movements only occur on receipt (Phase 0 invariants), and internal invoices update line items accurately upon variance acceptance (Phase 3).
-- Provide transition accounting tools via Historical Supplier PO to input pre-system accounts payable carry-forwards (Phase 3.2).
+- Provide transition accounting tools via Historical Supplier PO to input pre-system accounts payable carry-forwards, matching the non-cash-impact semantics of Historical Customer Credit.
+- Provide Smart Price Scanning tools that alert operators to Capital Changes and Below Cost scenarios, allowing inline branch-specific adjustments of prices (both parent and repack children).
+- Ensure stock movements only occur on receipt (Phase 0 invariants).
+- SMS engine must schedule follow-ups for historical credit with distinct terms (e.g., 30 days).
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
-**what currently exists?**: 
-A highly stable React + FastAPI multi-tenant POS application. The Branch Transfer Overhaul has successfully completed Phase 1 (Stock Request Confirmation), Phase 2 (QR Mobile Confirmations), Phase 2.1 (View QR Modal), Phase 3 (Variance PINs & Invoice Integrity Rewrite), and Phase 3.2 (Historical Supplier PO AP). The system features robust PIN/TOTP role-gated policies, zero-footprint tenant DB scoping, and a pristine  testing suite with 113/113 passing tests.
+**what currently exists?**:
+A highly stable React + FastAPI multi-tenant POS application. The Branch Transfer Overhaul has successfully completed Phases 1 through 3.1. The system features robust PIN/TOTP role-gated policies, zero-footprint tenant DB scoping, SMS scheduling/templating for automated overdue reminders, and a pristine  testing suite with 150/150 passing tests. 
 
-**Last working item**: 
-    - Last item agent was working: Preparing the workspace for a clean fork. Generated  and finalized Phase 3.2 testing.
-    - Status: NOT STARTED (Workspace is ready for next agent to pick a new task from Upcoming).
+**Last working item**:
+    - Last item agent was working: Fixing the Smart Price Scan feature to apply updates on a branch-specific level rather than a global level. Modified  to prioritize  overrides, updated the UI to display a branch scope warning, and locked the behaviour with BR tests.
+    - Status: COMPLETED
     - Agent Testing Done: Y
-    - Which testing method agent to use? Python backend testing via ============================= test session starts ==============================
+    - Which testing method agent to use? backend testing via ============================= test session starts ==============================
 platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
 rootdir: /app
 plugins: asyncio-1.3.0, anyio-4.12.1
 asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
 collected 0 items
 
-============================ no tests ran in 0.00s =============================
-    - User Testing Done: N
+============================ no tests ran in 0.00s ============================= and FE build check.
+    - User Testing Done: Y
 
-**All Pending/In progress Issue list**:  
-  - Issue 1:  PUT can blank  (Phase 3.1) - P1
-     - Attempted fixes: None yet (deferred from Phase 3 scope intentionally to keep PR tight).
-     - Next debug checklist: . Add defensive assertion helper  at the end of BTO writers (, , , etc.) to prevent  body manipulation regressions.
-     - Why fix this issue and what will be achieved with the fix? Secures the BTO endpoint against rogue API requests that might overwrite the org_id, dropping the BTO out of tenant-scoped queries.
+**All Pending/In progress Issue list**:
+  - Issue 1: Internal invoice print missing details (P1)
+     - Attempted fixes: None
+     - Next debug checklist: Modify print layouts to show  + Variance accepted by {verifier}.
+     - Why fix this issue and what will be achieved with the fix? Provides paper-trail transparency for branch transfers with accepted variances.
      - Status: NOT STARTED
      - Is recurring issue? N
-     - Should Test frontend/backend/both after fix? Backend.
-  - Issue 2: Frontend missing Invoice Creation Failed badge (Phase 3 UI Polish) - P2
+     - Should Test frontend/backend/both after fix? Frontend/Backend.
+  - Issue 2: Frontend missing Invoice Creation Failed badge (Phase 3 UI Polish) (P3)
      - Attempted fixes: Backend sets  flag natively, but UI doesn't display it yet.
      - Next debug checklist: . Display Invoice missing — see admin badge on BTO cards if the flag is true.
      - Why fix this issue and what will be achieved with the fix? Closes the loop on the Phase 3 backend fix, providing visibility to operators.
      - Status: NOT STARTED
      - Is recurring issue? N
      - Should Test frontend/backend/both after fix? Frontend.
-  - Issue 3: Status divergence in offline finalize - P3
-     - Attempted fixes: None.
-     - Next debug checklist:  in  writes , but live  writes .
-     - Why fix this issue and what will be achieved with the fix? Aligns offline state logic with live state logic for accounting consistency.
-     - Status: NOT STARTED
-     - Is recurring issue? N
-     - Should Test frontend/backend/both after fix? Backend.
 
-**In progress Task List**: 
-  (None. Previous tasks were completed and merged gracefully.)
+**In progress Task List**:
+  (None. All picked tasks were fully implemented and merged.)
 
 **Upcoming and Future Tasks**:
     Upcoming Tasks:
-    - Supplier Ledger view (Combine regular POs + Historical POs per supplier in a unified view) (P0)
-    - Phase 3.1:  organization_id hardening (P1)
+    - Supplier Ledger view (Combine regular POs + Historical POs per supplier in a unified view chronologically with running balance) (P0)
+    - Variance Log tab (P1)
+    - CSV bulk-import for Historical POs (P1)
+    - Tenant-configurable variance threshold (P1)
     - Prepared Order Completion SMS notification (Requires Resend/Twilio keys + integration playbook) (P2)
     - Phase 4: Sales-movement context + slow-moving SMS engine (P2)
-
+    
     Future Tasks:
     - Phase 4A.2: Concurrent Held-Sales Queue (P2)
     - Add Sync this AR to customer SMS toggle to Historical Credit (P3)
@@ -69,19 +64,20 @@ plugins: asyncio-1.3.0, anyio-4.12.1
 asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
 collected 0 items
 
-============================ no tests ran in 0.01s ============================= legacy test suite cleanup to remove hardcoded DB state pollution (11 failing tests) (P3)
+============================ no tests ran in 0.03s ============================= legacy test suite cleanup to remove hardcoded DB state pollution (11 failing tests) (P3)
     - Public view requires session PIN toggle at the organization level (P3)
 
 **Completed work in this session**:
-- Phase 1: Stock Request Confirmation Layer ( endpoint, Web Modal,  prefill logic) (DONE)
-- Phase 1.1: Frontend UI Approval Summary Chips on BTO cards (DONE)
-- Phase 2: QR/Mobile Stock Request Confirmation (, Mobile UI in ) (DONE)
-- Phase 2.1: View QR Modal () on Web (DONE)
-- Phase 3: High-Value Variance PIN gate ( policy) (DONE)
-- Phase 3: Internal Invoice line-item rewrite upon variance acceptance (DONE)
-- Phase 3: Silent internal invoice creation failure hardening (DONE)
-- Phase 3.2: Historical Supplier PO capability for transition accounting AP carry-forwards (DONE)
-- Handoff documentation update () (DONE)
+- Smart Price Scan: Capital Change inline update & Nested Repack child row pricing (DONE)
+- Smart Price Scan: Branch-scoped Writes (DONE)
+- Phase 3.1:  organization_id hardening (DONE)
+- Generated  (DONE)
+- Legacy Stock Request QR Mint-on-Miss ( fallback  generation) (DONE)
+- Suppliers Page — Add Old Balance dialog mounted Per-Supplier (DONE)
+- Verified and BR-locked Historical Supplier PO non-cash semantic contract (DONE)
+- Fixed Document Numbering System bug for Historical Supplier PO and Historical Customer Credit (DONE)
+- Historical Supplier POs merged into Pay Supplier page () (DONE)
+- Historical Customer Credit encoding now supports customizable  (defaults to 30 days) and triggers  SMS (DONE)
 
 **Earlier issues found/mentioned but not fixed**:
    - Issue 1: Verifier identity not consistently stamped on PO cancellation (E12 gap).
@@ -90,100 +86,106 @@ collected 0 items
 **Known issue recurrence from previous fork**:
   - Issue recurrence in previous fork: 11 Pre-existing Unit Test Failures in Legacy Test Suite (due to hardcoded dates).
   - Recurrence count: 40+
-  - Status: NOT STARTED (Agent correctly bypassed these by running the isolated  suite).
-
-**Code Architecture**:
-
-
-**Key Technical Concepts**:
-- **PIN-gated action policies**: Relies on . Multiple policies added: , , .
-- **Zero Footprint DB Testing**:  isolates and tests tenant data per suite and tears it down completely. Always verify zero footprint logs after BR runs.
-- **Idempotency**: QR scans use  to safely handle double-taps on mobile network conditions.
-- **Invoice Integrity Rewrite**: To keep AR/AP books correct,  rewrites its line items to explicitly match received/accepted BTO quantities after a variance is approved.
-
-**key DB schema**:
-  - : , , , , .
-  - : , , , .
-  - : Stores pre-system accounts payable. 
-  - : Logs high-value variance accepts and invoice generation failures.
-
-**changes in tech stack**:
-  - None. Standardized usage of  added for modals.
-
-**All files of reference**:
-  -  (CRITICAL: 60-second briefing specifically written for you)
-  -  
-  -  (Auth logins)
-  - 
-  - 
-  - 
-
-**Areas that need refactoring**: 
-  - Legacy test suite () pollutes database state and is extremely brittle. Stay out of it. 
-
-**key api endpoints**:
-  - 
-  - 
-  - 
-  - 
-
-**Critical Info for New Agent**: 
-- **TESTING CONSTRAINT:** You MUST strictly use the  suite for all backend testing (e.g. ============================= test session starts ==============================
-platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0 -- /root/.venv/bin/python3
-cachedir: .pytest_cache
-rootdir: /app
-plugins: asyncio-1.3.0, anyio-4.12.1
-asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
-collecting ... collected 0 items
-
-============================ no tests ran in 0.00s =============================). DO NOT execute the root ============================= test session starts ==============================
+  - Status: NOT STARTED (Agent correctly bypassed these by running the isolated  suite. DO NOT RUN standard ============================= test session starts ==============================
 platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
 rootdir: /app
 plugins: asyncio-1.3.0, anyio-4.12.1
 asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
 collected 0 items
 
-============================ no tests ran in 0.01s ============================= command as it will fail on old hardcoded dates.
--  () handles organization scoping automatically. Any new collection handling tenant data (e.g., ) must be registered there and in  to maintain a zero-footprint test teardown.
--  in  is the SOLE mutator of actual stock. Phase 1/Phase 2 confirmation logic operates strictly on *intent* ().
-- Read  immediately upon starting.
+============================ no tests ran in 0.01s =============================).
+
+**Code Architecture**:
+
+
+**Key Technical Concepts**:
+- **Smart Price System**: Employs a fallback model. Backend priority reads branch overrides () before defaulting to global .  respects this branch isolation.
+- **Numbering System**: Handled via . Prefix logic enforces sequence uniformity. 
+- **AP/AR Accounting Isolation**:  and  bypass standard  and wallet math upon creation. They ONLY affect the wallet/expenses during explicit settlement ().
+
+**key DB schema**:
+  - : Generated on cost updates; parsed by .
+  - : Maps  +  to override product defaults.
+  - : Stores pre-system accounts payable. 
+
+**changes in tech stack**:
+  - None.
+
+**All files of reference**:
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+
+**Areas that need refactoring**:
+  - Legacy test suite () pollutes database state and is extremely brittle. Stay out of it. Run ============================= test session starts ==============================
+platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
+rootdir: /app
+plugins: asyncio-1.3.0, anyio-4.12.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 0 items
+
+============================ no tests ran in 0.00s ============================= only.
+
+**key api endpoints**:
+  - 
+  - 
+  - 
+
+**Critical Info for New Agent**:
+- **TESTING CONSTRAINT:** You MUST strictly use the  suite for all backend testing. DO NOT execute the root ============================= test session starts ==============================
+platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
+rootdir: /app
+plugins: asyncio-1.3.0, anyio-4.12.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 0 items
+
+============================ no tests ran in 0.01s ============================= command. 
+- **Data integrity contract**: Old Balance / Historical AP/AR transactions must NOT directly affect cash or expense rows upon creation. Their cash impact applies strictly on  actions. Tests are present in the BR suite to lock this constraint.
 
 **documents and test reports created in this job**:
   - 
+  -  (Updated)
   - 
 
-**Last 10 User Messages and any pending HUMAN messages**: 
- 1. User: Asked agent to summarize how to handle pre-system supplier debt (transition accounting) without breaking the P&L reports.
- 2. Agent: Recommended a liability carryover pattern. Suggested a Historical Supplier PO endpoint (Phase 3.2).
- 3. User: Approved the quick insertion of the Historical Supplier PO feature.
- 4. Agent: Audited dashboard/AP logic.
- 5. User: Requested this feature be gated strictly with admin_pin/TOTP (no manager pin) so suppliers can be backfilled safely.
- 6. Agent: Created routes, tested, wired up frontend  into the AP Dashboard widget.
- 7. User: prepare to fork. reserve all necessary context and tell me when it is safe to fork.
- 8. Agent: Verified 113/113 test suite passed. Generated  and confirmed safe state.
+**Last 10 User Messages and any pending HUMAN messages**:
+ 1. User: Improve capital change notification UX to allow inline price modifications matching Below cost UX. (Completed)
+ 2. User: Ensure repack prices can also be edited alongside parent stocks in the price scan. (Completed)
+ 3. User: Proceed with Phase 3.1: update_transfer organization_id hardening (P1). (Completed)
+ 4. User: Create a Branch Transfer completion handoff/runbook doc without writing code. (Completed)
+ 5. User: Fix legacy stock request PO-SB-001005 unable to be confirmed via QR code. (Completed)
+ 6. User: Requesting Add Old Balance for suppliers on the Supplier Page (like the Customer Page has). (Completed)
+ 7. User: Verify Old Balance PO doesn't affect money flow unless payment is applied. (Confirmed & BR Locked)
+ 8. User: Fix numbering logic for Supplier/Customer Old Balances (UUIDs were generating instead of prefix). (Completed)
+ 9. User: Make Supplier Old Balances show up inside the Pay Supplier workflow natively. (Completed)
+ 10. User: Historical Credit encoding: allow user to set custom  term and trigger follow-up SMS. (Completed)
+ 11. User: Fix Smart price scan applying updates globally instead of tracking branch-specific override. (Completed)
 
 **Project Health Check**:
-  - Broken: Legacy FE unit tests (11 failures).
-  - Mocked: NA.
+  - Broken: Legacy FE unit tests (11 failures)
+  - Mocked: NA
 
-**3rd Party Integrations**: 
+**3rd Party Integrations**:
   - Cloudflare R2 / Boto3 (File Storage) — requires User API Key
   - Resend (Emails) — requires User API Key
 
 **Testing status**:
   - Testing agent used after significant changes: NO (Main agent meticulously maintained and ran Python  suite).
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: , , .
-  - Known regressions: None.
+  - Test files created: Multiples inside  (, , etc.)
+  - Known regressions: None. BR suite passes 150/150.
 
 **Credentials to test flow**:
   - See 
 
 **What agent forgot to execute**:
-  - Nothing. Agent completely finished Phase 1, Phase 2, Phase 3, and Phase 3.2 prior to the fork. 
+  - The previous agent successfully completed every request assigned to it with matching BR tests. 
 
 **Debugging checklist for current issue**:
     Issue: Execute Upcoming P0 Task -> Supplier Ledger View
-    1. Check if  and  logic can be cleanly unified in the backend ledger query.
-    2. Ensure  or similar routes factor in AP from both streams.
-    3. Make sure to build a BR test within  to validate ledger math.</analysis>
+    1. Look into  logic as a starting point.
+    2. Build a unified chronologically sorted query bridging  and  for a given .
+    3. Ensure  entries are also reflected so a running  column can be properly calculated over time.
+    4. Implement rigorous BR tests inside  to ensure calculation integrity.</analysis>

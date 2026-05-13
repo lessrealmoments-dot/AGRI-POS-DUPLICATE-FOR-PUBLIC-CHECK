@@ -25,6 +25,7 @@ import InventoryPage from './pages/InventoryPage';
 import CustomersPage from './pages/CustomersPage';
 import PriceSchemesPage from './pages/PriceSchemesPage';
 import PriceManagerPage from './pages/PriceManagerPage';
+import CapitalChangeReportPage from './pages/CapitalChangeReportPage';
 import SalesPage from './pages/SalesPage';
 import UnifiedSalesPage from './pages/UnifiedSalesPage';
 import PurchaseOrderPage from './pages/PurchaseOrderPage';
@@ -241,6 +242,7 @@ function AppRoutes() {
       <Route path="/customers" element={<ProtectedRoute><CustomersPage /></ProtectedRoute>} />
       <Route path="/price-schemes" element={<ProtectedRoute><PriceSchemesPage /></ProtectedRoute>} />
       <Route path="/price-manager" element={<ProtectedRoute><PriceManagerPage /></ProtectedRoute>} />
+      <Route path="/capital-change-report" element={<ProtectedRoute><CapitalChangeReportPage /></ProtectedRoute>} />
       <Route path="/sales" element={<ProtectedRoute><SalesPage /></ProtectedRoute>} />
       <Route path="/sales-order" element={<ProtectedRoute><UnifiedSalesPage /></ProtectedRoute>} />
       <Route path="/purchase-orders" element={<ProtectedRoute><FeatureGate featureKey="purchase_orders"><PurchaseOrderPage /></FeatureGate></ProtectedRoute>} />

@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "test_database")
 API = os.environ.get(
-    "API_URL", "https://qr-mobile-confirm.preview.emergentagent.com"
+    "API_URL", "https://supplier-sync-23.preview.emergentagent.com"
 ).rstrip("/") + "/api"
 
 # Find a real org user to test against

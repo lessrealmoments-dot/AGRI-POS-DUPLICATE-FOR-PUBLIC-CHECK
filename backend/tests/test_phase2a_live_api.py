@@ -11,7 +11,7 @@ import requests
 
 BASE_URL = os.environ.get(
     "REACT_APP_BACKEND_URL",
-    "https://qr-mobile-confirm.preview.emergentagent.com",
+    "https://supplier-sync-23.preview.emergentagent.com",
 ).rstrip("/")
 ENDPOINT = f"{BASE_URL}/api/admin/customer-balance-reconciliation"
 

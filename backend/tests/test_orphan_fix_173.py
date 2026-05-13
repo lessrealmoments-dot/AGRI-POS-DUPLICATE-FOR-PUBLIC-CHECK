@@ -3,7 +3,7 @@ Iter 173: tests for orphan-receivable + customer-delete-guard + sales-orphan-rej
 """
 import os, time, requests
 
-API = os.environ.get("API_URL", "https://qr-mobile-confirm.preview.emergentagent.com").rstrip("/") + "/api"
+API = os.environ.get("API_URL", "https://supplier-sync-23.preview.emergentagent.com").rstrip("/") + "/api"
 EMAIL = os.environ.get("TEST_EMAIL", "janmarkeahig@gmail.com")
 PASSWORD = os.environ.get("TEST_PASSWORD", "Aa@58798546521325")
 

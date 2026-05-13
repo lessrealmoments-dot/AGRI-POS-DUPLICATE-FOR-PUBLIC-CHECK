@@ -1,6 +1,49 @@
 # AgriBooks PRD
 
 
+## Capital Change Report Page (Feb 13 2026) ✅
+
+### Status: COMPLETE — new printable report listing every product whose cost moved within the selected window. Backend endpoint + frontend page + 6 BR tests; **156/156 BR pass / 423 rows** (was 150/150 + 6 new).
+
+### Why
+Operators maintain a printed price list. When supplier costs move via PO arrivals, they need a single sheet that lists which products' capital changed and by how much, grouped by category, with chronological direction (green = down, red = up) — so the physical price list can be updated by hand. Previously this required combing through `/api/products/{id}/capital-history` per product. There was no aggregate, printable, category-grouped view.
+
+### What was delivered
+1. **Backend `GET /api/products/capital-change-report`** (in `routes/products.py`):
+   - Query params: `range` (`30d`/`60d`/`90d`/`180d`/`365d`/`all`), `category`, `branch_id`, `search`, `source_type` (default `purchase_order`; supports `manual_edit` and `all`).
+   - Aggregates `db.capital_changes` rows, groups by category → products, attaches per-product chronological `changes[]` (oldest → newest) with `direction` per record, `by_month` bucket (YYYY-MM), `net_delta` / `net_delta_pct` vs window-start capital, and increase/decrease counters.
+   - Returns `summary` aggregate + `all_categories` for FE filter dropdown.
+   - Tenant scope flows through the `TenantDB` proxy on `db` (auto-injects `organization_id`).
+2. **Frontend `pages/CapitalChangeReportPage.js`**:
+   - Range pills, category select, source filter, search, optional branch select (admins with cross-branch view).
+   - Two view modes: **Sequence** (pill chain: `start → new1 → new2 → … → current`, color-coded by direction) and **Month bucket** (table with one column per YYYY-MM, multiple pills per cell when several changes hit the same month).
+   - Category sections collapsible. Summary card at the top. Empty state when window is dry.
+   - Print button + dedicated `@media print` stylesheet (A4 landscape, hides nav/filters, breaks-inside-avoid on category cards, prints filter context line at the top).
+3. **Wiring**:
+   - Route `/capital-change-report` mounted in `App.js`.
+   - Sidebar nav entry "Capital Changes" added under **Management** (perm `products.edit`, lucide `BarChart3` icon).
+4. **BR test file `tests/business_regression/test_br_capital_change_report.py`** — 6 tests locking:
+   - Basic shape, sort order, direction enum, net delta, increases/decreases counters.
+   - Range filter excludes older changes (30d vs 60d).
+   - Source-type filter (default PO; `manual_edit`; `all`).
+   - Category filter.
+   - Search filter (name OR sku, case-insensitive).
+   - `by_month` bucket key shape + total cardinality.
+
+### Verification
+- BR suite: **156/156 pass / 423 rows** (previously 150 + 6 new).
+- ESLint clean on `CapitalChangeReportPage.js`. Ruff clean on `routes/products.py`.
+- All range variants (30d/60d/90d/180d/365d/all) verified via curl → 200 OK.
+- Smoke screenshot rendered cleanly under super-admin (empty-state path) with full UI: range tabs, category/source/search/view toggle, summary, and empty banner. No runtime errors.
+
+### Files changed
+- MOD `backend/routes/products.py` — new `GET /capital-change-report` handler before `capital-change-alerts`.
+- NEW `backend/tests/business_regression/test_br_capital_change_report.py` (6 tests).
+- NEW `frontend/src/pages/CapitalChangeReportPage.js`.
+- MOD `frontend/src/App.js` (import + route).
+- MOD `frontend/src/components/Layout.js` (sidebar entry).
+
+
 ## Suppliers Page — "Add Old Balance" Entry Point (Feb 13 2026) ✅
 
 ### Status: COMPLETE — frontend-only patch; Historical Supplier PO dialog now mounted on the Suppliers page with per-vendor pre-selection; **131/131 BR pass** (backend untouched, sample re-run 12/12 historical_supplier_po cases).

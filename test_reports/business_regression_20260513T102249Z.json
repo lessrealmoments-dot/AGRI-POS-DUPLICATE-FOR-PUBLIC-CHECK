@@ -1,0 +1,143 @@
+{
+  "generated_at": "2026-05-13T10:22:49.693730+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 6,
+  "pass_count": 6,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br_cap_report.1_basic_shape",
+      "step": "changes_sorted_with_correct_directions",
+      "expected": {
+        "change_count": 4,
+        "directions": [
+          "up",
+          "down",
+          "up",
+          "down"
+        ],
+        "first_capital": 200.0,
+        "current_capital": 245.0,
+        "net_delta": 45.0,
+        "increases": 2,
+        "decreases": 2
+      },
+      "actual": {
+        "change_count": 4,
+        "directions": [
+          "up",
+          "down",
+          "up",
+          "down"
+        ],
+        "first_capital": 200.0,
+        "current_capital": 245.0,
+        "net_delta": 45.0,
+        "increases": 2,
+        "decreases": 2
+      },
+      "status": "PASS",
+      "evidence": {
+        "product_id": "br_cap_rep-p-44238bcc"
+      },
+      "recorded_at": "2026-05-13T10:22:49.430824+00:00"
+    },
+    {
+      "scenario": "br_cap_report.2_range_filter",
+      "step": "30d_excludes_old_60d_includes_both",
+      "expected": {
+        "count_30": 1,
+        "first_30": 110.0,
+        "count_60": 2,
+        "first_60": 100.0
+      },
+      "actual": {
+        "count_30": 1,
+        "first_30": 110.0,
+        "count_60": 2,
+        "first_60": 100.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "product_id": "br_cap_rep-p-98ffd484"
+      },
+      "recorded_at": "2026-05-13T10:22:49.435953+00:00"
+    },
+    {
+      "scenario": "br_cap_report.3_source_type_filter",
+      "step": "default_po_only_all_includes_both_manual_only_excludes_po",
+      "expected": {
+        "po_count": 1,
+        "all_count": 2,
+        "manual_count": 1
+      },
+      "actual": {
+        "po_count": 1,
+        "all_count": 2,
+        "manual_count": 1
+      },
+      "status": "PASS",
+      "evidence": {
+        "product_id": "br_cap_rep-p-a2373ea5"
+      },
+      "recorded_at": "2026-05-13T10:22:49.440526+00:00"
+    },
+    {
+      "scenario": "br_cap_report.4_category_filter",
+      "step": "only_filtered_category_returned",
+      "expected": {
+        "contains_CatA": true,
+        "contains_CatB": false
+      },
+      "actual": {
+        "contains_CatA": true,
+        "contains_CatB": false
+      },
+      "status": "PASS",
+      "evidence": {
+        "seen_cats": [
+          "CatA"
+        ]
+      },
+      "recorded_at": "2026-05-13T10:22:49.443973+00:00"
+    },
+    {
+      "scenario": "br_cap_report.5_search_filter",
+      "step": "search_matches_name_excludes_other",
+      "expected": {
+        "x_found": true,
+        "y_found": false
+      },
+      "actual": {
+        "x_found": true,
+        "y_found": false
+      },
+      "status": "PASS",
+      "evidence": {
+        "hits": [
+          "br_cap_rep-p-19198cdc"
+        ]
+      },
+      "recorded_at": "2026-05-13T10:22:49.447644+00:00"
+    },
+    {
+      "scenario": "br_cap_report.6_by_month_shape",
+      "step": "month_keys_valid_and_count_matches",
+      "expected": {
+        "valid_keys": true,
+        "total_in_buckets": 2
+      },
+      "actual": {
+        "valid_keys": true,
+        "total_in_buckets": 2
+      },
+      "status": "PASS",
+      "evidence": {
+        "months": [
+          "2026-05"
+        ]
+      },
+      "recorded_at": "2026-05-13T10:22:49.450849+00:00"
+    }
+  ]
+}
