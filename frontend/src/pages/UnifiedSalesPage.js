@@ -20,7 +20,7 @@ import {
   Search, Plus, Minus, Trash2, ShoppingCart, CreditCard, X, Wifi, WifiOff,
   RefreshCw, FileText, Lock, Zap, ClipboardList, AlertTriangle, Shield, CheckCircle2, Smartphone, Camera, Check,
   PackageX, ShieldAlert, ChevronDown, Eye, EyeOff, User, Package, PauseCircle, Inbox, RotateCcw,
-  ArrowUpRight, ArrowDownRight, Info, Unlock, Clock
+  ArrowUpRight, ArrowDownRight, Info, Unlock, Clock, Truck
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -49,6 +49,10 @@ import HistoricalCreditBanner from '../components/HistoricalCreditBanner';
 import HistoricalCreditDialog from '../components/HistoricalCreditDialog';
 import CheckoutDialog from '../components/CheckoutDialog';
 import CreditApprovalDialog from '../components/CreditApprovalDialog';
+import POSHistoryUnlockGate from '../components/POSHistoryUnlockGate';
+import POSSalesHistoryView from '../components/POSSalesHistoryView';
+import POSPurchaseHistoryView from '../components/POSPurchaseHistoryView';
+import POSPurchaseDetailDialog from '../components/POSPurchaseDetailDialog';
 
 // ── Bounded Levenshtein distance ─────────────────────────────────────────────
 // Returns the edit distance between `a` and `b`, BUT bails out early as soon
@@ -255,6 +259,7 @@ export default function UnifiedSalesPage() {
   const [historyTotals, setHistoryTotals] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState(null); // detail modal
+  const [posPurchaseDetailId, setPosPurchaseDetailId] = useState(null); // POS purchase-history detail dialog
   const selectInvoiceWithReceipts = async (inv) => {
     setSelectedInvoice(inv);
     // Load receipts for digital/split invoices
@@ -3040,7 +3045,7 @@ export default function UnifiedSalesPage() {
         <div className="flex items-center gap-4">
           <h1 className="text-xl font-bold tracking-tight" style={{ fontFamily: 'Manrope' }}>Sales</h1>
 
-          {/* Main Tab: New Sale / History */}
+          {/* Main Tab: New Sale / Sales History / Purchase History */}
           <div className="inline-flex items-center bg-slate-100/80 rounded-xl p-1 shadow-inner ring-1 ring-slate-200/40" data-testid="main-tab-toggle">
             <button
               onClick={() => salesGuard.requestSafe(() => setMainTab('sale'))}
@@ -3055,6 +3060,13 @@ export default function UnifiedSalesPage() {
               data-testid="tab-history"
             >
               <FileText size={14} /> Sales History
+            </button>
+            <button
+              onClick={() => salesGuard.requestSafe(() => setMainTab('po-history'))}
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${mainTab === 'po-history' ? 'bg-white shadow-sm ring-1 ring-slate-200/60 text-[#1A4D2E]' : 'text-slate-500 hover:text-slate-700'}`}
+              data-testid="tab-po-history"
+            >
+              <Truck size={14} /> Purchase History
             </button>
           </div>
 
@@ -3243,99 +3255,45 @@ export default function UnifiedSalesPage() {
         </div>
       </div>
 
-      {/* ─── HISTORY TAB ─────────────────────────────────────────────────── */}
+      {/* ─── SALES HISTORY TAB ───────────────────────────────────────────────
+            PIN-gated: managers limited to their assigned branch; Owner PIN
+            and Authenticator (TOTP) work anywhere. Backend enforces via
+            verify_pin_for_action(action_key='pos_view_history', branch_id=…).
+            See POSHistoryUnlockGate. */}
       {mainTab === 'history' && (
         <div className="flex-1 overflow-auto px-1">
-          {/* Running totals */}
-          {historyTotals && (
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-4">
-              {[
-                { label: 'Cash Sales', value: formatPHP(historyTotals.cash), color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200' },
-                { label: 'Digital Sales', value: formatPHP(historyTotals.digital || 0), color: 'text-blue-700', bg: 'bg-blue-50', border: 'border-blue-200' },
-                { label: 'Credit Sales', value: formatPHP(historyTotals.credit), color: 'text-amber-700', bg: 'bg-amber-50', border: 'border-amber-200' },
-                { label: 'Grand Total', value: formatPHP(historyTotals.grand_total), color: 'text-[#1A4D2E]', bg: 'bg-emerald-50', border: 'border-[#1A4D2E]/30' },
-                { label: 'Transactions', value: historyTotals.count, color: 'text-slate-700', bg: 'bg-slate-50', border: 'border-slate-200', sub: historyTotals.voided_count > 0 ? `${historyTotals.voided_count} voided` : null },
-              ].map(k => (
-                <div key={k.label} className={`rounded-xl border ${k.border} ${k.bg} px-4 py-3`}>
-                  <p className="text-[11px] text-slate-500 font-medium">{k.label}</p>
-                  <p className={`text-lg font-bold font-mono ${k.color}`}>{k.value}</p>
-                  {k.sub && <p className="text-[10px] text-slate-400">{k.sub}</p>}
-                </div>
-              ))}
-            </div>
-          )}
+          <POSHistoryUnlockGate
+            label="Sales History"
+            branch={currentBranch}
+            pinSession={pinSession}
+            startPinSession={startPinSession}
+          >
+            <POSSalesHistoryView
+              currentBranch={currentBranch}
+              isOnline={isOnline}
+              onSelectInvoice={selectInvoiceWithReceipts}
+            />
+          </POSHistoryUnlockGate>
+        </div>
+      )}
 
-          {/* Filters */}
-          <div className="flex gap-2 mb-3">
-            <Input type="date" value={historyDate} onChange={e => setHistoryDate(e.target.value)}
-              className="h-9 w-40 text-sm" />
-            <Input placeholder="Search invoice # or customer..." value={historySearch}
-              onChange={e => setHistorySearch(e.target.value)} className="h-9 flex-1 text-sm" />
-            <Button variant="outline" size="sm" onClick={loadHistory} disabled={historyLoading || !isOnline} className="h-9">
-              <RefreshCw size={13} className={historyLoading ? 'animate-spin' : ''} />
-            </Button>
-          </div>
-
-          {/* Sales list */}
-          {!isOnline ? (
-            <div className="text-center py-12 text-slate-400">
-              <WifiOff size={20} className="mx-auto mb-2" />
-              <p className="text-sm">History requires internet connection</p>
-            </div>
-          ) : historyLoading ? (
-            <div className="text-center py-12"><RefreshCw size={20} className="animate-spin mx-auto text-slate-400" /></div>
-          ) : historyList.length === 0 ? (
-            <div className="text-center py-12 text-slate-400">
-              <FileText size={28} className="mx-auto mb-2 opacity-40" />
-              <p className="text-sm">No sales found for {historyDate}</p>
-            </div>
-          ) : (
-            <div className="space-y-1.5">
-              {historyList.map(inv => {
-                const isVoided = inv.status === 'voided';
-                const ptype = inv.payment_type || 'cash';
-                const isSplit = ptype === 'split';
-                const isDigital = ptype === 'digital' || isSplit;
-                const isCash = ptype === 'cash' || (ptype !== 'credit' && ptype !== 'partial' && !isDigital && !inv.customer_id);
-                const isCredit = ptype === 'credit' || ptype === 'partial';
-                const hasBalance = inv.balance > 0 && !isVoided;
-                const time = formatTime(inv.created_at);
-                const badgeInfo = isVoided ? { label: 'VOIDED', cls: 'bg-slate-200 text-slate-500' }
-                  : isSplit ? { label: `Split · ${inv.digital_platform || 'Digital'}`, cls: 'bg-indigo-100 text-indigo-700' }
-                  : ptype === 'digital' ? { label: inv.digital_platform || 'Digital', cls: 'bg-blue-100 text-blue-700' }
-                  : isCredit ? { label: 'Credit', cls: 'bg-amber-100 text-amber-700' }
-                  : { label: 'Cash', cls: 'bg-emerald-100 text-emerald-700' };
-                return (
-                  <button key={inv.id} onClick={() => selectInvoiceWithReceipts(inv)}
-                    data-testid={`history-row-${inv.id}`}
-                    className={`w-full text-left rounded-xl border px-4 py-3 transition-all hover:shadow-sm ${isVoided ? 'bg-slate-50 border-slate-100 opacity-60' : 'bg-white border-slate-200 hover:border-[#1A4D2E]/30'}`}>
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <span className="text-[11px] text-slate-400 font-mono w-10 shrink-0">{time}</span>
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono text-sm font-semibold text-blue-700">{inv.invoice_number}</span>
-                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${badgeInfo.cls}`}>{badgeInfo.label}</span>
-                          </div>
-                          <p className="text-xs text-slate-500 truncate max-w-[180px]">{inv.customer_name || 'Walk-in'}</p>
-                        </div>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <p className={`font-bold font-mono ${isVoided ? 'text-slate-400 line-through' : 'text-slate-800'}`}>{formatPHP(inv.grand_total)}</p>
-                        {hasBalance && <p className="text-[10px] text-amber-600">bal {formatPHP(inv.balance)}</p>}
-                        {!hasBalance && !isVoided && isDigital && (
-                          <p className={`text-[10px] ${inv.receipt_review_status === 'reviewed' ? 'text-emerald-600' : 'text-blue-500'}`}>
-                            {inv.receipt_review_status === 'reviewed' ? 'verified' : 'needs verify'}
-                          </p>
-                        )}
-                        {!hasBalance && !isVoided && !isDigital && <p className="text-[10px] text-emerald-600">paid</p>}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
+      {/* ─── PURCHASE HISTORY TAB ────────────────────────────────────────────
+            Same gate semantics as Sales History above. Click on a PO row
+            opens the read-only POSPurchaseDetailDialog with a Print button. */}
+      {mainTab === 'po-history' && (
+        <div className="flex-1 overflow-auto px-1">
+          <POSHistoryUnlockGate
+            label="Purchase History"
+            branch={currentBranch}
+            pinSession={pinSession}
+            startPinSession={startPinSession}
+          >
+            <POSPurchaseHistoryView
+              currentBranch={currentBranch}
+              isOnline={isOnline}
+              onSelectPO={(po) => setPosPurchaseDetailId(po.id)}
+            />
+          </POSHistoryUnlockGate>
         </div>
       )}
 
@@ -5448,6 +5406,13 @@ export default function UnifiedSalesPage() {
         grandTotal={grandTotal}
         terms={header.terms}
         termsDays={header.terms_days || 0}
+      />
+
+      {/* POS Purchase History — read-only detail dialog with reprint */}
+      <POSPurchaseDetailDialog
+        poId={posPurchaseDetailId}
+        open={!!posPurchaseDetailId}
+        onClose={() => setPosPurchaseDetailId(null)}
       />
 
     </div>

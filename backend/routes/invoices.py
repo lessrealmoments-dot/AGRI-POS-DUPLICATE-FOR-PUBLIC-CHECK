@@ -912,6 +912,120 @@ async def restore_invoice_date(
 
 # ==================== VOID / REOPEN ====================
 
+@router.get("/invoices/history/by-range")
+async def get_invoices_by_range(
+    range: str = "today",                                  # today|week|month|30d|custom
+    from_date: Optional[str] = None,                       # YYYY-MM-DD (when range=custom)
+    to_date: Optional[str] = None,                         # YYYY-MM-DD (when range=custom)
+    branch_id: Optional[str] = None,
+    search: Optional[str] = None,
+    include_voided: bool = True,
+    user=Depends(get_current_user),
+):
+    """POS-terminal History view — sales over a flexible window.
+
+    Range chips:
+      • today  → just today
+      • week   → last 7 days (inclusive)
+      • month  → last 30 days  (calendar-day, not month-of-month, mirrors UI)
+      • 30d    → alias of month
+      • custom → uses `from_date` / `to_date` (inclusive)
+
+    Branch scoping is enforced by `get_branch_filter`: managers/cashiers are
+    locked to their assigned branch_ids; admins can pass any branch_id.
+    Newest-first sort. Includes voided invoices by default for paper-trail.
+    """
+    from datetime import datetime as _dt, timedelta as _td
+    today = await today_local(user.get("organization_id") or "")
+
+    # Resolve window ---------------------------------------------------------
+    rng = (range or "today").lower()
+    if rng == "today":
+        win_from = today
+        win_to = today
+    elif rng == "week":
+        win_to = today
+        win_from = (_dt.strptime(today, "%Y-%m-%d") - _td(days=6)).strftime("%Y-%m-%d")
+    elif rng in ("month", "30d"):
+        win_to = today
+        win_from = (_dt.strptime(today, "%Y-%m-%d") - _td(days=29)).strftime("%Y-%m-%d")
+    elif rng == "custom":
+        win_from = (from_date or today).strip()
+        win_to = (to_date or today).strip()
+        if win_from > win_to:
+            win_from, win_to = win_to, win_from
+    else:
+        win_from = today
+        win_to = today
+
+    # Build mongo query ------------------------------------------------------
+    query: dict = {}
+    if not include_voided:
+        query["status"] = {"$ne": "voided"}
+
+    branch_filter = await get_branch_filter(user, branch_id)
+    query = apply_branch_filter(query, branch_filter)
+
+    # Match by order_date OR invoice_date within window (inclusive)
+    date_window = {"$gte": win_from, "$lte": win_to}
+    date_or = [{"order_date": date_window}, {"invoice_date": date_window}]
+
+    if search:
+        search_or = [
+            {"invoice_number": {"$regex": search, "$options": "i"}},
+            {"customer_name":  {"$regex": search, "$options": "i"}},
+        ]
+        query["$and"] = [{"$or": date_or}, {"$or": search_or}]
+    else:
+        query["$or"] = date_or
+
+    invoices = await db.invoices.find(query, {"_id": 0}).sort("created_at", -1).to_list(1500)
+
+    # Totals (reuse logic from by-date) --------------------------------------
+    cash_total = sum(
+        float(inv.get("amount_paid", 0)) for inv in invoices
+        if inv.get("status") != "voided"
+        and inv.get("payment_type") in ("cash", None)
+        and inv.get("sale_type") != "cash_advance"
+    )
+    digital_total = sum(
+        float(inv.get("grand_total", 0)) for inv in invoices
+        if inv.get("status") != "voided" and inv.get("payment_type") == "digital"
+    )
+    credit_total = sum(
+        float(inv.get("balance", 0)) for inv in invoices
+        if inv.get("status") != "voided" and inv.get("payment_type") in ("credit", "partial")
+    )
+    for inv in invoices:
+        if inv.get("status") == "voided":
+            continue
+        if inv.get("payment_type") == "partial":
+            cash_total += float(inv.get("amount_paid", 0))
+        elif inv.get("payment_type") == "split":
+            cash_total    += float(inv.get("cash_amount", 0))
+            digital_total += float(inv.get("digital_amount", 0))
+    grand_total = sum(
+        float(inv.get("grand_total", 0)) for inv in invoices
+        if inv.get("status") != "voided"
+    )
+    voided_count = sum(1 for inv in invoices if inv.get("status") == "voided")
+
+    return {
+        "invoices": invoices,
+        "totals": {
+            "cash":        round(cash_total, 2),
+            "digital":     round(digital_total, 2),
+            "credit":      round(credit_total, 2),
+            "grand_total": round(grand_total, 2),
+            "count":       len([i for i in invoices if i.get("status") != "voided"]),
+            "voided_count": voided_count,
+        },
+        "range": rng,
+        "from": win_from,
+        "to":   win_to,
+    }
+
+
 @router.get("/invoices/history/by-date")
 async def get_invoices_by_date(
     date: Optional[str] = None,

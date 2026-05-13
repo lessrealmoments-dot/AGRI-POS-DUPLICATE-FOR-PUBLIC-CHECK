@@ -372,6 +372,106 @@ async def get_incoming_requests(
     return {"requests": requests, "total": len(requests)}
 
 
+@router.get("/history/by-range")
+async def get_purchase_orders_by_range(
+    range: str = "today",                                  # today|week|month|30d|custom
+    from_date: Optional[str] = None,                       # YYYY-MM-DD when range=custom
+    to_date: Optional[str] = None,                         # YYYY-MM-DD when range=custom
+    branch_id: Optional[str] = None,
+    search: Optional[str] = None,
+    user=Depends(get_current_user),
+):
+    """POS-terminal History view — purchase orders over a flexible window.
+
+    Range chips mirror invoices/history/by-range:
+      • today | week (7d) | month (30d) | 30d (alias) | custom
+
+    Branch scoping is enforced by `get_branch_filter`: managers/cashiers are
+    locked to their assigned branch_ids; admins can pass any branch_id.
+    Sorted newest-first. Returns headers only (no line-items, no receipts);
+    the client opens a per-PO detail dialog to drill in.
+    """
+    from datetime import datetime as _dt, timedelta as _td
+    today = await today_local(user.get("organization_id") or "")
+
+    rng = (range or "today").lower()
+    if rng == "today":
+        win_from = today
+        win_to = today
+    elif rng == "week":
+        win_to = today
+        win_from = (_dt.strptime(today, "%Y-%m-%d") - _td(days=6)).strftime("%Y-%m-%d")
+    elif rng in ("month", "30d"):
+        win_to = today
+        win_from = (_dt.strptime(today, "%Y-%m-%d") - _td(days=29)).strftime("%Y-%m-%d")
+    elif rng == "custom":
+        win_from = (from_date or today).strip()
+        win_to = (to_date or today).strip()
+        if win_from > win_to:
+            win_from, win_to = win_to, win_from
+    else:
+        win_from = today
+        win_to = today
+
+    query: dict = {}
+    branch_filter = await get_branch_filter(user, branch_id)
+    query = apply_branch_filter(query, branch_filter)
+
+    # PO `date` is YYYY-MM-DD string; `created_at` is ISO timestamp.
+    # Match either so partial-date legacy POs still show.
+    date_window = {"$gte": win_from, "$lte": win_to}
+    date_or: list = [{"date": date_window}]
+    # created_at falls back to ISO timestamp range
+    ts_from = win_from + "T00:00:00"
+    ts_to   = win_to + "T23:59:59"
+    date_or.append({"created_at": {"$gte": ts_from, "$lte": ts_to}})
+
+    if search:
+        search_or = [
+            {"po_number": {"$regex": search, "$options": "i"}},
+            {"vendor":    {"$regex": search, "$options": "i"}},
+        ]
+        query["$and"] = [{"$or": date_or}, {"$or": search_or}]
+    else:
+        query["$or"] = date_or
+
+    pos = await db.purchase_orders.find(query, {"_id": 0}).sort("created_at", -1).to_list(1500)
+
+    # Compact summary totals (used by the running-totals header strip) -------
+    spent_total = 0.0
+    paid_total  = 0.0
+    outstanding = 0.0
+    counts = {"received": 0, "draft": 0, "partial": 0, "cancelled": 0, "open": 0}
+    for po in pos:
+        st = (po.get("status") or "open").lower()
+        if st == "cancelled":
+            counts["cancelled"] += 1
+            continue
+        gt = float(po.get("grand_total") or 0)
+        bal = float(po.get("balance") or 0)
+        spent_total += gt
+        paid_total  += max(gt - bal, 0)
+        outstanding += bal
+        if st in counts:
+            counts[st] += 1
+        else:
+            counts["open"] += 1
+
+    return {
+        "purchase_orders": pos,
+        "totals": {
+            "spent":       round(spent_total, 2),
+            "paid":        round(paid_total, 2),
+            "outstanding": round(outstanding, 2),
+            "count":       len(pos),
+            "by_status":   counts,
+        },
+        "range": rng,
+        "from":  win_from,
+        "to":    win_to,
+    }
+
+
 @router.get("")
 async def list_purchase_orders(
     user=Depends(get_current_user),
