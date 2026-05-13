@@ -321,8 +321,24 @@ export default function BranchTransferPage() {
 
   useEffect(() => { if (tab === 'history') loadRequests(); }, [tab, loadRequests]);
 
-  // Generate a branch transfer from a stock request
+  // Generate a branch transfer from a stock request.
+  // Phase 0.5 — branch-context aware:
+  //   * Non-admin: hidden in UI when currentBranch != supply_branch_id.
+  //     If the button somehow reaches this handler from the wrong
+  //     context (deep link, stale state), the backend will 403.
+  //   * Admin: button shown, but if currentBranch differs from the
+  //     supply branch we prompt before sending the request.
   const handleGenerateTransfer = async (request) => {
+    const myBranchId = currentBranch?.id || user?.branch_id || '';
+    const supplyBranchId = request.supply_branch_id || '';
+    if (isAdmin && supplyBranchId && myBranchId && supplyBranchId !== myBranchId) {
+      const supplyName = (branches || []).find(b => b.id === supplyBranchId)?.name || supplyBranchId;
+      const myName = currentBranch?.name || 'current branch';
+      const ok = window.confirm(
+        `You are viewing as "${myName}". This will prepare a transfer FROM "${supplyName}".\n\nContinue anyway?`
+      );
+      if (!ok) return;
+    }
     setGeneratingTransfer(request.id);
     try {
       const res = await api.post(`/purchase-orders/${request.id}/generate-branch-transfer`);
@@ -1027,8 +1043,13 @@ export default function BranchTransferPage() {
   };
 
   // Cancel a stock request. Backend requires manager PIN (same as PO cancel).
+  // Phase 0.5: Removed the hard-coded `in_progress` guard — the backend
+  // now decides based on whether a linked BTO exists. If a linked BTO
+  // blocks cancel, the backend returns 400 with an actionable detail
+  // pointing at the BTO number.
   const handleCancelRequest = async (req) => {
-    if (!(req.status === 'requested' || req.status === 'draft')) {
+    // Status guard for genuinely terminal states; in_progress is now allowed.
+    if (req.status === 'fulfilled' || req.status === 'partially_fulfilled' || req.status === 'cancelled') {
       toast.error(`Cannot cancel — status is "${req.status}"`);
       return;
     }
@@ -1040,7 +1061,9 @@ export default function BranchTransferPage() {
       toast.success('Stock request cancelled');
       loadOrders();
     } catch (e) {
-      toast.error(e.response?.data?.detail || 'Cancel failed');
+      // If backend points at a linked BTO, surface that to the operator.
+      const detail = e.response?.data?.detail || 'Cancel failed';
+      toast.error(detail);
     }
   };
 
@@ -1635,7 +1658,7 @@ export default function BranchTransferPage() {
                     {saving ? <RefreshCw size={14} className="animate-spin mr-1.5" /> : <Send size={14} className="mr-1.5" />}
                     {editingOrderId ? 'Save Draft' : 'Create Transfer Order'}
                   </Button>
-                  {!editingOrderId && (
+                  {!editingOrderId && !isAdmin && (
                     <Button onClick={() => handleSubmit({ requiresApproval: true })}
                       disabled={saving || !toBranchId || !validRows.length}
                       variant="outline"
@@ -1947,14 +1970,14 @@ export default function BranchTransferPage() {
                               <XCircle size={12} className="mr-1" /> Cancel
                             </Button>
                           )}
-                          {(req.status === 'requested' || req.status === 'draft') && (
+                          {(req.status === 'requested' || req.status === 'draft') && (isAdmin || (currentBranch?.id && req.supply_branch_id === currentBranch.id)) && (
                             <Button size="sm" onClick={() => handleGenerateTransfer(req)} disabled={generatingTransfer === req.id}
                               className="h-10 px-5 bg-[#1A4D2E] hover:bg-[#14532d] text-white text-sm font-semibold" data-testid={`gen-transfer-${req.id}`}>
                               {generatingTransfer === req.id ? <RefreshCw size={14} className="animate-spin mr-2" /> : <ArrowRight size={14} className="mr-2" />}
                               Generate Transfer
                             </Button>
                           )}
-                          {req.status === 'in_progress' && (
+                          {req.status === 'in_progress' && (isAdmin || (currentBranch?.id && req.supply_branch_id === currentBranch.id)) && (
                             <Button size="sm" onClick={() => handleGenerateTransfer(req)} disabled={generatingTransfer === req.id}
                               className="h-10 px-5 bg-amber-700 hover:bg-amber-800 text-white text-sm font-semibold" data-testid={`resume-transfer-${req.id}`}>
                               {generatingTransfer === req.id ? <RefreshCw size={14} className="animate-spin mr-2" /> : <ArrowRight size={14} className="mr-2" />}
@@ -1976,6 +1999,12 @@ export default function BranchTransferPage() {
                             </div>
                           )}
                           {req.status === 'in_progress' && <Badge className="text-xs px-2.5 py-1 bg-amber-100 text-amber-700">Transfer In Progress</Badge>}
+                          {req.status === 'in_progress' && req.linked_bto_number && (
+                            <Badge className="text-xs px-2.5 py-1 bg-slate-50 text-slate-600 border border-slate-200"
+                              data-testid={`linked-bto-incoming-${req.id}`}>
+                              Linked: {req.linked_bto_number}
+                            </Badge>
+                          )}
                         </div>
                       </div>
                     );
@@ -2052,6 +2081,12 @@ export default function BranchTransferPage() {
                               </div>
                             )}
                             {req.status === 'in_progress' && <Badge className="text-xs px-2.5 py-1 bg-amber-100 text-amber-700">Transfer In Progress</Badge>}
+                            {req.status === 'in_progress' && req.linked_bto_number && (
+                              <Badge className="text-xs px-2.5 py-1 bg-slate-50 text-slate-600 border border-slate-200"
+                                data-testid={`linked-bto-outgoing-${req.id}`}>
+                                Linked: {req.linked_bto_number}
+                              </Badge>
+                            )}
                             {req.status === 'requested' && <Badge className="text-xs px-2.5 py-1 bg-blue-100 text-blue-700">Awaiting Response</Badge>}
                           </div>
                         </div>

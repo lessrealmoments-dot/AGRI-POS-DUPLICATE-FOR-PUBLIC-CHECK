@@ -4146,3 +4146,108 @@ Full design spec in `/app/memory/NEXT_FORK_HANDOFF.md`. Summary:
 - `test_reports/iteration_158.json` — Terminal Smart Sync Phase 1-3 (16/16 backend + all frontend tests passed)
 - `test_reports/iteration_15-17.json` — Phase 3 incident resolution
 - Latest: all QR phases tested manually with curl + screenshots
+
+
+---
+
+## Phase 0.5 — Branch Transfer Lifecycle + Permission Foundation (2026-02-13) ✅
+
+**Goal**: clean lifecycle + branch-context guards BEFORE shipping approved_qty / QR
+prep confirmation.
+
+### Backend changes
+- `purchase_orders.generate_branch_transfer_from_request`
+  * No longer flips PO → `in_progress` and no longer stamps
+    `fulfillment_started_*` — it's now a pure prefill.
+  * Non-admin caller must belong to `supply_branch_id` (requesting branch
+    can't fulfill its own request).
+- `branch_transfers.create_transfer`
+  * When `request_po_id` is provided, NOW flips the linked PO →
+    `in_progress` + stamps `fulfillment_started_at`,
+    `fulfillment_started_by`, `linked_bto_id`, `linked_bto_number`. The
+    status mutation happens at actual fulfillment, not at composer-open.
+- `purchase_orders.cancel_purchase_order`
+  * Refuses cancel of a `branch_request` PO when a linked
+    non-cancelled BTO exists; returns `400` with actionable
+    "Cancel linked transfer draft BTO-XXX first."
+  * Non-admin caller must belong to requesting branch (`po.branch_id`).
+  * Stamps verifier identity on the cancelled PO: `cancelled_by_id`,
+    `cancelled_by_name`, `cancel_pin_method`, `cancelled_at`,
+    `cancellation_reason`.
+- `branch_transfers.send_transfer`
+  * Non-admin caller must belong to source branch (`from_branch_id`).
+- `branch_transfers.cancel_transfer`
+  * Same source-branch enforcement.
+- `branch_transfers.approve_pending_transfer`
+  * Passes `branch_id=order["from_branch_id"]` to
+    `verify_pin_for_action`. A Branch A manager PIN can no longer
+    approve a Branch B → Branch A BTO. Admin PIN and TOTP still
+    bypass branch restriction.
+
+### Frontend changes (`BranchTransferPage.js`)
+- `handleCancelRequest` no longer hard-blocks `in_progress`. Backend
+  is the source of truth; if a linked BTO blocks the cancel, the
+  backend's 400 detail is surfaced to the toast.
+- "Generate Transfer" and "Resume Transfer" buttons hidden on incoming
+  request cards when non-admin's `currentBranch !== supply_branch_id`.
+  Admin sees the button and gets a confirm prompt if `currentBranch`
+  doesn't match the supply branch.
+- "Submit for Approval" button hidden for admins (clutter — admins
+  don't need approval).
+- In-progress request cards now show a "Linked: BTO-XXX" badge when
+  `req.linked_bto_number` is set, on both incoming and outgoing views.
+
+### Tests
+- New file `tests/business_regression/test_br_bt_permissions_and_pin.py`
+  — 18 tests, 40 expected-vs-actual rows. 7 of these were RED on the
+  un-fixed baseline (#2, #5, #7, #10, #12, #14, #18) and proved the
+  exact bugs. All 18 GREEN after the fix.
+- Updated `tests/business_regression/test_br_branch_transfer_invariants.py`
+  scenario `br_bt.2_generate_transfer_does_not_move_stock` to assert
+  PO status stays `requested` post-fix (was previously asserting
+  `in_progress` — the old bug).
+
+### Full BR baseline after Phase 0.5
+- 55 BR tests
+- 271 expected-vs-actual rows
+- 0 fail
+- Zero DB footprint confirmed
+
+### Files changed
+- `backend/routes/purchase_orders.py` (cancel + generate-transfer)
+- `backend/routes/branch_transfers.py` (create + send + cancel + approve)
+- `frontend/src/pages/BranchTransferPage.js` (cancel handler + button
+  gating + linked-BTO badge + admin Submit-for-Approval hide)
+- `backend/tests/business_regression/test_br_bt_permissions_and_pin.py` (NEW)
+- `backend/tests/business_regression/test_br_branch_transfer_invariants.py`
+  (one row updated to reflect new lifecycle)
+
+### Stock invariants preserved
+Phase 0 invariants still green. No change to `_apply_receipt`,
+`receive_transfer`, `accept_receipt`, or `dispute_receipt` logic.
+Inventory still mutates only on receive/accept.
+
+### Known remaining gaps (not in Phase 0.5 scope)
+- Internal-invoice silent-fail on BTO create (BT-AUD-30).
+- `update_transfer` PUT can blank `organization_id` (BT-AUD-34).
+- Variance receipt PIN threshold (BT-AUD-35) — defer until owner
+  defines threshold.
+- Receipt-photo enforcement asymmetric web vs terminal (BT-AUD-23).
+- No active_branch JWT field — soft FE confirm only.
+- 11 hardcoded-date FE unit tests (legacy).
+
+### Next planned work (Phase 1)
+- `approved_qty` / Stock Request Confirmation layer:
+  * Add `approval_status` + `items[].approved_qty` to
+    `purchase_orders` collection.
+  * New endpoint `POST /purchase-orders/{po_id}/confirm-request` (web).
+  * New endpoint `POST /qr-actions/{code}/confirm_stock_request`
+    (mobile QR) with `confirm_stock_request` PIN policy.
+  * `generate-branch-transfer` prefers `approved_qty` for `send_qty`
+    prefill when present.
+  * Web modal "Confirm Quantities" on incoming-request card.
+  * Mobile QR landing PIN-gated editor.
+  * "View QR" button on transfer/request cards (renders QR for
+    scanning from screen).
+  * New BR test file `test_br_stock_request_approval.py`.
+

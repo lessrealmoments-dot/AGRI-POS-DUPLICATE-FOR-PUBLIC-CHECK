@@ -1,0 +1,869 @@
+{
+  "generated_at": "2026-05-13T02:19:50.005759+00:00",
+  "pytest_exitstatus": 1,
+  "row_count": 40,
+  "pass_count": 25,
+  "fail_count": 15,
+  "rows": [
+    {
+      "scenario": "br_bt_perm.1_generate_transfer_does_not_create_bto",
+      "step": "bto_count_unchanged",
+      "expected": {
+        "bto_count": 0
+      },
+      "actual": {
+        "bto_count": 0
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "6151c7cd-75a7-4046-b002-c139e8fc552b",
+        "po_number": "PO-BC-001000",
+        "btos_before": 0,
+        "btos_after": 0
+      },
+      "recorded_at": "2026-05-13T02:19:49.347692+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.2_generate_transfer_does_not_mark_in_progress",
+      "step": "po_status_remains_requested",
+      "expected": {
+        "status": "requested"
+      },
+      "actual": {
+        "status": "in_progress"
+      },
+      "status": "FAIL",
+      "evidence": {
+        "po_id": "5a28d3ff-28a1-4ee9-9573-765a6defc4b8",
+        "status_before": "requested",
+        "status_after": "in_progress",
+        "fulfillment_started_at_before": null,
+        "fulfillment_started_at_after": "2026-05-13T02:19:49.361554+00:00"
+      },
+      "recorded_at": "2026-05-13T02:19:49.362636+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.2_generate_transfer_does_not_mark_in_progress",
+      "step": "fulfillment_started_not_stamped_yet",
+      "expected": {
+        "stamped": false
+      },
+      "actual": {
+        "stamped": true
+      },
+      "status": "FAIL",
+      "evidence": {
+        "po_id": "5a28d3ff-28a1-4ee9-9573-765a6defc4b8",
+        "status_before": "requested",
+        "status_after": "in_progress",
+        "fulfillment_started_at_before": null,
+        "fulfillment_started_at_after": "2026-05-13T02:19:49.361554+00:00"
+      },
+      "recorded_at": "2026-05-13T02:19:49.362646+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.3_cancel_request_after_generate_succeeds_when_no_bto",
+      "step": "cancel_succeeds",
+      "expected": {
+        "state": "ok"
+      },
+      "actual": {
+        "state": "ok"
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "28f7d364-be52-477e-8d4c-46cabfa1141c",
+        "result": {
+          "message": "PO cancelled"
+        },
+        "state": "ok",
+        "status_after": "cancelled",
+        "bto_count": 0,
+        "mgr_pin_used": true
+      },
+      "recorded_at": "2026-05-13T02:19:49.421424+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.3_cancel_request_after_generate_succeeds_when_no_bto",
+      "step": "po_status_is_cancelled",
+      "expected": {
+        "status": "cancelled"
+      },
+      "actual": {
+        "status": "cancelled"
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "28f7d364-be52-477e-8d4c-46cabfa1141c",
+        "result": {
+          "message": "PO cancelled"
+        },
+        "state": "ok",
+        "status_after": "cancelled",
+        "bto_count": 0,
+        "mgr_pin_used": true
+      },
+      "recorded_at": "2026-05-13T02:19:49.421438+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.4_create_bto_marks_request_in_progress",
+      "step": "po_status_in_progress_only_after_bto",
+      "expected": {
+        "status": "in_progress"
+      },
+      "actual": {
+        "status": "in_progress"
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "852e5c1e-7274-4d4b-adde-badabffae209",
+        "bto_id": "e6b2e19a-744c-4d21-b863-4b534852c75b",
+        "bto_number": "BTO-20260513-0001",
+        "po_status_after_bto": "in_progress",
+        "fulfillment_started_at": "2026-05-13T02:19:49.434017+00:00",
+        "fulfillment_started_by": "P2B Tester"
+      },
+      "recorded_at": "2026-05-13T02:19:49.447019+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.4_create_bto_marks_request_in_progress",
+      "step": "fulfillment_started_at_stamped",
+      "expected": {
+        "stamped": true
+      },
+      "actual": {
+        "stamped": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "852e5c1e-7274-4d4b-adde-badabffae209",
+        "bto_id": "e6b2e19a-744c-4d21-b863-4b534852c75b",
+        "bto_number": "BTO-20260513-0001",
+        "po_status_after_bto": "in_progress",
+        "fulfillment_started_at": "2026-05-13T02:19:49.434017+00:00",
+        "fulfillment_started_by": "P2B Tester"
+      },
+      "recorded_at": "2026-05-13T02:19:49.447030+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.4_create_bto_marks_request_in_progress",
+      "step": "fulfillment_started_by_stamped",
+      "expected": {
+        "stamped": true
+      },
+      "actual": {
+        "stamped": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "852e5c1e-7274-4d4b-adde-badabffae209",
+        "bto_id": "e6b2e19a-744c-4d21-b863-4b534852c75b",
+        "bto_number": "BTO-20260513-0001",
+        "po_status_after_bto": "in_progress",
+        "fulfillment_started_at": "2026-05-13T02:19:49.434017+00:00",
+        "fulfillment_started_by": "P2B Tester"
+      },
+      "recorded_at": "2026-05-13T02:19:49.447033+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.5_cancel_in_progress_rejected_when_linked_bto_exists",
+      "step": "cancel_rejected_400",
+      "expected": {
+        "state": "err",
+        "status_code": 400
+      },
+      "actual": {
+        "state": "ok",
+        "status_code": null
+      },
+      "status": "FAIL",
+      "evidence": {
+        "po_id": "7308eb2f-e485-4eb7-a271-4dece24eaccb",
+        "bto_id": "520ec777-b061-4fa2-a159-42c769dc9454",
+        "bto_number": "BTO-20260513-0002",
+        "po_status_after": "cancelled",
+        "bto_status_after": "draft",
+        "rejection_state": "ok",
+        "rejection_result": {
+          "message": "PO cancelled"
+        },
+        "rejection_detail_str": ""
+      },
+      "recorded_at": "2026-05-13T02:19:49.468838+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.5_cancel_in_progress_rejected_when_linked_bto_exists",
+      "step": "error_detail_mentions_linked_bto",
+      "expected": {
+        "mentions_bto": true
+      },
+      "actual": {
+        "mentions_bto": false
+      },
+      "status": "FAIL",
+      "evidence": {
+        "po_id": "7308eb2f-e485-4eb7-a271-4dece24eaccb",
+        "bto_id": "520ec777-b061-4fa2-a159-42c769dc9454",
+        "bto_number": "BTO-20260513-0002",
+        "po_status_after": "cancelled",
+        "bto_status_after": "draft",
+        "rejection_state": "ok",
+        "rejection_result": {
+          "message": "PO cancelled"
+        },
+        "rejection_detail_str": ""
+      },
+      "recorded_at": "2026-05-13T02:19:49.468851+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.5_cancel_in_progress_rejected_when_linked_bto_exists",
+      "step": "po_unchanged",
+      "expected": {
+        "status": "in_progress"
+      },
+      "actual": {
+        "status": "cancelled"
+      },
+      "status": "FAIL",
+      "evidence": {
+        "po_id": "7308eb2f-e485-4eb7-a271-4dece24eaccb",
+        "bto_id": "520ec777-b061-4fa2-a159-42c769dc9454",
+        "bto_number": "BTO-20260513-0002",
+        "po_status_after": "cancelled",
+        "bto_status_after": "draft",
+        "rejection_state": "ok",
+        "rejection_result": {
+          "message": "PO cancelled"
+        },
+        "rejection_detail_str": ""
+      },
+      "recorded_at": "2026-05-13T02:19:49.468854+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.5_cancel_in_progress_rejected_when_linked_bto_exists",
+      "step": "bto_unchanged",
+      "expected": {
+        "status": "draft"
+      },
+      "actual": {
+        "status": "draft"
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "7308eb2f-e485-4eb7-a271-4dece24eaccb",
+        "bto_id": "520ec777-b061-4fa2-a159-42c769dc9454",
+        "bto_number": "BTO-20260513-0002",
+        "po_status_after": "cancelled",
+        "bto_status_after": "draft",
+        "rejection_state": "ok",
+        "rejection_result": {
+          "message": "PO cancelled"
+        },
+        "rejection_detail_str": ""
+      },
+      "recorded_at": "2026-05-13T02:19:49.468856+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.6_cancel_linked_bto_then_request_can_cancel",
+      "step": "bto_cancelled_first",
+      "expected": {
+        "status": "cancelled"
+      },
+      "actual": {
+        "status": "cancelled"
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "a71c18d8-cb96-4061-880e-678cd26660b8",
+        "bto_id": "33abc218-4746-4a1e-abcb-18501124df98",
+        "bto_status_after_cancel": "cancelled",
+        "po_status_after_cancel": "cancelled",
+        "cancel_state": "ok",
+        "cancel_result": {
+          "message": "PO cancelled"
+        }
+      },
+      "recorded_at": "2026-05-13T02:19:49.501812+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.6_cancel_linked_bto_then_request_can_cancel",
+      "step": "po_cancel_succeeds_after_bto_cancelled",
+      "expected": {
+        "state": "ok"
+      },
+      "actual": {
+        "state": "ok"
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "a71c18d8-cb96-4061-880e-678cd26660b8",
+        "bto_id": "33abc218-4746-4a1e-abcb-18501124df98",
+        "bto_status_after_cancel": "cancelled",
+        "po_status_after_cancel": "cancelled",
+        "cancel_state": "ok",
+        "cancel_result": {
+          "message": "PO cancelled"
+        }
+      },
+      "recorded_at": "2026-05-13T02:19:49.501825+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.6_cancel_linked_bto_then_request_can_cancel",
+      "step": "po_status_cancelled",
+      "expected": {
+        "status": "cancelled"
+      },
+      "actual": {
+        "status": "cancelled"
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "a71c18d8-cb96-4061-880e-678cd26660b8",
+        "bto_id": "33abc218-4746-4a1e-abcb-18501124df98",
+        "bto_status_after_cancel": "cancelled",
+        "po_status_after_cancel": "cancelled",
+        "cancel_state": "ok",
+        "cancel_result": {
+          "message": "PO cancelled"
+        }
+      },
+      "recorded_at": "2026-05-13T02:19:49.501827+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.7_requester_manager_cannot_generate_own_request",
+      "step": "non_supply_manager_rejected",
+      "expected": {
+        "state": "err",
+        "status_code": 403
+      },
+      "actual": {
+        "state": "ok",
+        "status_code": null
+      },
+      "status": "FAIL",
+      "evidence": {
+        "po_id": "8b46aed0-7974-4459-9e4d-95cf3123c0c5",
+        "supply_branch_id": "br-b2-br-d8847c46",
+        "user_branch_id": "p2b-br-e28fc7d4",
+        "state": "ok",
+        "result": {
+          "message": "Transfer pre-filled from request",
+          "po_id": "8b46aed0-7974-4459-9e4d-95cf3123c0c5",
+          "po_number": "PO-BC-001006",
+          "from_branch_id": "br-b2-br-d8847c46",
+          "to_branch_id": "p2b-br-e28fc7d4",
+          "from_branch_name": "Branch B 7c46",
+          "to_branch_name": "Branch c7d4",
+          "show_retail": true,
+          "items": [
+            {
+              "product_id": "prd-24b16b51",
+              "product_name": "br_bt_perm7 P",
+              "sku": "SKU-b16b51",
+              "category": "General",
+              "unit": "pc",
+              "requested_qty": 20.0,
+              "available_stock": 30.0,
+              "qty": 20.0,
+              "branch_capital": 0.0,
+              "transfer_capital": 0.0,
+              "branch_retail": 0.0,
+              "last_branch_retail": null,
+              "show_retail": true
+            }
+          ],
+          "notes": "br_bt_perm regression"
+        }
+      },
+      "recorded_at": "2026-05-13T02:19:49.515528+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.8_supplier_manager_can_generate_incoming",
+      "step": "supply_manager_accepted",
+      "expected": {
+        "state": "ok"
+      },
+      "actual": {
+        "state": "ok"
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "71c14a1f-0f58-43e6-84ad-38b869f4ad86",
+        "state": "ok",
+        "items_returned": 1
+      },
+      "recorded_at": "2026-05-13T02:19:49.544294+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.9_admin_can_generate_from_any_branch_context",
+      "step": "admin_override_allowed",
+      "expected": {
+        "state": "ok"
+      },
+      "actual": {
+        "state": "ok"
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "c5ade36f-c0e8-4286-b8ed-8b864f5387cd",
+        "role": "admin",
+        "user_branch_id": "p2b-br-e28fc7d4",
+        "supply_branch_id": "br-b2-br-d8847c46",
+        "state": "ok"
+      },
+      "recorded_at": "2026-05-13T02:19:49.558272+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.10_wrong_branch_manager_cannot_send_bto",
+      "step": "non_source_manager_rejected",
+      "expected": {
+        "state": "err",
+        "status_code": 403
+      },
+      "actual": {
+        "state": "ok",
+        "status_code": null
+      },
+      "status": "FAIL",
+      "evidence": {
+        "bto_id": "2b5c5ae4-6625-43ec-bc00-642d0165b366",
+        "from_branch_id": "br-b2-br-d8847c46",
+        "user_branch_id": "p2b-br-e28fc7d4",
+        "state": "ok",
+        "result": {
+          "message": "Transfer sent",
+          "status": "sent"
+        },
+        "status_after": "sent"
+      },
+      "recorded_at": "2026-05-13T02:19:49.574918+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.10_wrong_branch_manager_cannot_send_bto",
+      "step": "bto_remains_draft",
+      "expected": {
+        "status": "draft"
+      },
+      "actual": {
+        "status": "sent"
+      },
+      "status": "FAIL",
+      "evidence": {
+        "bto_id": "2b5c5ae4-6625-43ec-bc00-642d0165b366",
+        "from_branch_id": "br-b2-br-d8847c46",
+        "user_branch_id": "p2b-br-e28fc7d4",
+        "state": "ok",
+        "result": {
+          "message": "Transfer sent",
+          "status": "sent"
+        },
+        "status_after": "sent"
+      },
+      "recorded_at": "2026-05-13T02:19:49.574928+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.11_source_branch_manager_can_send_bto",
+      "step": "source_manager_accepted",
+      "expected": {
+        "state": "ok"
+      },
+      "actual": {
+        "state": "ok"
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "b867b9c8-e7c4-4c33-964f-a5176b6ada1d",
+        "state": "ok",
+        "status_after": "sent",
+        "result_keys": [
+          "message",
+          "status"
+        ]
+      },
+      "recorded_at": "2026-05-13T02:19:49.599427+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.11_source_branch_manager_can_send_bto",
+      "step": "bto_status_sent",
+      "expected": {
+        "status": "sent"
+      },
+      "actual": {
+        "status": "sent"
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "b867b9c8-e7c4-4c33-964f-a5176b6ada1d",
+        "state": "ok",
+        "status_after": "sent",
+        "result_keys": [
+          "message",
+          "status"
+        ]
+      },
+      "recorded_at": "2026-05-13T02:19:49.599436+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.12_wrong_branch_manager_cannot_cancel_bto",
+      "step": "non_source_manager_cancel_rejected",
+      "expected": {
+        "state": "err",
+        "status_code": 403
+      },
+      "actual": {
+        "state": "ok",
+        "status_code": null
+      },
+      "status": "FAIL",
+      "evidence": {
+        "bto_id": "cd2aa1af-8d63-4853-889e-f7964f0944ab",
+        "user_branch": "p2b-br-e28fc7d4",
+        "from_branch": "br-b2-br-d8847c46",
+        "state": "ok",
+        "result": {
+          "message": "Transfer cancelled"
+        },
+        "status_after": "cancelled"
+      },
+      "recorded_at": "2026-05-13T02:19:49.607161+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.12_wrong_branch_manager_cannot_cancel_bto",
+      "step": "bto_remains_draft",
+      "expected": {
+        "status": "draft"
+      },
+      "actual": {
+        "status": "cancelled"
+      },
+      "status": "FAIL",
+      "evidence": {
+        "bto_id": "cd2aa1af-8d63-4853-889e-f7964f0944ab",
+        "user_branch": "p2b-br-e28fc7d4",
+        "from_branch": "br-b2-br-d8847c46",
+        "state": "ok",
+        "result": {
+          "message": "Transfer cancelled"
+        },
+        "status_after": "cancelled"
+      },
+      "recorded_at": "2026-05-13T02:19:49.607168+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.13_source_branch_manager_can_cancel_bto_draft",
+      "step": "source_manager_cancel_accepted",
+      "expected": {
+        "state": "ok"
+      },
+      "actual": {
+        "state": "ok"
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "b966aa45-f9c1-494e-999a-f8b51d26bfb7",
+        "state": "ok",
+        "status_after": "cancelled"
+      },
+      "recorded_at": "2026-05-13T02:19:49.651916+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.13_source_branch_manager_can_cancel_bto_draft",
+      "step": "bto_status_cancelled",
+      "expected": {
+        "status": "cancelled"
+      },
+      "actual": {
+        "status": "cancelled"
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "b966aa45-f9c1-494e-999a-f8b51d26bfb7",
+        "state": "ok",
+        "status_after": "cancelled"
+      },
+      "recorded_at": "2026-05-13T02:19:49.651924+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.14_wrong_branch_pin_cannot_approve_pending_bto",
+      "step": "cross_branch_pin_rejected",
+      "expected": {
+        "state": "err"
+      },
+      "actual": {
+        "state": "ok"
+      },
+      "status": "FAIL",
+      "evidence": {
+        "bto_id": "e52595f9-2dbc-461a-aa84-68a3ec967cfb",
+        "from_branch": "br-b2-br-d8847c46",
+        "pin_user_branch": "p2b-br-e28fc7d4",
+        "state": "ok",
+        "result": {
+          "message": "Transfer approved and dispatched",
+          "status": "sent"
+        },
+        "status_after": "sent"
+      },
+      "recorded_at": "2026-05-13T02:19:49.676210+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.14_wrong_branch_pin_cannot_approve_pending_bto",
+      "step": "bto_remains_pending_approval",
+      "expected": {
+        "status": "pending_approval"
+      },
+      "actual": {
+        "status": "sent"
+      },
+      "status": "FAIL",
+      "evidence": {
+        "bto_id": "e52595f9-2dbc-461a-aa84-68a3ec967cfb",
+        "from_branch": "br-b2-br-d8847c46",
+        "pin_user_branch": "p2b-br-e28fc7d4",
+        "state": "ok",
+        "result": {
+          "message": "Transfer approved and dispatched",
+          "status": "sent"
+        },
+        "status_after": "sent"
+      },
+      "recorded_at": "2026-05-13T02:19:49.676219+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.15_source_branch_pin_can_approve_pending_bto",
+      "step": "source_pin_accepted",
+      "expected": {
+        "state": "ok"
+      },
+      "actual": {
+        "state": "ok"
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "83211c03-1ef9-4ceb-a3a9-68ec19719c5b",
+        "state": "ok",
+        "status_after": "sent",
+        "approved_by": "br_bt_perm-Bmgr-f19ac133",
+        "approved_pin_method": "manager_pin"
+      },
+      "recorded_at": "2026-05-13T02:19:49.708104+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.15_source_branch_pin_can_approve_pending_bto",
+      "step": "bto_status_sent_after_approval",
+      "expected": {
+        "status": "sent"
+      },
+      "actual": {
+        "status": "sent"
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "83211c03-1ef9-4ceb-a3a9-68ec19719c5b",
+        "state": "ok",
+        "status_after": "sent",
+        "approved_by": "br_bt_perm-Bmgr-f19ac133",
+        "approved_pin_method": "manager_pin"
+      },
+      "recorded_at": "2026-05-13T02:19:49.708119+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.16_admin_caller_with_source_pin_can_approve",
+      "step": "admin_caller_accepted",
+      "expected": {
+        "state": "ok"
+      },
+      "actual": {
+        "state": "ok"
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "5e2cc82b-faf4-4e34-8372-421c1140f667",
+        "caller_role": "admin",
+        "state": "ok",
+        "status_after": "sent",
+        "approved_by": "br_bt_perm-Bmgr-f19ac133"
+      },
+      "recorded_at": "2026-05-13T02:19:49.729750+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.16_admin_caller_with_source_pin_can_approve",
+      "step": "bto_status_sent",
+      "expected": {
+        "status": "sent"
+      },
+      "actual": {
+        "status": "sent"
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "5e2cc82b-faf4-4e34-8372-421c1140f667",
+        "caller_role": "admin",
+        "state": "ok",
+        "status_after": "sent",
+        "approved_by": "br_bt_perm-Bmgr-f19ac133"
+      },
+      "recorded_at": "2026-05-13T02:19:49.729758+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.17_verifier_identity_stamped_on_approval",
+      "step": "approved_by_id_stamped",
+      "expected": {
+        "stamped": true
+      },
+      "actual": {
+        "stamped": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "1c299475-e830-4367-9f3f-8beb44d4a03a",
+        "approved_by": "br_bt_perm-Bmgr-f19ac133",
+        "approved_by_name": "B-Branch Manager",
+        "approved_pin_method": "manager_pin",
+        "approved_at": "2026-05-13T02:19:49.741737+00:00",
+        "approved_by_role": "manager"
+      },
+      "recorded_at": "2026-05-13T02:19:49.749995+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.17_verifier_identity_stamped_on_approval",
+      "step": "approved_by_name_stamped",
+      "expected": {
+        "stamped": true
+      },
+      "actual": {
+        "stamped": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "1c299475-e830-4367-9f3f-8beb44d4a03a",
+        "approved_by": "br_bt_perm-Bmgr-f19ac133",
+        "approved_by_name": "B-Branch Manager",
+        "approved_pin_method": "manager_pin",
+        "approved_at": "2026-05-13T02:19:49.741737+00:00",
+        "approved_by_role": "manager"
+      },
+      "recorded_at": "2026-05-13T02:19:49.750003+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.17_verifier_identity_stamped_on_approval",
+      "step": "approved_pin_method_stamped",
+      "expected": {
+        "stamped": true
+      },
+      "actual": {
+        "stamped": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "1c299475-e830-4367-9f3f-8beb44d4a03a",
+        "approved_by": "br_bt_perm-Bmgr-f19ac133",
+        "approved_by_name": "B-Branch Manager",
+        "approved_pin_method": "manager_pin",
+        "approved_at": "2026-05-13T02:19:49.741737+00:00",
+        "approved_by_role": "manager"
+      },
+      "recorded_at": "2026-05-13T02:19:49.750005+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.17_verifier_identity_stamped_on_approval",
+      "step": "approved_at_stamped",
+      "expected": {
+        "stamped": true
+      },
+      "actual": {
+        "stamped": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "bto_id": "1c299475-e830-4367-9f3f-8beb44d4a03a",
+        "approved_by": "br_bt_perm-Bmgr-f19ac133",
+        "approved_by_name": "B-Branch Manager",
+        "approved_pin_method": "manager_pin",
+        "approved_at": "2026-05-13T02:19:49.741737+00:00",
+        "approved_by_role": "manager"
+      },
+      "recorded_at": "2026-05-13T02:19:49.750008+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.18_cancel_po_stamps_verifier_identity",
+      "step": "po_status_cancelled",
+      "expected": {
+        "status": "cancelled"
+      },
+      "actual": {
+        "status": "cancelled"
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "1d0b9f2e-04d6-4b18-89b1-2d6845de15ae",
+        "status_after": "cancelled",
+        "cancelled_by": null,
+        "cancelled_by_name": null,
+        "cancel_pin_method": null,
+        "cancelled_at": null
+      },
+      "recorded_at": "2026-05-13T02:19:49.769167+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.18_cancel_po_stamps_verifier_identity",
+      "step": "verifier_id_stamped",
+      "expected": {
+        "stamped": true
+      },
+      "actual": {
+        "stamped": false
+      },
+      "status": "FAIL",
+      "evidence": {
+        "po_id": "1d0b9f2e-04d6-4b18-89b1-2d6845de15ae",
+        "status_after": "cancelled",
+        "cancelled_by": null,
+        "cancelled_by_name": null,
+        "cancel_pin_method": null,
+        "cancelled_at": null
+      },
+      "recorded_at": "2026-05-13T02:19:49.769180+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.18_cancel_po_stamps_verifier_identity",
+      "step": "cancel_pin_method_stamped",
+      "expected": {
+        "stamped": true
+      },
+      "actual": {
+        "stamped": false
+      },
+      "status": "FAIL",
+      "evidence": {
+        "po_id": "1d0b9f2e-04d6-4b18-89b1-2d6845de15ae",
+        "status_after": "cancelled",
+        "cancelled_by": null,
+        "cancelled_by_name": null,
+        "cancel_pin_method": null,
+        "cancelled_at": null
+      },
+      "recorded_at": "2026-05-13T02:19:49.769183+00:00"
+    },
+    {
+      "scenario": "br_bt_perm.18_cancel_po_stamps_verifier_identity",
+      "step": "cancelled_at_stamped",
+      "expected": {
+        "stamped": true
+      },
+      "actual": {
+        "stamped": false
+      },
+      "status": "FAIL",
+      "evidence": {
+        "po_id": "1d0b9f2e-04d6-4b18-89b1-2d6845de15ae",
+        "status_after": "cancelled",
+        "cancelled_by": null,
+        "cancelled_by_name": null,
+        "cancel_pin_method": null,
+        "cancelled_at": null
+      },
+      "recorded_at": "2026-05-13T02:19:49.769185+00:00"
+    }
+  ]
+}

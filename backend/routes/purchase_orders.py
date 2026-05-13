@@ -1618,6 +1618,19 @@ async def generate_branch_transfer_from_request(po_id: str, user=Depends(get_cur
     if not from_branch_id or not to_branch_id:
         raise HTTPException(status_code=400, detail="Branch IDs missing from request")
 
+    # Phase 0.5 — branch context enforcement.
+    # Non-admin/owner manager opening the composer MUST belong to the
+    # supply branch. The requesting branch cannot fulfill its own request.
+    from utils.auth import is_privileged, user_branch_ids
+    if not is_privileged(user):
+        allowed = user_branch_ids(user)
+        if from_branch_id not in allowed:
+            raise HTTPException(
+                status_code=403,
+                detail="Only the supplying branch can prepare this transfer. Switch to the supply branch to continue."
+            )
+
+
     # Get branch names for context
     from_branch = await db.branches.find_one({"id": from_branch_id}, {"_id": 0, "name": 1})
     to_branch = await db.branches.find_one({"id": to_branch_id}, {"_id": 0, "name": 1})
@@ -1666,13 +1679,12 @@ async def generate_branch_transfer_from_request(po_id: str, user=Depends(get_cur
             "show_retail": po.get("show_retail", True),
         })
 
-    # Mark the PO as "in_progress" (idempotent — only stamp on first entry).
-    if po.get("status") != "in_progress":
-        await db.purchase_orders.update_one(
-            {"id": po_id},
-            {"$set": {"status": "in_progress", "fulfillment_started_at": now_iso(),
-                      "fulfillment_started_by": user.get("full_name", user["username"])}}
-        )
+    # Phase 0.5 — Status mutation MOVED to create_transfer.
+    # Generate-branch-transfer is now a pure prefill: opening the composer
+    # never changes PO status. The PO flips to `in_progress` only when
+    # `create_transfer` inserts a real branch_transfer_orders row linked
+    # via `request_po_id`. This removes the cancel dead-end where a
+    # manager who closed the composer without saving left the PO stuck.
 
     return {
         "message": "Transfer pre-filled from request",
@@ -1690,7 +1702,15 @@ async def generate_branch_transfer_from_request(po_id: str, user=Depends(get_cur
 
 @router.delete("/{po_id}")
 async def cancel_purchase_order(po_id: str, data: dict = None, user=Depends(get_current_user)):
-    """Cancel a purchase order. Requires PIN verification. Cannot cancel received POs — use Reopen instead."""
+    """Cancel a purchase order. Requires PIN verification. Cannot cancel received POs — use Reopen instead.
+
+    Phase 0.5:
+      * For branch_request POs, refuse cancel if a linked non-cancelled
+        BTO exists — surface the linked BTO number in the error detail.
+      * Enforce requester-branch identity for non-admin callers.
+      * Stamp verifier identity (cancelled_by_id / cancelled_by_name /
+        cancel_pin_method / cancelled_at / cancellation_reason) for audit.
+    """
     check_perm(user, "purchase_orders", "delete")
 
     # PIN verification
@@ -1712,7 +1732,47 @@ async def cancel_purchase_order(po_id: str, data: dict = None, user=Depends(get_
         )
     if po.get("status") == "cancelled":
         raise HTTPException(status_code=400, detail="PO is already cancelled")
-    await db.purchase_orders.update_one({"id": po_id}, {"$set": {"status": "cancelled"}})
+
+    # Phase 0.5 — branch enforcement for non-admin callers on branch_request POs.
+    from utils.auth import is_privileged, user_branch_ids
+    if po.get("po_type") == "branch_request" and not is_privileged(user):
+        requester_branch_id = po.get("branch_id", "")
+        if requester_branch_id and requester_branch_id not in user_branch_ids(user):
+            raise HTTPException(
+                status_code=403,
+                detail="Only the requesting branch can cancel this stock request."
+            )
+
+    # Phase 0.5 — refuse cancel if a linked non-cancelled BTO exists. The
+    # owner-facing error tells the operator exactly what to do next.
+    if po.get("po_type") == "branch_request":
+        linked_bto = await db.branch_transfer_orders.find_one(
+            {"request_po_id": po_id,
+             "status": {"$nin": ["cancelled"]}},
+            {"_id": 0, "id": 1, "order_number": 1, "status": 1},
+        )
+        if linked_bto:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Cancel linked transfer draft "
+                    f"{linked_bto.get('order_number') or linked_bto.get('id')} first."
+                ),
+            )
+
+    # Phase 0.5 — write verifier identity onto the cancelled PO for audit.
+    await db.purchase_orders.update_one(
+        {"id": po_id},
+        {"$set": {
+            "status": "cancelled",
+            "cancelled_at": now_iso(),
+            "cancelled_by_id": (verifier or {}).get("id") or user.get("id", ""),
+            "cancelled_by_name": (verifier or {}).get("name")
+                or user.get("full_name") or user.get("username", ""),
+            "cancel_pin_method": (verifier or {}).get("method", ""),
+            "cancellation_reason": (data or {}).get("reason", "") if data else "",
+        }},
+    )
     return {"message": "PO cancelled"}
 
 

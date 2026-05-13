@@ -309,8 +309,8 @@ async def test_br_bt2_generate_transfer_does_not_move_stock(
 
     record_result(
         scenario="br_bt.2_generate_transfer_does_not_move_stock",
-        step="po_status_flips_to_in_progress",
-        expected={"status": "in_progress"},
+        step="po_status_remains_requested_until_bto_created",
+        expected={"status": "requested"},
         actual={"status": po_row.get("status")},
         evidence=base_ev,
     )
@@ -352,9 +352,10 @@ async def test_br_bt2_generate_transfer_does_not_move_stock(
         evidence=base_ev,
     )
 
-    assert po_row.get("status") == "in_progress", (
-        f"br_bt2: PO status should be 'in_progress' after generate, "
-        f"got {po_row.get('status')!r}"
+    assert po_row.get("status") == "requested", (
+        f"br_bt2 (post-Phase-0.5): PO status should stay 'requested' after "
+        f"generate-transfer prefill (BTO has not been created yet), got "
+        f"{po_row.get('status')!r}"
     )
     assert src_after_request == src_before, (
         "br_bt2 INVARIANT BUG — request creation moved supply stock"

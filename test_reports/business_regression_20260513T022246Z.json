@@ -1,0 +1,145 @@
+{
+  "generated_at": "2026-05-13T02:22:46.966288+00:00",
+  "pytest_exitstatus": 1,
+  "row_count": 5,
+  "pass_count": 4,
+  "fail_count": 1,
+  "rows": [
+    {
+      "scenario": "br_bt.2_generate_transfer_does_not_move_stock",
+      "step": "po_status_flips_to_in_progress",
+      "expected": {
+        "status": "in_progress"
+      },
+      "actual": {
+        "status": "requested"
+      },
+      "status": "FAIL",
+      "evidence": {
+        "org_id": "p2b-org-771a9474",
+        "source_branch_id": "p2b-br-8316ed25",
+        "destination_branch_id": "br-b2-br-2f7bd0a7",
+        "request_po_id": "5fa2f5b1-fd0d-42c8-a712-56d3a63cb885",
+        "request_po_number": "PO-BB-001000",
+        "product_id": "prd-e67dca4e",
+        "source_stock_before": 40.0,
+        "source_stock_after": 40.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "po_status_after_generate": "requested",
+        "prefill_items_count": 1
+      },
+      "recorded_at": "2026-05-13T02:22:46.884906+00:00"
+    },
+    {
+      "scenario": "br_bt.2_generate_transfer_does_not_move_stock",
+      "step": "prefill_contains_requested_and_available",
+      "expected": {
+        "items": 1,
+        "has_requested_qty": true,
+        "has_available_stock": true,
+        "has_send_qty": true
+      },
+      "actual": {
+        "items": 1,
+        "has_requested_qty": true,
+        "has_available_stock": true,
+        "has_send_qty": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-771a9474",
+        "source_branch_id": "p2b-br-8316ed25",
+        "destination_branch_id": "br-b2-br-2f7bd0a7",
+        "request_po_id": "5fa2f5b1-fd0d-42c8-a712-56d3a63cb885",
+        "request_po_number": "PO-BB-001000",
+        "product_id": "prd-e67dca4e",
+        "source_stock_before": 40.0,
+        "source_stock_after": 40.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "po_status_after_generate": "requested",
+        "prefill_items_count": 1
+      },
+      "recorded_at": "2026-05-13T02:22:46.884921+00:00"
+    },
+    {
+      "scenario": "br_bt.2_generate_transfer_does_not_move_stock",
+      "step": "source_supply_stock_unchanged_through_generate",
+      "expected": {
+        "stock": 40.0
+      },
+      "actual": {
+        "stock": 40.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-771a9474",
+        "source_branch_id": "p2b-br-8316ed25",
+        "destination_branch_id": "br-b2-br-2f7bd0a7",
+        "request_po_id": "5fa2f5b1-fd0d-42c8-a712-56d3a63cb885",
+        "request_po_number": "PO-BB-001000",
+        "product_id": "prd-e67dca4e",
+        "source_stock_before": 40.0,
+        "source_stock_after": 40.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "po_status_after_generate": "requested",
+        "prefill_items_count": 1
+      },
+      "recorded_at": "2026-05-13T02:22:46.884924+00:00"
+    },
+    {
+      "scenario": "br_bt.2_generate_transfer_does_not_move_stock",
+      "step": "destination_stock_unchanged_through_generate",
+      "expected": {
+        "stock": 0.0
+      },
+      "actual": {
+        "stock": 0.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-771a9474",
+        "source_branch_id": "p2b-br-8316ed25",
+        "destination_branch_id": "br-b2-br-2f7bd0a7",
+        "request_po_id": "5fa2f5b1-fd0d-42c8-a712-56d3a63cb885",
+        "request_po_number": "PO-BB-001000",
+        "product_id": "prd-e67dca4e",
+        "source_stock_before": 40.0,
+        "source_stock_after": 40.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "po_status_after_generate": "requested",
+        "prefill_items_count": 1
+      },
+      "recorded_at": "2026-05-13T02:22:46.884926+00:00"
+    },
+    {
+      "scenario": "br_bt.2_generate_transfer_does_not_move_stock",
+      "step": "generate_does_not_create_bto",
+      "expected": {
+        "bto_count": 0
+      },
+      "actual": {
+        "bto_count": 0
+      },
+      "status": "PASS",
+      "evidence": {
+        "org_id": "p2b-org-771a9474",
+        "source_branch_id": "p2b-br-8316ed25",
+        "destination_branch_id": "br-b2-br-2f7bd0a7",
+        "request_po_id": "5fa2f5b1-fd0d-42c8-a712-56d3a63cb885",
+        "request_po_number": "PO-BB-001000",
+        "product_id": "prd-e67dca4e",
+        "source_stock_before": 40.0,
+        "source_stock_after": 40.0,
+        "destination_stock_before": 0.0,
+        "destination_stock_after": 0.0,
+        "po_status_after_generate": "requested",
+        "prefill_items_count": 1
+      },
+      "recorded_at": "2026-05-13T02:22:46.884928+00:00"
+    }
+  ]
+}

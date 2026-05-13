@@ -434,6 +434,35 @@ async def create_transfer(data: dict, user=Depends(get_current_user)):
     await db.branch_transfer_orders.insert_one(transfer)
     del transfer["_id"]
 
+    # Phase 0.5 — when this BTO is linked to a stock-request PO, mark
+    # the PO as in_progress + stamp fulfillment_started_* HERE (not in
+    # generate-branch-transfer). This places the status-mutation at the
+    # point where fulfillment ACTUALLY starts, preventing the cancel
+    # dead-end where opening the composer alone locked the PO.
+    if transfer.get("request_po_id"):
+        try:
+            po_row = await db.purchase_orders.find_one(
+                {"id": transfer["request_po_id"]},
+                {"_id": 0, "status": 1},
+            )
+            if po_row and po_row.get("status") in ("requested", "draft"):
+                await db.purchase_orders.update_one(
+                    {"id": transfer["request_po_id"]},
+                    {"$set": {
+                        "status": "in_progress",
+                        "fulfillment_started_at": now_iso(),
+                        "fulfillment_started_by": user.get("full_name", user["username"]),
+                        "linked_bto_id": transfer["id"],
+                        "linked_bto_number": transfer["order_number"],
+                    }},
+                )
+        except Exception as link_err:
+            import logging
+            logging.getLogger("branch_transfers").warning(
+                f"Linking BTO {transfer['order_number']} to PO "
+                f"{transfer.get('request_po_id')} failed: {link_err}"
+            )
+
     # Auto-create internal invoice for this transfer
     from routes.internal_invoices import create_internal_invoice
     try:
@@ -486,11 +515,23 @@ async def approve_pending_transfer(transfer_id: str, data: dict, user=Depends(ge
     from utils import check_perm as _check_perm
     _check_perm(user, "branch_transfers", "approve")
 
-    # 2. PIN gate
+    # Look up the transfer FIRST so we can branch-scope the PIN check.
+    order = await db.branch_transfer_orders.find_one({"id": transfer_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Transfer not found")
+    if order.get("status") != "pending_approval":
+        raise HTTPException(status_code=400, detail=f"Transfer is not awaiting approval (status: {order.get('status')})")
+
+    # 2. PIN gate — branch-scoped (Phase 0.5).
+    # The PIN must belong to a user with access to the SOURCE branch
+    # (the branch shipping the goods). Admin PIN and TOTP always pass.
     pin = str(data.get("pin") or "").strip()
     if not pin:
         raise HTTPException(status_code=400, detail="PIN required to approve transfer")
-    verifier = await verify_pin_for_action(pin, "transfer_approve")
+    verifier = await verify_pin_for_action(
+        pin, "transfer_approve",
+        branch_id=order.get("from_branch_id", ""),
+    )
     if not verifier:
         raise HTTPException(status_code=403, detail="Invalid PIN or unauthorized for transfer approval")
 
@@ -512,12 +553,6 @@ async def approve_pending_transfer(transfer_id: str, data: dict, user=Depends(ge
                 status_code=403,
                 detail="This manager is not an authorized approver. Ask the admin to enable 'Approve Pending Transfer' in User Permissions."
             )
-
-    order = await db.branch_transfer_orders.find_one({"id": transfer_id}, {"_id": 0})
-    if not order:
-        raise HTTPException(status_code=404, detail="Transfer not found")
-    if order.get("status") != "pending_approval":
-        raise HTTPException(status_code=400, detail=f"Transfer is not awaiting approval (status: {order.get('status')})")
 
     # Ensure org context
     if not get_org_context():
@@ -885,6 +920,15 @@ async def send_transfer(transfer_id: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Transfer not found")
     if order["status"] != "draft":
         raise HTTPException(status_code=400, detail="Only draft orders can be sent")
+
+    # Phase 0.5 — source-branch enforcement.
+    from utils.auth import is_privileged, user_branch_ids
+    if not is_privileged(user):
+        if order["from_branch_id"] not in user_branch_ids(user):
+            raise HTTPException(
+                status_code=403,
+                detail="Only the source branch can send this transfer."
+            )
 
     # Ensure org context for super admin
     if not get_org_context():
@@ -1887,6 +1931,16 @@ async def cancel_transfer(transfer_id: str, user=Depends(get_current_user)):
         if order["status"] == "sent_to_terminal":
             detail = "Cannot cancel — transfer is being checked on a terminal."
         raise HTTPException(status_code=400, detail=detail)
+
+    # Phase 0.5 — source-branch enforcement.
+    from utils.auth import is_privileged, user_branch_ids
+    if not is_privileged(user):
+        if order["from_branch_id"] not in user_branch_ids(user):
+            raise HTTPException(
+                status_code=403,
+                detail="Only the source branch can cancel this transfer."
+            )
+
     await db.branch_transfer_orders.update_one(
         {"id": transfer_id}, {"$set": {"status": "cancelled", "cancelled_at": now_iso()}}
     )
