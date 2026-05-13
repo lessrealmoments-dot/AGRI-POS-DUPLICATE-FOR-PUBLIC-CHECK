@@ -1136,7 +1136,7 @@ function trustReceiptDotMatrix(data, biz, docCode) {
     const desc  = item.description || item.category || '';
     body += `<tr>`;
     body += `<td class="dm-row-num">${rowIdx}</td>`;
-    body += `<td>${item.product_name || ''}</td>`;
+    body += `<td class="strong">${item.product_name || ''}</td>`;
     body += `<td>${desc}</td>`;
     body += `<td class="c">${qty}${unit ? ' ' + unit : ''}</td>`;
     body += `<td class="r">${formatPHP(rate)}</td>`;
