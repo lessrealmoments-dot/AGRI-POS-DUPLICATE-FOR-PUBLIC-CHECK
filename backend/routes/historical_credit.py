@@ -120,10 +120,31 @@ def _validate_payload(data: dict, today: str) -> dict:
     if soft_floor_violation is not None:
         raise HTTPException(status_code=400, detail=soft_floor_violation)
 
+    # Optional `due_date` — lets the operator give the customer a future
+    # term on the carry-forward (e.g. "settle within 30 days"). Defaults
+    # to `transaction_date` so legacy callers keep their behaviour.
+    due_date_raw = (data.get("due_date") or "").strip()
+    due_date = due_date_raw or transaction_date[:10]
+    if due_date_raw:
+        if (len(due_date_raw) < 10 or due_date_raw[4] != "-"
+                or due_date_raw[7] != "-"):
+            raise HTTPException(
+                status_code=400,
+                detail="due_date must be YYYY-MM-DD",
+            )
+        try:
+            datetime.strptime(due_date_raw[:10], "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(
+                status_code=400, detail="due_date must be YYYY-MM-DD",
+            )
+        due_date = due_date_raw[:10]
+
     return {
         "customer_id": customer_id,
         "branch_id": branch_id,
         "transaction_date": transaction_date[:10],
+        "due_date": due_date,
         "reason": reason,
         "grand_total": round(gt, 2),
         "items": items,
@@ -362,7 +383,7 @@ async def create_historical_credit(data: dict, user=Depends(get_current_user)):
         "customer_name": customer.get("name") or "Customer",
         "order_date": payload["transaction_date"],
         "invoice_date": payload["transaction_date"],
-        "due_date": payload["transaction_date"],
+        "due_date": payload["due_date"],
         "items": payload["items"],
         "subtotal": round(payload["subtotal"], 2),
         "freight": round(payload["freight"], 2),
@@ -487,6 +508,47 @@ async def create_historical_credit(data: dict, user=Depends(get_current_user)):
         "at": encoded_at,
     })
 
+    # ── 5. Queue the opening-balance SMS (best-effort, idempotent) ───────
+    # The customer gets ONE notice at encoding via `opening_balance_notice`
+    # template. After that, the existing `_daily_sms_reminders` job
+    # (main.py:869) handles cadence based on `due_date`:
+    #   * 15 days before due_date → reminder_15day (once)
+    #   * 7  days before due_date → reminder_7day  (once)
+    #   * after due_date → overdue_notice every 7 days (weekly only, never daily)
+    # The dedup_key locks at one row per invoice — re-encoding cannot
+    # double-send. Failure here is intentionally silent: the encode
+    # itself has already landed.
+    sms_queued = False
+    try:
+        from routes.sms import queue_sms
+        from routes.sms_hooks import get_branch_name, get_company_name
+        phone = (customer.get("phone") or "").strip()
+        if phone:
+            company_name = await get_company_name(user.get("organization_id") or "")
+            branch_name = await get_branch_name(payload["branch_id"])
+            qres = await queue_sms(
+                template_key="opening_balance_notice",
+                customer_id=payload["customer_id"],
+                customer_name=customer.get("name", ""),
+                phone=phone,
+                variables={
+                    "customer_name": customer.get("name", ""),
+                    "amount": f"{payload['grand_total']:,.2f}",
+                    "company_name": company_name,
+                    "branch_name": branch_name,
+                    "date": payload["transaction_date"],
+                },
+                organization_id=user.get("organization_id") or "",
+                branch_id=payload["branch_id"],
+                branch_name=branch_name,
+                trigger="auto",
+                trigger_ref=invoice_id,
+                dedup_key=f"opening_balance:{invoice_id}",
+            )
+            sms_queued = bool(qres)
+    except Exception:
+        pass
+
     return {
         "ok": True,
         "invoice": invoice,
@@ -499,6 +561,7 @@ async def create_historical_credit(data: dict, user=Depends(get_current_user)):
             "approver_name": approver_name,
             "approver_role": approver_role,
         },
+        "sms_queued": sms_queued,
     }
 
 

@@ -1,0 +1,92 @@
+{
+  "generated_at": "2026-05-13T09:41:09.659015+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 5,
+  "pass_count": 4,
+  "fail_count": 1,
+  "rows": [
+    {
+      "scenario": "br_hc_sms.1_validate_accepts_due_date",
+      "step": "explicit_due_date_returned",
+      "expected": {
+        "due_date": "2026-06-12"
+      },
+      "actual": {
+        "due_date": "2026-06-12"
+      },
+      "status": "PASS",
+      "evidence": {
+        "transaction_date": "2026-03-14"
+      },
+      "recorded_at": "2026-05-13T09:41:09.533229+00:00"
+    },
+    {
+      "scenario": "br_hc_sms.2_validate_default_due",
+      "step": "due_falls_back_to_txn_date",
+      "expected": {
+        "due_date": "2026-03-29"
+      },
+      "actual": {
+        "due_date": "2026-03-29"
+      },
+      "status": "PASS",
+      "evidence": {
+        "transaction_date": "2026-03-29"
+      },
+      "recorded_at": "2026-05-13T09:41:09.534089+00:00"
+    },
+    {
+      "scenario": "br_hc_sms.3_encode_queues_sms",
+      "step": "exactly_one_opening_balance_row_per_encode",
+      "expected": {
+        "queue_delta": 1,
+        "dedup_key_prefix": "opening_balance:"
+      },
+      "actual": {
+        "queue_delta": 1,
+        "dedup_key_prefix": "opening_balance:c2"
+      },
+      "status": "FAIL",
+      "evidence": {
+        "invoice_id": "c23939cf-9f11-4e94-a2d3-00e2ba6a0b80",
+        "phone": "+639171234001"
+      },
+      "recorded_at": "2026-05-13T09:41:09.595444+00:00"
+    },
+    {
+      "scenario": "br_hc_sms.4_invoice_due_date_honoured",
+      "step": "invoice_due_date_matches_operator_term",
+      "expected": {
+        "due_date": "2026-06-27",
+        "txn_date_neq_due": true
+      },
+      "actual": {
+        "due_date": "2026-06-27",
+        "txn_date_neq_due": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "invoice_id": "d3dac204-e790-4094-99bc-6b54615775c0",
+        "txn_date": "2026-01-13"
+      },
+      "recorded_at": "2026-05-13T09:41:09.609070+00:00"
+    },
+    {
+      "scenario": "br_hc_sms.5_no_phone_no_sms",
+      "step": "encode_succeeds_no_sms_when_phone_blank",
+      "expected": {
+        "encode_ok": true,
+        "sms_enqueued": 0
+      },
+      "actual": {
+        "encode_ok": true,
+        "sms_enqueued": 0
+      },
+      "status": "PASS",
+      "evidence": {
+        "invoice_id": "f5475ce6-ab1f-4d81-8ec8-b04b6c073e5c"
+      },
+      "recorded_at": "2026-05-13T09:41:09.616934+00:00"
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "generated_at": "2026-05-13T09:40:10.310269+00:00",
+  "pytest_exitstatus": 1,
+  "row_count": 2,
+  "pass_count": 2,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br_hc_sms.1_validate_accepts_due_date",
+      "step": "explicit_due_date_returned",
+      "expected": {
+        "due_date": "2026-06-12"
+      },
+      "actual": {
+        "due_date": "2026-06-12"
+      },
+      "status": "PASS",
+      "evidence": {
+        "transaction_date": "2026-03-14"
+      },
+      "recorded_at": "2026-05-13T09:40:10.228503+00:00"
+    },
+    {
+      "scenario": "br_hc_sms.2_validate_default_due",
+      "step": "due_falls_back_to_txn_date",
+      "expected": {
+        "due_date": "2026-03-29"
+      },
+      "actual": {
+        "due_date": "2026-03-29"
+      },
+      "status": "PASS",
+      "evidence": {
+        "transaction_date": "2026-03-29"
+      },
+      "recorded_at": "2026-05-13T09:40:10.229490+00:00"
+    }
+  ]
+}

@@ -45,9 +45,16 @@ function isoDaysAgo(days) {
   return d.toISOString().slice(0, 10);
 }
 
+function isoDaysFromToday(days) {
+  const d = new Date();
+  d.setDate(d.getDate() + Number(days || 0));
+  return d.toISOString().slice(0, 10);
+}
+
 export default function AddOldBalanceDialog({ open, onOpenChange, customer, onCommitted }) {
   const [amount, setAmount]               = useState('');
   const [txnDate, setTxnDate]             = useState(isoDaysAgo(30));
+  const [daysToSettle, setDaysToSettle]   = useState('30'); // future term — keeps SMS cadence weekly
   const [reason, setReason]               = useState('');
   const [notebookRef, setNotebookRef]     = useState('');
   const [approvalCode, setApprovalCode]   = useState('');
@@ -58,6 +65,7 @@ export default function AddOldBalanceDialog({ open, onOpenChange, customer, onCo
     if (open) {
       setAmount('');
       setTxnDate(isoDaysAgo(30));
+      setDaysToSettle('30');
       setReason('');
       setNotebookRef('');
       setApprovalCode('');
@@ -83,10 +91,12 @@ export default function AddOldBalanceDialog({ open, onOpenChange, customer, onCo
     if (!canSubmit) return;
     setCommitting(true);
     try {
+      const dueDate = isoDaysFromToday(daysToSettle);
       const payload = {
         customer_id: customer.id,
         branch_id: customer.branch_id,
         transaction_date: txnDate,
+        due_date: dueDate,
         grand_total: amt,
         subtotal: amt,
         freight: 0,
@@ -178,6 +188,26 @@ export default function AddOldBalanceDialog({ open, onOpenChange, customer, onCo
               </p>
             )}
             {dateOk && <p className="text-[11px] text-slate-500 mt-1">{daysBack} days ago</p>}
+          </div>
+
+          {/* Days to settle (future term — drives weekly SMS cadence). */}
+          <div className="rounded-md border border-amber-200 bg-amber-50/40 p-2.5">
+            <Label className="text-xs">Give customer how many days to settle?</Label>
+            <Input data-testid="aob-days-to-settle" type="number" min="0" max="365"
+              value={daysToSettle}
+              onChange={(e) => setDaysToSettle(e.target.value.replace(/[^0-9]/g, ''))}
+              className="h-10 mt-1" />
+            <p className="text-[11px] text-amber-800 mt-1">
+              Due date: <strong>{isoDaysFromToday(daysToSettle)}</strong>
+              {' · '}
+              Customer will get an SMS now + auto follow-ups (15&nbsp;days before, 7&nbsp;days before, then weekly while overdue).
+            </p>
+            {parseInt(daysToSettle || 0, 10) === 0 && (
+              <p className="text-[11px] text-red-600 mt-1 flex items-start gap-1">
+                <AlertTriangle size={12} className="mt-0.5 flex-shrink-0" />
+                0 days = overdue from day one. SMS will start firing weekly immediately. OK if intended.
+              </p>
+            )}
           </div>
 
           {/* Notebook reference */}
