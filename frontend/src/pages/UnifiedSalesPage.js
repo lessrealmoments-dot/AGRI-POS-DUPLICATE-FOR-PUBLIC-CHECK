@@ -4220,6 +4220,7 @@ export default function UnifiedSalesPage() {
         saving={saving}
         confirmDisabled={confirmDisabled}
         isHistoricalCreditMode={isHistoricalCreditMode}
+        hc={hc}
       />
 
       {/* Credit Approval Dialog — Respects PIN Policies */}

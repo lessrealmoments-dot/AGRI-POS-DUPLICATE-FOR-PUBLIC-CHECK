@@ -79,6 +79,10 @@ export default function CheckoutDialog({
 
   // HC flags (read-only — used by the confirm-button LABEL only)
   isHistoricalCreditMode,
+  // HC state — exposed so when isHistoricalCreditMode is active and the
+  // reason is too short, the user can fill it INSIDE the dialog rather
+  // than being silently blocked by a disabled button.
+  hc,
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -378,6 +382,39 @@ export default function CheckoutDialog({
             )}
           </div>
 
+          {/* Historical Credit / Notebook AR — inline reason field.
+              Mirrors HistoricalCreditBanner so the user can satisfy the
+              20-char minimum without closing the dialog. Two-way bound to
+              the same `hc.reason` so the underlying banner reflects edits. */}
+          {isHistoricalCreditMode && hc && (
+            <div
+              data-testid="hc-inline-reason-block"
+              className="rounded-lg border-2 border-amber-300 bg-amber-50 p-3 space-y-2"
+            >
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="text-amber-600 shrink-0 mt-0.5" size={16} />
+                <div className="text-[12px] text-amber-900 leading-snug">
+                  <strong>Backdated credit — reason required.</strong>{' '}
+                  This will not affect today's cash and requires Owner / Admin
+                  TOTP approval on the next step.
+                </div>
+              </div>
+              <textarea
+                data-testid="hc-inline-reason-input"
+                value={hc.reason}
+                onChange={e => hc.setReason(e.target.value)}
+                placeholder="Notebook AR carry-forward verified against ledger page 12, customer countersigned 2026-02-04."
+                className="w-full text-[12px] rounded border border-amber-300 bg-white px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-400 min-h-[64px]"
+              />
+              <p className={`text-[11px] font-medium ${
+                hc.reason.trim().length >= 20 ? 'text-emerald-700' : 'text-amber-700'
+              }`}>
+                {hc.reason.trim().length} / 20 minimum
+                {hc.reason.trim().length < 20 && ' — keep typing to enable Continue'}
+              </p>
+            </div>
+          )}
+
           {/* Action buttons — checkout confirm */}
           <div className="flex gap-2 pt-2">
             <Button variant="outline" className="flex-1" onClick={() => onOpenChange(false)}>Cancel</Button>
@@ -386,6 +423,11 @@ export default function CheckoutDialog({
               className="flex-1 bg-[#1A4D2E] hover:bg-[#14532d] text-white"
               onClick={onConfirm}
               disabled={confirmDisabled}
+              title={
+                isHistoricalCreditMode && hc && hc.reason.trim().length < 20
+                  ? `Reason must be at least 20 characters (currently ${hc.reason.trim().length})`
+                  : undefined
+              }
             >
               {saving ? 'Processing...' : (
                 isHistoricalCreditMode ? 'Continue → Historical Credit / Notebook AR' :
