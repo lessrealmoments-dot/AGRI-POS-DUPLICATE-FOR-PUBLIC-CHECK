@@ -179,17 +179,17 @@ const fullPageCSS = `
 const dotMatrixCSS = `
   @page {
     size: 8.5in 11in;
-    margin: 0.5in 0.75in 0.7in 0.75in;
+    margin: 0.35in 0.6in 0.5in 0.6in;
     @bottom-center {
       content: "Page " counter(page) " of " counter(pages);
       font-family: 'Courier New', Courier, monospace;
-      font-size: 10px; color: #000;
+      font-size: 9px; color: #000;
     }
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     font-family: 'Courier New', Courier, monospace;
-    font-size: 12px; line-height: 1.65; color: #000; background: #fff;
+    font-size: 11px; line-height: 1.25; color: #000; background: #fff;
     -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
 
@@ -205,190 +205,211 @@ const dotMatrixCSS = `
   /* ── Letterhead repeated on every page ── */
   .dm-letterhead {
     width: 100%; border-collapse: collapse;
-    padding-bottom: 10px; margin-bottom: 6px;
+    padding-bottom: 4px; margin-bottom: 2px;
   }
   .dm-letterhead td { vertical-align: top; padding: 0; }
   .dm-lh-biz { padding-left: 8px; }
   .dm-lh-biz .dm-biz-name-lh {
     font-size: 13px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;
   }
-  .dm-lh-biz .dm-biz-detail-lh { font-size: 11px; line-height: 1.45; }
-  .dm-lh-biz .dm-biz-detail-lh .dm-lbl { display: inline-block; min-width: 52px; }
+  .dm-lh-biz .dm-biz-detail-lh { font-size: 10px; line-height: 1.3; }
+  .dm-lh-biz .dm-biz-detail-lh .dm-lbl { display: inline-block; min-width: 40px; }
   .dm-lh-title-cell { text-align: right; padding-right: 0; vertical-align: top; }
   .dm-lh-title {
-    font-size: 22px; font-weight: bold; text-transform: uppercase;
-    letter-spacing: 2px; margin-bottom: 6px;
+    font-size: 20px; font-weight: bold; text-transform: uppercase;
+    letter-spacing: 1.5px; margin-bottom: 3px;
   }
   .dm-lh-invbox {
-    display: inline-block; border: 1px solid #000; padding: 4px 8px;
-    font-size: 12px; line-height: 1.5; text-align: left; min-width: 200px;
+    display: inline-block; border: 1px solid #000; padding: 2px 6px;
+    font-size: 11px; line-height: 1.35; text-align: left; min-width: 200px;
   }
   .dm-lh-invbox table { border-collapse: collapse; }
-  .dm-lh-invbox td { padding: 1px 6px 1px 0; }
+  .dm-lh-invbox td { padding: 0 6px 0 0; }
   .dm-lh-invbox .dm-inv-val { font-weight: bold; text-align: right; padding-left: 12px; }
 
   /* ── Billing / Shipping band (first page only) ── */
-  .dm-addr-band { width: 100%; border-collapse: collapse; margin: 8px 0 6px 0; }
-  .dm-addr-band td { vertical-align: top; padding: 2px 4px; font-size: 11px; }
-  .dm-addr-band .dm-addr-label { font-weight: bold; width: 110px; }
+  .dm-addr-band { width: 100%; border-collapse: collapse; margin: 4px 0 2px 0; }
+  .dm-addr-band td { vertical-align: top; padding: 1px 4px; font-size: 10px; }
+  .dm-addr-band .dm-addr-label { font-weight: bold; width: 95px; }
   .dm-addr-band .dm-addr-val { font-weight: bold; }
 
   /* ── Sales-rep / Payment terms grid (first page only) ── */
-  .dm-meta-grid { width: 100%; border-collapse: collapse; margin: 6px 0 10px 0; }
+  .dm-meta-grid { width: 100%; border-collapse: collapse; margin: 3px 0 6px 0; }
   .dm-meta-grid th, .dm-meta-grid td {
-    border: 1px solid #000; padding: 5px 8px; font-size: 11px; vertical-align: top;
+    border: 1px solid #000; padding: 2px 6px; font-size: 10px; vertical-align: top;
   }
-  .dm-meta-grid th { background: #f0f0f0; font-weight: bold; text-align: left; }
+  .dm-meta-grid th { background: #f0f0f0; font-weight: bold; text-align: left; font-size: 9px; }
 
-  /* ── Right-aligned totals box (matches reference) ── */
+  /* ── Right-aligned totals box — compact ── */
   .dm-total-box {
-    margin: 14px 0 6px auto;
-    width: 320px; border-collapse: collapse;
+    margin: 6px 0 4px auto;
+    width: 280px; border-collapse: collapse;
   }
-  .dm-total-box td { padding: 6px 10px; font-size: 13px; vertical-align: middle; }
-  .dm-total-box td.dm-tb-label { text-align: left; }
+  .dm-total-box td { padding: 2px 8px; font-size: 11px; vertical-align: middle; }
+  .dm-total-box td.dm-tb-label { text-align: left; font-weight: bold; }
   .dm-total-box td.dm-tb-val {
-    text-align: right; border: 1px solid #000; min-width: 140px; font-weight: bold;
+    text-align: right; border: 1px solid #000; min-width: 120px; font-weight: bold;
   }
-  .dm-total-box tr.dm-tb-grand td.dm-tb-label { font-size: 16px; font-weight: bold; }
-  .dm-total-box tr.dm-tb-grand td.dm-tb-val { font-size: 16px; }
+  .dm-total-box tr.dm-tb-grand td.dm-tb-label { font-size: 13px; font-weight: bold; }
+  .dm-total-box tr.dm-tb-grand td.dm-tb-val { font-size: 13px; }
 
   /* ── Centered AUTHORIZED REPRESENTATIVE signature line ── */
   .dm-auth-sig {
-    text-align: center; margin: 28px auto 8px auto;
+    text-align: center; margin: 10px auto 4px auto;
     page-break-inside: avoid;
   }
   .dm-auth-sig .dm-sig-line-c {
-    border-bottom: 1px solid #000; width: 320px; height: 22px; margin: 0 auto;
+    border-bottom: 1px solid #000; width: 280px; height: 16px; margin: 0 auto;
   }
   .dm-auth-sig .dm-sig-label-c {
-    font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;
-    margin-top: 4px;
+    font-size: 9px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;
+    margin-top: 2px;
   }
 
   /* ── Terms block (charge agreement style) ── */
   .dm-terms-block {
-    margin-top: 16px; font-size: 11px; line-height: 1.5;
+    margin-top: 8px; font-size: 9.5px; line-height: 1.35;
     text-align: center;
     page-break-inside: avoid;
   }
   .dm-terms-block .dm-terms-head {
-    font-weight: bold; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;
+    font-weight: bold; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px;
+    font-size: 10px;
   }
   .dm-terms-block .dm-terms-copy-key {
-    font-size: 11px; font-weight: bold; letter-spacing: 0.5px;
-    margin-top: 6px; text-transform: uppercase;
+    font-size: 9.5px; font-weight: bold; letter-spacing: 0.5px;
+    margin-top: 3px; text-transform: uppercase;
   }
 
   /* ── Receipt-# fallback footer (in tfoot — shows even if @page bottom unsupported) ── */
   .dm-foot-receipt {
-    text-align: right; font-size: 10px; padding: 4px 0;
+    text-align: right; font-size: 9px; padding: 2px 0;
     border-top: 1px dashed #000;
   }
 
   /* ── Company header (legacy — order slip uses this) ── */
-  .dm-header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 8px; }
-  .dm-biz-name { font-size: 18px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; }
-  .dm-biz-detail { font-size: 11px; line-height: 1.5; }
+  .dm-header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 6px; margin-bottom: 4px; }
+  .dm-biz-name { font-size: 16px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; }
+  .dm-biz-detail { font-size: 10px; line-height: 1.3; }
 
   /* ── Document title banner ── */
   .dm-doc-title {
-    text-align: center; font-size: 15px; font-weight: bold;
-    text-transform: uppercase; letter-spacing: 3px;
+    text-align: center; font-size: 14px; font-weight: bold;
+    text-transform: uppercase; letter-spacing: 2px;
     border-top: 1px solid #000; border-bottom: 1px solid #000;
-    padding: 6px 0; margin: 8px 0;
+    padding: 3px 0; margin: 4px 0;
   }
 
   /* ── Meta grid (two-column key-value pairs) ── */
-  .dm-meta-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
-  .dm-meta-table td { padding: 3px 4px; font-size: 12px; vertical-align: top; }
+  .dm-meta-table { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
+  .dm-meta-table td { padding: 2px 4px; font-size: 11px; vertical-align: top; }
   .dm-meta-table .dm-label { font-weight: bold; white-space: nowrap; width: 1%; padding-right: 6px; }
 
   /* ── Customer / info box ── */
   .dm-info-box {
-    border: 1px solid #000; padding: 7px 10px; margin: 8px 0;
+    border: 1px solid #000; padding: 4px 8px; margin: 4px 0;
   }
   .dm-info-box .dm-box-label {
-    font-size: 10px; font-weight: bold; text-transform: uppercase;
-    letter-spacing: 0.5px; margin-bottom: 3px; border-bottom: 1px solid #000; padding-bottom: 2px;
+    font-size: 9px; font-weight: bold; text-transform: uppercase;
+    letter-spacing: 0.5px; margin-bottom: 2px; border-bottom: 1px solid #000; padding-bottom: 1px;
   }
-  .dm-info-box .dm-box-name { font-size: 13px; font-weight: bold; }
-  .dm-info-box .dm-box-sub { font-size: 11px; }
+  .dm-info-box .dm-box-name { font-size: 12px; font-weight: bold; }
+  .dm-info-box .dm-box-sub { font-size: 10px; }
 
   /* ── Warning banner ── */
   .dm-warning {
-    border: 2px solid #000; padding: 7px; margin: 8px 0;
-    text-align: center; font-weight: bold; font-size: 11px;
+    border: 2px solid #000; padding: 4px; margin: 4px 0;
+    text-align: center; font-weight: bold; font-size: 10px;
   }
 
-  /* ── Items table ── */
-  .dm-items-table { width: 100%; border-collapse: collapse; margin: 8px 0; }
-  .dm-items-table thead tr { border-bottom: 2px solid #000; }
+  /* ── Items table — DENSE (target: 10-15 lines on page 1) ── */
+  .dm-items-table { width: 100%; border-collapse: collapse; margin: 4px 0; }
+  .dm-items-table thead tr { border-bottom: 1.5px solid #000; }
   .dm-items-table th {
-    border: 1px solid #000; padding: 6px 7px;
-    font-size: 11px; font-weight: bold; text-transform: uppercase;
-    text-align: left; background: #fff;
+    border: 1px solid #000; padding: 3px 6px;
+    font-size: 10px; font-weight: bold; text-transform: uppercase;
+    text-align: left; background: #fff; line-height: 1.2;
   }
   .dm-items-table th.r { text-align: right; }
   .dm-items-table th.c { text-align: center; }
   .dm-items-table td {
-    border: 1px solid #000; padding: 6px 7px;
-    font-size: 12px; vertical-align: top; word-break: break-word;
+    border: 1px solid #000; padding: 2px 6px;
+    font-size: 11px; vertical-align: top; word-break: break-word; line-height: 1.25;
   }
   .dm-items-table td.r { text-align: right; }
   .dm-items-table td.c { text-align: center; }
   .dm-items-table td.strong { font-weight: bold; }
+  .dm-items-table .dm-row-num {
+    width: 22px; text-align: center; font-size: 10px; color: #555;
+  }
 
-  /* ── Totals block ── */
-  .dm-totals { margin-top: 6px; border-top: 2px solid #000; padding-top: 8px; }
+  /* ── Totals block (legacy used by order slip) ── */
+  .dm-totals { margin-top: 4px; border-top: 1.5px solid #000; padding-top: 4px; }
   .dm-tot-row {
     display: flex; justify-content: flex-end; gap: 0;
-    font-size: 12px; padding: 2px 0;
+    font-size: 11px; padding: 1px 0;
   }
   .dm-tot-row .dm-tot-label {
-    min-width: 140px; text-align: right; font-weight: bold; padding-right: 16px;
+    min-width: 120px; text-align: right; font-weight: bold; padding-right: 12px;
   }
-  .dm-tot-row .dm-tot-val {
-    min-width: 130px; text-align: right;
-  }
+  .dm-tot-row .dm-tot-val { min-width: 110px; text-align: right; }
   .dm-tot-row.dm-grand {
-    font-size: 14px; font-weight: bold;
+    font-size: 12px; font-weight: bold;
     border-top: 1px solid #000; border-bottom: 1px solid #000;
-    padding: 4px 0; margin: 4px 0;
+    padding: 2px 0; margin: 2px 0;
   }
 
-  /* ── QR section ── */
+  /* ── QR section (legacy big — kept for order slip) ── */
   .dm-qr-section {
-    display: flex; align-items: flex-start; gap: 20px;
-    margin-top: 16px; border-top: 1px solid #000; padding-top: 12px;
+    display: flex; align-items: flex-start; gap: 16px;
+    margin-top: 8px; border-top: 1px solid #000; padding-top: 6px;
   }
   .dm-qr-section img {
-    display: block; width: 120px; height: 120px;
+    display: block; width: 90px; height: 90px;
     image-rendering: pixelated; image-rendering: crisp-edges;
     flex-shrink: 0;
   }
-  .dm-qr-info { font-size: 11px; }
-  .dm-qr-info .dm-qr-code { font-size: 13px; font-weight: bold; letter-spacing: 1px; margin-bottom: 4px; }
-  .dm-qr-info .dm-qr-scan { font-size: 11px; font-weight: bold; margin-bottom: 6px; }
-  .dm-qr-info .dm-qr-sub { font-size: 11px; }
+  .dm-qr-info { font-size: 10px; }
+  .dm-qr-info .dm-qr-code { font-size: 11px; font-weight: bold; letter-spacing: 0.5px; margin-bottom: 2px; }
+  .dm-qr-info .dm-qr-scan { font-size: 10px; font-weight: bold; margin-bottom: 4px; }
+  .dm-qr-info .dm-qr-sub { font-size: 10px; }
+
+  /* ── Compact QR strip — pinned bottom-left of trust receipt below the
+        Terms block. Same shape, smaller footprint, consistent placement
+        across all printed copies. ── */
+  .dm-qr-strip {
+    display: flex; align-items: center; gap: 10px;
+    margin-top: 6px; padding-top: 4px;
+    border-top: 1px dashed #000;
+    page-break-inside: avoid;
+  }
+  .dm-qr-strip img {
+    width: 70px; height: 70px;
+    image-rendering: pixelated; image-rendering: crisp-edges;
+    flex-shrink: 0;
+  }
+  .dm-qr-strip .dm-qr-strip-info { font-size: 10px; line-height: 1.3; }
+  .dm-qr-strip .dm-qr-code { font-size: 11px; font-weight: bold; letter-spacing: 0.5px; }
+  .dm-qr-strip .dm-qr-scan { font-size: 10px; font-weight: bold; }
+  .dm-qr-strip .dm-qr-sub  { font-size: 9.5px; }
 
   /* ── Signature row ── */
-  .dm-sig-row { display: flex; justify-content: space-between; gap: 24px; margin-top: 32px; }
+  .dm-sig-row { display: flex; justify-content: space-between; gap: 24px; margin-top: 16px; }
   .dm-sig-block { flex: 1; text-align: center; }
-  .dm-sig-line { border-bottom: 1px solid #000; height: 28px; margin-bottom: 4px; }
-  .dm-sig-label { font-size: 10px; font-weight: bold; text-transform: uppercase; }
+  .dm-sig-line { border-bottom: 1px solid #000; height: 22px; margin-bottom: 2px; }
+  .dm-sig-label { font-size: 9px; font-weight: bold; text-transform: uppercase; }
 
   /* ── Footer ── */
   .dm-footer {
-    text-align: center; border-top: 2px solid #000;
-    margin-top: 18px; padding-top: 10px;
+    text-align: center; border-top: 1.5px solid #000;
+    margin-top: 8px; padding-top: 6px;
   }
-  .dm-footer .dm-thankyou { font-size: 14px; font-weight: bold; margin-bottom: 4px; }
-  .dm-footer .dm-disclaimer { font-size: 9px; line-height: 1.45; }
+  .dm-footer .dm-thankyou { font-size: 12px; font-weight: bold; margin-bottom: 2px; }
+  .dm-footer .dm-disclaimer { font-size: 8px; line-height: 1.3; }
 
   /* ── Terms / Note boxes ── */
-  .dm-box { border: 1px solid #000; padding: 8px 10px; margin: 10px 0; font-size: 11px; line-height: 1.5; }
-  .dm-box strong { font-size: 12px; text-transform: uppercase; }
+  .dm-box { border: 1px solid #000; padding: 4px 8px; margin: 4px 0; font-size: 10px; line-height: 1.35; }
+  .dm-box strong { font-size: 11px; text-transform: uppercase; }
 
   @media print {
     body { max-width: none; }
@@ -1085,19 +1106,28 @@ function trustReceiptDotMatrix(data, biz, docCode) {
     body += `<div class="dm-warning">** PARTIAL RELEASE — SCAN QR CODE BELOW TO RELEASE ITEMS **</div>`;
   }
 
-  // Items table — column structure mirrors the reference
+  // Items table — column structure mirrors the reference. The Discount
+  // column is shown only when at least one line actually has a discount;
+  // otherwise we drop it entirely so the row stays compact and readable.
   const items = inv.items || [];
-  const hasDiscount = items.some(i => parseFloat(i.discount_amount) > 0);
+  const hasDiscount = items.some(i =>
+    parseFloat(i.discount_amount) > 0 || parseFloat(i.discount_value) > 0
+  );
   body += `<table class="dm-items-table"><thead><tr>`;
-  body += `<th style="width:22%;">Item</th>`;
-  body += `<th style="width:24%;">Description</th>`;
-  body += `<th class="c" style="width:10%;">Quantity</th>`;
+  body += `<th class="c" style="width:24px;">#</th>`;
+  body += `<th style="width:24%;">Item</th>`;
+  body += `<th style="width:${hasDiscount ? '22' : '28'}%;">Description</th>`;
+  body += `<th class="c" style="width:10%;">Qty</th>`;
   body += `<th class="r" style="width:14%;">Unit Price</th>`;
-  body += `<th class="r" style="width:14%;">Discount</th>`;
+  if (hasDiscount) {
+    body += `<th class="r" style="width:12%;">Discount</th>`;
+  }
   body += `<th class="r" style="width:16%;">Sub-Total</th>`;
   body += `</tr></thead><tbody>`;
 
+  let rowIdx = 0;
   for (const item of items) {
+    rowIdx += 1;
     const qty   = parseFloat(item.quantity) || 0;
     const rate  = parseFloat(item.rate || item.unit_price || item.price) || 0;
     const disc  = parseFloat(item.discount_amount) || 0;
@@ -1105,11 +1135,14 @@ function trustReceiptDotMatrix(data, biz, docCode) {
     const unit  = item.unit || item.uom || '';
     const desc  = item.description || item.category || '';
     body += `<tr>`;
+    body += `<td class="dm-row-num">${rowIdx}</td>`;
     body += `<td>${item.product_name || ''}</td>`;
     body += `<td>${desc}</td>`;
     body += `<td class="c">${qty}${unit ? ' ' + unit : ''}</td>`;
     body += `<td class="r">${formatPHP(rate)}</td>`;
-    body += `<td class="r">${disc > 0 ? formatPHP(disc) : (hasDiscount ? '0 %' : '0 %')}</td>`;
+    if (hasDiscount) {
+      body += `<td class="r">${disc > 0 ? '- ' + formatPHP(disc) : '—'}</td>`;
+    }
     body += `<td class="r strong">${formatPHP(total)}</td>`;
     body += `</tr>`;
   }
@@ -1173,8 +1206,24 @@ function trustReceiptDotMatrix(data, biz, docCode) {
     </div>`;
   }
 
-  // QR code at the very end
-  body += qrImgTagDM(docCode, inv);
+  // Compact QR strip — consistent placement at the bottom-left,
+  // below the Terms block. Same data as the legacy `qrImgTagDM` but
+  // ~40% smaller footprint so the page stays dense.
+  if (docCode) {
+    const url = `${window.location.origin}/doc/${docCode}`;
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(url)}&margin=2&color=000000&bgcolor=ffffff`;
+    body += `
+      <div class="dm-qr-strip">
+        <img src="${qrUrl}" alt="QR Code" width="70" height="70" />
+        <div class="dm-qr-strip-info">
+          <div class="dm-qr-code">${docCode}</div>
+          <div class="dm-qr-scan">Scan to view document</div>
+          ${inv.invoice_number ? `<div class="dm-qr-sub">Receipt No: ${inv.invoice_number}</div>` : ''}
+          ${inv.invoice_date || inv.created_at || inv.order_date ? `<div class="dm-qr-sub">Date: ${fmtDate(inv.invoice_date || inv.created_at || inv.order_date)}</div>` : ''}
+          ${inv.customer_name ? `<div class="dm-qr-sub">Customer: ${inv.customer_name}</div>` : ''}
+        </div>
+      </div>`;
+  }
 
   // ── 4. Compose the page-frame table (thead+tbody+tfoot) ───────────────────
   return `
