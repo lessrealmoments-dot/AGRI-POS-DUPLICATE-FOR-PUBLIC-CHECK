@@ -1,0 +1,118 @@
+{
+  "generated_at": "2026-05-14T00:08:42.569938+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 5,
+  "pass_count": 3,
+  "fail_count": 2,
+  "rows": [
+    {
+      "scenario": "br_pos_history.1_sales_range_window",
+      "step": "today_window_matches_one_week_two_month_three",
+      "expected": {
+        "today": 1,
+        "week": 2,
+        "month": 3
+      },
+      "actual": {
+        "today": 1,
+        "week": 2,
+        "month": 3
+      },
+      "status": "PASS",
+      "evidence": {
+        "seeded": [
+          "BR_HIST-1-5DAGO",
+          "BR_HIST-1-TODAY",
+          "BR_HIST-1-20DAGO"
+        ]
+      },
+      "recorded_at": "2026-05-14T00:08:42.496926+00:00"
+    },
+    {
+      "scenario": "br_pos_history.2_sales_totals",
+      "step": "cash_credit_voided_aggregation_correct",
+      "expected": {
+        "cash_ge": 500,
+        "credit_ge": 700,
+        "voided_ge": 1
+      },
+      "actual": {
+        "cash": 600.0,
+        "credit": 700.0,
+        "voided_count": 1,
+        "grand": 1300.0
+      },
+      "status": "FAIL",
+      "evidence": {
+        "row_count": 3
+      },
+      "recorded_at": "2026-05-14T00:08:42.507442+00:00"
+    },
+    {
+      "scenario": "br_pos_history.3_po_range_window",
+      "step": "today_one_week_two_month_three",
+      "expected": {
+        "today": 1,
+        "week": 2,
+        "month": 3
+      },
+      "actual": {
+        "today": 1,
+        "week": 2,
+        "month": 3
+      },
+      "status": "PASS",
+      "evidence": {
+        "seeded": [
+          "BR_HIST-3-PO-TODAY",
+          "BR_HIST-3-PO-20D",
+          "BR_HIST-3-PO-5D"
+        ]
+      },
+      "recorded_at": "2026-05-14T00:08:42.519218+00:00"
+    },
+    {
+      "scenario": "br_pos_history.4_po_totals",
+      "step": "spent_paid_outstanding_by_status_correct",
+      "expected": {
+        "received_ge": 1,
+        "partial_ge": 1,
+        "cancelled_ge": 1
+      },
+      "actual": {
+        "spent": 4500.0,
+        "paid": 4000.0,
+        "outstanding": 500.0,
+        "by_status": {
+          "received": 2,
+          "draft": 0,
+          "partial": 1,
+          "cancelled": 1,
+          "open": 0
+        }
+      },
+      "status": "FAIL",
+      "evidence": {
+        "row_count": 3
+      },
+      "recorded_at": "2026-05-14T00:08:42.524658+00:00"
+    },
+    {
+      "scenario": "br_pos_history.5_newest_first",
+      "step": "C_before_B_before_A",
+      "expected": [
+        "BR_HIST-5-C",
+        "BR_HIST-5-B",
+        "BR_HIST-5-A"
+      ],
+      "actual": [
+        "BR_HIST-5-C",
+        "BR_HIST-5-B",
+        "BR_HIST-5-A"
+      ],
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T00:08:42.533522+00:00"
+    }
+  ]
+}

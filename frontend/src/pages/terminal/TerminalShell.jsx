@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShoppingCart, ClipboardCheck, ArrowLeftRight, Wifi, WifiOff, RefreshCw, Settings, ChevronRight, Unlink, Search, X, Loader2, Printer, FileText, ExternalLink, CheckCircle2, ScanLine, FolderUp, Check } from 'lucide-react';
+import { ShoppingCart, ClipboardCheck, ArrowLeftRight, Wifi, WifiOff, RefreshCw, Settings, ChevronRight, Unlink, Search, X, Loader2, Printer, FileText, ExternalLink, CheckCircle2, ScanLine, FolderUp, Check, History } from 'lucide-react';
 import { toast } from 'sonner';
 import TerminalSales from './TerminalSales';
 import TerminalPOCheck from './TerminalPOCheck';
 import TerminalTransfers from './TerminalTransfers';
 import TerminalDocUpload from './TerminalDocUpload';
+import TerminalHistoryOverlay from '../../components/TerminalHistoryOverlay';
 import axios from 'axios';
 import PrintEngine from '../../lib/PrintEngine';
 import PrintBridge from '../../lib/PrintBridge';
@@ -248,6 +249,19 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
   const [printQueueOpen, setPrintQueueOpen] = useState(false);
   const [quickScanCloudPrint, setQuickScanCloudPrint] = useState(false); // cloud print for scanned doc
 
+  // ── POS History overlay (Sales History + Purchase History sheet)
+  // Single sheet behind a PIN gate. Branch scope is locked to the
+  // terminal's pairing (session.branchId). Server enforces:
+  //   • Owner / Org Admin PIN → any branch
+  //   • TOTP (Authenticator)  → any branch
+  //   • Manager PIN           → ONLY if their assigned branch matches
+  // See POSHistoryUnlockGate + verify_pin_for_action('pos_view_history').
+  const [historyOverlayOpen, setHistoryOverlayOpen] = useState(false);
+  const [posHistoryPinSession, setPosHistoryPinSession] = useState(null);
+  const startHistoryPinSession = useCallback((pin, method, name) => {
+    setPosHistoryPinSession({ pin: String(pin || ''), method, name: name || '', at: Date.now() });
+  }, []);
+
   // Android back button / browser back navigation handler
   const backExitRef = useRef(false);
   const backExitTimerRef = useRef(null);
@@ -258,6 +272,11 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
 
     const handlePopState = () => {
       // Priority 1: Close any open overlay/modal
+      if (historyOverlayOpen) {
+        setHistoryOverlayOpen(false);
+        window.history.pushState({ terminal: true }, '');
+        return;
+      }
       if (qrScannerOpen) {
         setQrScannerOpen(false);
         window.history.pushState({ terminal: true }, '');
@@ -316,7 +335,7 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
       window.removeEventListener('popstate', handlePopState);
       clearTimeout(backExitTimerRef.current);
     };
-  }, [activeTab, qrScannerOpen, docUploadOpen, settingsOpen, quickScanDoc, showDocSearch, modeMenuOpen]);
+  }, [activeTab, qrScannerOpen, docUploadOpen, settingsOpen, quickScanDoc, showDocSearch, modeMenuOpen, historyOverlayOpen]);
 
   // Authenticated axios instance — uses tokenRef for latest token
   const [api] = useState(() => {
@@ -1117,6 +1136,14 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
                 </div>
                 <span className="text-sm font-medium">Upload Doc</span>
               </button>
+              <button onClick={() => { setModeMenuOpen(false); setHistoryOverlayOpen(true); }}
+                className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 text-slate-700"
+                data-testid="mode-history">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-rose-50 text-rose-600">
+                  <History size={16} />
+                </div>
+                <span className="text-sm font-medium">History</span>
+              </button>
               <button onClick={() => { setModeMenuOpen(false); setPrintQueueOpen(true); }}
                 className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 text-slate-700"
                 data-testid="mode-print-queue">
@@ -1400,6 +1427,18 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
           onClose={() => setDocUploadOpen(false)}
         />
       )}
+
+      {/* POS History Overlay — Sales + Purchase history with PIN gate */}
+      <TerminalHistoryOverlay
+        api={api}
+        open={historyOverlayOpen}
+        onClose={() => setHistoryOverlayOpen(false)}
+        branch={{ id: session.branchId, name: session.branchName || session.branch_name || '' }}
+        isOnline={isOnline}
+        businessInfo={businessInfo}
+        pinSession={posHistoryPinSession}
+        startPinSession={startHistoryPinSession}
+      />
 
       {/* QuickScan Cloud Print Overlay */}
       {quickScanCloudPrint && quickScanDoc?.basic && (

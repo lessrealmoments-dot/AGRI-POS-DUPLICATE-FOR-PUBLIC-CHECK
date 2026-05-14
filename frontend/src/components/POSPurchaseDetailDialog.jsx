@@ -6,7 +6,6 @@
  * can drill into any PO without leaving the terminal.
  */
 import React, { useState, useEffect, useCallback } from 'react';
-import { api } from '../contexts/AuthContext';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -25,7 +24,7 @@ const STATUS_BADGE = {
   cancelled: 'bg-rose-100 text-rose-600',
 };
 
-export default function POSPurchaseDetailDialog({ poId, open, onClose }) {
+export default function POSPurchaseDetailDialog({ api, poId, open, onClose }) {
   const [po, setPO] = useState(null);
   const [loading, setLoading] = useState(false);
   const [businessInfo, setBusinessInfo] = useState(null);

@@ -18,7 +18,6 @@
  *     and Purchase History tabs in the same session.
  */
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { api } from '../contexts/AuthContext';
 import { Card, CardContent } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -28,6 +27,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { toast } from 'sonner';
 
 export default function POSHistoryUnlockGate({
+  api,
   label,
   branch,
   pinSession,

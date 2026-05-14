@@ -12,11 +12,8 @@
  * Backend: GET /api/invoices/history/by-range
  */
 import React, { useEffect, useState, useCallback } from 'react';
-import { api } from '../contexts/AuthContext';
-import { Card, CardContent } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { Badge } from './ui/badge';
 import { RefreshCw, FileText, WifiOff, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPHP } from '../lib/utils';
@@ -45,6 +42,7 @@ const fmtDayISO = (iso) => {
 };
 
 export default function POSSalesHistoryView({
+  api,
   currentBranch,
   isOnline,
   onSelectInvoice,

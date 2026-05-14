@@ -7,7 +7,6 @@
  * PO up via onSelectPO(po) so the parent can open the detail/reprint dialog.
  */
 import React, { useEffect, useState, useCallback } from 'react';
-import { api } from '../contexts/AuthContext';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { RefreshCw, Truck, WifiOff, Search } from 'lucide-react';
@@ -46,6 +45,7 @@ const STATUS_BADGE = {
 };
 
 export default function POSPurchaseHistoryView({
+  api,
   currentBranch,
   isOnline,
   onSelectPO,
