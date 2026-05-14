@@ -137,7 +137,13 @@ export default function TerminalReturnRefundModal({
         cashier_name: terminalSession?.userName || '',
         manager_pin: pin,
       };
-      const res = await api.post('/returns', payload);
+      // In terminal mode, forward the paired session token so the backend's
+      // `Depends(get_current_user)` succeeds. Web mode falls through to the
+      // AuthContext interceptor.
+      const config = terminalSession?.token
+        ? { headers: { Authorization: `Bearer ${terminalSession.token}` } }
+        : undefined;
+      const res = await api.post('/returns', payload, config);
       setRmaNumber(res.data.rma_number);
       setStep(4);
       toast.success(`Return processed: ${res.data.rma_number}`);

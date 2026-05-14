@@ -2503,6 +2503,7 @@ export default function DocViewerPage() {
       {showUpdateReceiptModal && fullData && (
         <TerminalUpdateReceiptModal
           invoice={fullData.document || fullData}
+          terminalSession={terminalSession}
           onSuccess={(result) => {
             // Refresh document data
             setBasic(prev => ({

@@ -15,6 +15,7 @@ import RefundAllocationPreview from './RefundAllocationPreview';
 
 export default function TerminalUpdateReceiptModal({
   invoice,
+  terminalSession,
   onSuccess,
   onClose,
 }) {
@@ -100,7 +101,13 @@ export default function TerminalUpdateReceiptModal({
         reprint_receipt: reprintChoice === 'yes',
         notes,
       };
-      const res = await api.post(`/invoices/${invoice.id}/correct-incomplete-stock`, payload);
+      // In terminal mode, the user is authed via the paired terminal
+      // session token (not the web AuthContext JWT). Forward it explicitly
+      // so the backend's `Depends(get_current_user)` succeeds.
+      const config = terminalSession?.token
+        ? { headers: { Authorization: `Bearer ${terminalSession.token}` } }
+        : undefined;
+      const res = await api.post(`/invoices/${invoice.id}/correct-incomplete-stock`, payload, config);
       setCorrectionResult(res.data);
       setStep(3);
       toast.success('Receipt corrected successfully');
