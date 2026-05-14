@@ -1,6 +1,19 @@
 # AgriBooks Changelog
 
 
+## Feb 13 2026 — Hot Fix: Tenant Scoping on Invoice Corrections ✅
+
+**Bug found** during live-site audit (agri-books.com) on credit invoice `SI-MB-001001`. Curl `POST /api/invoices/{id}/correct-incomplete-stock` returned `{"detail":"Invoice not found"}` even though the invoice exists and the JWT was valid.
+
+**Root cause**: `correct_incomplete_stock` never declared `Depends(get_current_user)`. Without that dep, `set_org_context()` is never called for the request → `db.invoices` (a `TenantCollection` proxy) sees an empty org context → fail-closed → "not found". The route only worked in practice when a prior request on the same uvicorn worker happened to leave its context behind (latent context-bleed; non-deterministic).
+
+**Fix**:
+- `backend/routes/invoice_corrections.py` — added `user: dict = Depends(get_current_user)` to the signature. Audit fields `corrected_by_id` / `corrected_by_name` now reflect the real authenticated user (previously hardcoded `"terminal"`).
+- BR test invocations now pass `user=tenant["users"]["owner"]` (8 call-sites in `test_br_correct_incomplete_payment_aware.py`).
+- BR suite still **186 passed / 0 fail** after the change (453 structured rows).
+
+**Why credit failed visibly when cash didn't (on prod)**: When the route DID happen to find an invoice (worker had bleed-over context), the OLD code path then unconditionally did `update_cashier_wallet(-refund_amount, allow_negative=False)`. For credit invoices, cashier never received that money, so the wallet had insufficient balance → HTTP 400 → "Correction failed on credit". Cash invoices coincidentally had the wallet topped from the original sale so the same code path succeeded. The payment-aware allocator (already merged today) plus this auth fix together resolve both failure modes.
+
 ## Feb 13 2026 — Closed-Day Correction Policy: Always Allow ✅
 
 **Decision (owner)**: Both "Update for Incomplete Stock" and "Return & Refund" are allowed on closed days. Audit trail rests on **three pillars** that fire regardless of day status:

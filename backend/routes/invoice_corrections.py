@@ -16,12 +16,12 @@ Payment-aware routing (2026 audit fix):
           (the cashflow is untouched, so the closed Z-report stays consistent).
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import List
 from datetime import datetime, timezone
 
-from utils import today_local
+from utils import today_local, get_current_user
 from utils.refund_allocator import compute_refund_allocation
 from utils.helpers import (
     update_cashier_wallet, update_digital_wallet,
@@ -80,6 +80,7 @@ async def log_inventory_movement(
 async def correct_incomplete_stock(
     invoice_id: str,
     data: IncompleteStockCorrection,
+    user: dict = Depends(get_current_user),
 ):
     """
     Correct invoice when items weren't physically given.
@@ -87,11 +88,14 @@ async def correct_incomplete_stock(
       • AR first  → reduces invoice.balance and customer.balance.
       • Digital   → reverses matching payment channel via digital wallet.
       • Cash      → debits cashier wallet (only if cash was paid).
+
+    Requires an authenticated user — both for tenant scoping (so
+    `db.invoices.find_one` sees the right organization) and for an honest
+    audit trail (`corrected_by_id`, `corrected_by_name`). The PIN is then
+    a SECOND factor on top of the user's auth.
     """
     from config import db
     from routes.verify import verify_pin_for_action
-
-    user = {"id": "terminal", "full_name": "Terminal User", "email": "terminal@system"}
 
     # 1. Fetch invoice
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})

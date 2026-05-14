@@ -119,6 +119,7 @@ async def test_pa_correct_1_cash_baseline_debits_cashier(tenant, record_result):
             )],
             manager_pin=pin, reprint_receipt=False, notes="test",
         ),
+        user=tenant["users"]["owner"],
     )
     after_cash = await _cashier_balance(branch_id)
 
@@ -169,6 +170,7 @@ async def test_pa_correct_2_credit_unpaid_no_cashier_debit(tenant, record_result
             )],
             manager_pin=pin,
         ),
+        user=tenant["users"]["owner"],
     )
     after_cash = await _cashier_balance(branch_id)
     after_ar = await _customer_balance(cust_id)
@@ -224,6 +226,7 @@ async def test_pa_correct_3_digital_routes_to_digital_wallet(tenant, record_resu
             )],
             manager_pin=pin,
         ),
+        user=tenant["users"]["owner"],
     )
     after_cash = await _cashier_balance(branch_id)
     after_dig = await _digital_balance(branch_id)
@@ -280,6 +283,7 @@ async def test_pa_correct_4_split_overshoot_digital_then_cash(tenant, record_res
             )],
             manager_pin=pin,
         ),
+        user=tenant["users"]["owner"],
     )
     after_cash = await _cashier_balance(branch_id)
     after_dig = await _digital_balance(branch_id)
@@ -328,6 +332,7 @@ async def test_pa_correct_5_partial_credit_ar_then_cash(tenant, record_result):
             )],
             manager_pin=pin,
         ),
+        user=tenant["users"]["owner"],
     )
     after_cash = await _cashier_balance(branch_id)
     after_ar = await _customer_balance(cust_id)
@@ -379,6 +384,7 @@ async def test_pa_correct_6_day_closed_ar_only_allowed(tenant, record_result):
             )],
             manager_pin=pin,
         ),
+        user=tenant["users"]["owner"],
     )
     record_result(
         scenario="br_correct_pa.6_day_closed_ar_only",
@@ -426,6 +432,7 @@ async def test_pa_correct_7_day_closed_cash_now_allowed(tenant, record_result):
             )],
             manager_pin=pin,
         ),
+        user=tenant["users"]["owner"],
     )
     after_cash = await _cashier_balance(branch_id)
 
@@ -483,6 +490,7 @@ async def test_pa_correct_8_inventory_reversal_always_applies(tenant, record_res
             )],
             manager_pin=pin,
         ),
+        user=tenant["users"]["owner"],
     )
 
     inv_row = await _raw_db.inventory.find_one(
