@@ -1,22 +1,21 @@
 /**
  * TerminalHistoryOverlay — full-screen sheet launched from the POS Terminal
  * Mode Selector. Hosts Sales History + Purchase History views behind a
- * single PIN unlock gate, and routes detail dialogs through to the
- * terminal's own `api` instance (so branch + token scoping match the
- * terminal pairing, not the AuthContext user).
+ * single PIN unlock gate.
  *
- * Mounted by TerminalShell.jsx; toggled via the "History" entry in the
- * floating mode menu (lower-left). When closed, the unlock state is
- * preserved via pinSession so re-opening within 30 min won't re-prompt.
+ * Row clicks navigate to `/doc/{doc_code}` so we reuse the existing
+ * DocViewerPage modal that the search function already opens — same
+ * 58mm / Full-page reprint UX, same "Back to Terminal" affordance. No
+ * duplicate viewers, no SDK drift.
  */
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { X, FileText, Truck, ShieldCheck } from 'lucide-react';
 import { Button } from './ui/button';
+import { toast } from 'sonner';
 import POSHistoryUnlockGate from './POSHistoryUnlockGate';
 import POSSalesHistoryView from './POSSalesHistoryView';
 import POSPurchaseHistoryView from './POSPurchaseHistoryView';
-import POSSalesDetailDialog from './POSSalesDetailDialog';
-import POSPurchaseDetailDialog from './POSPurchaseDetailDialog';
 
 export default function TerminalHistoryOverlay({
   api,
@@ -24,15 +23,28 @@ export default function TerminalHistoryOverlay({
   onClose,
   branch,                // { id, name }
   isOnline,
-  businessInfo,
   pinSession,
   startPinSession,
 }) {
   const [view, setView] = useState('sales'); // 'sales' | 'purchase'
-  const [openInvoiceId, setOpenInvoiceId] = useState(null);
-  const [openPOId, setOpenPOId] = useState(null);
+  const navigate = useNavigate();
 
   if (!open) return null;
+
+  // Same handler shape for both lists — navigate to the existing
+  // DocViewerPage which already implements 58mm/Full-page reprint,
+  // payment history, "Back to Terminal" header, etc.
+  const openDoc = (row) => {
+    const code = row?.doc_code;
+    if (!code) {
+      toast.error('No QR code on this record yet — open it from its main page to generate one.');
+      return;
+    }
+    // Close the overlay so when the user taps "Back to Terminal" inside
+    // the doc viewer they land back on the live terminal cart, fresh.
+    onClose && onClose();
+    navigate(`/doc/${code}`);
+  };
 
   return (
     <div
@@ -99,33 +111,18 @@ export default function TerminalHistoryOverlay({
               api={api}
               currentBranch={branch}
               isOnline={isOnline}
-              onSelectInvoice={(inv) => setOpenInvoiceId(inv.id)}
+              onSelectInvoice={openDoc}
             />
           ) : (
             <POSPurchaseHistoryView
               api={api}
               currentBranch={branch}
               isOnline={isOnline}
-              onSelectPO={(po) => setOpenPOId(po.id)}
+              onSelectPO={openDoc}
             />
           )}
         </POSHistoryUnlockGate>
       </div>
-
-      {/* Detail dialogs */}
-      <POSSalesDetailDialog
-        api={api}
-        invoiceId={openInvoiceId}
-        open={!!openInvoiceId}
-        onClose={() => setOpenInvoiceId(null)}
-        businessInfo={businessInfo}
-      />
-      <POSPurchaseDetailDialog
-        api={api}
-        poId={openPOId}
-        open={!!openPOId}
-        onClose={() => setOpenPOId(null)}
-      />
     </div>
   );
 }

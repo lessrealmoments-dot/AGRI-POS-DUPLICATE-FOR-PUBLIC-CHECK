@@ -1428,14 +1428,15 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
         />
       )}
 
-      {/* POS History Overlay — Sales + Purchase history with PIN gate */}
+      {/* POS History Overlay — Sales + Purchase history with PIN gate.
+          Row clicks navigate to /doc/{code} which is the same modal the
+          terminal's search opens, so reprint UX matches end-to-end. */}
       <TerminalHistoryOverlay
         api={api}
         open={historyOverlayOpen}
         onClose={() => setHistoryOverlayOpen(false)}
         branch={{ id: session.branchId, name: session.branchName || session.branch_name || '' }}
         isOnline={isOnline}
-        businessInfo={businessInfo}
         pinSession={posHistoryPinSession}
         startPinSession={startHistoryPinSession}
       />
