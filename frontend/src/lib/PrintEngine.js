@@ -980,13 +980,16 @@ function orderSlipDotMatrix(data, biz, docCode) {
     const qty   = parseFloat(item.quantity) || 0;
     const rate  = parseFloat(item.rate || item.unit_price || item.price) || 0;
     const disc  = parseFloat(item.discount_amount) || 0;
+    // Per-unit discount in the DISC column (not the line total) — keeps
+    // the meaning aligned with the rate/qty columns next to it.
+    const discPerUnit = qty > 0 ? disc / qty : 0;
     const total = parseFloat(item.total) || (qty * rate - disc);
     html += `<tr>`;
     html += `<td class="dm-row-num"></td>`;
     html += `<td>${item.product_name || ''}</td>`;
     html += `<td class="c">${qty}</td>`;
     html += `<td class="r">${formatPHP(rate)}</td>`;
-    if (hasDiscount) html += `<td class="r">${disc > 0 ? formatPHP(disc) : '-'}</td>`;
+    if (hasDiscount) html += `<td class="r">${discPerUnit > 0 ? formatPHP(discPerUnit) : '-'}</td>`;
     html += `<td class="r strong">${formatPHP(total)}</td>`;
     html += `</tr>`;
   }
@@ -1150,6 +1153,11 @@ function trustReceiptDotMatrix(data, biz, docCode) {
     const qty   = parseFloat(item.quantity) || 0;
     const rate  = parseFloat(item.rate || item.unit_price || item.price) || 0;
     const disc  = parseFloat(item.discount_amount) || 0;
+    // Discount column shows the PER-UNIT discount (not the line total),
+    // so the cashier doesn't misread it as "₱X off the whole line". The
+    // line total still reflects qty × rate − line discount and remains
+    // mathematically consistent with everything below.
+    const discPerUnit = qty > 0 ? disc / qty : 0;
     const total = parseFloat(item.total) || (qty * rate - disc);
     const unit  = item.unit || item.uom || '';
     const desc  = item.description || item.category || '';
@@ -1160,7 +1168,7 @@ function trustReceiptDotMatrix(data, biz, docCode) {
     body += `<td class="c">${qty}${unit ? ' ' + unit : ''}</td>`;
     body += `<td class="r">${formatPHP(rate)}</td>`;
     if (hasDiscount) {
-      body += `<td class="r">${disc > 0 ? '- ' + formatPHP(disc) : '—'}</td>`;
+      body += `<td class="r">${discPerUnit > 0 ? '- ' + formatPHP(discPerUnit) : '—'}</td>`;
     }
     body += `<td class="r strong">${formatPHP(total)}</td>`;
     body += `</tr>`;
