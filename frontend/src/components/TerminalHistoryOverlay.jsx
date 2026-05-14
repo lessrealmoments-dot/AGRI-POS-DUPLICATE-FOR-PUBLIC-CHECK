@@ -36,7 +36,7 @@ export default function TerminalHistoryOverlay({
 
   return (
     <div
-      className="fixed inset-0 z-[80] bg-white flex flex-col safe-area-top safe-area-bottom"
+      className="fixed inset-0 z-40 bg-white flex flex-col safe-area-top safe-area-bottom"
       data-testid="terminal-history-overlay"
     >
       {/* Header */}
