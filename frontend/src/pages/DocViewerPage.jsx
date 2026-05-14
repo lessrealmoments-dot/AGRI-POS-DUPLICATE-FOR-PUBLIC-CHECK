@@ -849,7 +849,36 @@ function buildTier1PrintData(basic) {
 
 
 function getTerminalSession() {
-  try { const s = localStorage.getItem('agrismart_terminal'); return s ? JSON.parse(s) : null; } catch { return null; }
+  try {
+    const s = localStorage.getItem('agrismart_terminal');
+    if (!s) return null;
+    const session = JSON.parse(s);
+
+    // Standalone-mode gate (Feb 2026 lock-down).
+    //
+    // A previously-paired regular browser tab keeps `agrismart_terminal` in
+    // localStorage forever — so without this check, anyone landing on
+    // /doc/{code} in that same Brave/Chrome tab gets full terminal powers
+    // (Return & Refund, Update Incomplete, Receive Payment, Pickup SMS).
+    // That's a serious privilege-leak across browser sessions.
+    //
+    // Real terminals are installed as a PWA on the phone's home screen and
+    // launch in standalone mode (no URL bar). Regular browser tabs report
+    // display-mode: "browser" / standalone === false and are demoted to
+    // read-only doc viewers. The user can still see the receipt + payment
+    // history; they just can't take privileged actions until they reopen
+    // the doc from the installed AgriBooks home-screen icon.
+    const isStandalonePwa = (
+      (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+      || window.navigator.standalone === true   // iOS Safari home-screen flag
+      || /AgriBooksApp/i.test(window.navigator.userAgent || '')  // native wrapper escape hatch
+    );
+    if (!isStandalonePwa) return null;
+
+    return session;
+  } catch {
+    return null;
+  }
 }
 
 // ── Terminal Required Banner — shown when actions need a paired terminal ──
