@@ -246,13 +246,13 @@ const dotMatrixCSS = `
     margin: 6px 0 4px auto;
     width: 280px; border-collapse: collapse;
   }
-  .dm-total-box td { padding: 2px 8px; font-size: 15px; vertical-align: middle; }
+  .dm-total-box td { padding: 2px 8px; font-size: 14px; vertical-align: middle; }
   .dm-total-box td.dm-tb-label { text-align: left; font-weight: bold; }
   .dm-total-box td.dm-tb-val {
     text-align: right; border: 1px solid #000; min-width: 120px; font-weight: bold;
   }
-  .dm-total-box tr.dm-tb-grand td.dm-tb-label { font-size: 17px; font-weight: bold; }
-  .dm-total-box tr.dm-tb-grand td.dm-tb-val { font-size: 17px; }
+  .dm-total-box tr.dm-tb-grand td.dm-tb-label { font-size: 16px; font-weight: bold; }
+  .dm-total-box tr.dm-tb-grand td.dm-tb-val { font-size: 16px; }
 
   /* ── Centered AUTHORIZED REPRESENTATIVE signature line ── */
   .dm-auth-sig {
@@ -324,30 +324,30 @@ const dotMatrixCSS = `
   }
 
   /* ── Items table — DENSE (target: 10-15 lines on page 1)
-        Feb 2026: product name / qty / prices / line totals bumped for
-        at-a-glance visibility on carbon paper.
+        Feb 2026: product / description / qty / prices / totals tuned
+        for at-a-glance visibility on carbon paper.
         Row-number column is now an EMPTY tick-box — cashier hand-marks
         each line as it's prepped on the shelf. ── */
   .dm-items-table { width: 100%; border-collapse: collapse; margin: 4px 0; }
   .dm-items-table thead tr { border-bottom: 1.5px solid #000; }
   .dm-items-table th {
     border: 1px solid #000; padding: 3px 6px;
-    font-size: 14px; font-weight: bold; text-transform: uppercase;
+    font-size: 13px; font-weight: bold; text-transform: uppercase;
     text-align: left; background: #fff; line-height: 1.2;
   }
   .dm-items-table th.r { text-align: right; }
   .dm-items-table th.c { text-align: center; }
   .dm-items-table td {
     border: 1px solid #000; padding: 2px 6px;
-    font-size: 15px; vertical-align: top; word-break: break-word; line-height: 1.25;
+    font-size: 14px; vertical-align: top; word-break: break-word; line-height: 1.25;
   }
   .dm-items-table td.r { text-align: right; }
   .dm-items-table td.c { text-align: center; }
   .dm-items-table td.strong { font-weight: bold; }
-  /* Tick-box cell: kept empty so the cashier can manually check off each
-     line when the item is pulled / prepped. Width tuned for a tick-mark. */
+  /* Tick-box cell: kept narrow and empty so the cashier can hand-check
+     each line when the item is pulled / prepped. */
   .dm-items-table .dm-row-num {
-    width: 24px; min-height: 20px; text-align: center;
+    width: 20px; text-align: center;
   }
 
   /* ── Totals block (legacy — used by sales receipts.
@@ -355,14 +355,14 @@ const dotMatrixCSS = `
   .dm-totals { margin-top: 4px; border-top: 1.5px solid #000; padding-top: 4px; }
   .dm-tot-row {
     display: flex; justify-content: flex-end; gap: 0;
-    font-size: 15px; padding: 1px 0;
+    font-size: 14px; padding: 1px 0;
   }
   .dm-tot-row .dm-tot-label {
     min-width: 120px; text-align: right; font-weight: bold; padding-right: 12px;
   }
   .dm-tot-row .dm-tot-val { min-width: 110px; text-align: right; }
   .dm-tot-row.dm-grand {
-    font-size: 16px; font-weight: bold;
+    font-size: 15px; font-weight: bold;
     border-top: 1px solid #000; border-bottom: 1px solid #000;
     padding: 2px 0; margin: 2px 0;
   }
@@ -960,7 +960,7 @@ function orderSlipDotMatrix(data, biz, docCode) {
   const items = inv.items || [];
   const hasDiscount = items.some(i => parseFloat(i.discount_amount) > 0);
   html += `<table class="dm-items-table"><thead><tr>`;
-  html += `<th style="width:24px"></th>`;
+  html += `<th style="width:20px"></th>`;
   html += `<th>ITEM DESCRIPTION</th>`;
   html += `<th class="c" style="width:7%">QTY</th>`;
   html += `<th class="r" style="width:16%">UNIT PRICE</th>`;
@@ -1122,7 +1122,7 @@ function trustReceiptDotMatrix(data, biz, docCode) {
     parseFloat(i.discount_amount) > 0 || parseFloat(i.discount_value) > 0
   );
   body += `<table class="dm-items-table"><thead><tr>`;
-  body += `<th class="c" style="width:24px;"></th>`;
+  body += `<th class="c" style="width:20px;"></th>`;
   body += `<th style="width:24%;">Item</th>`;
   body += `<th style="width:${hasDiscount ? '22' : '28'}%;">Description</th>`;
   body += `<th class="c" style="width:10%;">Qty</th>`;
