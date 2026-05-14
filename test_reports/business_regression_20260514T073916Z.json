@@ -1,0 +1,64 @@
+{
+  "generated_at": "2026-05-14T07:39:16.164345+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 3,
+  "pass_count": 3,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br_line_disc.1_single_discounted",
+      "step": "qty_5_to_3_with_line_disc_200",
+      "expected": {
+        "refund": 1920.0,
+        "new_grand_total": 2880.0,
+        "balance": 0.0,
+        "new_line_total": 2880.0,
+        "new_line_disc": 120.0
+      },
+      "actual": {
+        "refund": 1920.0,
+        "new_grand_total": 2880.0,
+        "balance": 0.0,
+        "new_line_total": 2880.0,
+        "new_line_disc": 120.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T07:39:16.049777+00:00"
+    },
+    {
+      "scenario": "br_line_disc.2_mixed_aizon",
+      "step": "three_lines_partial_correction",
+      "expected": {
+        "refund": 5240.0,
+        "grand_total": 61250.0,
+        "balance": 0.0
+      },
+      "actual": {
+        "refund": 5240.0,
+        "grand_total": 61250.0,
+        "balance": 0.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T07:39:16.073323+00:00"
+    },
+    {
+      "scenario": "br_line_disc.3_no_discount_regression",
+      "step": "qty_4_to_2_no_disc",
+      "expected": {
+        "refund": 500.0,
+        "grand_total": 500.0,
+        "balance": 0.0
+      },
+      "actual": {
+        "refund": 500.0,
+        "grand_total": 500.0,
+        "balance": 0.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T07:39:16.094223+00:00"
+    }
+  ]
+}

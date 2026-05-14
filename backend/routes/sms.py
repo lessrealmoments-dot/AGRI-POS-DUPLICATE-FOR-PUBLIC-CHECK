@@ -452,6 +452,23 @@ DEFAULT_TEMPLATES = [
         "trigger": "auto",
         "active": True,
     },
+    {
+        "key": "stock_correction_refund",
+        "name": "Incomplete-Stock Refund — Customer Notice",
+        "body": (
+            "Hi <customer_name>, na-correct po namin ang invoice "
+            "<invoice_number> sa <company_name> dahil hindi naibigay "
+            "ang ilang items. "
+            "<refund_line>"
+            "<ar_line>"
+            "Remaining balance: P<remaining_balance>. "
+            "Salamat po!"
+        ),
+        "placeholders": ["customer_name", "invoice_number", "company_name",
+                         "refund_line", "ar_line", "remaining_balance"],
+        "trigger": "auto",
+        "active": True,
+    },
     # ── Branch Transfer Approval Workflow ────────────────────────────────────
     {
         "key": "transfer_pending_approval",

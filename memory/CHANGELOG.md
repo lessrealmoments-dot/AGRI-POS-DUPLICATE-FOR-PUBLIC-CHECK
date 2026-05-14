@@ -1,6 +1,27 @@
 # AgriBooks Changelog
 
 
+## Feb 14 2026 — Phantom-Balance Fix on Incomplete-Stock Corrections 🔴 P0
+**Pain point**: Live customer (Sibugay Agrivet) reported SI-MB-001059 (AIZON AGRIVET, ₱185,245 cash sale) showed a phantom ₱1,315 balance after an Incomplete-Stock correction. SMS also told the customer "we received a payment from you" when actually they were being **refunded**.
+
+**Root cause**: Two independent bugs:
+1. `invoice_corrections.py` computed corrected line totals as `actual_qty * rate`, silently dropping per-line discounts. For Aizon: 4 discounted lines had aggregate discount of ₱325+650+300+40=**₱1,315** — exactly the phantom balance. Cash refund (₱4,490) correctly debited the drawer but `grand_total` only fell by ₱3,175 (no discount applied to new totals), leaving ₱1,315 AR the customer never owed.
+2. Same endpoint reused `on_payment_received` SMS hook with the `payment_received` template, misleadingly telling customers "Salamat, natanggap namin ang P[refund] mo" when money was leaving the store.
+
+**Fixes** (`/app/backend/routes/invoice_corrections.py`):
+- Compute new line totals as `actual_qty * rate - prorated_disc` where `prorated_disc = (orig_disc / orig_qty) * actual_qty`. Refund now equals actual line-total drop (`orig_total - new_total`).
+- New SMS hook `on_stock_correction_refunded` + new template `stock_correction_refund` with clear refund-style wording: *"Hi [name], na-correct po namin ang invoice [#] dahil hindi naibigay ang ilang items. Refund: cash P[X]. Inilapat sa balance: P[Y]. Remaining balance: P[Z]."* Composes adaptively based on the refund_allocator routing.
+- New admin-only `POST /api/invoices/{id}/repair-correction-balance` endpoint to retroactively fix the 1 affected invoice (and any future stragglers): re-applies prorated discounts to corrected line totals, recomputes grand_total + balance + status, decrements customer.balance by the recovered drift. Idempotent.
+
+**Tests**: `test_br_correct_incomplete_line_discount.py` (3 new BR tests) — single-discount-line, mixed Aizon-style repro, no-discount regression. **189/189 BR suite passing** (up from 186).
+
+**User next step**: Deploy via "Save to Github" → then call the repair endpoint with their admin token to fix SI-MB-001059:
+```
+POST /api/invoices/1762bf1e-4fa6-40e7-894c-eea2d6d3911c/repair-correction-balance
+```
+
+
+
 ## Feb 13 2026 — Dot Matrix Receipt: Visibility Bump (×1.5) ✅
 
 **Pain point**: The Feb-2026 density pass made the dot-matrix receipt fit ~15 lines on one page but the trade-off was that product names, prices, qty, line totals, subtotals, and customer name became hard to read at a glance on carbon copies.

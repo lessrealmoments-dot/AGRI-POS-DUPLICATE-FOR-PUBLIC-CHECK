@@ -117,6 +117,23 @@ async def correct_incomplete_stock(
         raise HTTPException(403, "Invalid PIN. Authorization failed.")
 
     # 3. Build corrected items + compute refund_amount (pre-allocation)
+    #
+    # Per-line discount preservation (2026-02 phantom-balance fix):
+    # The previous version used `actual_qty * rate` as the new line total and
+    # `diff_qty * rate` as the refund. Both formulas IGNORED the original
+    # line's discount, which meant invoices with per-line discounts ended up
+    # with a phantom AR balance equal to the sum of all "lost" discounts
+    # (e.g. SI-MB-001059 / AIZON AGRIVET: ₱1,315 phantom balance from four
+    # discounted items 325+650+300+40). The cash refund (4,490) correctly
+    # debited the drawer, but `new_grand_total` failed to shrink by the
+    # same 4,490 because the discount "reappeared" when we recomputed
+    # `actual_qty * rate`.
+    #
+    # Fix: prorate the original line discount by actual_qty/orig_qty so the
+    # remaining qty keeps a proportional discount, and derive refund_amount
+    # from the ACTUAL line-total drop (orig_total - new_total). This keeps
+    # refund == grand_total drop, so balance lands cleanly at 0 for cash
+    # invoices and at the legitimate remainder for partials.
     corrected_items = []
     items_to_return = []
     refund_amount = 0.0
@@ -130,8 +147,20 @@ async def correct_incomplete_stock(
             actual_qty = float(correction.actual_qty)
             diff_qty = orig_qty - actual_qty
             rate = float(correction.rate)
+
+            orig_line_total = float(original_item.get("total", orig_qty * rate) or 0)
+            orig_line_disc = float(original_item.get("discount_amount", 0) or 0)
+            # Prorate per-unit discount so the remaining qty keeps the same
+            # effective unit price. Avoids losing the discount altogether.
+            per_unit_disc = (orig_line_disc / orig_qty) if orig_qty > 0 else 0.0
+            new_line_disc = round(per_unit_disc * actual_qty, 2)
+            new_line_total = round(actual_qty * rate - new_line_disc, 2)
+
             if diff_qty > 0:
-                refund_amount += diff_qty * rate
+                # Refund equals the actual line-value drop (preserves discount
+                # math). For lines with no discount this matches diff_qty*rate
+                # exactly, so behaviour for non-discounted invoices is unchanged.
+                refund_amount += round(orig_line_total - new_line_total, 2)
                 items_to_return.append({
                     "product_id":   product_id,
                     "product_name": correction.product_name,
@@ -141,8 +170,9 @@ async def correct_incomplete_stock(
                 })
             corrected_items.append({
                 **original_item,
-                "quantity": actual_qty,
-                "total":    actual_qty * rate,
+                "quantity":         actual_qty,
+                "discount_amount":  new_line_disc,
+                "total":            new_line_total,
             })
         else:
             corrected_items.append(original_item)
@@ -330,22 +360,28 @@ async def correct_incomplete_stock(
         )
 
     # 13. SMS — notify customer of correction (any refund > 0 with linked customer)
+    #
+    # Use the dedicated refund-style hook so the message reads as a
+    # correction + refund rather than (the old behaviour) a "we received
+    # your payment" confirmation. Previous wording confused customers
+    # whose invoice was actually being REFUNDED into thinking they had
+    # just made a payment to the store.
     if invoice.get("customer_id") and refund_amount > 0:
         try:
-            from routes.sms_hooks import on_payment_received
-            customer = await db.customers.find_one(
-                {"id": invoice["customer_id"]}, {"_id": 0}
+            from routes.sms_hooks import on_stock_correction_refunded
+            digital_total = sum(
+                d["amount"] for d in allocation.get("digital_refunds", []) or []
             )
-            if customer:
-                await on_payment_received(
-                    customer_id=invoice["customer_id"],
-                    amount_paid=refund_amount,
-                    remaining_balance=float(customer.get("balance", 0) or 0),
-                    branch_id=invoice.get("branch_id", ""),
-                    next_due_info=(
-                        f"Receipt correction — {inv_number}. "
-                    ),
-                )
+            await on_stock_correction_refunded(
+                customer_id=invoice["customer_id"],
+                invoice_number=inv_number,
+                branch_id=invoice.get("branch_id", ""),
+                refund_amount=refund_amount,
+                ar_reduction=float(allocation.get("ar_reduction", 0) or 0),
+                cash_refund=float(allocation.get("cash_refund", 0) or 0),
+                digital_refund=float(digital_total),
+                remaining_balance=new_balance,
+            )
         except Exception as e:
             print(f"SMS notification failed: {e}")
 
@@ -362,4 +398,135 @@ async def correct_incomplete_stock(
         "items_returned_to_shelf": items_to_return,
         "refund_allocation":      correction_record["refund_allocation"],
         "reprint":                data.reprint_receipt,
+    }
+
+
+
+@router.post("/invoices/{invoice_id}/repair-correction-balance")
+async def repair_correction_balance(
+    invoice_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """
+    One-off admin repair for invoices that suffered the pre-fix phantom-balance
+    bug: an incomplete-stock correction overstated `refund_amount` for any
+    line that originally had a per-line discount, so cash left the drawer for
+    the full diff_qty*rate but the new grand_total only fell by the discounted
+    amount — leaving a positive `balance` that the customer never owed.
+
+    This endpoint recomputes corrected line totals with per-unit discount
+    prorated and trues up grand_total + status. Cash, AR, inventory, and
+    expense rows are untouched (those were already correct — only the
+    invoice-side numbers drifted).
+
+    Idempotent: re-running on an already-clean invoice is a no-op.
+    Admin-only.
+    """
+    from config import db
+
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Admin only")
+
+    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(404, "Invoice not found")
+    if not invoice.get("correction_applied"):
+        raise HTTPException(400, "Invoice has no correction applied — nothing to repair")
+
+    correction = await db.invoice_corrections.find_one(
+        {"id": invoice.get("correction_id")}, {"_id": 0}
+    )
+    if not correction:
+        raise HTTPException(400, "Correction record not found — cannot repair safely")
+
+    # Rebuild corrected items with prorated discount preservation.
+    orig_items = correction.get("original_items", []) or []
+    cur_items = invoice.get("items", []) or []
+    by_id_orig = {it.get("product_id"): it for it in orig_items if it.get("product_id")}
+
+    rebuilt = []
+    for cur in cur_items:
+        pid = cur.get("product_id", "")
+        orig = by_id_orig.get(pid)
+        if not orig:
+            rebuilt.append(cur)
+            continue
+        orig_qty = float(orig.get("quantity", 0) or 0)
+        new_qty = float(cur.get("quantity", 0) or 0)
+        rate = float(cur.get("rate", 0) or 0)
+        orig_line_disc = float(orig.get("discount_amount", 0) or 0)
+        if orig_qty > 0:
+            per_unit_disc = orig_line_disc / orig_qty
+        else:
+            per_unit_disc = 0.0
+        new_line_disc = round(per_unit_disc * new_qty, 2)
+        new_line_total = round(new_qty * rate - new_line_disc, 2)
+        rebuilt.append({
+            **cur,
+            "discount_amount": new_line_disc,
+            "total":           new_line_total,
+        })
+
+    new_subtotal = round(sum(float(it.get("total", 0) or 0) for it in rebuilt), 2)
+    discount = float(invoice.get("overall_discount", 0) or 0)
+    freight = float(invoice.get("freight", 0) or 0)
+    new_grand_total = round(new_subtotal - discount + freight, 2)
+
+    new_amount_paid = float(invoice.get("amount_paid", 0) or 0)
+    new_balance = max(0.0, round(new_grand_total - new_amount_paid, 2))
+
+    if invoice.get("status") == "voided":
+        new_status = "voided"
+    elif new_balance <= 0.005:
+        new_status = "paid"
+    elif new_amount_paid > 0:
+        new_status = "partial"
+    else:
+        new_status = invoice.get("status", "credit")
+
+    # Capture before-state for the audit log.
+    before = {
+        "grand_total": invoice.get("grand_total"),
+        "subtotal":    invoice.get("subtotal"),
+        "balance":     invoice.get("balance"),
+        "status":      invoice.get("status"),
+    }
+    delta = round(float(invoice.get("grand_total", 0) or 0) - new_grand_total, 2)
+
+    await db.invoices.update_one(
+        {"id": invoice_id},
+        {"$set": {
+            "items":            rebuilt,
+            "subtotal":         new_subtotal,
+            "grand_total":      new_grand_total,
+            "balance":          new_balance,
+            "status":           new_status,
+            "balance_repaired": True,
+            "balance_repaired_at": now_iso(),
+            "balance_repaired_by": user.get("id"),
+            "balance_repair_delta": delta,
+            "updated_at":       now_iso(),
+        }}
+    )
+
+    # If we shrank the grand_total, the customer's open AR over-counted that
+    # invoice's balance by `delta`. Reduce their aggregate balance to match.
+    if delta > 0 and invoice.get("customer_id"):
+        await db.customers.update_one(
+            {"id": invoice["customer_id"]},
+            {"$inc": {"balance": -delta}},
+        )
+
+    return {
+        "success":         True,
+        "invoice_id":      invoice_id,
+        "invoice_number":  invoice.get("invoice_number", ""),
+        "before":          before,
+        "after": {
+            "grand_total": new_grand_total,
+            "subtotal":    new_subtotal,
+            "balance":     new_balance,
+            "status":      new_status,
+        },
+        "grand_total_delta": delta,
     }

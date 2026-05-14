@@ -527,3 +527,82 @@ async def on_refund_processed(return_doc: dict):
             )
     except Exception as e:
         logger.error(f"SMS hook on_refund_processed failed: {e}")
+
+
+
+async def on_stock_correction_refunded(
+    customer_id: str,
+    invoice_number: str,
+    branch_id: str,
+    refund_amount: float,
+    ar_reduction: float,
+    cash_refund: float,
+    digital_refund: float,
+    remaining_balance: float,
+):
+    """Send a clear refund-style SMS when an invoice is corrected for items
+    not given.
+
+    Replaces the previous `on_payment_received` reuse which (mis)told the
+    customer "we received a payment from you" — confusing them into thinking
+    they had just paid the store. This hook frames it correctly as a
+    correction + refund.
+
+    Composes a single message that adapts to the routing the
+    refund_allocator chose: cash refund line, digital refund line, AR
+    reduction line — any combination, only the relevant lines render.
+    """
+    try:
+        from routes.sms import queue_sms
+        if not customer_id:
+            return
+        customer = await raw_db.customers.find_one({"id": customer_id}, {"_id": 0})
+        if not customer:
+            return
+        phones = customer.get("phones") or ([customer["phone"]] if customer.get("phone") else [])
+        if not phones:
+            return
+
+        org_id = await _resolve_org_id(branch_id)
+        company_name = await get_company_name(org_id)
+
+        # Refund routing lines — only the components the allocator actually
+        # used render. Keeps message short for the common cash-only case.
+        refund_parts = []
+        if cash_refund > 0:
+            refund_parts.append(f"cash P{cash_refund:,.2f}")
+        if digital_refund > 0:
+            refund_parts.append(f"digital P{digital_refund:,.2f}")
+        refund_line = (
+            f"Refund: {' + '.join(refund_parts)}. " if refund_parts else ""
+        )
+        ar_line = (
+            f"Inilapat sa balance: P{ar_reduction:,.2f}. " if ar_reduction > 0 else ""
+        )
+
+        variables = {
+            "customer_name":     customer.get("name", ""),
+            "invoice_number":    invoice_number,
+            "company_name":      company_name,
+            "refund_line":       refund_line,
+            "ar_line":           ar_line,
+            "remaining_balance": f"{remaining_balance:,.2f}",
+        }
+        for phone in phones:
+            if not phone:
+                continue
+            await queue_sms(
+                template_key="stock_correction_refund",
+                customer_id=customer_id,
+                customer_name=customer.get("name", ""),
+                phone=phone,
+                variables=variables,
+                organization_id=org_id,
+                branch_id=branch_id,
+                branch_name=await get_branch_name(branch_id),
+                trigger="auto",
+                trigger_ref=f"correction:{invoice_number}",
+                dedup_key=f"stock_correction:{invoice_number}:{phone}:{refund_amount}",
+            )
+    except Exception as e:
+        logger.error(f"SMS hook on_stock_correction_refunded failed: {e}")
