@@ -406,6 +406,8 @@ async def correct_incomplete_stock(
 async def repair_correction_balance(
     invoice_id: str,
     user: dict = Depends(get_current_user),
+    write_off_residual: bool = False,
+    write_off_max: float = 100.0,
 ):
     """
     One-off admin repair for invoices that suffered the pre-fix phantom-balance
@@ -418,6 +420,13 @@ async def repair_correction_balance(
     prorated and trues up grand_total + status. Cash, AR, inventory, and
     expense rows are untouched (those were already correct — only the
     invoice-side numbers drifted).
+
+    Optional `write_off_residual=true` (admin only): after re-prorating
+    discounts, any remaining balance ≤ `write_off_max` is zeroed and the
+    delta is logged as a "Correction Over-Refund Write-off" expense for
+    clean accounting. This handles the corner case where the cashier
+    over-refunded by a small amount because the buggy refund formula
+    didn't account for the per-unit discount on the refunded units.
 
     Idempotent: re-running on an already-clean invoice is a no-op.
     Admin-only.
@@ -517,6 +526,64 @@ async def repair_correction_balance(
             {"$inc": {"balance": -delta}},
         )
 
+    # ── Optional residual write-off (cash over-refund cleanup) ─────────────
+    # The buggy refund formula (diff_qty * rate, no per-unit discount) often
+    # over-refunded the customer in cash for the units they returned. That
+    # over-refund shows up here as a positive residual `new_balance` even
+    # after we fixed the line totals. Cashier wallet is already short by
+    # this amount (cash physically left the drawer), so the cleanest fix
+    # is to write the residual off as a small Customer Service expense
+    # — keeping the invoice clean and the books truthful.
+    write_off_amount = 0.0
+    if (
+        write_off_residual
+        and new_balance > 0
+        and new_balance <= float(write_off_max)
+    ):
+        write_off_amount = new_balance
+        # Bring AR all the way to zero on both invoice and customer ledger.
+        await db.invoices.update_one(
+            {"id": invoice_id},
+            {"$set": {
+                "balance":              0.0,
+                "status":               "paid" if invoice.get("status") != "voided" else "voided",
+                "balance_write_off":    write_off_amount,
+                "balance_write_off_at": now_iso(),
+                "balance_write_off_by": user.get("id"),
+            }}
+        )
+        if invoice.get("customer_id"):
+            await db.customers.update_one(
+                {"id": invoice["customer_id"]},
+                {"$inc": {"balance": -write_off_amount}},
+            )
+        # Audit trail: surface in Z-report / Expenses as a tiny customer-service loss.
+        await db.expenses.insert_one({
+            "id":                  new_id(),
+            "branch_id":           invoice["branch_id"],
+            "category":            "Correction Over-Refund Write-off",
+            "description":         f"Phantom balance write-off — {invoice.get('invoice_number','')}",
+            "notes":               (
+                "Auto write-off after repair-correction-balance: cashier "
+                "previously over-refunded the customer in cash because the "
+                "old correction formula ignored per-line discount on the "
+                "refunded units."
+            ),
+            "amount":              write_off_amount,
+            "payment_method":      "Cash",
+            "fund_source":         "cashier",
+            "reference_number":    invoice.get("invoice_number", ""),
+            "date":                await today_local(user.get("organization_id") or ""),
+            "invoice_id":          invoice_id,
+            "correction_id":       invoice.get("correction_id"),
+            "created_by":          user.get("id"),
+            "created_by_name":     user.get("full_name", ""),
+            "created_at":          now_iso(),
+            "voided":              False,
+        })
+        new_balance = 0.0
+        new_status = "paid" if invoice.get("status") != "voided" else "voided"
+
     return {
         "success":         True,
         "invoice_id":      invoice_id,
@@ -528,5 +595,6 @@ async def repair_correction_balance(
             "balance":     new_balance,
             "status":      new_status,
         },
-        "grand_total_delta": delta,
+        "grand_total_delta":   delta,
+        "residual_written_off": round(write_off_amount, 2),
     }
