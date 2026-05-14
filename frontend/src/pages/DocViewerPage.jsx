@@ -854,26 +854,40 @@ function getTerminalSession() {
     if (!s) return null;
     const session = JSON.parse(s);
 
-    // Standalone-mode gate (Feb 2026 lock-down).
+    // ── App-only gate (Feb 2026 lock-down) ──────────────────────────────────
     //
-    // A previously-paired regular browser tab keeps `agrismart_terminal` in
-    // localStorage forever — so without this check, anyone landing on
-    // /doc/{code} in that same Brave/Chrome tab gets full terminal powers
-    // (Return & Refund, Update Incomplete, Receive Payment, Pickup SMS).
-    // That's a serious privilege-leak across browser sessions.
+    // The AgriSmart Terminal Android app (`com.agribooks.terminal`) is a
+    // Capacitor wrapper that loads agri-books.com in a WebView. Capacitor
+    // injects `window.Capacitor` into the page — a global that regular
+    // browsers (Brave / Chrome / Safari tab) CANNOT spoof. That's our
+    // primary signal that "this is the real terminal app, not a browser".
     //
-    // Real terminals are installed as a PWA on the phone's home screen and
-    // launch in standalone mode (no URL bar). Regular browser tabs report
-    // display-mode: "browser" / standalone === false and are demoted to
-    // read-only doc viewers. The user can still see the receipt + payment
-    // history; they just can't take privileged actions until they reopen
-    // the doc from the installed AgriBooks home-screen icon.
-    const isStandalonePwa = (
-      (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
-      || window.navigator.standalone === true   // iOS Safari home-screen flag
-      || /AgriBooksApp/i.test(window.navigator.userAgent || '')  // native wrapper escape hatch
+    // Fallbacks (in priority order) cover edge cases:
+    //   1. Capacitor native bridge present + reports native platform.
+    //   2. PWA installed as a home-screen app (Android Chrome "Install App").
+    //   3. iOS Safari "Add to Home Screen" → navigator.standalone === true.
+    //   4. Native UA marker — for any future wrapper that prefers UA tag.
+    //
+    // Without one of these, the browser is demoted to a read-only doc viewer
+    // even if it has stored terminal session credentials (e.g. someone
+    // paired Brave once). Sensitive write actions become invisible AND the
+    // backend (`require_terminal_session`) rejects the call anyway.
+    const cap = window.Capacitor;
+    const isAppContext = (
+      // 1. Capacitor wrapper — primary identifier for AgriSmart Terminal APK.
+      !!(cap && (
+        (typeof cap.isNativePlatform === 'function' && cap.isNativePlatform())
+        || (typeof cap.getPlatform === 'function' && cap.getPlatform() !== 'web')
+        || cap.platform === 'android' || cap.platform === 'ios'
+      ))
+      // 2. PWA standalone (Android / Chromium home-screen install).
+      || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+      // 3. iOS Safari home-screen.
+      || window.navigator.standalone === true
+      // 4. UA escape hatch for any other native wrapper.
+      || /AgriBooksApp|AgriSmartTerminal/i.test(window.navigator.userAgent || '')
     );
-    if (!isStandalonePwa) return null;
+    if (!isAppContext) return null;
 
     return session;
   } catch {
