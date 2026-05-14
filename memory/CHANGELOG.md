@@ -1,6 +1,29 @@
 # AgriBooks Changelog
 
 
+## Feb 13 2026 — Dot Matrix Receipt: Visibility Bump (×1.5) ✅
+
+**Pain point**: The Feb-2026 density pass made the dot-matrix receipt fit ~15 lines on one page but the trade-off was that product names, prices, qty, line totals, subtotals, and customer name became hard to read at a glance on carbon copies.
+
+**Fix**: Targeted ×1.5 scale-up on the most-read fields only — letterhead, items header, totals, and grand total — keeping the surrounding chrome (meta-table, footers, terms, QR) untouched so the receipt still fits one page.
+
+Concretely in `frontend/src/lib/PrintEngine.js` (dot-matrix CSS block):
+- `.dm-items-table td` (product name, qty, unit price, line total): **11px → 17px**
+- `.dm-items-table th` (column headers): **10px → 15px**
+- `.dm-items-table .dm-row-num`: **10px → 15px**
+- `.dm-total-box td` (subtotals / discount / freight): **11px → 16px**
+- `.dm-total-box tr.dm-tb-grand td` (grand total): **13px → 20px**
+- `.dm-totals .dm-tot-row` (legacy sales totals): **11px → 16px**
+- `.dm-totals .dm-tot-row.dm-grand`: **12px → 18px**
+- `.dm-info-box .dm-box-name` (customer name in info box): **12px → 18px**
+- `.dm-addr-band .dm-addr-val` (customer name in billing band): **10px → 15px**
+
+Width adjustments to accommodate larger digits without wrap:
+- `.dm-total-box` width: 280px → 320px (label/val min-widths 120/110 → 140/140).
+- `.dm-totals` label/val min-widths: 120px/110px → 160px/140px.
+
+Everything else (header letterhead, page footer, sig blocks, trust terms, QR codes) untouched. Lint-clean. No backend changes; BR suite still 186/186.
+
 ## Feb 13 2026 — Inline Terms Picker on Credit / Partial Checkout ✅
 
 **Pain point**: Users were forgetting to set "Terms" in the order header before checking out, so credit sales shipped with `terms="COD" / terms_days=0` and the wrong due_date got printed on the receipt.
