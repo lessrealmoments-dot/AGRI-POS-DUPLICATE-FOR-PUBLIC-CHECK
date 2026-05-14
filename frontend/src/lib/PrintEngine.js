@@ -231,8 +231,8 @@ const dotMatrixCSS = `
   .dm-addr-band { width: 100%; border-collapse: collapse; margin: 4px 0 2px 0; }
   .dm-addr-band td { vertical-align: top; padding: 1px 4px; font-size: 10px; }
   .dm-addr-band .dm-addr-label { font-weight: bold; width: 95px; }
-  /* Customer name in addr band — sized up 1.5× for at-a-glance visibility */
-  .dm-addr-band .dm-addr-val { font-weight: bold; font-size: 15px; line-height: 1.25; }
+  /* Customer name in addr band — bumped +1.5pt for visibility */
+  .dm-addr-band .dm-addr-val { font-weight: bold; font-size: 12px; }
 
   /* ── Sales-rep / Payment terms grid (first page only) ── */
   .dm-meta-grid { width: 100%; border-collapse: collapse; margin: 3px 0 6px 0; }
@@ -241,18 +241,18 @@ const dotMatrixCSS = `
   }
   .dm-meta-grid th { background: #f0f0f0; font-weight: bold; text-align: left; font-size: 9px; }
 
-  /* ── Right-aligned totals box — compact (Feb 2026: subtotals scaled 1.5× for visibility) ── */
+  /* ── Right-aligned totals box — compact (Feb 2026: subtotals +1.5pt for visibility) ── */
   .dm-total-box {
     margin: 6px 0 4px auto;
-    width: 320px; border-collapse: collapse;
+    width: 280px; border-collapse: collapse;
   }
-  .dm-total-box td { padding: 3px 8px; font-size: 16px; vertical-align: middle; }
+  .dm-total-box td { padding: 2px 8px; font-size: 13px; vertical-align: middle; }
   .dm-total-box td.dm-tb-label { text-align: left; font-weight: bold; }
   .dm-total-box td.dm-tb-val {
-    text-align: right; border: 1px solid #000; min-width: 140px; font-weight: bold;
+    text-align: right; border: 1px solid #000; min-width: 120px; font-weight: bold;
   }
-  .dm-total-box tr.dm-tb-grand td.dm-tb-label { font-size: 20px; font-weight: bold; }
-  .dm-total-box tr.dm-tb-grand td.dm-tb-val { font-size: 20px; }
+  .dm-total-box tr.dm-tb-grand td.dm-tb-label { font-size: 15px; font-weight: bold; }
+  .dm-total-box tr.dm-tb-grand td.dm-tb-val { font-size: 15px; }
 
   /* ── Centered AUTHORIZED REPRESENTATIVE signature line ── */
   .dm-auth-sig {
@@ -306,7 +306,7 @@ const dotMatrixCSS = `
   .dm-meta-table td { padding: 2px 4px; font-size: 11px; vertical-align: top; }
   .dm-meta-table .dm-label { font-weight: bold; white-space: nowrap; width: 1%; padding-right: 6px; }
 
-  /* ── Customer / info box (Feb 2026: customer name scaled 1.5× for visibility) ── */
+  /* ── Customer / info box (Feb 2026: customer name +1.5pt for visibility) ── */
   .dm-info-box {
     border: 1px solid #000; padding: 4px 8px; margin: 4px 0;
   }
@@ -314,7 +314,7 @@ const dotMatrixCSS = `
     font-size: 9px; font-weight: bold; text-transform: uppercase;
     letter-spacing: 0.5px; margin-bottom: 2px; border-bottom: 1px solid #000; padding-bottom: 1px;
   }
-  .dm-info-box .dm-box-name { font-size: 18px; font-weight: bold; line-height: 1.2; }
+  .dm-info-box .dm-box-name { font-size: 14px; font-weight: bold; }
   .dm-info-box .dm-box-sub { font-size: 10px; }
 
   /* ── Warning banner ── */
@@ -324,44 +324,43 @@ const dotMatrixCSS = `
   }
 
   /* ── Items table — DENSE (target: 10-15 lines on page 1)
-        Feb 2026: product names / qty / prices / line totals scaled 1.5×
-        for at-a-glance visibility on carbon paper. Header cells kept
-        proportional. ── */
+        Feb 2026: product name / qty / prices / line totals +1.5pt for
+        at-a-glance visibility on carbon paper. ── */
   .dm-items-table { width: 100%; border-collapse: collapse; margin: 4px 0; }
   .dm-items-table thead tr { border-bottom: 1.5px solid #000; }
   .dm-items-table th {
-    border: 1px solid #000; padding: 4px 6px;
-    font-size: 15px; font-weight: bold; text-transform: uppercase;
+    border: 1px solid #000; padding: 3px 6px;
+    font-size: 12px; font-weight: bold; text-transform: uppercase;
     text-align: left; background: #fff; line-height: 1.2;
   }
   .dm-items-table th.r { text-align: right; }
   .dm-items-table th.c { text-align: center; }
   .dm-items-table td {
-    border: 1px solid #000; padding: 3px 6px;
-    font-size: 17px; vertical-align: top; word-break: break-word; line-height: 1.25;
+    border: 1px solid #000; padding: 2px 6px;
+    font-size: 13px; vertical-align: top; word-break: break-word; line-height: 1.25;
   }
   .dm-items-table td.r { text-align: right; }
   .dm-items-table td.c { text-align: center; }
   .dm-items-table td.strong { font-weight: bold; }
   .dm-items-table .dm-row-num {
-    width: 28px; text-align: center; font-size: 15px; color: #555;
+    width: 22px; text-align: center; font-size: 12px; color: #555;
   }
 
   /* ── Totals block (legacy — used by sales receipts.
-        Feb 2026: scaled 1.5× for at-a-glance visibility on carbon paper. ── */
+        Feb 2026: +1.5pt for at-a-glance visibility on carbon paper. ── */
   .dm-totals { margin-top: 4px; border-top: 1.5px solid #000; padding-top: 4px; }
   .dm-tot-row {
     display: flex; justify-content: flex-end; gap: 0;
-    font-size: 16px; padding: 2px 0;
+    font-size: 13px; padding: 1px 0;
   }
   .dm-tot-row .dm-tot-label {
-    min-width: 160px; text-align: right; font-weight: bold; padding-right: 12px;
+    min-width: 120px; text-align: right; font-weight: bold; padding-right: 12px;
   }
-  .dm-tot-row .dm-tot-val { min-width: 140px; text-align: right; }
+  .dm-tot-row .dm-tot-val { min-width: 110px; text-align: right; }
   .dm-tot-row.dm-grand {
-    font-size: 18px; font-weight: bold;
+    font-size: 14px; font-weight: bold;
     border-top: 1px solid #000; border-bottom: 1px solid #000;
-    padding: 3px 0; margin: 2px 0;
+    padding: 2px 0; margin: 2px 0;
   }
 
   /* ── QR section (legacy big — kept for order slip) ── */
