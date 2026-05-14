@@ -1,0 +1,214 @@
+<analysis>**original_problem_statement**: Continue executing the multi-phase rollout for the Branch Transfer Overhaul (Phases 1-4) and historical data bridging. The problem scope was expanded during the session to include a robust Payment-Aware Refund Engine (for handling split, partial, and credit refunds correctly without misattributing cash), fixing authentication scoping in terminal mode, creating an inline terms picker for credit checkout, and fine-tuning Dot Matrix receipt printing (tick boxes, font scaling, per-unit discount views).
+
+PRODUCT REQUIREMENTS: 
+- Provide transition accounting tools via Historical Supplier PO and Historical Customer Credit.
+- Smart Price Scanning tools.
+- SMS engine must schedule follow-ups for historical credit.
+- Implement Payment-Aware Refund logic: AR reduction -> Digital -> Cash.
+
+**User's preferred language**: English (INSTRUCT next agent to respond in English only)
+
+**what currently exists?**: 
+A highly stable React + FastAPI multi-tenant POS application. The app now includes a Payment-Aware Refund Engine which dynamically processes and logs refunds based on the original payment method, rather than strictly debiting the cash drawer. Terminal History modals securely pass token authorizations. Credit checkout has an inline Terms Picker. Dot Matrix layouts utilize  for precise tick-boxes and optimally scaled layouts. Business regression suite is extremely solid with 186/186 passing tests.
+
+**Last working item**: 
+    - Last item agent was working: Fine-tuning the Dot Matrix receipt printing logic. The agent increased font sizes incrementally (+1.5pt to +2pt), converted the row number () column into a 0.33cm tick-box for manual item checking, enforced  to respect physical dimensions, adjusted the Item/Description column ratio to 65/35, and reformatted the discount column to display per-unit discounts instead of overall line-total discounts.
+    - Status: COMPLETED
+    - Agent Testing Done: Y
+    - Which testing method agent to use? Screenshot tool and manual visual checks.
+    - User Testing Done: N
+
+**All Pending/In progress Issue list**: 
+  - Issue 1: Internal invoice print missing details (P1)
+     - Attempted fixes: None
+     - Next debug checklist: Modify print layouts to show  + Variance accepted by {verifier}.
+     - Why fix this issue and what will be achieved with the fix? Provides paper-trail transparency for branch transfers with accepted variances.
+     - Status: NOT STARTED
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix? Frontend/Backend.
+  - Issue 2: Frontend missing Invoice Creation Failed badge (Phase 3 UI Polish) (P3)
+     - Attempted fixes: Backend sets  flag natively, but UI doesn't display it yet.
+     - Next debug checklist: . Display Invoice missing — see admin badge on BTO cards if the flag is true.
+     - Why fix this issue and what will be achieved with the fix? Closes the loop on the Phase 3 backend fix, providing visibility to operators.
+     - Status: NOT STARTED
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix? Frontend.
+
+**In progress Task List**: None.
+
+**Upcoming and Future Tasks**
+    Upcoming Tasks:
+    - Supplier Ledger view (Combine regular POs + Historical POs per supplier in a unified view chronologically with running balance) (P0) -> *Note: This remains the highest priority upcoming backlog item once immediate UI bugs/adjustments are cleared.*
+    - Variance Log tab (P1)
+    - CSV bulk-import for Historical POs (P1)
+    - Tenant-configurable variance threshold (P1)
+    - Prepared Order Completion SMS notification (Requires Resend/Twilio keys + integration playbook) (P2)
+    - Phase 4: Sales-movement context + slow-moving SMS engine (P2)
+
+    Future Tasks:
+    - Phase 4A.2: Concurrent Held-Sales Queue (P2)
+    - Add Sync this AR to customer SMS toggle to Historical Credit (P3)
+    - Rename  to  (P3)
+    - Full ============================= test session starts ==============================
+platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
+rootdir: /app
+plugins: asyncio-1.3.0, anyio-4.12.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 0 items
+
+============================ no tests ran in 0.01s ============================= legacy test suite cleanup to remove hardcoded DB state pollution (11 failing tests) (P3)
+    - Public view requires session PIN toggle at the organization level (P3)
+
+**Completed work in this session**
+- Verified Terminal history modals properly navigating to  via cache clear (DONE)
+- Built Payment-Aware Refund Engine () routing refunds AR -> Digital -> Cash. Integrated into  and  with 24 new BR tests (DONE)
+- Implemented Closed-Day Refund Policy allowing incomplete stock corrections on closed days to properly reverse inventory for auditing (DONE)
+- Fixed Auth Scoping bug on Prod: Added  to  and explicitly passed  to modals (, ) overriding web localStorage (DONE)
+- Added inline  to  for seamless Credit/Partial checkout flow (DONE)
+- Refactored Dot Matrix  layout: font scaling (+2pt), 0.33cm tick-box replacing row numbers,  for rigid column scaling, 65/35 Item-to-Description ratio, and per-unit discount formatting (DONE)
+
+**Earlier issues found/mentioned but not fixed**
+   - Issue 1: Verifier identity not consistently stamped on PO cancellation (E12 gap).
+   - Issue 2: Admins see incoming and outgoing requests mixed in the All Branches view without visual badges indicating the direction.
+
+**Known issue recurrence from previous fork**
+  - Issue recurrence in previous fork: 11 Pre-existing Unit Test Failures in Legacy Test Suite (due to hardcoded dates).
+  - Recurrence count: 40+
+  - Status: IGNORED/BLOCKED
+  - Note: Do NOT attempt to fix or run standard ============================= test session starts ==============================
+platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
+rootdir: /app
+plugins: asyncio-1.3.0, anyio-4.12.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 0 items
+
+============================ no tests ran in 0.01s =============================. Strictly run ============================= test session starts ==============================
+platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
+rootdir: /app
+plugins: asyncio-1.3.0, anyio-4.12.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 0 items
+
+============================ no tests ran in 0.00s ============================= only.
+
+**Code Architecture**
+Tree structure of the entire codebase
+
+
+**Key Technical Concepts**
+- **Payment-Aware Refund Engine**: Refunds do not blindly debit the cash drawer. Logic first applies the refund against any unpaid AR balance, then against digital platforms, and finally physical cash.
+- **Terminal Session Authentication**: Since the terminal interface operates outside of traditional web-login sessions (no localStorage JWT), custom modals interacting with backend APIs *must* accept and map  directly into the  Authorization headers.
+- **Dot Matrix PrintEngine**: Relies strictly on inline CSS, ,  explicit sizing, and calculated column percentages (summing to 100%) for pixel-perfect carbon printing.
+
+**key DB schema**
+  - : {{grand_total, amount_paid, balance, payment_type}}
+  - : tracks items, , and new physical inventory movements.
+
+**changes in tech stack**
+  - None
+
+**All files of reference**
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+
+**Areas that need refactoring**:
+- Legacy test suite () pollutes database state and is extremely brittle. Stay out of it. Run ============================= test session starts ==============================
+platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
+rootdir: /app
+plugins: asyncio-1.3.0, anyio-4.12.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 0 items
+
+============================ no tests ran in 0.00s ============================= only.
+
+**key api endpoints**
+  - 
+  - 
+
+**Critical Info for New Agent**
+- **TESTING CONSTRAINT:** You MUST strictly use the  suite for all backend testing (============================= test session starts ==============================
+platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
+rootdir: /app
+plugins: asyncio-1.3.0, anyio-4.12.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 0 items
+
+============================ no tests ran in 0.00s =============================). DO NOT execute the root ============================= test session starts ==============================
+platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
+rootdir: /app
+plugins: asyncio-1.3.0, anyio-4.12.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 0 items
+
+============================ no tests ran in 0.01s ============================= command. 
+- **Terminal Modal Auth:** Always ensure any new modals or sub-components spawned inside  (or  opened via terminal) explicitly pass down and utilize  in API requests.  defaults to  which fails because terminal mode skips the web login state.
+- **Dot Matrix:** Maintain  on  so browsers don't override the  tick-box width.
+
+**documents and test reports created in this job**
+  -  (186 passing tests)
+  - 
+  - 
+
+**Last 10 User Messages and any pending HUMAN messages** 
+1. User: Asked to recheck modal for terminal history. (Agent confirmed cache issue, no code changes needed).
+2. User: Requested modal logic to correctly process Return and Refund and Incomplete Stocks on split/partial/credit payments. (Completed).
+3. User: Clarified and enforced the policy to allow incomplete stock corrections on closed days to properly update inventory counts. (Completed).
+4. User: Reported that invoice correction was failing with Not authenticated on production when using credit. (Fixed backend auth dependency and frontend token scoping).
+5. User: Requested an inline terms picker component when selecting Credit/Partial during checkout. (Completed).
+6. User: Requested a 1.5x font size increase on Dot Matrix sales receipts. (Completed, but overshoot).
+7. User: Corrected to +1.5/+2pt font scaling, and requested removal of row numbers to create an empty tick box. (Completed).
+8. User: Requested tick box column be shrunk to 1cm, then 1/3 cm. (Completed).
+9. User: Reported tick box size wasn't visibly updating in print view. (Fixed by applying ).
+10. User: Requested the Item/Description column width ratio be set to 65:35, and that the discount column displays per-unit instead of line-total discount. (Completed).
+
+**Project Health Check:**
+- Broken: Legacy FE unit tests (============================= test session starts ==============================
+platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
+rootdir: /app
+plugins: asyncio-1.3.0, anyio-4.12.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 0 items
+
+============================ no tests ran in 0.01s ============================= root).
+- Mocked: NA
+
+**3rd Party Integrations**
+- Cloudflare R2 / Boto3 (File Storage) — requires User API Key
+- Resend (Emails) — requires User API Key
+
+**Testing status**
+  - Testing agent used after significant changes: NO (Main agent handled complex ============================= test session starts ==============================
+platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
+rootdir: /app
+plugins: asyncio-1.3.0, anyio-4.12.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 0 items
+
+============================ no tests ran in 0.00s ============================= expansion directly, running 186 assertions successfully).
+  - Troubleshoot agent used after agent stuck in loop: NO
+  - Test files created: 
+    - 
+    - 
+    - 
+  - Known regressions: None.
+
+**Credentials to test flow:**
+- See 
+
+**What agent forgot to execute**
+- Nothing. The agent iteratively solved all reported ad-hoc bugs and feature polishings successfully.
+
+**Debugging checklist for current issue**
+    Issue: Execute Upcoming P0 Task -> Supplier Ledger View
+    1. Look into  logic as a starting point.
+    2. Build a unified chronologically sorted query bridging  and  for a given .
+    3. Ensure  entries are also reflected so a running  column can be properly calculated over time.
+    4. Implement rigorous BR tests inside  to ensure calculation integrity.</analysis>
