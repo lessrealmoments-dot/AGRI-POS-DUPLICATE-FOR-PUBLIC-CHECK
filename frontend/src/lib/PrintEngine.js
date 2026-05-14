@@ -328,7 +328,13 @@ const dotMatrixCSS = `
         for at-a-glance visibility on carbon paper.
         Row-number column is now an EMPTY tick-box — cashier hand-marks
         each line as it's prepped on the shelf. ── */
-  .dm-items-table { width: 100%; border-collapse: collapse; margin: 4px 0; }
+  .dm-items-table {
+    width: 100%; border-collapse: collapse; margin: 4px 0;
+    /* Honour declared column widths instead of distributing leftover
+       space; without this the empty tick-box column would inflate to
+       whatever % the other columns don't claim. */
+    table-layout: fixed;
+  }
   .dm-items-table thead tr { border-bottom: 1.5px solid #000; }
   .dm-items-table th {
     border: 1px solid #000; padding: 3px 6px;
@@ -1125,7 +1131,7 @@ function trustReceiptDotMatrix(data, biz, docCode) {
   body += `<table class="dm-items-table"><thead><tr>`;
   body += `<th class="c" style="width:0.33cm;padding:1px 0;"></th>`;
   body += `<th style="width:24%;">Item</th>`;
-  body += `<th style="width:${hasDiscount ? '22' : '28'}%;">Description</th>`;
+  body += `<th>Description</th>`;
   body += `<th class="c" style="width:10%;">Qty</th>`;
   body += `<th class="r" style="width:14%;">Unit Price</th>`;
   if (hasDiscount) {
