@@ -1,0 +1,26 @@
+{
+  "generated_at": "2026-05-14T09:45:42.057043+00:00",
+  "pytest_exitstatus": 1,
+  "row_count": 1,
+  "pass_count": 0,
+  "fail_count": 1,
+  "rows": [
+    {
+      "scenario": "br_cb_sr.1_po_now_routed",
+      "step": "bad_pin_returns_403_not_400",
+      "expected": {
+        "raised": true,
+        "status_403_not_400": true,
+        "msg_not_doc_type": true
+      },
+      "actual": {
+        "raised": true,
+        "status_403_not_400": false,
+        "msg_not_doc_type": true
+      },
+      "status": "FAIL",
+      "evidence": {},
+      "recorded_at": "2026-05-14T09:45:41.986209+00:00"
+    }
+  ]
+}

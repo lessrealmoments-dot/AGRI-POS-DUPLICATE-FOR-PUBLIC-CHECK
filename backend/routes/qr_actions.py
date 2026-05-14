@@ -179,6 +179,27 @@ async def verify_release_pin(code: str, data: dict, request: Request):
         action_key = "qr_transfer_receive"
         if doc:
             doc = {"branch_id": doc.get("to_branch_id", "")}
+    elif doc_type == "purchase_order":
+        # Stock-request flow: the verifier should be from the SUPPLIER branch
+        # (`supply_branch_id`) — they're the ones approving fulfillment.
+        # External-vendor POs (no supply_branch_id) fall back to the
+        # requesting branch_id (legacy behavior).
+        #
+        # We use `qr_cross_branch_action` (TOTP-only) because reaching this
+        # verify_pin endpoint for a PO means the caller is at a foreign
+        # branch — the supplier-branch path no longer trips the gate post
+        # Feb-2026 fix. TOTP-only protects against PIN-leakage across
+        # branches, matching the policy used for cross-branch invoice/BTO.
+        po = await db.purchase_orders.find_one(
+            {"id": doc_id},
+            {"_id": 0, "branch_id": 1, "supply_branch_id": 1, "po_type": 1},
+        )
+        action_key = "qr_cross_branch_action"
+        if po:
+            target_branch = po.get("supply_branch_id") or po.get("branch_id", "")
+            doc = {"branch_id": target_branch}
+        else:
+            doc = None
     else:
         raise HTTPException(status_code=400, detail=f"No PIN action defined for doc type: {doc_type}")
 

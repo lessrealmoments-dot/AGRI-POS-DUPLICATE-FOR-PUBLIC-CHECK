@@ -1803,7 +1803,21 @@ export default function DocViewerPage() {
   // Detect if this document belongs to a different branch than the terminal
   const isForeignBranch = useMemo(() => {
     if (!terminalBranchId || !basic) return false;
-    if (basic.doc_type === 'invoice' || basic.doc_type === 'purchase_order') {
+    if (basic.doc_type === 'invoice') {
+      return !!(basic.branch_id && basic.branch_id !== terminalBranchId);
+    }
+    if (basic.doc_type === 'purchase_order') {
+      // Stock-request POs (one branch asking another to supply): the
+      // legitimate actor is the SUPPLIER branch, not the requesting
+      // branch. Scanning at the supplier terminal must NOT trigger the
+      // cross-branch gate — that branch IS the document's home for
+      // action purposes (they own the fulfillment).
+      //
+      // External-vendor POs (no supply_branch_id): the requesting
+      // branch_id is the actor, same as the previous logic.
+      if (basic.is_branch_request && basic.supply_branch_id) {
+        return basic.supply_branch_id !== terminalBranchId;
+      }
       return !!(basic.branch_id && basic.branch_id !== terminalBranchId);
     }
     if (basic.doc_type === 'branch_transfer') {

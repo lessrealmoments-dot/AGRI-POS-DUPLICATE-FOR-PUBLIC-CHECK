@@ -1,0 +1,41 @@
+{
+  "generated_at": "2026-05-14T09:46:15.093519+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 2,
+  "pass_count": 2,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br_cb_sr.1_po_now_routed",
+      "step": "bad_pin_returns_403_not_400",
+      "expected": {
+        "raised": true,
+        "status_403_not_400": true,
+        "msg_not_doc_type": true
+      },
+      "actual": {
+        "raised": true,
+        "status_403_not_400": true,
+        "msg_not_doc_type": true
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T09:46:15.039480+00:00"
+    },
+    {
+      "scenario": "br_cb_sr.2_supply_branch_resolved",
+      "step": "verify_pin_called_with_supply_branch_id",
+      "expected": {
+        "branch_id": "p2b-br-5a819d02",
+        "action_key": "qr_cross_branch_action"
+      },
+      "actual": {
+        "branch_id": "p2b-br-5a819d02",
+        "action_key": "qr_cross_branch_action"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T09:46:15.045672+00:00"
+    }
+  ]
+}
