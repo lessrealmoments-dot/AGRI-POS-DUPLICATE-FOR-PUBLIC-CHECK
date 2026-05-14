@@ -1,0 +1,139 @@
+{
+  "generated_at": "2026-05-14T01:43:19.069262+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 7,
+  "pass_count": 7,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br_correct_pa.1_cash_baseline",
+      "step": "cash_sale_correction_debits_cashier_500",
+      "expected": {
+        "refund": 500.0,
+        "cash_delta": -500.0,
+        "ar_reduction": 0.0,
+        "digital_count": 0
+      },
+      "actual": {
+        "refund": 500.0,
+        "cash_delta": -500.0,
+        "ar_reduction": 0.0,
+        "digital_count": 0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:43:18.347266+00:00"
+    },
+    {
+      "scenario": "br_correct_pa.2_credit_unpaid",
+      "step": "credit_correction_only_reduces_ar_cashier_unchanged",
+      "expected": {
+        "refund": 500.0,
+        "cash_delta": 0.0,
+        "ar_delta": -500.0,
+        "ar_reduction": 500.0,
+        "cash_refund": 0.0
+      },
+      "actual": {
+        "refund": 500.0,
+        "cash_delta": 0.0,
+        "ar_delta": -500.0,
+        "ar_reduction": 500.0,
+        "cash_refund": 0.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "inv_id": "inv-f800-credit-1000-9e768f",
+        "customer_id": "cust-17190157"
+      },
+      "recorded_at": "2026-05-14T01:43:18.397676+00:00"
+    },
+    {
+      "scenario": "br_correct_pa.3_digital_invoice",
+      "step": "digital_correction_routes_to_digital_wallet_not_cash",
+      "expected": {
+        "refund": 500.0,
+        "cash_delta": 0.0,
+        "digital_delta": -500.0,
+        "digital_refund_count": 1
+      },
+      "actual": {
+        "refund": 500.0,
+        "cash_delta": 0.0,
+        "digital_delta": -500.0,
+        "digital_refund_count": 1
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:43:18.889867+00:00"
+    },
+    {
+      "scenario": "br_correct_pa.4_split_within_digital",
+      "step": "split_correction_within_digital_budget_does_not_touch_cash",
+      "expected": {
+        "refund": 1000.0,
+        "cash_delta": 0.0,
+        "digital_delta": -1000.0
+      },
+      "actual": {
+        "refund": 1000.0,
+        "cash_delta": 0.0,
+        "digital_delta": -1000.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:43:18.951728+00:00"
+    },
+    {
+      "scenario": "br_correct_pa.5_partial_credit",
+      "step": "partial_correction_drains_ar_first_then_cash",
+      "expected": {
+        "ar_reduction": 700.0,
+        "cash_refund": 300.0,
+        "cash_delta": -300.0,
+        "ar_delta": -700.0
+      },
+      "actual": {
+        "ar_reduction": 700.0,
+        "cash_refund": 300.0,
+        "cash_delta": -300.0,
+        "ar_delta": -700.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:43:18.986183+00:00"
+    },
+    {
+      "scenario": "br_correct_pa.6_day_closed_ar_only",
+      "step": "day_closed_ar_only_correction_allowed",
+      "expected": {
+        "success": true,
+        "cash_refund": 0.0,
+        "ar_reduction": 500.0
+      },
+      "actual": {
+        "success": true,
+        "cash_refund": 0.0,
+        "ar_reduction": 500.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:43:19.009752+00:00"
+    },
+    {
+      "scenario": "br_correct_pa.7_day_closed_cash_blocked",
+      "step": "day_closed_cash_correction_rejected",
+      "expected": {
+        "blocked": true,
+        "type": "day_closed_cash_refund"
+      },
+      "actual": {
+        "blocked": true,
+        "type": "day_closed_cash_refund"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:43:19.020619+00:00"
+    }
+  ]
+}

@@ -1,0 +1,213 @@
+{
+  "generated_at": "2026-05-14T01:38:18.595218+00:00",
+  "pytest_exitstatus": 1,
+  "row_count": 12,
+  "pass_count": 11,
+  "fail_count": 1,
+  "rows": [
+    {
+      "scenario": "br_refund_allocator.1_pure_cash",
+      "step": "cash_sale_refund_goes_to_cashier",
+      "expected": {
+        "ar": 0.0,
+        "cash": 250.0,
+        "digital_count": 0,
+        "unalloc": 0.0
+      },
+      "actual": {
+        "ar": 0.0,
+        "cash": 250.0,
+        "digital_count": 0,
+        "unalloc": 0.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "inv_kind": "cash"
+      },
+      "recorded_at": "2026-05-14T01:38:18.562454+00:00"
+    },
+    {
+      "scenario": "br_refund_allocator.2_pure_credit_unpaid",
+      "step": "credit_unpaid_refund_reduces_ar_only_no_wallets",
+      "expected": {
+        "ar": 1000.0,
+        "cash": 0.0,
+        "digital_count": 0
+      },
+      "actual": {
+        "ar": 1000.0,
+        "cash": 0.0,
+        "digital_count": 0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:38:18.563074+00:00"
+    },
+    {
+      "scenario": "br_refund_allocator.3_partial_credit",
+      "step": "ar_first_then_cash_for_overshoot",
+      "expected": {
+        "ar": 7000.0,
+        "cash": 1000.0
+      },
+      "actual": {
+        "ar": 7000.0,
+        "cash": 1000.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:38:18.563529+00:00"
+    },
+    {
+      "scenario": "br_refund_allocator.4_pure_digital",
+      "step": "digital_refund_routes_to_digital_wallet_not_cash",
+      "expected": {
+        "ar": 0.0,
+        "cash": 0.0,
+        "digital_amount": 500.0,
+        "digital_platform": "GCash"
+      },
+      "actual": {
+        "ar": 0.0,
+        "cash": 0.0,
+        "digital_amount": 500.0,
+        "digital_platform": "GCash"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:38:18.564000+00:00"
+    },
+    {
+      "scenario": "br_refund_allocator.5_split_digital_first",
+      "step": "split_refund_eats_digital_before_cash",
+      "expected": {
+        "ar": 0.0,
+        "cash": 0.0,
+        "digital_total": 2000.0
+      },
+      "actual": {
+        "ar": 0.0,
+        "cash": 0.0,
+        "digital_total": 2000.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:38:18.564427+00:00"
+    },
+    {
+      "scenario": "br_refund_allocator.6_split_overshoot_to_cash",
+      "step": "overshoot_above_digital_paid_lands_in_cashier",
+      "expected": {
+        "ar": 0.0,
+        "digital_total": 2500.0,
+        "cash": 500.0
+      },
+      "actual": {
+        "ar": 0.0,
+        "digital_total": 2500.0,
+        "cash": 500.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:38:18.564833+00:00"
+    },
+    {
+      "scenario": "br_refund_allocator.7_subsequent_digital_payment",
+      "step": "ar_consumed_first_even_when_digital_payment_exists",
+      "expected": {
+        "ar": 2500.0,
+        "digital_count": 0,
+        "cash": 0.0
+      },
+      "actual": {
+        "ar": 2500.0,
+        "digital_count": 0,
+        "cash": 0.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:38:18.565310+00:00"
+    },
+    {
+      "scenario": "br_refund_allocator.8_drained_digital_then_cash",
+      "step": "fully_digital_paid_credit_routes_to_digital_first",
+      "expected": {
+        "ar": 0.0,
+        "digital_total": 3500.0,
+        "cash": 0.0
+      },
+      "actual": {
+        "ar": 0.0,
+        "digital_total": 3500.0,
+        "cash": 0.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:38:18.565695+00:00"
+    },
+    {
+      "scenario": "br_refund_allocator.9_voided_payments_ignored",
+      "step": "voided_payment_rows_dropped_from_summary",
+      "expected": {
+        "digital_paid": 2000.0
+      },
+      "actual": {
+        "digital_paid": 2000.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:38:18.566076+00:00"
+    },
+    {
+      "scenario": "br_refund_allocator.10_overshoot",
+      "step": "refund_above_grand_total_surfaces_unallocated_residual",
+      "expected": {
+        "cash": 1000.0,
+        "unalloc": 500.0
+      },
+      "actual": {
+        "cash": 1500.0,
+        "unalloc": 0.0
+      },
+      "status": "FAIL",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:38:18.566415+00:00"
+    },
+    {
+      "scenario": "br_refund_allocator.11_split_summary",
+      "step": "cash_and_digital_buckets_track_split_breakdown",
+      "expected": {
+        "cash_paid": 1500.0,
+        "digital_paid": 2500.0,
+        "open": 0.0
+      },
+      "actual": {
+        "cash_paid": 1500.0,
+        "digital_paid": 2500.0,
+        "open": 0.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:38:18.590500+00:00"
+    },
+    {
+      "scenario": "br_refund_allocator.12_zero_refund_inert",
+      "step": "zero_refund_does_nothing",
+      "expected": {
+        "ar": 0.0,
+        "cash": 0.0,
+        "digital_count": 0,
+        "unalloc": 0.0
+      },
+      "actual": {
+        "ar": 0.0,
+        "cash": 0.0,
+        "digital_count": 0,
+        "unalloc": 0.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:38:18.590954+00:00"
+    }
+  ]
+}

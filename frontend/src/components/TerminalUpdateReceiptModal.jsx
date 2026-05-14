@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import CalcInput from './CalcInput';
+import RefundAllocationPreview from './RefundAllocationPreview';
 
 export default function TerminalUpdateReceiptModal({
   invoice,
@@ -105,8 +106,18 @@ export default function TerminalUpdateReceiptModal({
       toast.success('Receipt corrected successfully');
     } catch (e) {
       const detail = e.response?.data?.detail;
-      setPinError(typeof detail === 'string' ? detail : detail?.message || 'Failed to correct receipt');
-      toast.error('Correction failed');
+      // Payment-aware refund: surface the day-closed-cash-refund hint clearly
+      // so the cashier knows AR-only / digital-only paths are still open.
+      if (detail && typeof detail === 'object' && detail.type === 'day_closed_cash_refund') {
+        setPinError(
+          detail.message ||
+          'Day is closed — cash refunds blocked. Use Return & Refund, or only correct items that route to AR/digital.'
+        );
+        toast.error('Day closed — cash refunds blocked');
+      } else {
+        setPinError(typeof detail === 'string' ? detail : detail?.message || 'Failed to correct receipt');
+        toast.error('Correction failed');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -214,6 +225,14 @@ export default function TerminalUpdateReceiptModal({
                     </div>
                   </div>
                 )}
+
+                {/* Payment-aware refund routing preview */}
+                {calculations.hasChanges && (
+                  <RefundAllocationPreview
+                    invoice={invoice}
+                    refundAmount={calculations.refundAmount}
+                  />
+                )}
               </div>
             </div>
 
@@ -256,10 +275,15 @@ export default function TerminalUpdateReceiptModal({
                   </span>
                 </div>
                 <div className="flex justify-between text-sm pt-2 border-t border-slate-200">
-                  <span className="font-bold text-slate-700">Refund from Cashier</span>
+                  <span className="font-bold text-slate-700">Total Refund</span>
                   <span className="font-bold text-amber-700">{formatPHP(calculations.refundAmount)}</span>
                 </div>
               </div>
+
+              <RefundAllocationPreview
+                invoice={invoice}
+                refundAmount={calculations.refundAmount}
+              />
 
               {/* Reprint choice */}
               <div>

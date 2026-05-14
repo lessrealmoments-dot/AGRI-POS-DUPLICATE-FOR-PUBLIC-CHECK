@@ -12,6 +12,7 @@ import {
 import { localTodayStr } from '../lib/dateFormat';
 import { toast } from 'sonner';
 import CalcInput from './CalcInput';
+import RefundAllocationPreview from './RefundAllocationPreview';
 
 const CONDITIONS = [
   { value: 'sellable', label: 'Sellable', desc: 'Unopened, good condition', color: 'emerald', action: 'shelf' },
@@ -337,6 +338,10 @@ export default function TerminalReturnRefundModal({
                 <p className="text-sm text-slate-600">Total Refund Amount</p>
                 <p className="text-2xl font-bold text-red-600">{formatPHP(refundAmount)}</p>
               </div>
+              {/* Payment-aware refund routing preview */}
+              <div className="mb-3">
+                <RefundAllocationPreview invoice={invoice} refundAmount={refundAmount} />
+              </div>
               <div className="flex gap-2">
                 <Button variant="outline" onClick={() => setStep(1)} data-testid="return-back2-btn">Back</Button>
                 <Button
@@ -380,10 +385,12 @@ export default function TerminalReturnRefundModal({
                 </div>
               </div>
 
+              <RefundAllocationPreview invoice={invoice} refundAmount={refundAmount} />
+
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
                 <p className="text-xs text-amber-800 flex items-center gap-1.5">
                   <AlertTriangle size={12} />
-                  <span>This will refund money from cashier wallet and update inventory. Confirm with your PIN.</span>
+                  <span>Refund routes per the preview above — AR / digital / cash. Confirm with your PIN.</span>
                 </p>
               </div>
 

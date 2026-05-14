@@ -2383,28 +2383,28 @@ export default function DocViewerPage() {
                       Process customer returns and issue refunds
                     </p>
                     
-                    {/* Update Receipt for Incomplete Stock - Only if day not closed */}
-                    {!dayIsClosed && (
-                      <>
-                        <Button 
-                          className="w-full h-11 bg-amber-600 hover:bg-amber-700 text-white font-semibold flex items-center justify-center gap-2"
-                          onClick={() => setShowUpdateReceiptModal(true)}
-                          data-testid="terminal-update-receipt-btn"
-                        >
-                          <FileEdit size={14} />
-                          Update for Incomplete Stock
-                        </Button>
-                        <p className="text-xs text-slate-400 text-center -mt-1">
-                          Correct receipt when items weren't given
-                        </p>
-                      </>
-                    )}
+                    {/* Update Receipt for Incomplete Stock — always visible.
+                        Backend allows AR-only corrections on closed days
+                        (payment-aware routing), and rejects cash refunds
+                        on closed days with a clear day_closed_cash_refund
+                        error the modal surfaces. */}
+                    <Button 
+                      className="w-full h-11 bg-amber-600 hover:bg-amber-700 text-white font-semibold flex items-center justify-center gap-2"
+                      onClick={() => setShowUpdateReceiptModal(true)}
+                      data-testid="terminal-update-receipt-btn"
+                    >
+                      <FileEdit size={14} />
+                      Update for Incomplete Stock
+                    </Button>
+                    <p className="text-xs text-slate-400 text-center -mt-1">
+                      Correct receipt when items weren't given · payment-aware refund
+                    </p>
                     
                     {dayIsClosed && (
                       <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
                         <p className="text-xs text-slate-500 text-center">
                           <Lock size={12} className="inline mr-1" />
-                          Day closed - Receipt updates disabled. Use Return & Refund instead.
+                          Day closed — only AR/digital-only corrections allowed. Cash refunds require Return &amp; Refund.
                         </p>
                       </div>
                     )}

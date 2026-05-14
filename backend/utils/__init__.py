@@ -53,3 +53,7 @@ from .date_basis import (
     enrich_invoice_with_date_basis,
     enrich_movement_with_source_date,
 )
+from .refund_allocator import (
+    compute_refund_allocation,
+    summarize_invoice_payments,
+)

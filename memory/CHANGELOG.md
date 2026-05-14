@@ -1,6 +1,43 @@
 # AgriBooks Changelog
 
 
+## Feb 13 2026 — Payment-Aware Refund Engine ✅
+
+**Goal**: Stop cashier wallet over-debits when correcting / returning credit, digital, or split-payment invoices. Old code unconditionally debited cashier for refund_amount even though digital/credit/split sales never put that cash in the drawer.
+
+### What was delivered
+- **NEW** `backend/utils/refund_allocator.py` — `compute_refund_allocation(invoice, refund_amount)` routes refunds in priority order: **AR → digital channels → cash** (newest payment first for digital). Cash is capped at `summary.cash_paid` so we never debit more than was paid. Surfaces `remaining_unallocated` when refund exceeds grand_total.
+- **MOD** `backend/routes/invoice_corrections.py` — `correct_incomplete_stock`:
+  - Uses the allocator. Conditional `update_cashier_wallet` (only when `cash_refund > 0`), per-channel `update_digital_wallet`, AR-side reduces `invoice.balance` + `customer.balance` only by the AR portion (kills the previous double-debit).
+  - Day-closed gate: **AR-only / digital-only** corrections are now ALLOWED on closed days. Cash refund on closed day raises HTTP 400 with `{type: "day_closed_cash_refund"}`.
+  - Subsequent payment rows linked to refunded digital amounts are marked `voided: true`.
+  - Response includes `refund_allocation` breakdown + `original_payment_summary` for audit.
+- **MOD** `backend/routes/returns.py` — `create_return` & `void_return`:
+  - Adds `payment_aware` boolean (default `true` when `invoice_number` is provided).
+  - Looks up linked invoice, runs allocator, disburses across digital channels + cash residual.
+  - Cashier fund check now uses `cash_refund` (not full retail), unblocking refund-from-cashier-with-zero-balance for credit returns.
+  - `void_return` reverses digital wallets in lockstep with cash.
+  - Persists `refund_allocation`, `cash_refund_disbursed`, `digital_refund_disbursed` in the `returns` collection.
+- **NEW** `frontend/src/lib/refundAllocator.js` — JS mirror of the backend allocator for live FE preview.
+- **NEW** `frontend/src/components/RefundAllocationPreview.jsx` — visual routing preview (AR row + per-channel digital rows + cash row + unallocated row). Reusable.
+- **MOD** `frontend/src/components/TerminalUpdateReceiptModal.jsx` — preview rendered on step 1 (next to refund summary) AND step 2 (next to PIN). Day-closed-cash-refund error surfaced with a clear toast + inline message.
+- **MOD** `frontend/src/components/TerminalReturnRefundModal.jsx` — preview rendered on step 2 (configure) AND step 3 (PIN).
+- **MOD** `frontend/src/pages/DocViewerPage.jsx` — removed the `!dayIsClosed` gate that hid Update-for-Incomplete-Stock; backend now handles the gate per-allocation.
+
+### Test coverage
+- **NEW** `tests/business_regression/test_br_refund_allocator.py` — 12 pure-math unit tests (pure cash, pure credit, partial credit, pure digital, split within digital, split overshoot, subsequent digital AR payment, drained digital then cash, voided payments ignored, overshoot grand_total, split summary breakdown, zero refund inert).
+- **NEW** `tests/business_regression/test_br_correct_incomplete_payment_aware.py` — 7 integration tests through the route handler (cash baseline, credit unpaid no cashier debit, digital routes to digital wallet, split overshoot, partial credit AR-then-cash, day-closed AR-only allowed, day-closed cash rejected).
+- **NEW** `tests/business_regression/test_br_returns_payment_aware.py` — 5 integration tests through `/returns` (cash walk-in baseline, credit unpaid AR-only, digital routes to digital, split within digital, split overshoot to cash residual).
+- **BR suite total**: 185 passed (was 161 → +24 new tests). 452 structured rows pass / 0 fail.
+
+### Business impact
+- Credit invoices: corrections/refunds no longer create phantom cashier shortages. AR is the only thing that moves when the customer hasn't paid yet.
+- Digital invoices: refunds route to the original digital channel + ref number → matches physical-world reversal trail.
+- Split invoices: digital channels are reversed before cash is touched → preserves end-of-day cash position.
+- Day-closed AR-only corrections are unblocked, eliminating the "I forgot but the Z-report is closed" workaround.
+
+
+
 
 ## Feb 2026 — Phase 4 Cleanup, useHistoricalCredit() Extraction Pass
 

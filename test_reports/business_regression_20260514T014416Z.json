@@ -1,0 +1,92 @@
+{
+  "generated_at": "2026-05-14T01:44:16.158724+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 5,
+  "pass_count": 5,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br_returns_pa.1_cash_walkin",
+      "step": "cash_return_debits_cashier_500",
+      "expected": {
+        "cash_delta": -500.0,
+        "ar_reduction": 0.0,
+        "digital_count": 0,
+        "payment_aware": true
+      },
+      "actual": {
+        "cash_delta": -500.0,
+        "ar_reduction": 0.0,
+        "digital_count": 0,
+        "payment_aware": true
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:44:15.970636+00:00"
+    },
+    {
+      "scenario": "br_returns_pa.2_credit_unpaid",
+      "step": "credit_return_reduces_ar_only_no_cash",
+      "expected": {
+        "cash_delta": 0.0,
+        "ar_delta": -500.0,
+        "ar_reduction": 500.0,
+        "cash_refund": 0.0
+      },
+      "actual": {
+        "cash_delta": 0.0,
+        "ar_delta": -500.0,
+        "ar_reduction": 500.0,
+        "cash_refund": 0.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:44:16.009450+00:00"
+    },
+    {
+      "scenario": "br_returns_pa.3_digital_invoice",
+      "step": "digital_return_routes_to_digital_wallet",
+      "expected": {
+        "cash_delta": 0.0,
+        "digital_delta": -500.0
+      },
+      "actual": {
+        "cash_delta": 0.0,
+        "digital_delta": -500.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:44:16.036634+00:00"
+    },
+    {
+      "scenario": "br_returns_pa.4_split_within_digital",
+      "step": "split_return_within_digital_budget_uses_only_digital",
+      "expected": {
+        "cash_delta": 0.0,
+        "digital_delta": -1000.0
+      },
+      "actual": {
+        "cash_delta": 0.0,
+        "digital_delta": -1000.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:44:16.065893+00:00"
+    },
+    {
+      "scenario": "br_returns_pa.5_split_cash_residual",
+      "step": "split_return_overshoot_digital_falls_into_cash",
+      "expected": {
+        "cash_delta": -500.0,
+        "digital_delta": -1500.0
+      },
+      "actual": {
+        "cash_delta": -500.0,
+        "digital_delta": -1500.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:44:16.109947+00:00"
+    }
+  ]
+}

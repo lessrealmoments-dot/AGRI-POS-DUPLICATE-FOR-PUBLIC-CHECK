@@ -1,0 +1,101 @@
+{
+  "generated_at": "2026-05-14T01:40:00.421096+00:00",
+  "pytest_exitstatus": 1,
+  "row_count": 5,
+  "pass_count": 4,
+  "fail_count": 1,
+  "rows": [
+    {
+      "scenario": "br_correct_pa.2_credit_unpaid",
+      "step": "credit_correction_only_reduces_ar_cashier_unchanged",
+      "expected": {
+        "refund": 500.0,
+        "cash_delta": 0.0,
+        "ar_delta": -500.0,
+        "ar_reduction": 500.0,
+        "cash_refund": 0.0
+      },
+      "actual": {
+        "refund": 500.0,
+        "cash_delta": 0.0,
+        "ar_delta": -500.0,
+        "ar_reduction": 500.0,
+        "cash_refund": 0.0
+      },
+      "status": "PASS",
+      "evidence": {
+        "inv_id": "inv-2442-credit-1000",
+        "customer_id": "cust-f65e5be0"
+      },
+      "recorded_at": "2026-05-14T01:40:00.169555+00:00"
+    },
+    {
+      "scenario": "br_correct_pa.3_digital_invoice",
+      "step": "digital_correction_routes_to_digital_wallet_not_cash",
+      "expected": {
+        "refund": 500.0,
+        "cash_delta": 0.0,
+        "digital_delta": -500.0,
+        "digital_refund_count": 1
+      },
+      "actual": {
+        "refund": 500.0,
+        "cash_delta": 0.0,
+        "digital_delta": -500.0,
+        "digital_refund_count": 1
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:40:00.209095+00:00"
+    },
+    {
+      "scenario": "br_correct_pa.4_split_within_digital",
+      "step": "split_correction_within_digital_budget_does_not_touch_cash",
+      "expected": {
+        "refund": 1000.0,
+        "cash_delta": 0.0,
+        "digital_delta": -1000.0
+      },
+      "actual": {
+        "refund": 1000.0,
+        "cash_delta": 0.0,
+        "digital_delta": -1000.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:40:00.259463+00:00"
+    },
+    {
+      "scenario": "br_correct_pa.6_day_closed_ar_only",
+      "step": "day_closed_ar_only_correction_allowed",
+      "expected": {
+        "success": true,
+        "cash_refund": 0.0,
+        "ar_reduction": 500.0
+      },
+      "actual": {
+        "success": true,
+        "cash_refund": 0.0,
+        "ar_reduction": 500.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:40:00.322424+00:00"
+    },
+    {
+      "scenario": "br_correct_pa.7_day_closed_cash_blocked",
+      "step": "day_closed_cash_correction_rejected",
+      "expected": {
+        "blocked": true,
+        "type": "day_closed_cash_refund"
+      },
+      "actual": {
+        "blocked": true,
+        "type": "insufficient_funds"
+      },
+      "status": "FAIL",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:40:00.339627+00:00"
+    }
+  ]
+}

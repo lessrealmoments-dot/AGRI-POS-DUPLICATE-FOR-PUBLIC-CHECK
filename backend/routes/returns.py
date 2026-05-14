@@ -11,6 +11,8 @@ from utils import (
     get_current_user, check_perm, now_iso, new_id,
     log_movement, update_cashier_wallet, today_local,
 )
+from utils.helpers import update_digital_wallet
+from utils.refund_allocator import compute_refund_allocation
 
 router = APIRouter(prefix="/returns", tags=["Returns"])
 
@@ -79,8 +81,30 @@ async def create_return(data: dict, user=Depends(get_current_user)):
     refund_amount = float(data.get("refund_amount", 0))
     fund_source = data.get("fund_source", "cashier")
 
-    # ── Validate fund balance if issuing refund ────────────────────────────
-    if refund_amount > 0:
+    # ── Payment-aware allocation (2026 audit fix) ──────────────────────────
+    # When the return is linked to an invoice and the caller hasn't opted out
+    # via `payment_aware=False`, compute the refund routing automatically
+    # (AR-first → digital channels → cash) so credit/digital/split sales
+    # don't over-debit cashier.
+    payment_aware = bool(data.get("payment_aware", True))
+    linked_invoice_for_allocation = None
+    allocation = None
+    if payment_aware and data.get("invoice_number"):
+        linked_invoice_for_allocation = await db.invoices.find_one(
+            {"invoice_number": data["invoice_number"],
+             "branch_id":      branch_id},
+            {"_id": 0},
+        )
+        if linked_invoice_for_allocation:
+            allocation = compute_refund_allocation(
+                linked_invoice_for_allocation, refund_amount,
+            )
+
+    # ── Validate fund balance if issuing CASH refund ────────────────────────
+    cash_to_refund = allocation["cash_refund"] if allocation else (
+        refund_amount if fund_source in ("cashier", "safe") else 0.0
+    )
+    if cash_to_refund > 0:
         cashier_wallet = await db.fund_wallets.find_one(
             {"branch_id": branch_id, "type": "cashier", "active": True}, {"_id": 0}
         )
@@ -96,10 +120,10 @@ async def create_return(data: dict, user=Depends(get_current_user)):
             ).to_list(500)
             safe_balance = sum(lot["remaining_amount"] for lot in lots)
 
-        if fund_source == "safe" and safe_balance < refund_amount:
-            raise HTTPException(status_code=400, detail=f"Safe has ₱{safe_balance:.2f}, need ₱{refund_amount:.2f}")
-        if fund_source == "cashier" and cashier_balance < refund_amount:
-            raise HTTPException(status_code=400, detail=f"Cashier has ₱{cashier_balance:.2f}, need ₱{refund_amount:.2f}")
+        if fund_source == "safe" and safe_balance < cash_to_refund:
+            raise HTTPException(status_code=400, detail=f"Safe has ₱{safe_balance:.2f}, need ₱{cash_to_refund:.2f}")
+        if fund_source == "cashier" and cashier_balance < cash_to_refund:
+            raise HTTPException(status_code=400, detail=f"Cashier has ₱{cashier_balance:.2f}, need ₱{cash_to_refund:.2f}")
 
     # ── C-8 (Audit 2026-02): atomic org+branch-scoped RMA number ──────────
     # Replaces the previous `count_documents({})+1` pattern which produced
@@ -185,21 +209,22 @@ async def create_return(data: dict, user=Depends(get_current_user)):
 
     # ── Credit customer AR reduction (Fix #1) ───────────────────────────────
     # If the customer is on credit, the return reduces their Accounts Receivable.
-    # Semantics:
-    #   total_return_value = retail value of goods returned (sum of refund_price × qty)
-    #   cash_refunded      = refund_amount (cash given back now)
-    #   credit_applied     = max(0, total_return_value - cash_refunded)
-    # `credit_applied` is subtracted from:
-    #   (a) customer.balance (AR ledger)
-    #   (b) original invoice.balance (if invoice_number provided) — applied to newest
-    #       open invoice for that customer, falling back if the linked invoice is paid/voided
+    #
+    # When `payment_aware=True` and we have a linked invoice, the allocator
+    # is authoritative for `credit_applied`: it represents the portion of
+    # the refund that simply shrinks the still-open AR balance. This avoids
+    # the previous double-application bug where the caller could pass a
+    # large `refund_amount` AND still have AR reduced for the diff.
     customer_id = data.get("customer_id")
     customer_type = (data.get("customer_type") or "walkin").lower()
     credit_applied = 0.0
     credit_applied_to_invoices = []
-    if customer_type == "credit" and customer_id:
+    if allocation is not None and customer_id:
+        credit_applied = allocation["ar_reduction"]
+    elif customer_type == "credit" and customer_id:
         credit_applied = round(max(0, total_refund_retail - refund_amount), 2)
-        if credit_applied > 0:
+    if credit_applied > 0 and customer_id:
+        if True:
             # Resolve the target customer
             cust = await db.customers.find_one({"id": customer_id}, {"_id": 0})
             if cust:
@@ -319,8 +344,89 @@ async def create_return(data: dict, user=Depends(get_current_user)):
                         "created_at": now_iso(),
                     })
 
-    # ── Record refund as expense ────────────────────────────────────────────
-    if refund_amount > 0:
+    # ── Disburse refund per allocation (or legacy single-fund) ──────────────
+    # When `allocation` is present (payment-aware), we:
+    #   - Reverse digital channels first via `update_digital_wallet` (negative).
+    #   - Debit the cashier wallet only for the residual `cash_refund`.
+    #   - AR portion was already applied above and doesn't touch any wallet.
+    # When `allocation` is None (walk-in returns or `payment_aware=False`),
+    # we fall back to the original single-fund disbursement.
+    digital_refunds_disbursed = []
+    cash_refund_disbursed = 0.0
+
+    if allocation is not None:
+        # 1. Digital reversals (one wallet_movement per channel)
+        for d in allocation["digital_refunds"]:
+            await update_digital_wallet(
+                branch_id,
+                -d["amount"],
+                reference=(
+                    f"Customer Return Refund — {rma_number} — "
+                    f"{data.get('customer_name', 'Walk-in')} — digital reversal"
+                ),
+                platform=d.get("platform") or d.get("method", ""),
+                ref_number=d.get("ref_number", ""),
+            )
+            digital_refunds_disbursed.append(d)
+
+            # Mark linked subsequent payment as voided, if any
+            if d.get("payment_id") and linked_invoice_for_allocation:
+                await db.invoices.update_one(
+                    {"id": linked_invoice_for_allocation["id"],
+                     "payments.id": d["payment_id"]},
+                    {"$set": {"payments.$.voided":        True,
+                              "payments.$.voided_at":     now_iso(),
+                              "payments.$.voided_reason": "customer_return_refund"}},
+                )
+
+        # 2. Cash residual
+        cash_refund_disbursed = allocation["cash_refund"]
+        if cash_refund_disbursed > 0:
+            ref_text = (
+                f"Customer Return Refund — {rma_number} — "
+                f"{data.get('customer_name', 'Walk-in')} — "
+                f"{data.get('reason', '')}"
+            )
+            if fund_source == "safe":
+                safe_wallet = await db.fund_wallets.find_one(
+                    {"branch_id": branch_id, "type": "safe", "active": True}, {"_id": 0}
+                )
+                if safe_wallet:
+                    remaining = cash_refund_disbursed
+                    for lot in await db.safe_lots.find(
+                        {"wallet_id": safe_wallet["id"], "remaining_amount": {"$gt": 0}}, {"_id": 0}
+                    ).sort("remaining_amount", -1).to_list(500):
+                        if remaining <= 0: break
+                        take = min(lot["remaining_amount"], remaining)
+                        await db.safe_lots.update_one({"id": lot["id"]}, {"$inc": {"remaining_amount": -take}})
+                        remaining -= take
+            else:
+                await update_cashier_wallet(branch_id, -cash_refund_disbursed, ref_text)
+
+            # Z-report: log only the CASH portion as an expense (digital
+            # reversals already live in wallet_movements with sign).
+            await db.expenses.insert_one({
+                "id":               new_id(),
+                "branch_id":        branch_id,
+                "category":         "Customer Return Refund",
+                "description":      f"Refund (cash) — {rma_number} — {data.get('customer_name', 'Walk-in')}",
+                "notes":            (
+                    f"Reason: {data.get('reason', '')} | "
+                    f"Items: {', '.join(i.get('product_name','') for i in items)} | "
+                    f"Invoice: {data.get('invoice_number', 'N/A')}"
+                ),
+                "amount":           cash_refund_disbursed,
+                "payment_method":   "Cash",
+                "fund_source":      fund_source,
+                "reference_number": rma_number,
+                "date":             return_date,
+                "rma_number":       rma_number,
+                "created_by":       user["id"],
+                "created_by_name":  user.get("full_name", user["username"]),
+                "created_at":       now_iso(),
+            })
+    elif refund_amount > 0:
+        # Legacy single-fund disbursement (walk-in or payment_aware=False)
         ref_text = f"Customer Return Refund — {rma_number} — {data.get('customer_name', 'Walk-in')} — {data.get('reason', '')}"
         if fund_source == "safe":
             safe_wallet = await db.fund_wallets.find_one(
@@ -339,25 +445,26 @@ async def create_return(data: dict, user=Depends(get_current_user)):
             await update_cashier_wallet(branch_id, -refund_amount, ref_text)
 
         await db.expenses.insert_one({
-            "id": new_id(),
-            "branch_id": branch_id,
-            "category": "Customer Return Refund",
-            "description": f"Refund — {rma_number} — {data.get('customer_name', 'Walk-in')}",
-            "notes": (
+            "id":               new_id(),
+            "branch_id":        branch_id,
+            "category":         "Customer Return Refund",
+            "description":      f"Refund — {rma_number} — {data.get('customer_name', 'Walk-in')}",
+            "notes":            (
                 f"Reason: {data.get('reason', '')} | "
                 f"Items: {', '.join(i.get('product_name','') for i in items)} | "
                 f"Invoice: {data.get('invoice_number', 'N/A')}"
             ),
-            "amount": refund_amount,
-            "payment_method": "Cash",
-            "fund_source": fund_source,
+            "amount":           refund_amount,
+            "payment_method":   "Cash",
+            "fund_source":      fund_source,
             "reference_number": rma_number,
-            "date": return_date,
-            "rma_number": rma_number,
-            "created_by": user["id"],
-            "created_by_name": user.get("full_name", user["username"]),
-            "created_at": now_iso(),
+            "date":             return_date,
+            "rma_number":       rma_number,
+            "created_by":       user["id"],
+            "created_by_name":  user.get("full_name", user["username"]),
+            "created_at":       now_iso(),
         })
+        cash_refund_disbursed = refund_amount
 
     # ── Notify owner of pull-out losses ────────────────────────────────────
     if pulled_out_items and total_loss_value > 0:
@@ -410,6 +517,22 @@ async def create_return(data: dict, user=Depends(get_current_user)):
         "has_pullout": len(pulled_out_items) > 0,
         "credit_applied": round(credit_applied, 2),
         "credit_applied_to_invoices": credit_applied_to_invoices,
+        # Payment-aware refund accounting (2026 audit fix)
+        "payment_aware":             allocation is not None,
+        "refund_allocation":         (
+            {
+                "ar_reduction":           allocation["ar_reduction"],
+                "cash_refund":            allocation["cash_refund"],
+                "digital_refunds":        digital_refunds_disbursed,
+                "check_refunds":          allocation["check_refunds"],
+                "remaining_unallocated":  allocation["remaining_unallocated"],
+            }
+            if allocation is not None else None
+        ),
+        "cash_refund_disbursed":     round(cash_refund_disbursed, 2),
+        "digital_refund_disbursed":  round(
+            sum(d["amount"] for d in digital_refunds_disbursed), 2
+        ),
         "status": "completed",
         "processed_by": user["id"],
         "processed_by_name": user.get("full_name", user["username"]),
@@ -486,7 +609,22 @@ async def void_return(return_id: str, data: dict, user=Depends(get_current_user)
     #  refund is reversed, so money comes back into the fund.)
     refund_amount = float(ret.get("refund_amount", 0))
     fund_source = ret.get("fund_source", "cashier")
-    if refund_amount > 0:
+    # Payment-aware refunds may have routed money to digital channels —
+    # reverse those in lockstep before touching cashier.
+    payment_aware_alloc = ret.get("refund_allocation") if ret.get("payment_aware") else None
+    cash_to_reverse = float(ret.get("cash_refund_disbursed", refund_amount)) if payment_aware_alloc else refund_amount
+
+    if payment_aware_alloc:
+        for d in payment_aware_alloc.get("digital_refunds", []) or []:
+            await update_digital_wallet(
+                branch_id,
+                +float(d.get("amount", 0)),
+                reference=f"Return void — digital reversal restored — {ret['rma_number']}",
+                platform=d.get("platform") or d.get("method", ""),
+                ref_number=d.get("ref_number", ""),
+            )
+
+    if cash_to_reverse > 0:
         ref_text = f"Return void — refund reversed — {ret['rma_number']}"
         if fund_source == "safe":
             safe_wallet = await db.fund_wallets.find_one(
@@ -497,15 +635,16 @@ async def void_return(return_id: str, data: dict, user=Depends(get_current_user)
                     "id": new_id(), "branch_id": branch_id,
                     "wallet_id": safe_wallet["id"],
                     "date_received": await today_local(user.get("organization_id") or ""),
-                    "original_amount": refund_amount,
-                    "remaining_amount": refund_amount,
+                    "original_amount": cash_to_reverse,
+                    "remaining_amount": cash_to_reverse,
                     "source_reference": ref_text,
                     "created_by": user["id"],
                     "created_at": now_iso(),
                 })
         else:
-            await update_cashier_wallet(branch_id, refund_amount, ref_text)
+            await update_cashier_wallet(branch_id, cash_to_reverse, ref_text)
 
+    if refund_amount > 0:
         # Void the expense record for the refund
         await db.expenses.update_many(
             {"rma_number": ret["rma_number"], "voided": {"$ne": True}},

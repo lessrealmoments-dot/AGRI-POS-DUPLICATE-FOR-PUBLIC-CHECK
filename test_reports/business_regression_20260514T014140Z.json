@@ -1,0 +1,24 @@
+{
+  "generated_at": "2026-05-14T01:41:40.855768+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 1,
+  "pass_count": 1,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br_correct_pa.7_day_closed_cash_blocked",
+      "step": "day_closed_cash_correction_rejected",
+      "expected": {
+        "blocked": true,
+        "type": "day_closed_cash_refund"
+      },
+      "actual": {
+        "blocked": true,
+        "type": "day_closed_cash_refund"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T01:41:40.816596+00:00"
+    }
+  ]
+}
