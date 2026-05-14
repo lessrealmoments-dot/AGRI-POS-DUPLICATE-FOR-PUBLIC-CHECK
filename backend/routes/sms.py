@@ -469,6 +469,23 @@ DEFAULT_TEMPLATES = [
         "trigger": "auto",
         "active": True,
     },
+    {
+        # Manual pickup-ready SMS triggered from terminal "Send Pickup SMS"
+        # button. Rate-limited server-side: max 3 sends per invoice, 5-min
+        # cooldown between sends. Used when a customer pays upfront and
+        # asks the store to prepare/hold the items for later pickup.
+        "key": "pickup_ready",
+        "name": "Order Ready for Pickup — Customer Notice",
+        "body": (
+            "Hi <customer_name>, ang inyong order po <invoice_number> "
+            "sa <company_name> ay handa na para i-pickup. "
+            "Pakikuha po kapag may oras kayo. Salamat!"
+        ),
+        "placeholders": ["customer_name", "invoice_number", "company_name",
+                         "branch_name"],
+        "trigger": "manual",
+        "active": True,
+    },
     # ── Branch Transfer Approval Workflow ────────────────────────────────────
     {
         "key": "transfer_pending_approval",

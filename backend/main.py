@@ -53,6 +53,7 @@ from routes.qr_actions import router as qr_actions_router
 from routes.documents import router as documents_router
 from routes.sms import router as sms_router
 from routes.invoice_corrections import router as invoice_corrections_router
+from routes.pickup_sms import router as pickup_sms_router
 from routes.app_downloads import router as app_downloads_router
 from routes.crop_credits import router as crop_credits_router
 from routes.signatures import router as signatures_router
@@ -171,6 +172,7 @@ api_router.include_router(returns_router)
 
 # Invoice Corrections (Incomplete Stock)
 api_router.include_router(invoice_corrections_router)
+api_router.include_router(pickup_sms_router)
 
 # Audit Center
 api_router.include_router(audit_router)

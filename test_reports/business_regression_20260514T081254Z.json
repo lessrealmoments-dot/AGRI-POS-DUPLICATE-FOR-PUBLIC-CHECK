@@ -1,0 +1,115 @@
+{
+  "generated_at": "2026-05-14T08:12:54.419488+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 6,
+  "pass_count": 6,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br_pickup.1_first_send",
+      "step": "counter_increments_remaining_decrements",
+      "expected": {
+        "sent_count": 1,
+        "remaining": 2,
+        "phones_len": 1
+      },
+      "actual": {
+        "sent_count": 1,
+        "remaining": 2,
+        "phones_len": 1
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T08:12:54.326592+00:00"
+    },
+    {
+      "scenario": "br_pickup.2_cooldown",
+      "step": "second_send_within_5min_blocked",
+      "expected": {
+        "raised": true,
+        "status": 429,
+        "remaining": 2,
+        "has_retry_after": true
+      },
+      "actual": {
+        "raised": true,
+        "status": 429,
+        "remaining": 2,
+        "has_retry_after": true
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T08:12:54.339791+00:00"
+    },
+    {
+      "scenario": "br_pickup.3_lifetime_cap",
+      "step": "fourth_send_blocked_permanently",
+      "expected": {
+        "raised": true,
+        "status": 429,
+        "remaining": 0,
+        "retry_after_None": true
+      },
+      "actual": {
+        "raised": true,
+        "status": 429,
+        "remaining": 0,
+        "retry_after_None": true
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T08:12:54.344075+00:00"
+    },
+    {
+      "scenario": "br_pickup.4_cooldown_expires",
+      "step": "resend_succeeds_after_5min",
+      "expected": {
+        "sent_count": 2,
+        "remaining": 1
+      },
+      "actual": {
+        "sent_count": 2,
+        "remaining": 1
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T08:12:54.360107+00:00"
+    },
+    {
+      "scenario": "br_pickup.5_no_customer",
+      "step": "walkin_invoice_400",
+      "expected": {
+        "raised": true,
+        "status": 400
+      },
+      "actual": {
+        "raised": true,
+        "status": 400
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T08:12:54.362706+00:00"
+    },
+    {
+      "scenario": "br_pickup.6_status_hydrate",
+      "step": "after_one_send_status_reports_state",
+      "expected": {
+        "sent_count": 1,
+        "remaining": 2,
+        "max_sends": 3,
+        "has_customer": true,
+        "retry_after_positive": true
+      },
+      "actual": {
+        "sent_count": 1,
+        "remaining": 2,
+        "max_sends": 3,
+        "has_customer": true,
+        "retry_after_positive": true
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T08:12:54.372531+00:00"
+    }
+  ]
+}

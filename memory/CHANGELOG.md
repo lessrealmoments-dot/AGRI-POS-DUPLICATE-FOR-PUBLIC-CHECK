@@ -1,6 +1,27 @@
 # AgriBooks Changelog
 
 
+## Feb 14 2026 — Pickup-Ready SMS (manual, rate-limited) ✅
+**Use case**: Customer pays upfront for an order they'll collect later ("ipreparé na lang, kukunin namin mamaya"). When the cashier finishes physically preparing the order, they tap a new **"Send Pickup Ready SMS"** button on the terminal to notify the customer.
+
+**Surfaces in**: `DocViewerPage` → Terminal Actions → new "PICKUP NOTIFICATIONS" section, visible on every invoice with a linked customer.
+
+**Rate limits (server-enforced)**:
+- Max **3 sends per invoice** (lifetime).
+- **5-min cooldown** between sends — UI shows live `m:ss` countdown.
+- Manual trigger only (`trigger="manual"`).
+- Confirmation modal "Are you sure the items are ready?" prevents accidental taps.
+
+**Implementation**:
+- New `routes/pickup_sms.py` → `POST /api/invoices/{id}/send-pickup-sms` + `GET /api/invoices/{id}/pickup-sms-status`. 429 with `retry_after_seconds` on cooldown, 429 with `retry_after_seconds=null` on lifetime cap, 400 on missing customer/phone.
+- New SMS template `pickup_ready` (Filipino + English mix).
+- Counters stored on `invoices.pickup_sms_count`, `pickup_sms_last_sent_at`, `pickup_sms_history[]` (audit trail with who sent + which phones + index).
+- `components/PickupSmsButton.jsx` — self-hides for walk-in invoices, hydrates state on mount, shows AlertDialog for confirmation, live countdown ticker.
+
+**Tests**: `test_br_pickup_sms.py` (6 new BR tests covering: first send, cooldown block, lifetime cap, cooldown expiry, walk-in rejection, status hydration). **195/195 BR suite passing**.
+
+
+
 ## Feb 14 2026 — Phantom-Balance Fix on Incomplete-Stock Corrections 🔴 P0
 **Pain point**: Live customer (Sibugay Agrivet) reported SI-MB-001059 (AIZON AGRIVET, ₱185,245 cash sale) showed a phantom ₱1,315 balance after an Incomplete-Stock correction. SMS also told the customer "we received a payment from you" when actually they were being **refunded**.
 

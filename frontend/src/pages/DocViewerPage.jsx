@@ -15,6 +15,7 @@ import PrintEngine from '../lib/PrintEngine';
 import PrintBridge from '../lib/PrintBridge';
 import TerminalReturnRefundModal from '../components/TerminalReturnRefundModal';
 import TerminalUpdateReceiptModal from '../components/TerminalUpdateReceiptModal';
+import PickupSmsButton from '../components/PickupSmsButton';
 import CalcInput from '../components/CalcInput';
 
 const BACKEND = process.env.REACT_APP_BACKEND_URL || '';
@@ -2400,6 +2401,16 @@ export default function DocViewerPage() {
                     <p className="text-xs text-slate-400 text-center -mt-1">
                       Correct receipt when items weren't given · payment-aware refund
                     </p>
+
+                    {/* Pickup-ready SMS (manual, 5-min cooldown, max 3 sends).
+                        Use case: customer paid upfront and asked us to prepare
+                        the order for later pickup. Cashier hits this once items
+                        are physically ready. Component self-hides if the invoice
+                        has no linked customer (walk-in cash sales). */}
+                    <PickupSmsButton
+                      invoiceId={(fullData?.document || fullData)?.id}
+                      terminalToken={terminalSession?.token}
+                    />
                   </>
                 )}
                 
