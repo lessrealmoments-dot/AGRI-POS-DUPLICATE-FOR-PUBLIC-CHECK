@@ -152,31 +152,13 @@ async def correct_incomplete_stock(
     # 4. Compute payment-aware allocation
     allocation = compute_refund_allocation(invoice, refund_amount)
 
-    # 5. Day-closed gate — only block if a cash refund would touch the
-    #    closed Z-report. AR-only & digital-only corrections can run.
-    if allocation["cash_refund"] > 0:
-        closed_doc = await db.daily_closings.find_one({
-            "branch_id": invoice["branch_id"],
-            "date":      invoice.get("order_date"),
-            "status":    "closed",
-        })
-        if closed_doc:
-            raise HTTPException(
-                400,
-                {
-                    "type": "day_closed_cash_refund",
-                    "message": (
-                        f"Cannot refund cash on a closed day "
-                        f"({invoice.get('order_date')}). Use Return & Refund, "
-                        f"or correct without cash impact (AR/digital only)."
-                    ),
-                    "allocation_preview": {
-                        "ar_reduction":     allocation["ar_reduction"],
-                        "cash_refund":      allocation["cash_refund"],
-                        "digital_refunds":  allocation["digital_refunds"],
-                    },
-                },
-            )
+    # NOTE — day-closed corrections are intentionally ALLOWED.
+    # Rationale (Feb 2026 owner decision): the inventory reversal +
+    # today-dated wallet_movement + today-dated expense row provide a
+    # complete audit trail. Count-sheets will catch any physical-vs-
+    # system mismatch (e.g. system says 5 returned but only 3 are on
+    # the shelf → audit flags 2 missing). The original closed Z-report
+    # stays as it was; the refund's impact lives in TODAY's books.
 
     # 6. Compute new amount_paid + balance using AR-first accounting
     amount_paid = float(invoice.get("amount_paid", 0) or 0)

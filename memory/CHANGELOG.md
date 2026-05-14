@@ -1,6 +1,21 @@
 # AgriBooks Changelog
 
 
+## Feb 13 2026 — Closed-Day Correction Policy: Always Allow ✅
+
+**Decision (owner)**: Both "Update for Incomplete Stock" and "Return & Refund" are allowed on closed days. Audit trail rests on **three pillars** that fire regardless of day status:
+1. **Inventory `+qty` reversal** (unconditional). Even if the product row didn't exist, an upsert creates it. Count-sheets will catch any physical-vs-system gap and route the discrepancy to the owner for investigation.
+2. **Today-dated `wallet_movements`** for the cash + digital legs. The closed Z-report is never re-touched.
+3. **Today-dated `expenses` row** ("Customer Return Refund") for the cash portion.
+
+**Changes**
+- `backend/routes/invoice_corrections.py` — removed the `day_closed_cash_refund` HTTP 400 gate. Replaced with an explanatory comment block citing the owner decision.
+- `frontend/src/components/TerminalUpdateReceiptModal.jsx` — removed the special-cased toast for `day_closed_cash_refund`. Falls back to the generic correction error.
+- `frontend/src/pages/DocViewerPage.jsx` — removed the closed-day notice strip.
+- BR test `test_pa_correct_7_day_closed_cash_now_allowed` flipped from rejection to success expectation.
+- BR test `test_pa_correct_8_inventory_reversal_always_applies` added — proves inventory upsert + `inventory_movements` log fire even when the product row didn't exist beforehand.
+- **BR suite**: 186 passed (was 185 → +1 net after flipping test 7's intent and adding test 8). 453 structured rows pass / 0 fail.
+
 ## Feb 13 2026 — Payment-Aware Refund Engine ✅
 
 **Goal**: Stop cashier wallet over-debits when correcting / returning credit, digital, or split-payment invoices. Old code unconditionally debited cashier for refund_amount even though digital/credit/split sales never put that cash in the drawer.

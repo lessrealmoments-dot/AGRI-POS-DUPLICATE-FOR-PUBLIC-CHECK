@@ -106,18 +106,8 @@ export default function TerminalUpdateReceiptModal({
       toast.success('Receipt corrected successfully');
     } catch (e) {
       const detail = e.response?.data?.detail;
-      // Payment-aware refund: surface the day-closed-cash-refund hint clearly
-      // so the cashier knows AR-only / digital-only paths are still open.
-      if (detail && typeof detail === 'object' && detail.type === 'day_closed_cash_refund') {
-        setPinError(
-          detail.message ||
-          'Day is closed — cash refunds blocked. Use Return & Refund, or only correct items that route to AR/digital.'
-        );
-        toast.error('Day closed — cash refunds blocked');
-      } else {
-        setPinError(typeof detail === 'string' ? detail : detail?.message || 'Failed to correct receipt');
-        toast.error('Correction failed');
-      }
+      setPinError(typeof detail === 'string' ? detail : detail?.message || 'Failed to correct receipt');
+      toast.error('Correction failed');
     } finally {
       setSubmitting(false);
     }

@@ -393,11 +393,13 @@ async def test_pa_correct_6_day_closed_ar_only_allowed(tenant, record_result):
 
 
 # ═════════════════════════════════════════════════════════════════════
-# Test 7 — Day-closed gate: cash correction is REJECTED.
+# Test 7 — Day-closed gate: cash correction is ALLOWED (Feb 2026 owner
+# decision). The closed day's Z-report stays untouched; refund impact
+# lives in TODAY's wallet_movements + expenses + inventory reversal,
+# so count-sheets still catch any physical-vs-system mismatch.
 # ═════════════════════════════════════════════════════════════════════
 @pytest.mark.asyncio
-async def test_pa_correct_7_day_closed_cash_rejected(tenant, record_result):
-    from fastapi import HTTPException
+async def test_pa_correct_7_day_closed_cash_now_allowed(tenant, record_result):
     org_id = tenant["org_id"]
     branch_id = tenant["branches"]["main"]
     pin = await _seed_manager_pin(tenant)
@@ -407,35 +409,102 @@ async def test_pa_correct_7_day_closed_cash_rejected(tenant, record_result):
     inv_id, _ = await _seed_invoice(
         org_id=org_id, branch_id=branch_id, payment_type="cash",
         grand_total=1000.0, amount_paid=1000.0, items=_ITEM,
-        order_date=closed_day,
+        order_date=closed_day, tag="day-closed-cash",
     )
     await _raw_db.daily_closings.insert_one({
         "id": f"close-{branch_id[-4:]}-2", "branch_id": branch_id,
         "organization_id": org_id, "date": closed_day, "status": "closed",
     })
 
-    blocked = False
-    detail = {}
-    try:
-        await correct_incomplete_stock(
-            inv_id,
-            IncompleteStockCorrection(
-                items=[IncompleteStockItem(
-                    product_id="p1", product_name="Item A",
-                    original_qty=2, actual_qty=1, rate=500.0, unit="pc",
-                )],
-                manager_pin=pin,
-            ),
-        )
-    except HTTPException as e:
-        blocked = True
-        detail = e.detail
+    before_cash = await _cashier_balance(branch_id)
+    res = await correct_incomplete_stock(
+        inv_id,
+        IncompleteStockCorrection(
+            items=[IncompleteStockItem(
+                product_id="p1", product_name="Item A",
+                original_qty=2, actual_qty=1, rate=500.0, unit="pc",
+            )],
+            manager_pin=pin,
+        ),
+    )
+    after_cash = await _cashier_balance(branch_id)
+
+    # The closed day's Z-report stays untouched (we don't write back to
+    # that date); the cash refund hits TODAY's cashier wallet.
+    record_result(
+        scenario="br_correct_pa.7_day_closed_cash_allowed",
+        step="day_closed_cash_correction_succeeds_with_today_dated_audit",
+        expected={"success": True, "cash_refund": 500.0,
+                  "cash_delta": -500.0, "items_returned": 1},
+        actual={"success": res["success"],
+                "cash_refund": res["refund_allocation"]["cash_refund"],
+                "cash_delta": round(after_cash - before_cash, 2),
+                "items_returned": res["items_returned"]},
+    )
+    assert res["success"] is True
+    assert res["refund_allocation"]["cash_refund"] == 500.0
+    assert round(after_cash - before_cash, 2) == -500.0
+    assert res["items_returned"] == 1  # inventory reversal happened
+
+
+# ═════════════════════════════════════════════════════════════════════
+# Test 8 — Inventory reversal is the audit floor: even if the product
+# row is missing/zero in the branch inventory (e.g. the stock truly
+# wasn't available), the correction still bumps `inventory.quantity`
+# upward. Count-sheets later flag the physical-vs-system gap and the
+# owner has the paper trail to investigate.
+# ═════════════════════════════════════════════════════════════════════
+@pytest.mark.asyncio
+async def test_pa_correct_8_inventory_reversal_always_applies(tenant, record_result):
+    org_id = tenant["org_id"]
+    branch_id = tenant["branches"]["main"]
+    pin = await _seed_manager_pin(tenant)
+    await _seed_cashier(branch_id=branch_id, balance=10000.0)
+
+    # Wipe any pre-existing inventory row for p1 in this branch so we
+    # start from "no row" — the correction must upsert it.
+    await _raw_db.inventory.delete_many(
+        {"branch_id": branch_id, "product_id": "p-audit"}
+    )
+
+    items = [{"product_id": "p-audit", "product_name": "Audit Item",
+              "quantity": 5, "rate": 100.0, "total": 500.0, "unit": "pc"}]
+    inv_id, _ = await _seed_invoice(
+        org_id=org_id, branch_id=branch_id, payment_type="cash",
+        grand_total=500.0, amount_paid=500.0, items=items, tag="audit",
+    )
+
+    res = await correct_incomplete_stock(
+        inv_id,
+        IncompleteStockCorrection(
+            items=[IncompleteStockItem(
+                product_id="p-audit", product_name="Audit Item",
+                original_qty=5, actual_qty=3, rate=100.0, unit="pc",
+            )],
+            manager_pin=pin,
+        ),
+    )
+
+    inv_row = await _raw_db.inventory.find_one(
+        {"branch_id": branch_id, "product_id": "p-audit"}, {"_id": 0}
+    )
+    movement = await _raw_db.inventory_movements.find_one(
+        {"branch_id": branch_id, "product_id": "p-audit",
+         "movement_type": "incomplete_stock_return"},
+        {"_id": 0}, sort=[("created_at", -1)],
+    )
 
     record_result(
-        scenario="br_correct_pa.7_day_closed_cash_blocked",
-        step="day_closed_cash_correction_rejected",
-        expected={"blocked": True, "type": "day_closed_cash_refund"},
-        actual={"blocked": blocked, "type": detail.get("type") if isinstance(detail, dict) else None},
+        scenario="br_correct_pa.8_inventory_reversal_always",
+        step="inventory_bumped_and_movement_logged_even_with_no_prior_row",
+        expected={"inventory_qty": 2.0, "movement_recorded": True,
+                  "items_returned": 1, "refund": 200.0},
+        actual={"inventory_qty": float(inv_row["quantity"]) if inv_row else None,
+                "movement_recorded": movement is not None,
+                "items_returned": res["items_returned"],
+                "refund": res["refund_amount"]},
+        evidence={"inv_row": inv_row, "movement_qty": (movement or {}).get("quantity")},
     )
-    assert blocked is True
-    assert isinstance(detail, dict) and detail.get("type") == "day_closed_cash_refund"
+    assert inv_row is not None and float(inv_row["quantity"]) == 2.0
+    assert movement is not None and float(movement["quantity"]) == 2.0
+    assert res["refund_amount"] == 200.0

@@ -2384,10 +2384,11 @@ export default function DocViewerPage() {
                     </p>
                     
                     {/* Update Receipt for Incomplete Stock — always visible.
-                        Backend allows AR-only corrections on closed days
-                        (payment-aware routing), and rejects cash refunds
-                        on closed days with a clear day_closed_cash_refund
-                        error the modal surfaces. */}
+                        Day-closed corrections are allowed: the closed-day Z-report
+                        stays untouched; the refund's impact lives in TODAY's
+                        wallet_movements + expenses, and the inventory reversal
+                        gives count-sheets the audit trail they need to flag any
+                        physical-vs-system mismatches. */}
                     <Button 
                       className="w-full h-11 bg-amber-600 hover:bg-amber-700 text-white font-semibold flex items-center justify-center gap-2"
                       onClick={() => setShowUpdateReceiptModal(true)}
@@ -2399,15 +2400,6 @@ export default function DocViewerPage() {
                     <p className="text-xs text-slate-400 text-center -mt-1">
                       Correct receipt when items weren't given · payment-aware refund
                     </p>
-                    
-                    {dayIsClosed && (
-                      <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-                        <p className="text-xs text-slate-500 text-center">
-                          <Lock size={12} className="inline mr-1" />
-                          Day closed — only AR/digital-only corrections allowed. Cash refunds require Return &amp; Refund.
-                        </p>
-                      </div>
-                    )}
                   </>
                 )}
                 
