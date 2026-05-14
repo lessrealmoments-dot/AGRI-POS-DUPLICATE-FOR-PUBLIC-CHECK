@@ -1130,8 +1130,12 @@ function trustReceiptDotMatrix(data, biz, docCode) {
   );
   body += `<table class="dm-items-table"><thead><tr>`;
   body += `<th class="c" style="width:0.33cm;padding:1px 0;"></th>`;
-  body += `<th style="width:24%;">Item</th>`;
-  body += `<th>Description</th>`;
+  // Item gets 65% of the (Item+Description) combined width, since the
+  // Description column is often empty. Splits:
+  //   No discount: 39% / 21% (item/desc) + 10/14/16 (qty/price/total) = 100%
+  //   With disc  : 31% / 17%             + 10/14/12/16              = 100%
+  body += `<th style="width:${hasDiscount ? '31' : '39'}%;">Item</th>`;
+  body += `<th style="width:${hasDiscount ? '17' : '21'}%;">Description</th>`;
   body += `<th class="c" style="width:10%;">Qty</th>`;
   body += `<th class="r" style="width:14%;">Unit Price</th>`;
   if (hasDiscount) {
