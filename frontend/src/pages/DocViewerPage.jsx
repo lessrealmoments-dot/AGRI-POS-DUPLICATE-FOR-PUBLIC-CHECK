@@ -2340,16 +2340,57 @@ export default function DocViewerPage() {
           </div>
         )}
 
-        {/* Non-terminal payment — Apply Payment via TOTP or Staff Login */}
-        {!isTerminal && (
-          <WebPaymentSection
-            basic={basic}
-            docCode={code?.toUpperCase()}
-            onReprintRequested={() => handleTier1Reprint('thermal')}
-            onPaymentRecorded={(r) => {
-              setBasic(prev => ({ ...prev, balance: r.new_balance, available_actions: r.new_balance <= 0 ? prev.available_actions?.filter(a => a !== 'receive_payment') : prev.available_actions }));
-            }}
-          />
+        {/* Non-terminal scans: show a clean, elegant banner instructing
+            the user to switch to the AgriBooks terminal app for any action.
+            Read access (receipt + payment history + balance) stays open.
+            Write actions (payments, returns, corrections, SMS) are
+            backend-gated to terminal-only. */}
+        {!isTerminal && fullData && (
+          <div
+            className="bg-gradient-to-br from-amber-50 via-white to-orange-50 border-2 border-amber-200 rounded-xl overflow-hidden shadow-sm"
+            data-testid="terminal-required-cta"
+          >
+            <div className="px-5 py-3 bg-amber-100/60 border-b border-amber-200 flex items-center gap-2">
+              <Smartphone size={15} className="text-amber-700" />
+              <span className="text-sm font-semibold text-amber-900">Actions require the AgriBooks Terminal app</span>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-xs text-slate-600 leading-relaxed">
+                You're viewing this receipt from a regular browser. For your security,
+                <span className="font-semibold text-slate-800"> payments, refunds, returns, and stock corrections </span>
+                can only be performed inside the <span className="font-semibold">AgriBooks Terminal app</span> on a paired device.
+              </p>
+
+              <div className="bg-white rounded-lg border border-amber-200 p-4 text-center">
+                <p className="text-[11px] uppercase tracking-wider text-slate-500 mb-2">
+                  Open the AgriBooks app and enter this code
+                </p>
+                <div
+                  className="text-2xl font-mono font-bold tracking-[0.3em] text-amber-900 select-all"
+                  data-testid="terminal-required-code"
+                >
+                  {(code || '').toUpperCase()}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      navigator.clipboard.writeText((code || '').toUpperCase());
+                      toast.success('Code copied');
+                    } catch { /* clipboard not available */ }
+                  }}
+                  className="mt-3 text-[11px] font-semibold text-amber-700 hover:text-amber-900 underline underline-offset-2"
+                  data-testid="terminal-required-copy-btn"
+                >
+                  Copy code to clipboard
+                </button>
+              </div>
+
+              <p className="text-[11px] text-slate-400 text-center leading-relaxed">
+                Don't have the app on this phone? Ask your manager or use a paired terminal device.
+              </p>
+            </div>
+          </div>
         )}
 
         {/* Tier 3: Terminal Actions */}
@@ -2410,6 +2451,7 @@ export default function DocViewerPage() {
                     <PickupSmsButton
                       invoiceId={(fullData?.document || fullData)?.id}
                       terminalToken={terminalSession?.token}
+                      terminalSession={terminalSession}
                     />
                   </>
                 )}

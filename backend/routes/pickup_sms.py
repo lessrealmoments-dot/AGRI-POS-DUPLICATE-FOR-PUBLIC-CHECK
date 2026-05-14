@@ -20,6 +20,7 @@ from datetime import datetime, timezone, timedelta
 
 from config import db
 from utils import get_current_user, now_iso
+from utils.terminal_guard import require_terminal_session
 
 router = APIRouter()
 
@@ -44,6 +45,7 @@ def _parse_iso(s: str):
 async def send_pickup_sms(
     invoice_id: str,
     user: dict = Depends(get_current_user),
+    _terminal: dict = Depends(require_terminal_session),
 ):
     """
     Send a pickup-ready SMS to the invoice's customer.

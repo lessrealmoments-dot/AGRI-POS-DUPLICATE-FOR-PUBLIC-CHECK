@@ -13,6 +13,7 @@ from utils import (
 )
 from utils.helpers import update_digital_wallet
 from utils.refund_allocator import compute_refund_allocation
+from utils.terminal_guard import require_terminal_session
 
 router = APIRouter(prefix="/returns", tags=["Returns"])
 
@@ -52,7 +53,11 @@ async def get_return(return_id: str, user=Depends(get_current_user)):
 
 
 @router.post("")
-async def create_return(data: dict, user=Depends(get_current_user)):
+async def create_return(
+    data: dict,
+    user=Depends(get_current_user),
+    _terminal: dict = Depends(require_terminal_session),
+):
     """
     Process a complete customer return transaction.
 

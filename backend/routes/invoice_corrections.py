@@ -26,6 +26,7 @@ from utils.refund_allocator import compute_refund_allocation
 from utils.helpers import (
     update_cashier_wallet, update_digital_wallet,
 )
+from utils.terminal_guard import require_terminal_session
 
 router = APIRouter()
 
@@ -44,6 +45,11 @@ class IncompleteStockCorrection(BaseModel):
     manager_pin: str
     reprint_receipt: bool = False
     notes: str = ""
+    # Terminal-session credentials (Feb 2026 lock). The endpoint dependency
+    # `require_terminal_session` reads these (or X-Terminal-Id headers) and
+    # rejects the request if no valid paired terminal session is found.
+    terminal_id: str = ""
+    device_id: str = ""
 
 
 def new_id():
@@ -81,6 +87,7 @@ async def correct_incomplete_stock(
     invoice_id: str,
     data: IncompleteStockCorrection,
     user: dict = Depends(get_current_user),
+    _terminal: dict = Depends(require_terminal_session),
 ):
     """
     Correct invoice when items weren't physically given.

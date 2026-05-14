@@ -1,6 +1,28 @@
 # AgriBooks Changelog
 
 
+## Feb 14 2026 — Terminal-Only Lock-down on Sensitive Write Actions 🔒
+**Threat closed**: previously, the terminal-action UI was hidden for non-terminal scans, but the **backend endpoints accepted any authenticated admin token** — meaning a stolen admin JWT or a direct curl/Postman call could bypass the UI gate and execute payments, refunds, returns, and stock corrections. Camera-only QR scans also exposed `WebPaymentSection` with TOTP/staff-login fallback, an unintended cash-recording surface.
+
+**4 endpoints locked to paired-terminal sessions only**:
+- `POST /api/qr-actions/{code}/receive_payment` — dropped Path 2 (web staff JWT) and Path 3 (TOTP-only). **Path 1 (terminal + PIN) is the only allowed flow.**
+- `POST /api/invoices/{id}/correct-incomplete-stock` — now requires `terminal_id` + `device_id`.
+- `POST /api/returns` — same.
+- `POST /api/invoices/{id}/send-pickup-sms` — same.
+
+**How**: new `utils/terminal_guard.py::require_terminal_session` FastAPI dependency that reads credentials from `X-Terminal-Id` / `X-Device-Id` headers (preferred) or JSON body, then defers to the canonical `_verify_terminal_session()` for active-session + device-binding checks. Returns 403 with: *"This action is restricted to the AgriBooks terminal app. Web/camera-scan access is not permitted."*
+
+**Frontend** (`DocViewerPage.jsx`):
+- Removed `WebPaymentSection` rendering for non-terminal scans.
+- Added elegant amber-gradient banner showing the QR code prominently with a "Copy code to clipboard" affordance + instructions to open in the AgriBooks Terminal app.
+- All terminal modals (`TerminalUpdateReceiptModal`, `TerminalReturnRefundModal`, `PickupSmsButton`) now pass `terminal_id` + `device_id` so the gate is satisfied transparently.
+
+**Read paths preserved** ✅: viewing the receipt, payment history (with timestamps), balance, and attached docs still works from any camera scan after Tier 2 PIN unlock. Only **write/financial actions** require the paired app.
+
+**Tests**: `test_br_terminal_guard.py` (6 new BR tests): no-creds rejection, header creds pass, body creds pass, unknown terminal_id, device-binding mismatch, header-precedence-over-body. **201/201 BR suite passing** (up from 195).
+
+
+
 ## Feb 14 2026 — Pickup-Ready SMS (manual, rate-limited) ✅
 **Use case**: Customer pays upfront for an order they'll collect later ("ipreparé na lang, kukunin namin mamaya"). When the cashier finishes physically preparing the order, they tap a new **"Send Pickup Ready SMS"** button on the terminal to notify the customer.
 

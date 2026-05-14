@@ -23,18 +23,24 @@ const MAX_SENDS = 3;
  *   - "Are you sure" confirmation modal (prevents accidental taps)
  *   - Disabled + reason text once the lifetime cap is hit
  */
-export default function PickupSmsButton({ invoiceId, terminalToken }) {
+export default function PickupSmsButton({ invoiceId, terminalToken, terminalSession }) {
   const [status, setStatus] = useState(null);   // {sent_count, remaining, retry_after_seconds, has_customer}
   const [loading, setLoading] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [secsLeft, setSecsLeft] = useState(0);
 
-  const authHeaders = terminalToken
-    ? { Authorization: `Bearer ${terminalToken}` }
-    : (() => {
-        const t = localStorage.getItem('token');
-        return t ? { Authorization: `Bearer ${t}` } : {};
-      })();
+  // Build headers once. We always need either the paired terminal JWT or
+  // (fallback) the web admin JWT for `get_current_user`, plus the explicit
+  // X-Terminal-Id headers the server `require_terminal_session` dependency
+  // checks. Pickup-SMS has no JSON body, so headers are the only carrier.
+  const authHeaders = (() => {
+    const h = {};
+    const tok = terminalToken || localStorage.getItem('token');
+    if (tok) h.Authorization = `Bearer ${tok}`;
+    if (terminalSession?.terminalId) h['X-Terminal-Id'] = terminalSession.terminalId;
+    if (terminalSession?.deviceId)   h['X-Device-Id']   = terminalSession.deviceId;
+    return h;
+  })();
 
   // ── Hydrate current rate-limit state on mount ─────────────────────────────
   const fetchStatus = useCallback(async () => {

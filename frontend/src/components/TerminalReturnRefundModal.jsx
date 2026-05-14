@@ -136,6 +136,11 @@ export default function TerminalReturnRefundModal({
         cashier_id: terminalSession?.userId || '',
         cashier_name: terminalSession?.userName || '',
         manager_pin: pin,
+        // Terminal-session credentials — verified server-side by
+        // `require_terminal_session` to ensure refunds can only be issued
+        // from a paired terminal app.
+        terminal_id: terminalSession?.terminalId || '',
+        device_id:   terminalSession?.deviceId || '',
       };
       // In terminal mode, forward the paired session token so the backend's
       // `Depends(get_current_user)` succeeds. Web mode falls through to the

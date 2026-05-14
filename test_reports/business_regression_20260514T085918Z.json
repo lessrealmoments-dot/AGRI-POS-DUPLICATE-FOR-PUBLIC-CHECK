@@ -1,0 +1,97 @@
+{
+  "generated_at": "2026-05-14T08:59:18.800227+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 6,
+  "pass_count": 6,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br_terminal_guard.1_no_creds",
+      "step": "empty_request_rejected",
+      "expected": {
+        "raised": true,
+        "status": 403,
+        "msg_mentions_app": true
+      },
+      "actual": {
+        "raised": true,
+        "status": 403,
+        "msg_mentions_app": true
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T08:59:18.552979+00:00"
+    },
+    {
+      "scenario": "br_terminal_guard.2_headers",
+      "step": "header_creds_accepted",
+      "expected": {
+        "terminal_id": "term-tg-2",
+        "device_id": "dev-tg-2"
+      },
+      "actual": {
+        "terminal_id": "term-tg-2",
+        "device_id": "dev-tg-2"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T08:59:18.787787+00:00"
+    },
+    {
+      "scenario": "br_terminal_guard.3_body",
+      "step": "body_creds_accepted",
+      "expected": {
+        "terminal_id": "term-tg-3"
+      },
+      "actual": {
+        "terminal_id": "term-tg-3"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T08:59:18.790142+00:00"
+    },
+    {
+      "scenario": "br_terminal_guard.4_unknown_terminal",
+      "step": "unknown_id_403",
+      "expected": {
+        "raised": true,
+        "status": 403
+      },
+      "actual": {
+        "raised": true,
+        "status": 403
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T08:59:18.791526+00:00"
+    },
+    {
+      "scenario": "br_terminal_guard.5_device_mismatch",
+      "step": "different_device_403",
+      "expected": {
+        "raised": true,
+        "status": 403
+      },
+      "actual": {
+        "raised": true,
+        "status": 403
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T08:59:18.793130+00:00"
+    },
+    {
+      "scenario": "br_terminal_guard.6_header_precedence",
+      "step": "header_wins_over_body",
+      "expected": {
+        "terminal_id": "term-tg-6a"
+      },
+      "actual": {
+        "terminal_id": "term-tg-6a"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-14T08:59:18.795322+00:00"
+    }
+  ]
+}

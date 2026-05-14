@@ -638,18 +638,17 @@ async def generate_upload_token(code: str, data: dict, request: Request):
 async def receive_payment(code: str, data: dict, request: Request):
     """
     Record a payment on a credit/partial invoice via QR scan.
-    Three authentication paths:
-      1. terminal_id  — active terminal session + any allowed PIN (manager/admin/TOTP)
-      2. web_auth_token — staff JWT (admin/manager/owner login), no PIN needed
-      3. TOTP-only — no terminal, no login; 6-digit time-based code only
 
-    Body: { amount, method, reference, payment_ref,
-            terminal_id + pin  (path 1)
-            web_auth_token     (path 2)
-            pin (TOTP 6-digit) (path 3) }
+    **Terminal-only** (locked Feb 2026). Only Path 1 is accepted. The previous
+    web-staff-JWT (Path 2) and TOTP-only (Path 3) paths were dropped because
+    they allowed any admin with a regular phone camera to record payments —
+    a cash-siphoning risk. Payments must now be entered through a paired
+    AgriSmart terminal so every receive_payment carries a verifiable
+    device-binding + PIN trail.
+
+    Body: { amount, method, reference, payment_ref, terminal_id, device_id, pin }
     """
     terminal_id       = (data.get("terminal_id")    or "").strip()
-    web_auth_token    = (data.get("web_auth_token") or "").strip()
     pin               = (data.get("pin")            or "").strip()
     amount            = float(data.get("amount", 0))
     method            = (data.get("method") or "Cash").strip()
@@ -659,9 +658,14 @@ async def receive_payment(code: str, data: dict, request: Request):
     client_ip         = request.client.host if request.client else ""
     user_agent        = request.headers.get("user-agent", "")
 
-    # Path 1: Terminal device — verify session early (fail-fast)
-    if terminal_id:
-        await _verify_terminal_session(terminal_id, data.get("device_id", ""))
+    # Hard gate: terminal session is mandatory. No more web/TOTP fallback.
+    if not terminal_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Payments must be recorded from a paired AgriBooks terminal app. "
+                   "Web/camera-scan recording is no longer permitted."
+        )
+    await _verify_terminal_session(terminal_id, data.get("device_id", ""))
 
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be greater than zero")
@@ -703,57 +707,22 @@ async def receive_payment(code: str, data: dict, request: Request):
 
     branch_id = invoice.get("branch_id", "")
 
-    # ── Determine verifier based on auth path ────────────────────────────────
-    if terminal_id:
-        # Path 1: Terminal + PIN (any configured method)
-        if not pin:
-            raise HTTPException(status_code=400, detail="PIN is required")
-        from routes.verify import verify_pin_for_action
-        verifier = await verify_pin_for_action(pin, "qr_receive_payment", branch_id=branch_id)
-        if not verifier:
-            await log_failed_qr_pin_attempt(doc_ref["code"], doc_type, "receive_payment", client_ip, branch_id, terminal_id=terminal_id)
-            await _log_action(doc_ref, "receive_payment", None, f"₱{amount:,.2f} PIN failed",
-                              result="failed", error="invalid_pin", client_ip=client_ip, user_agent=user_agent)
-            raise HTTPException(status_code=403, detail={
-                "message": "Invalid PIN",
-                "warn": lockout["warn"],
-                "attempts_remaining": max(0, lockout["attempts_remaining"] - 1),
-            })
-        await log_successful_qr_pin_attempt(doc_ref["code"], doc_type, "receive_payment", verifier["verifier_name"], client_ip)
-
-    elif web_auth_token:
-        # Path 2: Staff login via username+password (JWT auth — no additional PIN needed)
-        staff_user = await _verify_staff_jwt(web_auth_token, branch_id)
-        verifier = {
-            "verifier_id":   staff_user["id"],
-            "verifier_name": staff_user.get("full_name") or staff_user.get("username", "Staff"),
-            "method":        "staff_login",
-        }
-
-    else:
-        # Path 3: TOTP-only (regular phone, no terminal, no staff login)
-        if not pin:
-            raise HTTPException(
-                status_code=403,
-                detail="Authentication required: use a paired terminal, staff login, or a time-based code (TOTP)"
-            )
-        if len(pin) != 6 or not pin.isdigit():
-            raise HTTPException(
-                status_code=403,
-                detail="Only a 6-digit time-based code (TOTP) is accepted for web payment. Use your authenticator app."
-            )
-        from routes.verify import _resolve_pin
-        verifier = await _resolve_pin(pin, allowed_methods=["totp"], branch_id=branch_id)
-        if not verifier:
-            await log_failed_qr_pin_attempt(doc_ref["code"], doc_type, "receive_payment", client_ip, branch_id, terminal_id="web")
-            await _log_action(doc_ref, "receive_payment", None, f"₱{amount:,.2f} TOTP failed",
-                              result="failed", error="invalid_pin", client_ip=client_ip, user_agent=user_agent)
-            raise HTTPException(status_code=403, detail={
-                "message": "Invalid time-based code. Only TOTP from an authenticator app is accepted for web payment.",
-                "warn": lockout["warn"],
-                "attempts_remaining": max(0, lockout["attempts_remaining"] - 1),
-            })
-        await log_successful_qr_pin_attempt(doc_ref["code"], doc_type, "receive_payment", verifier["verifier_name"], client_ip)
+    # ── Verify PIN against the active terminal session ────────────────────
+    # Web/TOTP paths were removed Feb 2026 — terminal+PIN is the only flow.
+    if not pin:
+        raise HTTPException(status_code=400, detail="PIN is required")
+    from routes.verify import verify_pin_for_action
+    verifier = await verify_pin_for_action(pin, "qr_receive_payment", branch_id=branch_id)
+    if not verifier:
+        await log_failed_qr_pin_attempt(doc_ref["code"], doc_type, "receive_payment", client_ip, branch_id, terminal_id=terminal_id)
+        await _log_action(doc_ref, "receive_payment", None, f"₱{amount:,.2f} PIN failed",
+                          result="failed", error="invalid_pin", client_ip=client_ip, user_agent=user_agent)
+        raise HTTPException(status_code=403, detail={
+            "message": "Invalid PIN",
+            "warn": lockout["warn"],
+            "attempts_remaining": max(0, lockout["attempts_remaining"] - 1),
+        })
+    await log_successful_qr_pin_attempt(doc_ref["code"], doc_type, "receive_payment", verifier["verifier_name"], client_ip)
 
     # Build payment record — same schema as invoices.payments[]
     interest_owed      = float(invoice.get("interest_accrued", 0)) + float(invoice.get("penalties", 0))

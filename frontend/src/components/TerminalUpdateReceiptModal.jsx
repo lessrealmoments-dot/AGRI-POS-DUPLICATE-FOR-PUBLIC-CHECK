@@ -100,6 +100,11 @@ export default function TerminalUpdateReceiptModal({
         manager_pin: pin,
         reprint_receipt: reprintChoice === 'yes',
         notes,
+        // Terminal-session credentials (backend `require_terminal_session`
+        // dependency reads these to confirm the request came from a paired
+        // AgriBooks terminal app, not a regular web browser).
+        terminal_id: terminalSession?.terminalId || '',
+        device_id:   terminalSession?.deviceId || '',
       };
       // In terminal mode, the user is authed via the paired terminal
       // session token (not the web AuthContext JWT). Forward it explicitly
