@@ -520,10 +520,25 @@ async def repair_correction_balance(
 
     # If we shrank the grand_total, the customer's open AR over-counted that
     # invoice's balance by `delta`. Reduce their aggregate balance to match.
-    if delta > 0 and invoice.get("customer_id"):
+    #
+    # We do NOT $inc here (the previous version did, but on cash sales where
+    # customer.balance was already 0, that drove it negative — a false
+    # credit). Instead, after the invoice update we recompute customer.balance
+    # from the canonical source of truth: sum of open-AR invoice balances.
+    if invoice.get("customer_id"):
+        cust_id = invoice["customer_id"]
+        agg = await db.invoices.aggregate([
+            {"$match": {
+                "customer_id": cust_id,
+                "status": {"$nin": ["voided", "paid"]},
+                "balance": {"$gt": 0},
+            }},
+            {"$group": {"_id": None, "total": {"$sum": "$balance"}}},
+        ]).to_list(1)
+        true_balance = round(float(agg[0]["total"]) if agg else 0.0, 2)
         await db.customers.update_one(
-            {"id": invoice["customer_id"]},
-            {"$inc": {"balance": -delta}},
+            {"id": cust_id},
+            {"$set": {"balance": true_balance}},
         )
 
     # ── Optional residual write-off (cash over-refund cleanup) ─────────────
@@ -553,9 +568,21 @@ async def repair_correction_balance(
             }}
         )
         if invoice.get("customer_id"):
+            # Recompute from source of truth instead of $inc (same rationale
+            # as above — $inc on cash-paid customers drove balance negative).
+            cust_id = invoice["customer_id"]
+            agg2 = await db.invoices.aggregate([
+                {"$match": {
+                    "customer_id": cust_id,
+                    "status": {"$nin": ["voided", "paid"]},
+                    "balance": {"$gt": 0},
+                }},
+                {"$group": {"_id": None, "total": {"$sum": "$balance"}}},
+            ]).to_list(1)
+            true_balance2 = round(float(agg2[0]["total"]) if agg2 else 0.0, 2)
             await db.customers.update_one(
-                {"id": invoice["customer_id"]},
-                {"$inc": {"balance": -write_off_amount}},
+                {"id": cust_id},
+                {"$set": {"balance": true_balance2}},
             )
         # Audit trail: surface in Z-report / Expenses as a tiny customer-service loss.
         await db.expenses.insert_one({
