@@ -32,6 +32,7 @@ import { Label } from './ui/label';
 import { Button } from './ui/button';
 import CalcInput from './CalcInput';
 import { formatPHP } from '../lib/utils';
+import TermsPicker from './TermsPicker';
 
 export default function CheckoutDialog({
   // Open / close
@@ -71,6 +72,14 @@ export default function CheckoutDialog({
   // Release mode
   releaseMode,
   setReleaseMode,
+
+  // Payment terms — surfaced for credit & partial so the user can't
+  // accidentally ship a credit sale without picking a due date.
+  terms,
+  termsDays,
+  termsOptions,
+  transactionDate,
+  onTermsChange,
 
   // Confirm
   onConfirm,
@@ -295,9 +304,18 @@ export default function CheckoutDialog({
             </div>
           )}
           {paymentType === 'partial' && (
-            <div>
+            <div className="space-y-3">
+              {selectedCustomer && onTermsChange && (
+                <TermsPicker
+                  value={terms}
+                  days={termsDays}
+                  options={termsOptions}
+                  transactionDate={transactionDate}
+                  onChange={onTermsChange}
+                />
+              )}
               {selectedCustomer ? (
-                <>
+                <div>
                   <Label>Amount Paid Now</Label>
                   <CalcInput
                     data-testid="partial-amount"
@@ -309,7 +327,7 @@ export default function CheckoutDialog({
                     <span className="text-sm text-amber-700">Balance (to AR)</span>
                     <span className="font-bold text-amber-700">{formatPHP(grandTotal - partialPayment)}</span>
                   </div>
-                </>
+                </div>
               ) : (
                 <div className="p-3 bg-amber-50 rounded-lg">
                   <p className="text-sm text-amber-700 font-medium">Select a customer above</p>
@@ -320,20 +338,31 @@ export default function CheckoutDialog({
           )}
 
           {paymentType === 'credit' && (
-            <div className="p-3 bg-red-50 rounded-lg">
-              <p className="text-sm text-red-700 font-medium">Full Credit Sale</p>
-              {selectedCustomer ? (
-                <p className="text-xs text-red-600 mt-1">
-                  {formatPHP(grandTotal)} will be added to {selectedCustomer.name}'s receivables
-                </p>
-              ) : (
-                <p className="text-xs text-red-600 mt-1">
-                  Select a customer above — credit balance must be assigned to an account
-                </p>
+            <div className="space-y-3">
+              {selectedCustomer && onTermsChange && (
+                <TermsPicker
+                  value={terms}
+                  days={termsDays}
+                  options={termsOptions}
+                  transactionDate={transactionDate}
+                  onChange={onTermsChange}
+                />
               )}
-              <p className="text-xs text-slate-500 mt-2 flex items-center gap-1">
-                <Shield size={12} /> Requires manager approval
-              </p>
+              <div className="p-3 bg-red-50 rounded-lg">
+                <p className="text-sm text-red-700 font-medium">Full Credit Sale</p>
+                {selectedCustomer ? (
+                  <p className="text-xs text-red-600 mt-1">
+                    {formatPHP(grandTotal)} will be added to {selectedCustomer.name}'s receivables
+                  </p>
+                ) : (
+                  <p className="text-xs text-red-600 mt-1">
+                    Select a customer above — credit balance must be assigned to an account
+                  </p>
+                )}
+                <p className="text-xs text-slate-500 mt-2 flex items-center gap-1">
+                  <Shield size={12} /> Requires manager approval
+                </p>
+              </div>
             </div>
           )}
 

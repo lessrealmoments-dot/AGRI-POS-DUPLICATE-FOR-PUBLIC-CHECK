@@ -1,6 +1,17 @@
 # AgriBooks Changelog
 
 
+## Feb 13 2026 — Inline Terms Picker on Credit / Partial Checkout ✅
+
+**Pain point**: Users were forgetting to set "Terms" in the order header before checking out, so credit sales shipped with `terms="COD" / terms_days=0` and the wrong due_date got printed on the receipt.
+
+**Fix**: New `TermsPicker.jsx` component injected directly into `CheckoutDialog` when the user picks **Credit** or **Partial** payment type. Renders the same terms list returned by `GET /api/settings/terms-options` (COD / Net 7 / 15 / 30 / 45 / 60 / 90) as one-tap chips, plus a **Custom** chip that reveals a day-count input (`Custom Net N Days`). A live due-date preview (`order_date + days`, localized PH date) sits at the bottom so the cashier sees the date the receipt will print with.
+
+- **NEW** `frontend/src/components/TermsPicker.jsx` (~140 LOC).
+- **MOD** `frontend/src/components/CheckoutDialog.jsx` — new props (`terms`, `termsDays`, `termsOptions`, `transactionDate`, `onTermsChange`); picker mounted inside both the `paymentType === 'partial'` and `paymentType === 'credit'` branches when a customer is selected. Both new props are OPTIONAL — old call-sites and tests keep working with no change.
+- **MOD** `frontend/src/pages/UnifiedSalesPage.js` — passes `header.terms`, `header.terms_days`, the existing `terms` (options) array, `header.order_date`, and a setter callback that updates header.terms + header.terms_days in one shot.
+- Lint-clean. BR suite still 186 passed / 0 failed.
+
 ## Feb 13 2026 — Hot Fix: Tenant Scoping on Invoice Corrections ✅
 
 **Bug found** during live-site audit (agri-books.com) on credit invoice `SI-MB-001001`. Curl `POST /api/invoices/{id}/correct-incomplete-stock` returned `{"detail":"Invoice not found"}` even though the invoice exists and the JWT was valid.

@@ -4241,6 +4241,11 @@ export default function UnifiedSalesPage() {
         setDigitalSender={setDigitalSender}
         releaseMode={releaseMode}
         setReleaseMode={setReleaseMode}
+        terms={header.terms}
+        termsDays={header.terms_days}
+        termsOptions={terms}
+        transactionDate={header.order_date}
+        onTermsChange={(label, days) => setHeader(h => ({ ...h, terms: label, terms_days: days }))}
         onConfirm={handleCreditSale}
         saving={saving}
         confirmDisabled={confirmDisabled}
