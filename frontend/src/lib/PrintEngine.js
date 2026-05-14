@@ -344,10 +344,12 @@ const dotMatrixCSS = `
   .dm-items-table td.r { text-align: right; }
   .dm-items-table td.c { text-align: center; }
   .dm-items-table td.strong { font-weight: bold; }
-  /* Tick-box cell: kept narrow and empty so the cashier can hand-check
-     each line when the item is pulled / prepped. */
+  /* Tick-box cell: 1cm wide so the cashier can hand-check each line
+     when the item is pulled / prepped. Using cm instead of px so the
+     dot-matrix printer renders the column at a predictable physical
+     size regardless of effective DPI. */
   .dm-items-table .dm-row-num {
-    width: 20px; text-align: center;
+    width: 1cm; text-align: center;
   }
 
   /* ── Totals block (legacy — used by sales receipts.
@@ -960,7 +962,7 @@ function orderSlipDotMatrix(data, biz, docCode) {
   const items = inv.items || [];
   const hasDiscount = items.some(i => parseFloat(i.discount_amount) > 0);
   html += `<table class="dm-items-table"><thead><tr>`;
-  html += `<th style="width:20px"></th>`;
+  html += `<th style="width:1cm"></th>`;
   html += `<th>ITEM DESCRIPTION</th>`;
   html += `<th class="c" style="width:7%">QTY</th>`;
   html += `<th class="r" style="width:16%">UNIT PRICE</th>`;
@@ -1122,7 +1124,7 @@ function trustReceiptDotMatrix(data, biz, docCode) {
     parseFloat(i.discount_amount) > 0 || parseFloat(i.discount_value) > 0
   );
   body += `<table class="dm-items-table"><thead><tr>`;
-  body += `<th class="c" style="width:20px;"></th>`;
+  body += `<th class="c" style="width:1cm;"></th>`;
   body += `<th style="width:24%;">Item</th>`;
   body += `<th style="width:${hasDiscount ? '22' : '28'}%;">Description</th>`;
   body += `<th class="c" style="width:10%;">Qty</th>`;
