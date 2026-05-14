@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShoppingCart, ClipboardCheck, ArrowLeftRight, Wifi, WifiOff, RefreshCw, Settings, ChevronRight, Unlink, Search, X, Loader2, Printer, FileText, ExternalLink, CheckCircle2, ScanLine, FolderUp, Check, History } from 'lucide-react';
+import { ShoppingCart, ClipboardCheck, ArrowLeftRight, Inbox, Wifi, WifiOff, RefreshCw, Settings, ChevronRight, Unlink, Search, X, Loader2, Printer, FileText, ExternalLink, CheckCircle2, ScanLine, FolderUp, Check, History } from 'lucide-react';
 import { toast } from 'sonner';
 import TerminalSales from './TerminalSales';
 import TerminalPOCheck from './TerminalPOCheck';
 import TerminalTransfers from './TerminalTransfers';
+import TerminalStockRequests from './TerminalStockRequests';
 import TerminalDocUpload from './TerminalDocUpload';
 import TerminalHistoryOverlay from '../../components/TerminalHistoryOverlay';
 import axios from 'axios';
@@ -201,6 +202,7 @@ function formatRelativeTime(isoString) {
 const TABS = [
   { key: 'sales', label: 'Sales', icon: ShoppingCart, color: 'text-emerald-600 bg-emerald-50' },
   { key: 'po', label: 'PO Check', icon: ClipboardCheck, color: 'text-amber-600 bg-amber-50' },
+  { key: 'stock-requests', label: 'Requests', icon: Inbox, color: 'text-purple-600 bg-purple-50' },
   { key: 'transfers', label: 'Transfers', icon: ArrowLeftRight, color: 'text-blue-600 bg-blue-50' },
 ];
 
@@ -228,6 +230,7 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
   const wsRef = useRef(null);
   const poRefreshRef = useRef(null); // callback to refresh PO list
   const transferRefreshRef = useRef(null);
+  const stockReqRefreshRef = useRef(null); // refresh incoming stock-request list
   // Global hardware scanner buffer (for H10P Newland HID keyboard wedge)
   const globalScanBufferRef = useRef('');
   const globalScanTimerRef = useRef(null);
@@ -1089,6 +1092,11 @@ export default function TerminalShell({ session, onLogout, onSessionUpdate }) {
         )}
         {activeTab === 'transfers' && (
           <TerminalTransfers api={api} session={session} isOnline={isOnline} onRefreshRef={transferRefreshRef} />
+        )}
+        {activeTab === 'stock-requests' && (
+          <div className="px-3 pt-3 pb-24 h-full overflow-y-auto">
+            <TerminalStockRequests api={api} session={session} isOnline={isOnline} onRefreshRef={stockReqRefreshRef} />
+          </div>
         )}
       </div>
 
