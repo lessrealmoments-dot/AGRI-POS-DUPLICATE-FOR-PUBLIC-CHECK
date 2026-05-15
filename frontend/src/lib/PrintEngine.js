@@ -969,8 +969,8 @@ function orderSlipDotMatrix(data, biz, docCode) {
   html += `<table class="dm-items-table"><thead><tr>`;
   html += `<th style="width:0.33cm;padding:1px 0"></th>`;
   html += `<th>ITEM DESCRIPTION</th>`;
-  html += `<th class="c" style="width:7%">QTY</th>`;
-  html += `<th class="r" style="width:16%">UNIT PRICE</th>`;
+  html += `<th class="c" style="width:10%">QTY</th>`;
+  html += `<th class="r" style="width:15%">UNIT PRICE</th>`;
   if (hasDiscount) html += `<th class="r" style="width:12%">DISC</th>`;
   html += `<th class="r" style="width:15%">LINE TOTAL</th>`;
   html += `</tr></thead><tbody>`;
@@ -984,10 +984,11 @@ function orderSlipDotMatrix(data, biz, docCode) {
     // the meaning aligned with the rate/qty columns next to it.
     const discPerUnit = qty > 0 ? disc / qty : 0;
     const total = parseFloat(item.total) || (qty * rate - disc);
+    const unit  = item.unit || item.uom || '';
     html += `<tr>`;
     html += `<td class="dm-row-num"></td>`;
     html += `<td>${item.product_name || ''}</td>`;
-    html += `<td class="c">${qty}</td>`;
+    html += `<td class="c">${qty}${unit ? ' ' + unit : ''}</td>`;
     html += `<td class="r">${formatPHP(rate)}</td>`;
     if (hasDiscount) html += `<td class="r">${discPerUnit > 0 ? formatPHP(discPerUnit) : '-'}</td>`;
     html += `<td class="r strong">${formatPHP(total)}</td>`;

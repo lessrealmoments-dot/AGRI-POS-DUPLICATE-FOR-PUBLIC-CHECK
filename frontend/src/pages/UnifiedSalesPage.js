@@ -2199,6 +2199,7 @@ export default function UnifiedSalesPage() {
           rate: c.price,
           price: c.price,
           total: c.total,
+          unit: c.unit || '',
         }));
       }
       return lines.filter(l => l.product_id).map(l => ({
@@ -2208,6 +2209,7 @@ export default function UnifiedSalesPage() {
         rate: l.rate,
         price: l.rate,
         total: lineTotal(l),
+        unit: l.unit || '',
       }));
     }, [mode, cart, lines]),
     getContext: useCallback(() => {
@@ -2526,12 +2528,14 @@ export default function UnifiedSalesPage() {
       ? cart.map(c => ({
           product_id: c.product_id, product_name: c.product_name, sku: c.sku,
           quantity: c.quantity, rate: c.price, price: c.price, total: c.total,
+          unit: c.unit || '',
           discount_type: 'amount', discount_value: 0, discount_amount: 0,
           is_repack: c.is_repack || false,
         }))
       : lines.filter(l => l.product_id).map(l => ({
           product_id: l.product_id, product_name: l.product_name,
           description: l.description, quantity: l.quantity, rate: l.rate,
+          unit: l.unit || '',
           discount_type: l.discount_type, discount_value: l.discount_value,
           discount_amount: l.discount_type === 'percent' ? l.quantity * l.rate * l.discount_value / 100 : l.discount_value * l.quantity,
           total: lineTotal(l), is_repack: l.is_repack || false,
@@ -3942,6 +3946,7 @@ export default function UnifiedSalesPage() {
                         <th className="text-left px-3 py-2 text-xs uppercase text-slate-500 font-medium min-w-[240px]">Item</th>
                         <th className="text-left px-3 py-2 text-xs uppercase text-slate-500 font-medium min-w-[120px]">Description</th>
                         <th className="text-right px-3 py-2 text-xs uppercase text-slate-500 font-medium w-20">Qty</th>
+                        <th className="text-left px-2 py-2 text-xs uppercase text-slate-500 font-medium w-14">Unit</th>
                         <th className="text-right px-3 py-2 text-xs uppercase text-slate-500 font-medium w-28">Unit Price</th>
                         <th className="text-right px-3 py-2 text-xs uppercase text-slate-500 font-medium w-28" title="Amount discounts apply per unit (₱X × qty). Percent discounts apply to the line total.">Discount<span className="text-[9px] lowercase text-slate-400 normal-case font-normal ml-1">/unit</span></th>
                         <th className="text-right px-3 py-2 text-xs uppercase text-slate-500 font-medium w-28">Sub-Total</th>
@@ -4037,6 +4042,9 @@ export default function UnifiedSalesPage() {
                               onChange={(v) => updateLine(i, 'quantity', v)}
                               onBlur={() => finalizeLineField(i, 'quantity')}
                             />
+                          </td>
+                          <td className="px-2 py-1 text-xs text-slate-500" data-testid={`line-unit-${i}`}>
+                            {line.unit || ''}
                           </td>
                           <td className="px-3 py-1">
                             <div>
