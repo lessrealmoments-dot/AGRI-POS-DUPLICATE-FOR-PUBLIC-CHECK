@@ -1923,6 +1923,7 @@ export default function UnifiedSalesPage() {
     newLines[index] = {
       ...newLines[index], product_id: product.id, product_name: product.name,
       description: product.description || '', rate, original_rate: rate,
+      unit: product.unit || '',
       cost_price: product.cost_price || 0,
       moving_average_cost: product.moving_average_cost || 0,
       last_purchase_cost: product.last_purchase_cost || 0,

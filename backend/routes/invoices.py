@@ -18,6 +18,34 @@ from utils import (
 router = APIRouter(tags=["Invoices"])
 
 
+async def _hydrate_item_units(doc: dict) -> dict:
+    """Backfill `unit` (UoM) on items from the products collection.
+
+    Older invoices were created before sale payloads carried `unit`, so
+    reprints would otherwise show qty without the packaging label. This
+    is a read-time enrichment — the underlying document is NOT mutated.
+    """
+    if not doc:
+        return doc
+    items = doc.get("items") or []
+    missing_pids = [
+        it.get("product_id") for it in items
+        if it.get("product_id") and not it.get("unit")
+    ]
+    if not missing_pids:
+        return doc
+    prods = await db.products.find(
+        {"id": {"$in": list(set(missing_pids))}},
+        {"_id": 0, "id": 1, "unit": 1},
+    ).to_list(len(missing_pids))
+    unit_map = {p["id"]: (p.get("unit") or "") for p in prods}
+    for it in items:
+        if not it.get("unit") and it.get("product_id") in unit_map:
+            it["unit"] = unit_map[it["product_id"]]
+    doc["items"] = items
+    return doc
+
+
 # ==================== INVOICE CRUD ====================
 @router.get("/invoices")
 async def list_invoices(
@@ -124,7 +152,10 @@ async def get_invoice(inv_id: str, user=Depends(get_current_user)):
         inv = await db.purchase_orders.find_one({"id": inv_id}, {"_id": 0})
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
-    
+
+    # Backfill unit (UoM) on items missing it — see _hydrate_item_units.
+    await _hydrate_item_units(inv)
+
     # Include edit history and count
     edit_history = await db.invoice_edits.find(
         {"invoice_id": inv_id}, {"_id": 0}
@@ -171,12 +202,14 @@ async def get_invoice_by_number(invoice_number: str, user=Depends(get_current_us
         if invoice.get("linked_offline_receipt_number") == invoice_number \
                 and invoice.get("invoice_number") != invoice_number:
             invoice["_resolved_via_linked_receipt"] = True
+        await _hydrate_item_units(invoice)
         return invoice
 
     # Search in sales
     sale = await db.sales.find_one({"sale_number": invoice_number}, {"_id": 0})
     if sale:
         sale["_collection"] = "sales"
+        await _hydrate_item_units(sale)
         return sale
 
     # Search in purchase orders
