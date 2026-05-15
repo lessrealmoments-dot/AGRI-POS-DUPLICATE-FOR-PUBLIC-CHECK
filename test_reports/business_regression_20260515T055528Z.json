@@ -1,0 +1,85 @@
+{
+  "generated_at": "2026-05-15T05:55:28.263306+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 5,
+  "pass_count": 4,
+  "fail_count": 1,
+  "rows": [
+    {
+      "scenario": "br_pr.1_snapshot_at_triage",
+      "step": "snapshot_present_before_mark_ordered",
+      "expected": {
+        "has_snapshot": true,
+        "source": "triage",
+        "items_count": 1
+      },
+      "actual": {
+        "has_snapshot": true,
+        "source": "triage",
+        "items_count": 1
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T05:55:28.169284+00:00"
+    },
+    {
+      "scenario": "br_pr.2_mark_ordered_snapshot_immutable",
+      "step": "snapshot_unchanged_after_mark_ordered",
+      "expected": {
+        "snapshot_qty": 10.0,
+        "snapshot_unit_price": 100.0,
+        "live_unit_price": 80.0
+      },
+      "actual": {
+        "snapshot_qty": 10.0,
+        "snapshot_unit_price": 100.0,
+        "live_unit_price": 80.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T05:55:28.190939+00:00"
+    },
+    {
+      "scenario": "br_pr.3_receive_draft_direct",
+      "step": "variance_computed_without_mark_ordered",
+      "expected": {
+        "kind": "under_delivered"
+      },
+      "actual": {
+        "kind": "under_delivered"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T05:55:28.200430+00:00"
+    },
+    {
+      "scenario": "br_pr.4_bto_lands_in_pending_approval",
+      "step": "not_dead_end_draft",
+      "expected": {
+        "status": "pending_approval"
+      },
+      "actual": {
+        "status": "pending_approval"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T05:55:28.212554+00:00"
+    },
+    {
+      "scenario": "br_pr.5_extra_at_receive",
+      "step": "extra_items_kind_and_supplying_mgr_alerted",
+      "expected": {
+        "kind": "extra_items",
+        "sms_fired": true
+      },
+      "actual": {
+        "kind": "extra_items",
+        "sms_fired": true,
+        "manager_alerted": true
+      },
+      "status": "FAIL",
+      "evidence": {},
+      "recorded_at": "2026-05-15T05:55:28.222298+00:00"
+    }
+  ]
+}

@@ -387,6 +387,12 @@ async def triage_request(
             "from_branch_id":  sup_bid,
             "to_branch_id":    req_bid,
             "items":           bto_items,
+            # Stock-Request BTOs land in `pending_approval` so the
+            # requesting branch (Branch A) sees them in their Requests
+            # tab and can edit qty / approve / decline on phone. Without
+            # this flag the BTO would default to status='draft' which is
+            # a dead-end state that nobody ever revisits.
+            "requires_approval": True,
             "notes":           f"Auto-generated from stock request {req['request_number']}",
             "source_request_id":     request_id,
             "source_request_number": req["request_number"],
@@ -456,6 +462,26 @@ async def triage_request(
             line_subtotal += total
 
         po_number = await generate_next_number("PO", req_bid)
+        # Snapshot of the as-triaged baseline. Captured HERE (at triage)
+        # rather than at mark-ordered, so variance can be computed even
+        # when Branch A receives a DRAFT PO directly without going
+        # through the Mark-Ordered step. Mark-Ordered is purely
+        # informational (supplier ref + ETA + SMS) and should NOT
+        # rewrite this snapshot.
+        request_snapshot = {
+            "items": [{
+                "product_id":      it["product_id"],
+                "product_name":    it.get("product_name", ""),
+                "quantity":        float(it.get("quantity") or 0),
+                "unit_price":      float(it.get("unit_price") or 0),
+                "total":           float(it.get("total") or 0),
+                "source_request_item_id": it.get("source_request_item_id"),
+            } for it in po_items],
+            "line_subtotal": round(line_subtotal, 2),
+            "grand_total":   round(line_subtotal, 2),
+            "captured_at":   now_iso(),
+            "source":        "triage",
+        }
         po_doc = {
             "id":                       new_id(),
             "po_number":                po_number,
@@ -482,6 +508,8 @@ async def triage_request(
             "source_request_id":        request_id,
             "source_request_number":    req["request_number"],
             "phantom_for_branch_id":    sup_bid,   # supplying branch tracks via this
+            # Variance baseline — see compute_phantom_po_variance.
+            "ordered_snapshot":         request_snapshot,
             "created_by":               user["id"],
             "created_by_name":          user.get("full_name") or user.get("username", ""),
             "created_at":               now_iso(),
@@ -883,23 +911,12 @@ async def mark_phantom_po_ordered(
     freight = float(data.get("freight") or 0)
     grand_total = round(line_subtotal - overall_disc + freight, 2)
 
-    # Snapshot of items + totals as ordered — the basis for post-receive
-    # variance detection (Phase 3). Deep-copied to break aliasing.
-    ordered_snapshot = {
-        "items": [{
-            "product_id":      it.get("product_id"),
-            "product_name":    it.get("product_name", ""),
-            "quantity":        float(it.get("quantity") or 0),
-            "unit_price":      float(it.get("unit_price") or 0),
-            "total":           float(it.get("total") or 0),
-            "source_request_item_id": it.get("source_request_item_id"),
-        } for it in new_items],
-        "line_subtotal":           round(line_subtotal, 2),
-        "overall_discount_amount": overall_disc,
-        "freight":                 freight,
-        "grand_total":             grand_total,
-    }
-
+    # NOTE (Feb 2026 fix): the variance baseline (`ordered_snapshot`) is
+    # captured at TRIAGE time, NOT here. Mark-Ordered is purely
+    # informational — it lets Branch B annotate "I locked the deal with
+    # the supplier" (supplier_ref + ETA + SMS to Branch A). It must NOT
+    # rewrite the snapshot, otherwise editing prices at mark-ordered
+    # would silently shift the baseline and quietly mask variance later.
     update_doc = {
         "items":                    new_items,
         "line_subtotal":            round(line_subtotal, 2),
@@ -919,7 +936,6 @@ async def mark_phantom_po_ordered(
         "supplier_ref":             (data.get("supplier_ref") or "").strip(),
         "expected_delivery_date":   (data.get("expected_delivery_date") or "").strip(),
         "ordered_notes":            (data.get("notes") or "").strip(),
-        "ordered_snapshot":         ordered_snapshot,
     }
     await db.purchase_orders.update_one({"id": po_id}, {"$set": update_doc})
 

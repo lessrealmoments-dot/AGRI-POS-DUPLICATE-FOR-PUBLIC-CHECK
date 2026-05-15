@@ -1,6 +1,37 @@
 # AgriBooks Changelog
 
 
+## Feb 15 2026 — Stock Requests Phase 3++ : DRAFT PO = Parked Receipt + BTO Lands in Requests 🟠 P0 BUG FIX
+
+**User-reported gaps**:
+1. *"On the DRAFT PO requestee side, we can't edit it. I wanted it to act as a parked receipt — click the receipt, edit actual qty, save. This needs to be connected to original-order vs received."*
+2. *"When triage put a line on Branch Transfer, it sent the BTO via Drafts. Our Draft is a dead-end — should go to Requests where we can edit qty / approve / decline on phone."*
+
+**Fixes**:
+
+### Bug 1 — `ordered_snapshot` moved from Mark-Ordered → Triage
+- The variance baseline is now stamped on every spawned DRAFT PO at **triage time** (with `source: 'triage'` marker), not at Mark-Ordered.
+- `mark_phantom_po_ordered` no longer rewrites the snapshot — it's purely informational (supplier_ref + ETA + SMS).
+- Branch A can now open a DRAFT PO → edit qty → add items → click Receive (via existing PO receive flow which already accepts status='draft'), and `update_phantom_po_received` will compute variance correctly against the triage baseline.
+- Net effect: DRAFT POs now feel like parked receipts. Mark-Ordered is optional/informational; receive works either way.
+
+### Bug 2 — BTO from triage now lands in `pending_approval`
+- One-line fix: `requires_approval: True` added to the `create_transfer` call inside `triage_request`.
+- Before: BTO defaulted to `status='draft'` (dead-end).
+- After: BTO lands in `pending_approval` — visible in the Requests tab where Branch A can edit qty, approve, decline on phone.
+
+**Tests** (`test_br_stock_request_parked_receipt.py` — 5 scenarios, all green):
+1. Snapshot present at triage time (before any Mark-Ordered call)
+2. Mark-Ordered with `item_overrides` does NOT shift the snapshot (price/qty in snapshot remains the triage baseline, live items reflect new price)
+3. Branch A receives a DRAFT PO directly (skipping Mark-Ordered) → variance still correctly computed as `under_delivered`
+4. BTO from triage lands in `pending_approval`, not `draft`
+5. Adding a brand-new line at receive (parked-receipt scenario) → `extra_items` variance + SMS alerts supplying-branch manager
+
+**Verification**: 254/254 BR tests passing (was 249 + 5 new). Lint clean.
+**Notification covered by existing variance SMS**: if Branch A edits qty or adds items at receive, the variance SMS already fires to the supplying branch — no new SMS template needed.
+
+
+
 ## Feb 15 2026 — Stock Requests Phase 3+: Activity Timeline 🟠 P1
 
 **Why**: stakeholders need a single chronological feed of "what happened" across the request and its spawned BTO + POs — instead of clicking each linked doc to piece events together.
