@@ -20,7 +20,7 @@ import {
   Search, Plus, Minus, Trash2, ShoppingCart, CreditCard, X, Wifi, WifiOff,
   RefreshCw, FileText, Lock, Zap, ClipboardList, AlertTriangle, Shield, CheckCircle2, Smartphone, Camera, Check,
   PackageX, ShieldAlert, ChevronDown, Eye, EyeOff, User, Package, PauseCircle, Inbox, RotateCcw,
-  ArrowUpRight, ArrowDownRight, Info, Unlock, Clock
+  ArrowUpRight, ArrowDownRight, Info, Unlock, Clock, ArrowUp, ArrowDown, ArrowUpDown
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -219,7 +219,7 @@ function PinSessionBadge({ session, onExpired }) {
 }
 
 const EMPTY_LINE = {
-  product_id: '', product_name: '', description: '',
+  product_id: '', product_name: '', description: '', unit: '', category: '',
   quantity: 1, rate: 0, original_rate: 0,
   cost_price: 0, moving_average_cost: 0, last_purchase_cost: 0,
   effective_capital: 0, capital_method: 'manual',
@@ -1126,6 +1126,7 @@ export default function UnifiedSalesPage() {
         rate: c.price,
         original_rate: c.original_price ?? c.price,
         unit: c.unit || '',
+        category: c.category || '',
         cost_price: c.cost_price || 0,
         moving_average_cost: c.moving_average_cost || 0,
         last_purchase_cost: c.last_purchase_cost || 0,
@@ -1156,6 +1157,7 @@ export default function UnifiedSalesPage() {
           quantity: l.quantity,
           total: l.quantity * l.rate,
           unit: l.unit || '',
+          category: l.category || '',
           is_repack: l.is_repack || false,
           cost_price: l.cost_price || 0,
           moving_average_cost: l.moving_average_cost || 0,
@@ -1343,7 +1345,8 @@ export default function UnifiedSalesPage() {
       }
       return [...prev, {
         product_id: product.id, product_name: product.name, sku: product.sku,
-        price, quantity: 1, total: price, unit: product.unit, is_repack: product.is_repack,
+        price, quantity: 1, total: price, unit: product.unit, category: product.category || '',
+        is_repack: product.is_repack,
         cost_price: product.cost_price || 0,
         moving_average_cost: product.moving_average_cost || 0,
         last_purchase_cost: product.last_purchase_cost || 0,
@@ -1929,7 +1932,7 @@ export default function UnifiedSalesPage() {
     newLines[index] = {
       ...newLines[index], product_id: product.id, product_name: product.name,
       description: product.description || '', rate, original_rate: rate,
-      unit: product.unit || '',
+      unit: product.unit || '', category: product.category || '',
       cost_price: product.cost_price || 0,
       moving_average_cost: product.moving_average_cost || 0,
       last_purchase_cost: product.last_purchase_cost || 0,
@@ -1986,6 +1989,58 @@ export default function UnifiedSalesPage() {
   const removeLine = (index) => {
     if (lines.length <= 1) return;
     setLines(lines.filter((_, i) => i !== index));
+  };
+
+  // ── Sort for Loading: reorder lines for truck loading efficiency ──────────
+  // Priority: 1) Category (Fertilizer first, then alphabetical)
+  //           2) Heavy UoM (Bag/Sack) on top within each category
+  //           3) Alphabetical by product name within same group
+  const HEAVY_UOM_PATTERN = /^(bag|bags|sack|sacks)$/i;
+  const CATEGORY_PRIORITY = { fertilizer: 0 }; // lower = higher priority
+
+  const sortForLoading = () => {
+    const filled = lines.filter(l => l.product_id);
+    const empty = lines.filter(l => !l.product_id);
+    if (filled.length < 2) { toast('Nothing to sort — add more items first'); return; }
+
+    filled.sort((a, b) => {
+      const catA = (a.category || 'zzz').toLowerCase();
+      const catB = (b.category || 'zzz').toLowerCase();
+      const catPrioA = CATEGORY_PRIORITY[catA] ?? 99;
+      const catPrioB = CATEGORY_PRIORITY[catB] ?? 99;
+      // 1. Category priority (Fertilizer first, then alphabetical)
+      if (catPrioA !== catPrioB) return catPrioA - catPrioB;
+      const catCmp = catA.localeCompare(catB);
+      if (catCmp !== 0) return catCmp;
+      // 2. Heavy UoM on top within same category
+      const heavyA = HEAVY_UOM_PATTERN.test((a.unit || '').trim()) ? 0 : 1;
+      const heavyB = HEAVY_UOM_PATTERN.test((b.unit || '').trim()) ? 0 : 1;
+      if (heavyA !== heavyB) return heavyA - heavyB;
+      // 3. Alphabetical by product name
+      return (a.product_name || '').localeCompare(b.product_name || '');
+    });
+
+    // Keep at least one trailing empty row
+    const sorted = [...filled, ...(empty.length > 0 ? empty : [{ ...EMPTY_LINE }])];
+    setLines(sorted);
+    toast.success('Sorted for loading — heavy bags on top');
+  };
+
+  // ── Move line up/down for manual fine-tuning ─────────────────────────────
+  const moveLineUp = (index) => {
+    if (index <= 0) return;
+    const newLines = [...lines];
+    [newLines[index - 1], newLines[index]] = [newLines[index], newLines[index - 1]];
+    setLines(newLines);
+  };
+
+  const moveLineDown = (index) => {
+    // Don't swap with the trailing empty row
+    const lastFilledIdx = lines.length - 1 - (lines[lines.length - 1]?.product_id ? 0 : 1);
+    if (index >= lastFilledIdx) return;
+    const newLines = [...lines];
+    [newLines[index], newLines[index + 1]] = [newLines[index + 1], newLines[index]];
+    setLines(newLines);
   };
 
   const lineTotal = (line) => {
@@ -3945,6 +4000,21 @@ export default function UnifiedSalesPage() {
           <div className="flex-1 flex flex-col min-w-0">
             <Card className="flex-1 flex flex-col border-slate-200 min-h-0">
               <CardContent className="flex-1 flex flex-col p-0 min-h-0">
+                {/* Sort for Loading toolbar */}
+                <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-100 bg-slate-50/50">
+                  <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Order Lines</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs gap-1.5 border-slate-300 text-slate-600 hover:bg-amber-50 hover:border-amber-300 hover:text-amber-700"
+                    onClick={sortForLoading}
+                    disabled={lines.filter(l => l.product_id).length < 2}
+                    data-testid="sort-for-loading-btn"
+                    title="Sort items for truck loading: Fertilizer first, then by category. Heavy bags (Bag/Sack) on top within each group."
+                  >
+                    <ArrowUpDown size={12} /> Sort for Loading
+                  </Button>
+                </div>
                 <div className="overflow-auto flex-1">
                   <table className="w-full text-sm" data-testid="order-lines-table">
                     <thead className="sticky top-0 bg-slate-50 z-10">
@@ -3957,7 +4027,7 @@ export default function UnifiedSalesPage() {
                         <th className="text-right px-3 py-2 text-xs uppercase text-slate-500 font-medium w-28">Unit Price</th>
                         <th className="text-right px-3 py-2 text-xs uppercase text-slate-500 font-medium w-28" title="Amount discounts apply per unit (₱X × qty). Percent discounts apply to the line total.">Discount<span className="text-[9px] lowercase text-slate-400 normal-case font-normal ml-1">/unit</span></th>
                         <th className="text-right px-3 py-2 text-xs uppercase text-slate-500 font-medium w-28">Sub-Total</th>
-                        <th className="w-10"></th>
+                        <th className="w-20"></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -4139,10 +4209,20 @@ export default function UnifiedSalesPage() {
                           </td>
                           <td className="px-3 py-1 text-right font-medium">{formatPHP(lineTotal(line))}</td>
                           <td className="px-1">
-                            {lines.length > 1 && line.product_id && (
-                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-500" onClick={() => removeLine(i)}>
-                                <Trash2 size={12} />
-                              </Button>
+                            {line.product_id && (
+                              <div className="flex items-center gap-0.5">
+                                <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-slate-400 hover:text-slate-600" onClick={() => moveLineUp(i)} disabled={i === 0} data-testid={`move-up-${i}`} title="Move up">
+                                  <ArrowUp size={11} />
+                                </Button>
+                                <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-slate-400 hover:text-slate-600" onClick={() => moveLineDown(i)} disabled={i >= lines.filter(l => l.product_id).length - 1} data-testid={`move-down-${i}`} title="Move down">
+                                  <ArrowDown size={11} />
+                                </Button>
+                                {lines.length > 1 && (
+                                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-400 hover:text-red-600" onClick={() => removeLine(i)} data-testid={`remove-line-${i}`}>
+                                    <Trash2 size={11} />
+                                  </Button>
+                                )}
+                              </div>
                             )}
                           </td>
                         </tr>

@@ -1,3 +1,29 @@
+## 2026-05-15 — Sort for Loading Feature (Detailed Sale)
+
+### Feature
+Added a "Sort for Loading" button to the Detailed Sale page that reorders
+line items for optimal truck loading order:
+- **Category priority**: Fertilizer loads first, then alphabetical by category
+- **Heavy UoM on top**: Bag/Sack items within each category appear first
+- **Alphabetical tiebreak**: Products with same category + UoM sort by name
+
+### Manual Reorder
+Added Move Up / Move Down buttons on each line item for manual fine-tuning
+after the auto-sort or for ad-hoc reordering.
+
+### Data Flow
+- `category` field now stored on cart items and order lines alongside `unit`
+- Propagated through all code paths: `addToCart`, `handleProductSelect`,
+  `switchMode` (both directions), `loadDraftIntoCart`, `reopenAsSale`
+
+### Files Changed
+- `/app/frontend/src/pages/UnifiedSalesPage.js` — sorting logic, move
+  up/down, category storage, UI buttons
+- Heavy UoM pattern: `/^(bag|bags|sack|sacks)$/i`
+
+---
+
+
 ## 2026-05-15 — UoM (Unit of Measurement) Bug Fix — End-to-End
 
 ### Root Cause
