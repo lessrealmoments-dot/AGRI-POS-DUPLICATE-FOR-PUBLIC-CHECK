@@ -731,6 +731,15 @@ export default function AuditCenterPage() {
   const [iter241Loading, setIter241Loading] = useState(false);
   const [iter241Report, setIter241Report] = useState(null);
   const [iter241Confirm, setIter241Confirm] = useState(false);
+
+  // ── PO Overall-Discount Capital backfill (Feb 2026) ────────────────────
+  // POs received BEFORE the overall-discount proration fix stamped each
+  // line's cost_price at the pre-overall-discount price. This backfill
+  // walks past received POs with overall_discount_amount > 0 and corrects
+  // branch_prices.cost_price using the new proportional allocation.
+  const [poDiscLoading, setPoDiscLoading] = useState(false);
+  const [poDiscReport, setPoDiscReport] = useState(null);
+  const [poDiscConfirm, setPoDiscConfirm] = useState(false);
   const [ackDialog, setAckDialog] = useState(null); // event being acknowledged
   const [ackNote, setAckNote] = useState('');
   const [ackSaving, setAckSaving] = useState(false);
@@ -842,6 +851,35 @@ export default function AuditCenterPage() {
     }
     setIter241Loading(false);
     setIter241Confirm(false);
+  };
+
+  // ── PO Overall-Discount Capital backfill ───────────────────────────────
+  // Same UX pattern as the iter240/241 backfills. The endpoint accepts a
+  // single POST with `{dry_run: true|false}`. Idempotent — re-running an
+  // applied backfill writes nothing.
+  const runPoDiscBackfill = async (mode) => {
+    setPoDiscLoading(true);
+    try {
+      const res = await api.post(
+        `${BACKEND_URL}/api/purchase-orders/backfill-overall-discount-capital`,
+        { dry_run: mode !== 'apply' }
+      );
+      setPoDiscReport(res.data);
+      if (mode === 'apply') {
+        toast.success(
+          `Updated ${res.data.written} branch cost row(s) across ${res.data.scanned_pos} PO(s).`
+        );
+      } else {
+        toast.success(res.data.planned_changes === 0
+          ? 'Clean — no past PO needs a capital correction.'
+          : `${res.data.planned_changes} cost row(s) need correcting — review below.`);
+      }
+    } catch (e) {
+      const msg = e.response?.data?.detail || e.message || 'Backfill failed';
+      toast.error(typeof msg === 'string' ? msg : 'Backfill failed');
+    }
+    setPoDiscLoading(false);
+    setPoDiscConfirm(false);
   };
 
   const prepareForAudit = async () => {
@@ -2701,6 +2739,105 @@ export default function AuditCenterPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* ── Data Maintenance: PO Overall-Discount Capital ────────── */}
+          <Card className="border-2 border-sky-200 bg-sky-50/40 mt-3" data-testid="po-disc-backfill-card">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2" style={{ fontFamily: 'Manrope' }}>
+                <Receipt size={16} className="text-sky-600" /> Data Maintenance — PO Overall-Discount Capital
+              </CardTitle>
+              <p className="text-xs text-slate-600 leading-relaxed pt-1">
+                Corrects historical product <strong>capital / cost prices</strong> for past POs that carried
+                an <em>overall</em> discount (e.g. "₱2,000 off the whole PO"). Until the Feb 2026 fix, the
+                overall discount only hit Payables — line cost was stamped at the pre-overall-discount price,
+                silently inflating COGS. The backfill distributes the overall discount proportionally by line
+                value (GAAP landed-cost allocation) and rewrites <code className="bg-white/60 px-1 rounded text-[10px]">branch_prices.cost_price</code>.
+                <strong> Always Preview first.</strong> Idempotent — re-running is safe.
+              </p>
+            </CardHeader>
+            <CardContent className="pt-0 space-y-3">
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm" variant="outline"
+                  onClick={() => runPoDiscBackfill('preview')}
+                  disabled={poDiscLoading}
+                  data-testid="po-disc-preview-btn"
+                >
+                  {poDiscLoading
+                    ? <RefreshCw size={13} className="animate-spin mr-1.5" />
+                    : <Eye size={13} className="mr-1.5" />}
+                  Preview (Dry-Run)
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => setPoDiscConfirm(true)}
+                  disabled={poDiscLoading || !poDiscReport || (poDiscReport?.planned_changes || 0) === 0 || poDiscReport?.dry_run === false}
+                  className="bg-sky-600 hover:bg-sky-700 text-white"
+                  data-testid="po-disc-apply-btn"
+                >
+                  <Check size={13} className="mr-1.5" /> Apply Fix
+                  {poDiscReport?.planned_changes > 0 && poDiscReport?.dry_run !== false && (
+                    <Badge className="ml-2 bg-white/20 text-white text-[10px]">{poDiscReport.planned_changes}</Badge>
+                  )}
+                </Button>
+              </div>
+
+              {poDiscReport && (
+                <div className="bg-white border border-slate-200 rounded-lg p-3 space-y-2 text-xs" data-testid="po-disc-report">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Mode</span>
+                    <Badge variant={poDiscReport.dry_run === false ? 'default' : 'secondary'} className="text-[10px]">
+                      {poDiscReport.dry_run === false ? 'APPLIED ✓' : 'DRY-RUN'}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">POs scanned</span>
+                    <span className="font-semibold text-slate-800">{poDiscReport.scanned_pos}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Cost rows {poDiscReport.dry_run === false ? 'corrected' : 'needing correction'}</span>
+                    <span className="font-mono font-semibold text-sky-700">
+                      {poDiscReport.dry_run === false ? poDiscReport.written : poDiscReport.planned_changes}
+                    </span>
+                  </div>
+                  {poDiscReport.skipped_no_branch > 0 && (
+                    <div className="flex items-center justify-between text-amber-700">
+                      <span>Skipped (PO had no branch)</span>
+                      <span className="font-mono">{poDiscReport.skipped_no_branch}</span>
+                    </div>
+                  )}
+
+                  {poDiscReport.planned_changes === 0 ? (
+                    <p className="text-emerald-700 font-medium pt-1 border-t border-slate-100">
+                      ✓ All past POs with overall discounts already have correct capital.
+                    </p>
+                  ) : (
+                    <div className="pt-2 border-t border-slate-100">
+                      <p className="font-semibold text-slate-700 mb-1">Per-row preview (top 50)</p>
+                      <div className="max-h-56 overflow-y-auto space-y-1.5">
+                        {(poDiscReport.preview || []).map((d, i) => (
+                          <div key={i} className="bg-slate-50 rounded p-2 grid grid-cols-2 gap-2 text-[11px]" data-testid={`po-disc-detail-${i}`}>
+                            <div>
+                              <p className="font-mono font-semibold">{d.po_number}</p>
+                              <p className="text-[10px] text-slate-500 truncate">{d.product_name}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-mono">
+                                {formatPHP(d.old_cost)} → <span className="text-sky-700 font-semibold">{formatPHP(d.new_cost)}</span>
+                              </p>
+                              <p className="text-[10px] text-slate-400">
+                                share: {formatPHP(d.overall_disc_share)}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
 
@@ -2765,6 +2902,40 @@ export default function AuditCenterPage() {
                   data-testid="iter241-confirm-apply-btn"
                 >
                   {iter241Loading ? <RefreshCw size={13} className="animate-spin mr-1" /> : <Check size={13} className="mr-1" />}
+                  Apply Fix
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* ── PO Overall-Discount Apply confirm dialog ───────────────── */}
+      {poDiscConfirm && (
+        <Dialog open={poDiscConfirm} onOpenChange={setPoDiscConfirm}>
+          <DialogContent className="max-w-sm" data-testid="po-disc-confirm-dialog">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-slate-800">
+                <Receipt size={16} className="text-sky-600" /> Apply PO Capital Backfill?
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 text-sm">
+              <p>This will permanently rewrite <strong>{poDiscReport?.planned_changes || 0}</strong> branch cost row(s)
+                across <strong>{poDiscReport?.scanned_pos || 0}</strong> historical PO(s).</p>
+              <ul className="text-xs text-slate-600 list-disc pl-5 space-y-0.5">
+                <li>Only <code className="text-[10px]">branch_prices.cost_price</code> is touched — payables, invoices, and movements are untouched</li>
+                <li>Each updated row is tagged <code className="text-[10px]">source: overall_discount_backfill</code></li>
+                <li>Re-running is a no-op — safe to apply multiple times</li>
+              </ul>
+              <div className="flex gap-2 pt-1">
+                <Button variant="outline" className="flex-1" onClick={() => setPoDiscConfirm(false)}>Cancel</Button>
+                <Button
+                  onClick={() => runPoDiscBackfill('apply')}
+                  className="flex-1 bg-sky-600 hover:bg-sky-700 text-white"
+                  disabled={poDiscLoading}
+                  data-testid="po-disc-confirm-apply-btn"
+                >
+                  {poDiscLoading ? <RefreshCw size={13} className="animate-spin mr-1" /> : <Check size={13} className="mr-1" />}
                   Apply Fix
                 </Button>
               </div>
