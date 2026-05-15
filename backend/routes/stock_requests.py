@@ -26,6 +26,9 @@ Endpoints:
     POST   /stock-requests/{id}/send                draft → sent
     POST   /stock-requests/{id}/triage              spawn BTO + draft POs
     POST   /stock-requests/{id}/cancel              cancel (cascades to draft POs)
+    POST   /stock-requests/{id}/po/{po_id}/mark-ordered
+                                                    Branch B: phantom PO
+                                                    draft→ordered + SMS to A
     GET    /stock-requests/products-lookup          shared product search w/
                                                     both branches' inventory
 """
@@ -247,7 +250,9 @@ async def get_request(request_id: str, user=Depends(get_current_user)):
             {"id": {"$in": po_ids}},
             {"_id": 0, "id": 1, "po_number": 1, "vendor": 1, "status": 1,
              "grand_total": 1, "phantom_for_branch_id": 1,
-             "items": 1, "ordered_at": 1, "received_at": 1},
+             "items": 1, "ordered_at": 1, "received_at": 1,
+             "ordered_by_name": 1, "supplier_ref": 1,
+             "expected_delivery_date": 1, "ordered_notes": 1},
         ).to_list(100)
 
     return {**req, "bto": bto, "pos": pos}
@@ -582,3 +587,212 @@ async def cancel_request(request_id: str, data: dict = None,
                   "cancel_reason": (data.get("reason") or "").strip()}},
     )
     return {"ok": True, "status": "cancelled"}
+
+
+
+# ── Mark Phantom PO Ordered (Phase 2) ───────────────────────────────────────
+async def _notify_requesting_branch_po_ordered(po: dict, req: dict):
+    """Best-effort SMS to the requesting branch's admins/manager when
+    Branch B confirms with the supplier that the phantom PO has been
+    ordered. Branch A then knows to expect delivery.
+
+    Uses the existing SMS pipeline — silent on missing templates or
+    recipients (consistent with branch_transfers pattern).
+    """
+    try:
+        from routes.sms import queue_sms
+
+        org_id = po.get("organization_id") or req.get("organization_id") or ""
+        req_bid = req.get("requesting_branch_id") or po.get("branch_id") or ""
+        if not org_id or not req_bid:
+            return
+
+        proj = {"_id": 0, "id": 1, "full_name": 1, "username": 1, "phone": 1,
+                "phone_number": 1, "role": 1, "branch_id": 1, "branch_ids": 1}
+        recipients = []
+        seen = set()
+
+        admins = await db.users.find(
+            {"organization_id": org_id, "role": "admin", "active": True}, proj
+        ).to_list(50)
+        for u in admins:
+            recipients.append(u)
+            seen.add(u["id"])
+
+        managers = await db.users.find(
+            {"organization_id": org_id, "role": "manager", "active": True,
+             "$or": [{"branch_id": req_bid}, {"branch_ids": req_bid}]},
+            proj,
+        ).to_list(50)
+        for u in managers:
+            if u["id"] in seen:
+                continue
+            recipients.append(u)
+            seen.add(u["id"])
+
+        branch = await _raw_db.branches.find_one(
+            {"id": req_bid}, {"_id": 0, "name": 1}
+        ) or {}
+        org = await _raw_db.organizations.find_one(
+            {"id": org_id}, {"_id": 0, "name": 1}
+        ) or {}
+
+        for rcp in recipients:
+            phone = (rcp.get("phone") or rcp.get("phone_number") or "").strip()
+            if not phone:
+                continue
+            await queue_sms(
+                template_key="phantom_po_ordered",
+                customer_id=rcp["id"],
+                customer_name=rcp.get("full_name") or rcp.get("username", "Manager"),
+                phone=phone,
+                variables={
+                    "recipient_name": rcp.get("full_name") or rcp.get("username", ""),
+                    "po_number":      po.get("po_number", ""),
+                    "vendor":         po.get("vendor", ""),
+                    "branch_name":    branch.get("name", "your branch"),
+                    "request_number": req.get("request_number", ""),
+                    "grand_total":    f"{float(po.get('grand_total') or 0):,.2f}",
+                    "company_name":   org.get("name", "AgriBooks"),
+                    "items_count":    str(len(po.get("items", []))),
+                    "delivery_date":  po.get("expected_delivery_date") or "",
+                },
+                organization_id=org_id,
+                branch_id=req_bid,
+                branch_name=branch.get("name", ""),
+                trigger="auto",
+                trigger_ref=po.get("id", ""),
+                dedup_key=f"phantom_po_ordered:{po.get('id','')}:{rcp['id']}",
+            )
+    except Exception as e:
+        import logging
+        logging.getLogger("stock_requests").warning(
+            f"phantom_po_ordered SMS failed: {e}"
+        )
+
+
+@router.post("/{request_id}/po/{po_id}/mark-ordered")
+async def mark_phantom_po_ordered(
+    request_id: str, po_id: str, data: dict = None,
+    user=Depends(get_current_user),
+):
+    """Branch B confirms with the supplier and locks the PO.
+
+    Body:
+      {
+        pin:                "1234",
+        supplier_ref:       "INV-2026-…",
+        expected_delivery_date: "2026-02-20",
+        notes:              "",
+        item_overrides: [
+          {item_id, unit_price?, quantity?, discount_amount?}
+        ],
+        overall_discount?: 0,
+        freight?:          0,
+      }
+
+    Atomic effects:
+      * PO status: draft → ordered
+      * Recomputes totals if any overrides supplied
+      * Stamps ordered_at / ordered_by_name / supplier_ref
+      * Fires SMS to requesting branch admins + manager(s)
+      * Updates the linked stock-request item statuses → 'ordered'
+    """
+    check_perm(user, "branch_transfers", "update")
+    data = data or {}
+
+    req = await db.stock_requests.find_one({"id": request_id}, {"_id": 0})
+    if not req:
+        raise HTTPException(404, "Stock request not found.")
+    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
+    if not po:
+        raise HTTPException(404, "PO not found.")
+    if po.get("source_request_id") != request_id:
+        raise HTTPException(400, "PO does not belong to this stock request.")
+    if po.get("status") != "draft":
+        raise HTTPException(400, f"Only DRAFT POs can be marked ordered "
+                                 f"(current status: '{po.get('status')}').")
+    sup_bid = req["supplying_branch_id"]
+    assert_branch_access(user, sup_bid)
+
+    pin = str(data.get("pin", "")).strip()
+    if not pin:
+        raise HTTPException(400, "PIN required to mark a phantom PO ordered.")
+    from routes.verify import verify_pin_for_action
+    verifier = await verify_pin_for_action(
+        pin, "confirm_stock_request", branch_id=sup_bid,
+    )
+    if not verifier:
+        raise HTTPException(403, "Invalid PIN or unauthorized for the supplying branch.")
+
+    overrides = {o["item_id"]: o for o in (data.get("item_overrides") or [])}
+    new_items = []
+    line_subtotal = 0.0
+    for it in po.get("items", []):
+        item_id = it.get("source_request_item_id") or it.get("id") or it.get("product_id")
+        ov = overrides.get(item_id) or overrides.get(it.get("product_id"))
+        next_item = dict(it)
+        if ov:
+            if ov.get("unit_price") is not None:
+                next_item["unit_price"] = float(ov["unit_price"])
+            if ov.get("quantity") is not None:
+                next_item["quantity"] = float(ov["quantity"])
+            if ov.get("discount_amount") is not None:
+                next_item["discount_amount"] = float(ov["discount_amount"])
+        qty = float(next_item.get("quantity") or 0)
+        up = float(next_item.get("unit_price") or 0)
+        disc = float(next_item.get("discount_amount") or 0)
+        next_item["total"] = round(qty * up - disc, 2)
+        line_subtotal += next_item["total"]
+        new_items.append(next_item)
+
+    overall_disc = float(data.get("overall_discount") or 0)
+    freight = float(data.get("freight") or 0)
+    grand_total = round(line_subtotal - overall_disc + freight, 2)
+
+    update_doc = {
+        "items":                    new_items,
+        "line_subtotal":            round(line_subtotal, 2),
+        "subtotal":                 round(line_subtotal, 2),
+        "overall_discount_amount":  overall_disc,
+        "overall_discount_value":   overall_disc,
+        "freight":                  freight,
+        "grand_total":              grand_total,
+        "balance":                  grand_total,
+        "status":                   "ordered",
+        "po_type":                  "terms",
+        "ordered_at":               now_iso(),
+        "ordered_by":               user["id"],
+        "ordered_by_name":          (verifier.get("verifier_name")
+                                     or user.get("full_name")
+                                     or user.get("username", "")),
+        "supplier_ref":             (data.get("supplier_ref") or "").strip(),
+        "expected_delivery_date":   (data.get("expected_delivery_date") or "").strip(),
+        "ordered_notes":            (data.get("notes") or "").strip(),
+    }
+    await db.purchase_orders.update_one({"id": po_id}, {"$set": update_doc})
+
+    req_items = req.get("items", [])
+    updated = []
+    for it in req_items:
+        if it.get("assigned_doc_id") == po_id:
+            updated.append({**it, "status": "ordered"})
+        else:
+            updated.append(it)
+    await db.stock_requests.update_one(
+        {"id": request_id},
+        {"$set": {"items": updated}},
+    )
+
+    fresh_po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
+    await _notify_requesting_branch_po_ordered(fresh_po, req)
+
+    return {
+        "ok":             True,
+        "po_id":          po_id,
+        "po_number":      fresh_po.get("po_number"),
+        "status":         "ordered",
+        "grand_total":    grand_total,
+        "ordered_by":     update_doc["ordered_by_name"],
+        "ordered_at":     update_doc["ordered_at"],
+    }

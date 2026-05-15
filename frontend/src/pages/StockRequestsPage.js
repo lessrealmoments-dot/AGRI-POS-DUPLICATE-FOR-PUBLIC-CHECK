@@ -384,6 +384,10 @@ function DetailDialog({ requestId, currentBranchId, onClose }) {
   const [assignments, setAssignments] = useState({});  // item_id → assignment
   const [pin, setPin] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // Phase 2 — Mark Ordered inline form per PO
+  const [orderingPoId, setOrderingPoId] = useState(null);
+  const [orderForm, setOrderForm] = useState({ pin: '', supplier_ref: '', expected_delivery_date: '', notes: '' });
+  const [orderSubmitting, setOrderSubmitting] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -425,8 +429,7 @@ function DetailDialog({ requestId, currentBranchId, onClose }) {
     setAssignments(prev => ({ ...prev, [item_id]: { ...prev[item_id], ...patch } }));
   };
 
-  const submitTriage = async () => {
-    if (!pin.trim()) { toast.error('PIN required'); return; }
+  const submitTriage = async () => {    if (!pin.trim()) { toast.error('PIN required'); return; }
     const assigns = Object.values(assignments).filter(a => a.fulfillment_type);
     if (!assigns.length) { toast.error('Assign at least one line'); return; }
     setSubmitting(true);
@@ -445,6 +448,29 @@ function DetailDialog({ requestId, currentBranchId, onClose }) {
       toast.error(e.response?.data?.detail || 'Triage failed');
     }
     setSubmitting(false);
+  };
+
+  const submitMarkOrdered = async (po_id) => {
+    if (!orderForm.pin.trim()) { toast.error('PIN required to mark ordered'); return; }
+    setOrderSubmitting(true);
+    try {
+      const res = await api.post(
+        `/stock-requests/${requestId}/po/${po_id}/mark-ordered`,
+        {
+          pin: orderForm.pin,
+          supplier_ref: orderForm.supplier_ref,
+          expected_delivery_date: orderForm.expected_delivery_date,
+          notes: orderForm.notes,
+        }
+      );
+      toast.success(`PO ${res.data.po_number} marked Ordered. Branch A notified.`);
+      setOrderingPoId(null);
+      setOrderForm({ pin: '', supplier_ref: '', expected_delivery_date: '', notes: '' });
+      reload();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to mark ordered');
+    }
+    setOrderSubmitting(false);
   };
 
   return (
@@ -475,13 +501,88 @@ function DetailDialog({ requestId, currentBranchId, onClose }) {
                     <StatusBadge status={doc.bto.status} />
                   </div>
                 )}
-                {(doc.pos || []).map(po => (
-                  <div key={po.id} className="flex items-center gap-2 text-slate-700">
-                    <FileText size={12} /> PO <span className="font-mono">{po.po_number}</span>
-                    · {po.vendor} · <span className="font-mono">{formatPHP(po.grand_total)}</span>
-                    <Badge className="text-[10px] bg-slate-100 text-slate-700">{po.status}</Badge>
-                  </div>
-                ))}
+                {(doc.pos || []).map(po => {
+                  const isDraftPhantom = po.status === 'draft' && po.phantom_for_branch_id === currentBranchId;
+                  const isExpanded = orderingPoId === po.id;
+                  return (
+                    <div key={po.id} className="space-y-1.5" data-testid={`linked-po-${po.id}`}>
+                      <div className="flex items-center gap-2 text-slate-700 flex-wrap">
+                        <FileText size={12} /> PO <span className="font-mono">{po.po_number}</span>
+                        · {po.vendor} · <span className="font-mono">{formatPHP(po.grand_total)}</span>
+                        <Badge className="text-[10px] bg-slate-100 text-slate-700">{po.status}</Badge>
+                        {isDraftPhantom && !isExpanded && (
+                          <Button
+                            size="sm" variant="outline"
+                            className="h-6 px-2 text-[10px] ml-auto border-teal-300 text-teal-700 hover:bg-teal-50"
+                            onClick={() => { setOrderingPoId(po.id); }}
+                            data-testid={`mark-ordered-btn-${po.id}`}
+                          >
+                            <Send size={10} className="mr-1" /> Mark Ordered
+                          </Button>
+                        )}
+                      </div>
+                      {isExpanded && (
+                        <div className="bg-white border border-teal-200 rounded-lg p-3 space-y-2"
+                             data-testid={`mark-ordered-form-${po.id}`}>
+                          <p className="text-[11px] text-teal-900 font-semibold">
+                            Confirm with {po.vendor} — locks the price + notifies Branch A
+                          </p>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            <div>
+                              <Label className="text-[10px] text-slate-500">Supplier reference (optional)</Label>
+                              <Input value={orderForm.supplier_ref}
+                                     onChange={e => setOrderForm(f => ({ ...f, supplier_ref: e.target.value }))}
+                                     placeholder="e.g. SUP-INV-2026-0042" className="h-8 text-xs"
+                                     data-testid={`order-supplier-ref-${po.id}`} />
+                            </div>
+                            <div>
+                              <Label className="text-[10px] text-slate-500">Expected delivery</Label>
+                              <Input type="date" value={orderForm.expected_delivery_date}
+                                     onChange={e => setOrderForm(f => ({ ...f, expected_delivery_date: e.target.value }))}
+                                     className="h-8 text-xs"
+                                     data-testid={`order-delivery-date-${po.id}`} />
+                            </div>
+                          </div>
+                          <div>
+                            <Label className="text-[10px] text-slate-500">Notes (optional)</Label>
+                            <Input value={orderForm.notes}
+                                   onChange={e => setOrderForm(f => ({ ...f, notes: e.target.value }))}
+                                   placeholder="Delivery method, special instructions…"
+                                   className="h-8 text-xs"
+                                   data-testid={`order-notes-${po.id}`} />
+                          </div>
+                          <div className="flex gap-2 items-end pt-1">
+                            <div>
+                              <Label className="text-[10px] text-slate-500">Branch PIN</Label>
+                              <Input type="password" value={orderForm.pin}
+                                     onChange={e => setOrderForm(f => ({ ...f, pin: e.target.value }))}
+                                     placeholder="••••••" className="w-28 h-8 text-xs"
+                                     data-testid={`order-pin-${po.id}`} />
+                            </div>
+                            <Button onClick={() => submitMarkOrdered(po.id)}
+                                    disabled={orderSubmitting}
+                                    className="bg-teal-600 hover:bg-teal-700 text-white h-8 text-xs"
+                                    data-testid={`order-submit-${po.id}`}>
+                              {orderSubmitting ? <RefreshCw size={12} className="animate-spin mr-1" /> : <Check size={12} className="mr-1" />}
+                              Confirm Ordered
+                            </Button>
+                            <Button variant="outline" onClick={() => setOrderingPoId(null)}
+                                    className="h-8 text-xs">
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                      {po.status === 'ordered' && (po.ordered_by_name || po.supplier_ref) && (
+                        <p className="text-[10px] text-slate-400 ml-5">
+                          Ordered by {po.ordered_by_name || 'Manager'}
+                          {po.supplier_ref && <> · ref <span className="font-mono">{po.supplier_ref}</span></>}
+                          {po.expected_delivery_date && <> · ETA {po.expected_delivery_date}</>}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
 

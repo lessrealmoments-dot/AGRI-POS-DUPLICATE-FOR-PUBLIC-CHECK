@@ -1,6 +1,39 @@
 # AgriBooks Changelog
 
 
+## Feb 15 2026 — Stock Requests Phase 2: Mark Phantom PO Ordered + SMS 🟠 P1
+
+**Gap closed**: After triage, DRAFT phantom POs sat in the supplying branch's list with no easy way to "lock them in" once Branch B negotiated with the supplier. Branch A had no notification that delivery was on the way.
+
+**Backend** — new endpoint `POST /api/stock-requests/{request_id}/po/{po_id}/mark-ordered`:
+- PIN-gated via the same supplying-branch policy as triage (`confirm_stock_request` action)
+- Cross-request guard: PO must belong to the specified stock request
+- Only DRAFT POs can transition (refused for any other status)
+- Supports per-item `item_overrides` (final-negotiation pricing): updates `unit_price`, `quantity`, `discount_amount`; recomputes `line_subtotal` / `grand_total` atomically
+- Stamps `ordered_at`, `ordered_by`, `ordered_by_name`, `supplier_ref`, `expected_delivery_date`, `ordered_notes`
+- Flips `po_type` from "draft" to "terms" so it joins the normal PO payment pipeline
+- Updates the linked stock-request item statuses → `ordered`
+- Fires SMS to requesting-branch admins + branch managers using new template key `phantom_po_ordered` (variables: po_number, vendor, request_number, grand_total, delivery_date, branch_name, company_name)
+
+**Frontend** (`pages/StockRequestsPage.js`):
+- Each DRAFT phantom PO on the request detail dialog gets a teal "Mark Ordered" button (only visible to the supplying branch)
+- Inline expandable form: supplier reference, expected delivery date, notes, branch PIN
+- After confirmation, the row collapses + shows footnote: "Ordered by Manager · ref SUP-INV-2026-0042 · ETA 2026-02-20"
+- `get_request` endpoint now exposes `ordered_by_name`, `supplier_ref`, `expected_delivery_date`, `ordered_notes` for the FE
+
+**Tests** (`test_br_stock_request_mark_ordered.py` — 6 scenarios, all green):
+1. Happy path: draft → ordered, all metadata stamped
+2. Per-item price override: 2 lines × 2 qty @ ₱100 → grand_total ₱400 ; override line 1 to ₱150 → recomputed to ₱500
+3. Cannot mark-ordered a PO already in `ordered` status (refused)
+4. PIN required; invalid PIN → 403
+5. Cross-request guard: passing PO from a different request → 400
+6. SMS notification: `queue_sms` invoked with template `phantom_po_ordered`, requesting-branch manager included as recipient
+
+**Verification**: 232/232 BR tests passing (was 226 + 6 new). Lint clean on both backend and frontend. Smoke screenshot confirms page renders.
+
+
+
+
 ## Feb 15 2026 — Stock Requests (multi-doc triage) 🟢 P0 FEATURE
 
 **User pain**: When Branch A requests stock from Branch B, B often has only part of the items and a supplier for the rest. No clean way to fan out one request into multiple downstream docs (BTO + POs) without juggling forms.

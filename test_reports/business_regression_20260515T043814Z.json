@@ -1,0 +1,95 @@
+{
+  "generated_at": "2026-05-15T04:38:14.726681+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 6,
+  "pass_count": 5,
+  "fail_count": 1,
+  "rows": [
+    {
+      "scenario": "br_mo.1_happy_path",
+      "step": "status_flipped_to_ordered",
+      "expected": {
+        "status": "ordered",
+        "supplier_ref": "FERT-INV-2026-0042"
+      },
+      "actual": {
+        "status": "ordered",
+        "supplier_ref": "FERT-INV-2026-0042"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T04:38:14.630581+00:00"
+    },
+    {
+      "scenario": "br_mo.2_price_override",
+      "step": "grand_total_recomputed",
+      "expected": {
+        "grand_total": 500.0
+      },
+      "actual": {
+        "grand_total": 500.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T04:38:14.641517+00:00"
+    },
+    {
+      "scenario": "br_mo.3_non_draft",
+      "step": "refused",
+      "expected": {
+        "raised": true
+      },
+      "actual": {
+        "raised": true
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T04:38:14.649104+00:00"
+    },
+    {
+      "scenario": "br_mo.4_pin_gating",
+      "step": "missing_and_invalid_both_refused",
+      "expected": {
+        "missing": true,
+        "invalid": true
+      },
+      "actual": {
+        "missing": true,
+        "invalid": true
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T04:38:14.659336+00:00"
+    },
+    {
+      "scenario": "br_mo.5_cross_request_guard",
+      "step": "cross_link_refused",
+      "expected": {
+        "raised": true
+      },
+      "actual": {
+        "raised": true
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T04:38:14.670287+00:00"
+    },
+    {
+      "scenario": "br_mo.6_sms",
+      "step": "phantom_po_ordered_template_invoked",
+      "expected": {
+        "template_key": "phantom_po_ordered",
+        "at_least_one_recipient": true
+      },
+      "actual": {
+        "templates": [
+          "phantom_po_ordered"
+        ],
+        "recipients": 1
+      },
+      "status": "FAIL",
+      "evidence": {},
+      "recorded_at": "2026-05-15T04:38:14.681139+00:00"
+    }
+  ]
+}
