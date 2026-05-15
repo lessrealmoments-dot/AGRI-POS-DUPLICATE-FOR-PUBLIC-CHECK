@@ -1,0 +1,78 @@
+{
+  "generated_at": "2026-05-15T01:08:58.903645+00:00",
+  "pytest_exitstatus": 1,
+  "row_count": 4,
+  "pass_count": 1,
+  "fail_count": 3,
+  "rows": [
+    {
+      "scenario": "br_close_wizard.batch.1_skipped_days",
+      "step": "anchor_to_most_recent_close_not_exact_day_before",
+      "expected": {
+        "starting_float": 5000.0,
+        "total_cash_sales": 1500000.0,
+        "expected_counter_min": 1500000.0,
+        "has_prev_close": true
+      },
+      "actual": {
+        "starting_float": 0.0,
+        "total_cash_sales": 0,
+        "expected_counter": 0.0,
+        "has_prev_close": false
+      },
+      "status": "FAIL",
+      "evidence": {},
+      "recorded_at": "2026-05-15T01:08:58.761675+00:00"
+    },
+    {
+      "scenario": "br_close_wizard.batch.2_parity_single_day",
+      "step": "batch_with_one_day_matches_single_day",
+      "expected": {
+        "starting_float_match": true,
+        "expected_counter_match": true,
+        "total_cash_sales_match": true
+      },
+      "actual": {
+        "single_sf": 99999.0,
+        "batch_sf": 99999.0,
+        "single_ec": 99999.0,
+        "batch_ec": 99999.0,
+        "single_cs": 0,
+        "batch_cs": 0
+      },
+      "status": "FAIL",
+      "evidence": {},
+      "recorded_at": "2026-05-15T01:08:58.832025+00:00"
+    },
+    {
+      "scenario": "br_close_wizard.batch.3_first_close_ever",
+      "step": "wallet_balance_used_when_no_prior_close",
+      "expected": {
+        "has_prev_close": false,
+        "expected_counter": 55555.0,
+        "starting_float": 55555.0
+      },
+      "actual": {
+        "has_prev_close": false,
+        "expected_counter": 55555.0,
+        "starting_float": 55555.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T01:08:58.848185+00:00"
+    },
+    {
+      "scenario": "br_close_wizard.batch.4_partial_no_double_count",
+      "step": "cash_sales_only_counts_full_paid",
+      "expected": {
+        "total_cash_sales": 100.0
+      },
+      "actual": {
+        "total_cash_sales": 0
+      },
+      "status": "FAIL",
+      "evidence": {},
+      "recorded_at": "2026-05-15T01:08:58.864165+00:00"
+    }
+  ]
+}

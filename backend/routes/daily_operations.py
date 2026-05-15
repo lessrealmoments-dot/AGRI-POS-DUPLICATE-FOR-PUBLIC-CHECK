@@ -1555,8 +1555,21 @@ async def batch_close_preview(
     date_filter = {"$in": date_list}
 
     # Starting float
-    day_before = (datetime.strptime(first_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
-    prev_close = await db.daily_closings.find_one({"date": day_before, "branch_id": branch_id}, {"_id": 0})
+    #
+    # CLOSE-WIZARD FIX (Feb 2026): use the most-recent closed day BEFORE
+    # `first_date` — not exactly `first_date - 1`. Group closings exist
+    # precisely because users skipped one or more closes; demanding an
+    # exact day-before match falls through to `wallet.balance`, and if
+    # the wallet has drifted (manual reset, missed sync, fresh branch)
+    # the batch preview reports expected_counter=0 for a ₱1.5M batch.
+    # Mirroring the single-day query keeps the anchor stable across
+    # arbitrary skip-gaps and matches users' mental model: "the last
+    # known good cash baseline."
+    prev_close = await db.daily_closings.find_one(
+        {"branch_id": branch_id, "date": {"$lt": first_date}, "status": "closed"},
+        {"_id": 0},
+        sort=[("date", -1)],
+    )
     has_prev_close = bool(prev_close)
     wallet = await db.fund_wallets.find_one({"branch_id": branch_id, "type": "cashier", "active": True}, {"_id": 0})
     starting_float = float(prev_close.get("cash_to_drawer", 0)) if prev_close else float(wallet["balance"] if wallet else 0)
@@ -1772,6 +1785,14 @@ async def batch_close_preview(
         "total_credit_today": total_credit_today,
         "credit_invoices": credit_invoices,
         "daily_breakdown": daily_breakdown,
+        # CLOSE WIZARD FIX (Feb 2026): expose the canonical reconciliation
+        # numbers the wizard needs. Previously the batch preview computed
+        # `expected_counter` then silently dropped it, leaving the frontend
+        # to either invent a value or fall back to wallet.balance (which
+        # produced "expected = 0" on ₱1.5M batches when the wallet had
+        # drifted). The single-day preview already returns these — parity.
+        "expected_counter": expected_counter,
+        "has_prev_close":   has_prev_close,
     }
 
 
@@ -2178,9 +2199,18 @@ async def batch_close_days(data: dict, user=Depends(get_current_user)):
     from datetime import timedelta
     month_prefix = first_date[:7]
 
-    # Starting float: from the day before first_date
-    day_before = (datetime.strptime(first_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
-    prev_close = await db.daily_closings.find_one({"date": day_before, "branch_id": branch_id}, {"_id": 0})
+    # Starting float — anchor to the most-recent closed day before
+    # `first_date`. Same fix as `/daily-close-preview/batch`: an exact
+    # `first_date - 1` lookup misses every batch where the user skipped
+    # one or more close-days (which is the whole reason batch close
+    # exists). Wallet-balance fallback is preserved for the genuine
+    # "first close ever" case.
+    prev_close = await db.daily_closings.find_one(
+        {"branch_id": branch_id, "date": {"$lt": first_date}, "status": "closed"},
+        {"_id": 0},
+        sort=[("date", -1)],
+    )
+    has_prev_close = bool(prev_close)
     wallet = await db.fund_wallets.find_one({"branch_id": branch_id, "type": "cashier", "active": True}, {"_id": 0})
     starting_float = float(prev_close.get("cash_to_drawer", 0)) if prev_close else float(wallet["balance"] if wallet else 0)
 
@@ -2193,10 +2223,19 @@ async def batch_close_days(data: dict, user=Depends(get_current_user)):
     # Aggregate across ALL dates
     date_filter = {"$in": dates}
 
-    # Cash sales
+    # Cash sales — exclude partial-sale line rows. Their cash portion is
+    # already captured by `total_cash_ar` via the payments-today
+    # aggregation below; including the full partial line_total here as
+    # well would double-count by (line_total - partial_cash_amount) per
+    # partial sale. (Single-day preview/POST and the batch preview all
+    # apply the same `partial_grand_total` filter; pre-Feb-2026 the
+    # batch POST was the only path missing it, silently inflating
+    # `total_cash_sales` and `expected_counter` on every batch close
+    # that contained partial-payment sales.)
     cash_sales_agg = await db.sales_log.aggregate([
         {"$match": {"branch_id": branch_id, "date": date_filter, "voided": {"$ne": True},
-                    "payment_method": {"$regex": "^cash$", "$options": "i"}}},
+                    "payment_method": {"$regex": "^cash$", "$options": "i"},
+                    "partial_grand_total": {"$exists": False}}},
         {"$group": {"_id": "$category", "total": {"$sum": "$line_total"}}}
     ]).to_list(100)
     sales_by_category = {r["_id"] or "General": round(r["total"], 2) for r in cash_sales_agg}
@@ -2355,8 +2394,17 @@ async def batch_close_days(data: dict, user=Depends(get_current_user)):
 
     # CLOSE WIZARD REFACTOR (Feb 2026): partial_total dropped — same-day
     # partial-sale cash legs are now part of total_cash_ar.
+    # Feb 2026 FIX: mirror single-day `has_prev_close` guard. For a
+    # batch that has NO prior closed day at all (genuine first-ever
+    # close on a fresh wallet), the formula would double-count cash
+    # that's already reflected in wallet.balance; in that case the
+    # current wallet balance IS the expected counter. For every other
+    # batch (the common case) we use the canonical formula.
     total_cash_in = total_cash_sales + total_cash_ar + total_split_cash
-    expected_counter = round(starting_float + total_cash_in + net_fund_transfers - total_cashier_expenses, 2)
+    if has_prev_close:
+        expected_counter = round(starting_float + total_cash_in + net_fund_transfers - total_cashier_expenses, 2)
+    else:
+        expected_counter = round(float(wallet["balance"]) if wallet else 0, 2)
     over_short = round(actual_cash - expected_counter, 2)
 
     # Credit sales across all dates

@@ -1,6 +1,33 @@
 # AgriBooks Changelog
 
 
+## Feb 14 2026 — Closing Wizard (Group / Batch) Audit + Fix 🔴 P0
+**User report**: Batch-closing ~10 days of ₱1.5M cash sales showed `expected_counter = 0`. Single-day close worked fine.
+
+**Audit — 3 independent defects all feeding the same wrong number**:
+
+1. **Anchor lookup mismatch** (the headline bug). Single-day preview used `find_one({"date": {"$lt": target_date}}, sort=[("date", -1)])` — finds ANY most-recent closed day. Batch preview AND batch POST used `find_one({"date": first_date - 1 day})` — exact match only. Group-close exists *specifically* because the user skipped close-days, so the exact-day lookup almost always missed → `starting_float` fell through to `wallet.balance` (which on the reporter's setup had drifted to 0).
+
+2. **`expected_counter` computed but never returned** from `/daily-close-preview/batch`. The frontend silently fell back to 0.
+
+3. **Partial-sale double-count** in batch POST. The `cash_sales_agg` query was missing `"partial_grand_total": {"$exists": False}` filter that single-day and preview paths used. Partial-sale lines were counted both in `total_cash_sales` AND in `total_cash_ar` (via the payments aggregation) — inflating the recorded closing on every batch with partial-paid sales.
+
+**Fix** (`routes/daily_operations.py`):
+- Both batch preview + POST now use `find_one({"branch_id": …, "date": {"$lt": first_date}, "status": "closed"}, sort=[("date", -1)])` — mirrors single-day.
+- Batch preview returns `expected_counter` + `has_prev_close`.
+- Batch POST `expected_counter` formula now respects `has_prev_close` (formula when anchor exists, `wallet.balance` for genuine first-ever close).
+- Batch POST `cash_sales_agg` excludes `partial_grand_total` rows.
+
+**Tests**: `test_br_close_wizard_batch.py` — 4 new BR tests:
+1. Skipped-days anchor test: reproduces the user's exact "₱1.5M sales / expected=0" scenario; anchor falls back to the close 5 days before the window, formula produces ₱1,505,000.
+2. Parity test: batch-with-1-day = single-day preview (same `starting_float`, `expected_counter`, `total_cash_sales`).
+3. First-ever-close fallback: no prior close → `wallet.balance` used (preserves correctness for fresh-branch setup).
+4. Partial-sale double-count regression: partial-paid invoices excluded from `total_cash_sales`.
+
+**207/207 BR suite passing** (up from 203). Lint clean.
+
+
+
 ## Feb 14 2026 — Terminal-Only Lock-down on Sensitive Write Actions 🔒
 **Threat closed**: previously, the terminal-action UI was hidden for non-terminal scans, but the **backend endpoints accepted any authenticated admin token** — meaning a stolen admin JWT or a direct curl/Postman call could bypass the UI gate and execute payments, refunds, returns, and stock corrections. Camera-only QR scans also exposed `WebPaymentSection` with TOTP/staff-login fallback, an unintended cash-recording surface.
 

@@ -1,0 +1,22 @@
+{
+  "generated_at": "2026-05-15T01:10:14.776078+00:00",
+  "pytest_exitstatus": 1,
+  "row_count": 1,
+  "pass_count": 0,
+  "fail_count": 1,
+  "rows": [
+    {
+      "scenario": "br_close_wizard.batch.4_partial_no_double_count",
+      "step": "cash_sales_only_counts_full_paid",
+      "expected": {
+        "total_cash_sales": 100.0
+      },
+      "actual": {
+        "total_cash_sales": 0
+      },
+      "status": "FAIL",
+      "evidence": {},
+      "recorded_at": "2026-05-15T01:10:14.713411+00:00"
+    }
+  ]
+}
