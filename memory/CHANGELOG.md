@@ -1,6 +1,38 @@
 # AgriBooks Changelog
 
 
+## Feb 15 2026 — Stock Requests Phase 3: Variance Detection + SMS template seed 🟠 P1
+
+**What ships**:
+1. **Receive-time variance detection**: when Branch A receives a phantom PO, we compare the `ordered_snapshot` (captured at mark-ordered) against the actually-received `items`. Five outcomes, prioritised: `missing_items` > `extra_items` > `under_delivered` > `over_delivered` > `completed`.
+2. **Back-propagation**: variance kind stamped on the parent PO (`received_variance_kind` + full per-item breakdown in `received_variance`), AND propagated to the linked stock_request item's `status` and `variance` fields.
+3. **Auto-complete**: when every child doc (BTO + all phantom POs) reaches a terminal status, the stock_request auto-flips to `completed`.
+4. **Frontend badges**: each PO row in the request detail dialog now shows a coloured variance badge (emerald=completed, amber=under, sky=over, violet=extra, rose=missing) plus an inline per-item delta table for any non-trivial variance.
+5. **SMS template seeded**: `phantom_po_ordered` template added to `DEFAULT_TEMPLATES` so the Phase 2 SMS works out of the box for every tenant.
+
+**Backend changes**:
+- `routes/stock_requests.py`:
+  - `compute_phantom_po_variance(po)` — pure function, computes structured variance summary
+  - `update_phantom_po_received(po)` — hook called from receive flow; stamps variance on PO + back-propagates to stock_request + auto-completes when terminal
+  - `mark_phantom_po_ordered` now stores `ordered_snapshot` (deep-copied items + totals at lock time)
+  - `get_request` projection now exposes `received_variance`, `received_variance_kind` for the FE
+- `routes/purchase_orders.py` — `receive_purchase_order` now invokes `update_phantom_po_received` for any PO with `source_request_id` (best-effort, never raises)
+- `routes/sms.py` — `phantom_po_ordered` template added to `DEFAULT_TEMPLATES`
+
+**Tests** (`test_br_stock_request_variance.py` — 8 scenarios, all green):
+1. Pure helper math (combined missing + extra + under in one snapshot → precedence yields `missing_items`)
+2. completed: exact-qty receive
+3. under_delivered: shipped 8/10
+4. over_delivered: shipped 7/5
+5. extra_items: supplier added a product
+6. missing_items: supplier omitted a line entirely
+7. Stock-request item status and variance propagate correctly
+8. Request auto-completes when single PO is fully received
+
+**Verification**: 240/240 BR tests passing (was 232 + 8 new). Lint clean. Page renders cleanly.
+
+
+
 ## Feb 15 2026 — Stock Requests Phase 2: Mark Phantom PO Ordered + SMS 🟠 P1
 
 **Gap closed**: After triage, DRAFT phantom POs sat in the supplying branch's list with no easy way to "lock them in" once Branch B negotiated with the supplier. Branch A had no notification that delivery was on the way.

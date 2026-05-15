@@ -35,6 +35,14 @@ const STATUS_BADGE = {
   cancelled:               { label: 'Cancelled',       cls: 'bg-rose-100 text-rose-700' },
 };
 
+const VARIANCE_BADGE = {
+  completed:        { label: 'Completed',       cls: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+  under_delivered:  { label: 'Under-delivered', cls: 'bg-amber-100 text-amber-700 border-amber-200' },
+  over_delivered:   { label: 'Over-delivered',  cls: 'bg-sky-100 text-sky-700 border-sky-200' },
+  extra_items:      { label: 'Extra items',     cls: 'bg-violet-100 text-violet-700 border-violet-200' },
+  missing_items:    { label: 'Missing items',   cls: 'bg-rose-100 text-rose-700 border-rose-200' },
+};
+
 const StatusBadge = ({ status }) => {
   const s = STATUS_BADGE[status] || { label: status, cls: 'bg-slate-100 text-slate-700' };
   return <Badge className={`${s.cls} text-[10px] font-medium`}>{s.label}</Badge>;
@@ -510,6 +518,13 @@ function DetailDialog({ requestId, currentBranchId, onClose }) {
                         <FileText size={12} /> PO <span className="font-mono">{po.po_number}</span>
                         · {po.vendor} · <span className="font-mono">{formatPHP(po.grand_total)}</span>
                         <Badge className="text-[10px] bg-slate-100 text-slate-700">{po.status}</Badge>
+                        {po.received_variance_kind && VARIANCE_BADGE[po.received_variance_kind] && (
+                          <Badge className={`text-[10px] border ${VARIANCE_BADGE[po.received_variance_kind].cls}`}
+                                 data-testid={`variance-badge-${po.id}`}>
+                            {po.received_variance_kind === 'completed' ? <Check size={9} className="mr-0.5" /> : <AlertTriangle size={9} className="mr-0.5" />}
+                            {VARIANCE_BADGE[po.received_variance_kind].label}
+                          </Badge>
+                        )}
                         {isDraftPhantom && !isExpanded && (
                           <Button
                             size="sm" variant="outline"
@@ -521,6 +536,34 @@ function DetailDialog({ requestId, currentBranchId, onClose }) {
                           </Button>
                         )}
                       </div>
+
+                      {/* Per-item variance breakdown — shown only when there
+                          IS a non-trivial variance (skip 'completed' since
+                          everything matched). */}
+                      {po.received_variance
+                        && po.received_variance_kind !== 'completed'
+                        && (po.received_variance.items_variance || []).some(iv => iv.kind !== 'match') && (
+                        <div className="bg-white border border-slate-200 rounded text-[10px] ml-5 p-2 space-y-0.5"
+                             data-testid={`variance-detail-${po.id}`}>
+                          <p className="font-semibold text-slate-600 mb-0.5">Variance vs ordered</p>
+                          {po.received_variance.items_variance.filter(iv => iv.kind !== 'match').map((iv, k) => {
+                            const tone = iv.kind === 'missing' ? 'text-rose-600'
+                                      : iv.kind === 'extra'   ? 'text-violet-600'
+                                      : iv.kind === 'under'   ? 'text-amber-600'
+                                      : 'text-sky-600';
+                            const arrow = iv.delta > 0 ? '+' : '';
+                            return (
+                              <div key={k} className={`flex justify-between ${tone}`}>
+                                <span className="truncate">{iv.product_name}</span>
+                                <span className="font-mono shrink-0">
+                                  {iv.ordered_qty} → {iv.received_qty}
+                                  <span className="text-[9px] ml-1">({arrow}{iv.delta})</span>
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                       {isExpanded && (
                         <div className="bg-white border border-teal-200 rounded-lg p-3 space-y-2"
                              data-testid={`mark-ordered-form-${po.id}`}>

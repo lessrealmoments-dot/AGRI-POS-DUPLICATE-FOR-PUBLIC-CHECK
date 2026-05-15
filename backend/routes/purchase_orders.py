@@ -1567,6 +1567,23 @@ async def receive_purchase_order(po_id: str, data: dict = None, user=Depends(get
         }}
     )
 
+    # ── Phantom-PO variance back-propagation (Stock Requests Phase 3) ────
+    # If this PO was spawned from a stock request, compare ordered_snapshot
+    # vs received items and surface the result on both the PO and the
+    # source stock_request so the supplying branch sees supplier-reliability
+    # anomalies (under/over/extra/missing) in its phantom-PO list.
+    if po.get("source_request_id"):
+        try:
+            from routes.stock_requests import update_phantom_po_received
+            fresh_po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
+            if fresh_po:
+                await update_phantom_po_received(fresh_po)
+        except Exception as e:
+            import logging
+            logging.getLogger("purchase_orders").warning(
+                f"Phantom-PO variance hook failed for {po_id}: {e}"
+            )
+
     # ── Notify owner/admin that PO was received and needs review ──────────
     po_number = po.get("po_number", "")
     vendor = po.get("vendor", "")

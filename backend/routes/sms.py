@@ -543,6 +543,21 @@ DEFAULT_TEMPLATES = [
         "trigger": "auto",
         "active": True,
     },
+    {
+        "key": "phantom_po_ordered",
+        "name": "Phantom PO Ordered (Stock Request → Branch A)",
+        "body": (
+            "Hi <recipient_name>, PO <po_number> from <vendor> "
+            "(<items_count> item/s, P<grand_total>) has been ordered for "
+            "request <request_number>. Expected delivery: <delivery_date>. "
+            "— <company_name>"
+        ),
+        "placeholders": ["recipient_name", "po_number", "vendor",
+                         "items_count", "grand_total", "request_number",
+                         "delivery_date", "branch_name", "company_name"],
+        "trigger": "auto",
+        "active": True,
+    },
     # ── Crop Credit Notifications ────────────────────────────────────────────
     {
         "key": "crop_season_started",

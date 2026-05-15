@@ -1,0 +1,104 @@
+{
+  "generated_at": "2026-05-15T04:46:01.960544+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 7,
+  "pass_count": 7,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br_var.2_completed",
+      "step": "kind_completed_and_request_updated",
+      "expected": {
+        "po_kind": "completed",
+        "item_status": "completed"
+      },
+      "actual": {
+        "po_kind": "completed",
+        "item_status": "completed"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T04:46:01.853494+00:00"
+    },
+    {
+      "scenario": "br_var.3_under",
+      "step": "kind_under_delivered",
+      "expected": {
+        "kind": "under_delivered"
+      },
+      "actual": {
+        "kind": "under_delivered"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T04:46:01.867616+00:00"
+    },
+    {
+      "scenario": "br_var.4_over",
+      "step": "kind_over_delivered",
+      "expected": {
+        "kind": "over_delivered"
+      },
+      "actual": {
+        "kind": "over_delivered"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T04:46:01.877793+00:00"
+    },
+    {
+      "scenario": "br_var.5_extra",
+      "step": "kind_extra_items",
+      "expected": {
+        "kind": "extra_items"
+      },
+      "actual": {
+        "kind": "extra_items"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T04:46:01.888677+00:00"
+    },
+    {
+      "scenario": "br_var.6_missing",
+      "step": "kind_missing_items",
+      "expected": {
+        "kind": "missing_items"
+      },
+      "actual": {
+        "kind": "missing_items"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T04:46:01.899969+00:00"
+    },
+    {
+      "scenario": "br_var.7_propagation",
+      "step": "status_and_variance_propagated",
+      "expected": {
+        "status": "under_delivered",
+        "variance": "under_delivered"
+      },
+      "actual": {
+        "status": "under_delivered",
+        "variance": "under_delivered"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T04:46:01.910055+00:00"
+    },
+    {
+      "scenario": "br_var.8_auto_complete",
+      "step": "request_status_completed",
+      "expected": {
+        "req_status": "completed"
+      },
+      "actual": {
+        "req_status": "completed"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T04:46:01.919857+00:00"
+    }
+  ]
+}

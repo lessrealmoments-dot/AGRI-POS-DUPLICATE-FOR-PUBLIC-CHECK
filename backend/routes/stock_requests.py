@@ -251,8 +251,10 @@ async def get_request(request_id: str, user=Depends(get_current_user)):
             {"_id": 0, "id": 1, "po_number": 1, "vendor": 1, "status": 1,
              "grand_total": 1, "phantom_for_branch_id": 1,
              "items": 1, "ordered_at": 1, "received_at": 1,
+             "received_date": 1,
              "ordered_by_name": 1, "supplier_ref": 1,
-             "expected_delivery_date": 1, "ordered_notes": 1},
+             "expected_delivery_date": 1, "ordered_notes": 1,
+             "received_variance": 1, "received_variance_kind": 1},
         ).to_list(100)
 
     return {**req, "bto": bto, "pos": pos}
@@ -750,6 +752,23 @@ async def mark_phantom_po_ordered(
     freight = float(data.get("freight") or 0)
     grand_total = round(line_subtotal - overall_disc + freight, 2)
 
+    # Snapshot of items + totals as ordered — the basis for post-receive
+    # variance detection (Phase 3). Deep-copied to break aliasing.
+    ordered_snapshot = {
+        "items": [{
+            "product_id":      it.get("product_id"),
+            "product_name":    it.get("product_name", ""),
+            "quantity":        float(it.get("quantity") or 0),
+            "unit_price":      float(it.get("unit_price") or 0),
+            "total":           float(it.get("total") or 0),
+            "source_request_item_id": it.get("source_request_item_id"),
+        } for it in new_items],
+        "line_subtotal":           round(line_subtotal, 2),
+        "overall_discount_amount": overall_disc,
+        "freight":                 freight,
+        "grand_total":             grand_total,
+    }
+
     update_doc = {
         "items":                    new_items,
         "line_subtotal":            round(line_subtotal, 2),
@@ -769,6 +788,7 @@ async def mark_phantom_po_ordered(
         "supplier_ref":             (data.get("supplier_ref") or "").strip(),
         "expected_delivery_date":   (data.get("expected_delivery_date") or "").strip(),
         "ordered_notes":            (data.get("notes") or "").strip(),
+        "ordered_snapshot":         ordered_snapshot,
     }
     await db.purchase_orders.update_one({"id": po_id}, {"$set": update_doc})
 
@@ -796,3 +816,174 @@ async def mark_phantom_po_ordered(
         "ordered_by":     update_doc["ordered_by_name"],
         "ordered_at":     update_doc["ordered_at"],
     }
+
+
+# ── Phase 3 — Post-receive variance detection ───────────────────────────────
+def compute_phantom_po_variance(po: dict) -> dict:
+    """Compare a phantom PO's `ordered_snapshot` against its current `items`
+    (representing what was actually received). Returns a structured variance
+    summary used both for back-propagation to the stock request and for UI.
+
+    Variance kinds (mutually-exclusive — first match wins):
+        completed        — every ordered line received in exact qty
+        under_delivered  — at least one ordered line received with qty < ordered
+        over_delivered   — at least one ordered line received with qty > ordered
+        extra_items      — a line appears in received that wasn't in ordered
+        missing_items    — an ordered line is entirely absent from received
+
+    NOTE: a single PO can have multiple anomalies simultaneously. We pick a
+    *primary* kind for the badge but expose `items_variance` for full detail.
+    Precedence: missing_items > extra_items > under_delivered > over_delivered > completed.
+    This ordering surfaces the most concerning anomaly to the supplying branch
+    (missing items mean a supplier failed to ship; extra items hint at sloppy
+    delivery; over/under are smaller deviations).
+    """
+    snapshot = po.get("ordered_snapshot") or {}
+    ordered_items = snapshot.get("items") or []
+    received_items = po.get("items") or []
+
+    # Index by product_id (a line is identified by what product it shipped).
+    ordered_by_pid = {it.get("product_id"): it for it in ordered_items if it.get("product_id")}
+    received_by_pid = {it.get("product_id"): it for it in received_items if it.get("product_id")}
+
+    items_variance = []
+    has_missing = False
+    has_extra = False
+    has_under = False
+    has_over = False
+
+    all_pids = set(ordered_by_pid) | set(received_by_pid)
+    for pid in all_pids:
+        o = ordered_by_pid.get(pid)
+        r = received_by_pid.get(pid)
+        o_qty = float((o or {}).get("quantity") or 0)
+        r_qty = float((r or {}).get("quantity") or 0)
+        name = (r or o or {}).get("product_name", "")
+
+        if o and not r:
+            # Ordered but not received — supplier failed entirely on this line.
+            items_variance.append({
+                "product_id": pid, "product_name": name,
+                "ordered_qty": o_qty, "received_qty": 0,
+                "delta": -o_qty, "kind": "missing"})
+            has_missing = True
+        elif r and not o:
+            # Received something that wasn't ordered.
+            items_variance.append({
+                "product_id": pid, "product_name": name,
+                "ordered_qty": 0, "received_qty": r_qty,
+                "delta": r_qty, "kind": "extra"})
+            has_extra = True
+        else:
+            delta = round(r_qty - o_qty, 4)
+            if delta == 0:
+                items_variance.append({
+                    "product_id": pid, "product_name": name,
+                    "ordered_qty": o_qty, "received_qty": r_qty,
+                    "delta": 0, "kind": "match"})
+            elif delta < 0:
+                items_variance.append({
+                    "product_id": pid, "product_name": name,
+                    "ordered_qty": o_qty, "received_qty": r_qty,
+                    "delta": delta, "kind": "under"})
+                has_under = True
+            else:
+                items_variance.append({
+                    "product_id": pid, "product_name": name,
+                    "ordered_qty": o_qty, "received_qty": r_qty,
+                    "delta": delta, "kind": "over"})
+                has_over = True
+
+    # Primary classification, precedence missing > extra > under > over > complete.
+    if has_missing:
+        kind = "missing_items"
+    elif has_extra:
+        kind = "extra_items"
+    elif has_under:
+        kind = "under_delivered"
+    elif has_over:
+        kind = "over_delivered"
+    else:
+        kind = "completed"
+
+    return {
+        "kind":           kind,
+        "items_variance": items_variance,
+        "has_missing":    has_missing,
+        "has_extra":      has_extra,
+        "has_under":      has_under,
+        "has_over":       has_over,
+    }
+
+
+async def update_phantom_po_received(po: dict):
+    """Hook called from `purchase_orders.receive_purchase_order` whenever a
+    PO that was spawned from a stock request transitions to `received`.
+
+    Computes variance, stamps `received_variance` on the PO, and back-
+    propagates per-item statuses to the stock_request so the supplying
+    branch sees supplier-reliability anomalies in its phantom-PO list.
+
+    Best-effort — never raises (logging on failure).
+    """
+    try:
+        request_id = po.get("source_request_id")
+        if not request_id:
+            return
+        variance = compute_phantom_po_variance(po)
+
+        await db.purchase_orders.update_one(
+            {"id": po["id"]},
+            {"$set": {"received_variance": variance,
+                      "received_variance_kind": variance["kind"]}},
+        )
+
+        req = await db.stock_requests.find_one({"id": request_id}, {"_id": 0})
+        if not req:
+            return
+        po_id = po["id"]
+        new_status = {
+            "completed":        "completed",
+            "under_delivered":  "under_delivered",
+            "over_delivered":   "over_delivered",
+            "extra_items":      "extra_items",
+            "missing_items":    "missing_items",
+        }.get(variance["kind"], "received")
+
+        updated = []
+        for it in req.get("items", []):
+            if it.get("assigned_doc_id") == po_id:
+                updated.append({**it,
+                                "status":   new_status,
+                                "variance": variance["kind"]})
+            else:
+                updated.append(it)
+
+        # If every child doc is now in a terminal state, mark the request completed.
+        all_pos = await db.purchase_orders.find(
+            {"source_request_id": request_id, "id": {"$ne": None}},
+            {"_id": 0, "id": 1, "status": 1},
+        ).to_list(100)
+        bto = None
+        if (req.get("fulfillment_summary") or {}).get("bto_id"):
+            bto = await db.branch_transfer_orders.find_one(
+                {"id": req["fulfillment_summary"]["bto_id"]},
+                {"_id": 0, "status": 1},
+            )
+
+        all_pos_done = all(p["status"] in ("received", "cancelled") for p in all_pos) if all_pos else True
+        bto_done = (bto is None) or (bto.get("status") in ("completed", "received", "cancelled"))
+        new_request_status = req["status"]
+        if all_pos_done and bto_done and req["status"] == "fulfillment_generated":
+            new_request_status = "completed"
+
+        await db.stock_requests.update_one(
+            {"id": request_id},
+            {"$set": {"items": updated, "status": new_request_status}},
+        )
+    except Exception as e:
+        import logging
+        logging.getLogger("stock_requests").warning(
+            f"update_phantom_po_received failed for PO {po.get('id')}: {e}"
+        )
+
