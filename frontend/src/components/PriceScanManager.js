@@ -312,17 +312,17 @@ export default function PriceScanManager() {
         }
       } else if (pinModal.kind === 'capital_change') {
         const alert = pinModal.alert;
-        // Collect the parent's changed prices.
+        // Collect ALL parent prices with valid values — always save to branch_prices
+        // even if they match global prices. Creating a branch override proves the
+        // price was reviewed after the capital change.
         const parentPrices = capEditPrices[alert.id] || {};
         const parentChanges = {};
         Object.entries(parentPrices).forEach(([k, v]) => {
           const num = parseFloat(v);
           if (isNaN(num) || num <= 0) return;
-          const currentPrice = parseFloat(alert.prices?.[k] || 0);
-          if (Math.abs(num - currentPrice) < 0.005) return;
           parentChanges[k] = num;
         });
-        // Collect each child repack's changed prices.
+        // Collect each child repack's prices (same logic — save all valid values).
         const childUpdates = []; // [{product_id, prices}]
         (alert.children || []).forEach(c => {
           const childEdits = (capChildEditPrices[alert.id] || {})[c.product_id] || {};
@@ -330,8 +330,6 @@ export default function PriceScanManager() {
           Object.entries(childEdits).forEach(([k, v]) => {
             const num = parseFloat(v);
             if (isNaN(num) || num <= 0) return;
-            const currentPrice = parseFloat(c.prices?.[k] || 0);
-            if (Math.abs(num - currentPrice) < 0.005) return;
             cleaned[k] = num;
           });
           if (Object.keys(cleaned).length) {
@@ -341,7 +339,7 @@ export default function PriceScanManager() {
           }
         });
         if (!Object.keys(parentChanges).length && !childUpdates.length) {
-          toast.error('No price changes to apply. Use Acknowledge if no update needed.');
+          toast.error('Enter at least one price before confirming.');
           setPinSubmitting(false);
           return;
         }
@@ -374,7 +372,7 @@ export default function PriceScanManager() {
             if (e.response?.status === 403) throw e;
           }
         }
-        // Auto-acknowledge — operator reviewed AND adjusted.
+        // Auto-acknowledge — operator reviewed AND confirmed prices.
         try {
           await api.post(
             `${BACKEND_URL}/api/products/capital-change-alerts/${alert.id}/acknowledge`
@@ -383,11 +381,18 @@ export default function PriceScanManager() {
         const parts = [];
         if (parentApplied) parts.push(alert.product_name);
         if (childApplied.length) parts.push(`${childApplied.length} repack${childApplied.length === 1 ? '' : 's'}`);
-        toast.success(`Prices updated: ${parts.join(' + ')}`);
+        toast.success(`Branch prices confirmed: ${parts.join(' + ')}`);
         if (childFailed.length) {
           toast.error(`Failed: ${childFailed.join(', ')}`);
         }
         setCapAlerts(prev => prev.filter(a => a.id !== alert.id));
+        // Trigger POS cache refresh so Sales page shows updated prices immediately
+        try {
+          const branchId = alert.branch_id || currentBranch?.id || '';
+          if (branchId) {
+            await api.get(`${BACKEND_URL}/api/sync/pos-data`, { params: { branch_id: branchId } });
+          }
+        } catch { /* silent — prices saved, cache refresh is best-effort */ }
       } else {
         let fixed = 0;
         let failed = 0;
@@ -961,59 +966,28 @@ export default function PriceScanManager() {
                               {a.changed_by_name && <div className="text-slate-400">by {a.changed_by_name}</div>}
                             </td>
                             <td className="px-2 py-2">
-                              {(() => {
-                                // Detect any pending price edits (parent or any child)
-                                // so we can rename the primary button + warn on ack.
-                                const parentEdits = capEditPrices[a.id] || {};
-                                const hasParentEdit = Object.entries(parentEdits).some(([k, v]) => {
-                                  const num = parseFloat(v);
-                                  if (isNaN(num) || num <= 0) return false;
-                                  const cur = parseFloat(a.prices?.[k] || 0);
-                                  return Math.abs(num - cur) >= 0.005;
-                                });
-                                const hasChildEdit = (a.children || []).some(c => {
-                                  const e = (capChildEditPrices[a.id] || {})[c.product_id] || {};
-                                  return Object.entries(e).some(([k, v]) => {
-                                    const num = parseFloat(v);
-                                    if (isNaN(num) || num <= 0) return false;
-                                    const cur = parseFloat(c.prices?.[k] || 0);
-                                    return Math.abs(num - cur) >= 0.005;
-                                  });
-                                });
-                                const hasEdits = hasParentEdit || hasChildEdit;
-                                return (
-                                  <div className="flex flex-col gap-1">
-                                    <Button size="sm"
-                                      onClick={() => {
-                                        // No edits → straight ack (no PIN required).
-                                        // Has edits → PIN-gated update + auto-ack.
-                                        if (hasEdits) handleSaveCapAlert(a);
-                                        else ackCapAlert(a.id);
-                                      }}
-                                      className="h-7 text-[11px] bg-[#1A4D2E] hover:bg-[#14532d] text-white"
-                                      data-testid={`cap-update-${a.id}`}>
-                                      {hasEdits ? <Lock size={10} className="mr-1" /> : <Check size={10} className="mr-1" />}
-                                      {hasEdits ? 'Update & Acknowledge' : 'Acknowledge'}
-                                    </Button>
-                                    {hasEdits && (
-                                      <Button size="sm" variant="outline"
-                                        onClick={() => {
-                                          if (!window.confirm(
-                                            'You have unsaved price changes for this product.\n\n' +
-                                            'Click Cancel to go back and use "Update & Acknowledge" to save them.\n\n' +
-                                            'Click OK to dismiss this alert without saving any price changes.'
-                                          )) return;
-                                          ackCapAlert(a.id);
-                                        }}
-                                        className="h-7 text-[11px] text-slate-600"
-                                        data-testid={`ack-cap-${a.id}`}>
-                                        <X size={10} className="mr-1" />
-                                        Dismiss without saving
-                                      </Button>
-                                    )}
-                                  </div>
-                                );
-                              })()}
+                              <div className="flex flex-col gap-1">
+                                <Button size="sm"
+                                  onClick={() => handleSaveCapAlert(a)}
+                                  className="h-7 text-[11px] bg-[#1A4D2E] hover:bg-[#14532d] text-white"
+                                  data-testid={`cap-update-${a.id}`}>
+                                  <Lock size={10} className="mr-1" />
+                                  Confirm Prices
+                                </Button>
+                                <Button size="sm" variant="outline"
+                                  onClick={() => {
+                                    if (!window.confirm(
+                                      'Dismiss this alert without saving any branch prices?\n\n' +
+                                      'The product will keep using global prices at this branch.'
+                                    )) return;
+                                    ackCapAlert(a.id);
+                                  }}
+                                  className="h-7 text-[11px] text-slate-500"
+                                  data-testid={`ack-cap-${a.id}`}>
+                                  <X size={10} className="mr-1" />
+                                  Dismiss
+                                </Button>
+                              </div>
                             </td>
                           </tr>
                           {/* Child repack rows (when expanded). Same column
@@ -1152,10 +1126,15 @@ export default function PriceScanManager() {
                 </Button>
               )}
               {tab === 'capital_changes' && capAlerts.length > 0 && user?.role === 'admin' && (
-                <Button size="sm" onClick={ackAllCapAlerts}
-                  className="bg-[#1A4D2E] hover:bg-[#14532d] text-white" data-testid="ack-all-cap-btn">
-                  <Check size={13} className="mr-1.5" />
-                  Acknowledge All ({capAlerts.length})
+                <Button size="sm" variant="outline" onClick={() => {
+                  if (!window.confirm(
+                    `Dismiss all ${capAlerts.length} capital change alert(s) without saving branch prices?\n\nProducts will keep using global prices.`
+                  )) return;
+                  ackAllCapAlerts();
+                }}
+                  className="text-slate-600 border-slate-300" data-testid="ack-all-cap-btn">
+                  <X size={13} className="mr-1.5" />
+                  Dismiss All ({capAlerts.length})
                 </Button>
               )}
             </div>
@@ -1177,7 +1156,7 @@ export default function PriceScanManager() {
               {pinModal?.kind === 'all'
                 ? `Apply price updates to ${issues.length} product${issues.length === 1 ? '' : 's'}.`
                 : pinModal?.kind === 'capital_change'
-                ? `Apply price update to ${pinModal?.alert?.product_name} (capital ${pinModal?.alert?.direction === 'up' ? 'increased' : 'decreased'}). Alert will be acknowledged automatically.`
+                ? `Confirm branch prices for ${pinModal?.alert?.product_name} (capital ${pinModal?.alert?.direction === 'up' ? 'increased' : 'decreased'}). Prices will be saved to this branch.`
                 : `Apply price update to ${pinModal?.issue?.product_name}.`}
             </p>
             <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">

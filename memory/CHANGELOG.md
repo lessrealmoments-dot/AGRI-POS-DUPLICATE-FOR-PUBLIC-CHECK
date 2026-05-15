@@ -1,3 +1,32 @@
+## 2026-05-15 — Smart Price Scan: Capital Change Fix
+
+### Bug
+Capital Changes tab: typing new prices and clicking "Acknowledge" did not
+save branch prices. Root cause: the system compared user input against
+current effective prices, and if they matched (global = what user typed),
+it treated it as "no change" and only acknowledged without saving.
+
+### Fixes
+1. **Always save to branch_prices**: Removed the "is different?" filter.
+   All valid prices in the fields are now written as branch-specific
+   overrides. This proves the price was reviewed and protects the branch
+   from future global price changes.
+
+2. **POS cache refresh**: After saving, triggers a POS data reload so
+   the Sales page immediately reflects the updated branch prices.
+
+3. **Clearer button labels**:
+   - Primary button: "Confirm Prices" (always PIN-gated, always saves)
+   - Secondary button: "Dismiss" (just acknowledges, with confirmation)
+   - Bulk button: "Dismiss All" (with confirmation dialog)
+   - Removed confusing "Acknowledge" vs "Update & Acknowledge" split
+
+### Files Changed
+- `/app/frontend/src/components/PriceScanManager.js`
+
+---
+
+
 ## 2026-05-15 — Sort for Loading Feature (Detailed Sale)
 
 ### Feature
