@@ -86,8 +86,14 @@ export default function CheckoutDialog({
   saving,
   confirmDisabled,
 
-  // HC flags (read-only — used by the confirm-button LABEL only)
+  // HC flags + hook handle. `hc` is the `useHistoricalCredit()` return
+  // value — needed when isHistoricalCreditMode is true so the inline
+  // "reason" field can read/write the same state the underlying
+  // HistoricalCreditDialog uses. Default to `null` so the rendering
+  // guards (`isHistoricalCreditMode && hc && …`) safely no-op on web
+  // builds where the page hasn't been updated to pass it yet.
   isHistoricalCreditMode,
+  hc = null,
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
