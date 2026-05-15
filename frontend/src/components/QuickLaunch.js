@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   ShoppingCart, Receipt, FileText, Wallet,
   Banknote, ArrowRightLeft, Lock,
-  ChevronDown, ChevronUp, Zap,
+  ChevronDown, ChevronUp, Zap, ClipboardList,
 } from 'lucide-react';
 
 /**
@@ -60,6 +60,14 @@ const ACTIONS = [
     path: '/branch-transfers',
     color: 'bg-amber-50 text-amber-700 hover:bg-amber-100 border-amber-200',
     iconBg: 'bg-amber-600',
+  },
+  {
+    key: 'stock-request',
+    label: 'Stock Request',
+    icon: ClipboardList,
+    path: '/stock-requests',
+    color: 'bg-teal-50 text-teal-700 hover:bg-teal-100 border-teal-200',
+    iconBg: 'bg-teal-600',
   },
   {
     key: 'close-wizard',

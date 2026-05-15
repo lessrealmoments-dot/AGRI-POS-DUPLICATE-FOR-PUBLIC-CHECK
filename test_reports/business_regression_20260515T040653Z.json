@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-05-15T04:13:10.275775+00:00",
-  "pytest_exitstatus": 0,
+  "generated_at": "2026-05-15T04:06:53.987377+00:00",
+  "pytest_exitstatus": 1,
   "row_count": 8,
-  "pass_count": 8,
-  "fail_count": 0,
+  "pass_count": 6,
+  "fail_count": 2,
   "rows": [
     {
       "scenario": "br_sr.1_pure_transfer",
@@ -18,7 +18,7 @@
       },
       "status": "PASS",
       "evidence": {},
-      "recorded_at": "2026-05-15T04:13:10.194103+00:00"
+      "recorded_at": "2026-05-15T04:06:53.475230+00:00"
     },
     {
       "scenario": "br_sr.2_supplier_grouping",
@@ -33,7 +33,7 @@
       },
       "status": "PASS",
       "evidence": {},
-      "recorded_at": "2026-05-15T04:13:10.201264+00:00"
+      "recorded_at": "2026-05-15T04:06:53.518948+00:00"
     },
     {
       "scenario": "br_sr.3_mixed",
@@ -50,41 +50,41 @@
       },
       "status": "PASS",
       "evidence": {},
-      "recorded_at": "2026-05-15T04:13:10.208820+00:00"
+      "recorded_at": "2026-05-15T04:06:53.526299+00:00"
     },
     {
       "scenario": "br_sr.4_quick_create_supplier",
       "step": "supplier_on_requesting_branch",
       "expected": {
-        "branch_id": "br-b2-br-cb032ee6",
+        "branch_id": "br-b2-br-8e9bbb08",
         "created_via": "stock_request_quick_create"
       },
       "actual": {
-        "branch_id": "br-b2-br-cb032ee6",
+        "branch_id": "br-b2-br-8e9bbb08",
         "created_via": "stock_request_quick_create"
       },
       "status": "PASS",
       "evidence": {},
-      "recorded_at": "2026-05-15T04:13:10.213694+00:00"
+      "recorded_at": "2026-05-15T04:06:53.530913+00:00"
     },
     {
       "scenario": "br_sr.5_phantom_and_linkage",
       "step": "phantom_flag_and_source_set",
       "expected": {
-        "po.phantom_for": "p2b-br-69921914",
-        "po.source_request_id": "143f881c-72f6-47c0-9555-dc36956a9321",
-        "bto.source_request_id": "143f881c-72f6-47c0-9555-dc36956a9321",
+        "po.phantom_for": "p2b-br-3ef6fa64",
+        "po.source_request_id": "e81f127e-9936-42d6-a6b7-929d98f2a28c",
+        "bto.source_request_id": "e81f127e-9936-42d6-a6b7-929d98f2a28c",
         "po.status": "draft"
       },
       "actual": {
-        "po.phantom_for": "p2b-br-69921914",
-        "po.source_request_id": "143f881c-72f6-47c0-9555-dc36956a9321",
-        "bto.source_request_id": "143f881c-72f6-47c0-9555-dc36956a9321",
+        "po.phantom_for": "p2b-br-3ef6fa64",
+        "po.source_request_id": "e81f127e-9936-42d6-a6b7-929d98f2a28c",
+        "bto.source_request_id": null,
         "po.status": "draft"
       },
-      "status": "PASS",
+      "status": "FAIL",
       "evidence": {},
-      "recorded_at": "2026-05-15T04:13:10.224254+00:00"
+      "recorded_at": "2026-05-15T04:06:53.540584+00:00"
     },
     {
       "scenario": "br_sr.6_cancel_cascade",
@@ -99,7 +99,7 @@
       },
       "status": "PASS",
       "evidence": {},
-      "recorded_at": "2026-05-15T04:13:10.231747+00:00"
+      "recorded_at": "2026-05-15T04:06:53.581295+00:00"
     },
     {
       "scenario": "br_sr.7_no_retriage",
@@ -112,7 +112,7 @@
       },
       "status": "PASS",
       "evidence": {},
-      "recorded_at": "2026-05-15T04:13:10.237346+00:00"
+      "recorded_at": "2026-05-15T04:06:53.586558+00:00"
     },
     {
       "scenario": "br_sr.8_products_lookup",
@@ -122,12 +122,12 @@
         "supplying_qty": 25
       },
       "actual": {
-        "requesting_qty": 3.0,
-        "supplying_qty": 25.0
+        "requesting_qty": 0,
+        "supplying_qty": 0
       },
-      "status": "PASS",
+      "status": "FAIL",
       "evidence": {},
-      "recorded_at": "2026-05-15T04:13:10.240957+00:00"
+      "recorded_at": "2026-05-15T04:06:53.613675+00:00"
     }
   ]
 }

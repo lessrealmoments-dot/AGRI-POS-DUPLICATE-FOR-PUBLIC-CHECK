@@ -1,0 +1,34 @@
+{
+  "summary": "Stock Requests feature: backend endpoints all wired and functional (8 BR tests + 6 live-API tests pass). Frontend has critical issues: /stock-requests page is gated behind a Standard-plan feature wall (renders the Branch Transfers upgrade card instead of StockRequestsPage), and the 'Stock Requests' sidebar entry is missing for the test admin (Branch Transfers entry is also absent in the sidebar for this user). The Dashboard Quick Launch 'Stock Request' tile (testid quick-launch-stock-request) IS present and visible with teal styling.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "StockRequestsPage route", "issue": "Navigating to /stock-requests on a Basic-plan org renders the Branch Transfers 'Standard Plan Feature' upgrade card instead of the StockRequestsPage. data-testid='stock-requests-page', tabs (Incoming/My Requests/New), supplying-branch-select and product-search-input could not be verified because the page never mounts.", "selector": "[data-testid=\"stock-requests-page\"]", "priority": "HIGH"},
+      {"component": "Layout sidebar", "issue": "The 'Stock Requests' nav item (claimed to be added right above 'Branch Transfers') is NOT visible in the rendered sidebar for the regression admin. The 'Branch Transfers' entry itself is also absent from the sidebar for this user. Likely the entries are conditioned on a plan/feature flag (Standard) and therefore hidden on Basic plan — but the requirement states the item should appear in the 'Branches' section of the sidebar.", "selector": "a[href=\"/stock-requests\"]", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_stock_requests_live_api.py",
+    "/app/backend/tests/business_regression/test_br_stock_request_triage.py",
+    "/app/test_reports/business_regression_latest.json"
+  ],
+  "action_items": [
+    "Ensure /stock-requests route is NOT gated behind the same plan flag as Branch Transfers (or, if intentional, document it). Currently navigating to /stock-requests on Basic plan renders the Branch Transfers upgrade wall — the StockRequestsPage component never mounts.",
+    "Make the 'Stock Requests' sidebar item render for all plans that should access the feature; if plan-gated, align the gating with the rest of the spec. Verify on a Standard+ org that the item appears directly above 'Branch Transfers' under the Branches section.",
+    "After fixing visibility, re-verify these testids: stock-requests-page, supplying-branch-select, product-search-input, and the three tabs."
+  ],
+  "critical_code_review_comments": [
+    "FE plan-gating: the /stock-requests route appears to share the Branch Transfers gate. If StockRequestsPage is meant for all plans (or specifically Standard+), the gate logic needs explicit handling instead of falling through to the Branch Transfers upgrade card.",
+    "Backend endpoints look healthy — list (role=requesting/supplying), products-lookup (with required branch params), create→send→cancel round-trip, and triage PIN-gating all behave correctly via the live preview URL."
+  ],
+  "updated_files": ["/app/backend/tests/test_stock_requests_live_api.py"],
+  "success_rate": {"backend": "100%", "frontend": "33%"},
+  "test_credentials": "test_org_admin@regression.local / RegressionPass!2026 (org 'Branch Verify Co' was temporarily flipped from plan=suspended→basic to allow HTTP login during testing, then restored to suspended/expired).",
+  "seed_data_creation": "None persistent. Live-API roundtrip test created/cancelled a stock request prefixed with TEST_ which ends in 'cancelled' state.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend BR tests at /app/backend/tests/business_regression/test_br_stock_request_triage.py (8/8 green) and live-API smoke at /app/backend/tests/test_stock_requests_live_api.py (6/6 green) cover the endpoint surface. To run live-API tests, the regression admin's org must have plan != 'suspended' — temporarily set organizations.plan='basic' for org id 394b5fa7-0c6d-4745-bd83-8f241f7f676c, run tests, then restore plan='suspended'. The FE testids stock-requests-page / supplying-branch-select / product-search-input / tab-* were unverifiable because /stock-requests rendered the Branch Transfers upgrade wall on Basic plan.",
+  "rca of the issue": "When navigating to /stock-requests with the regression admin (Basic plan), the rendered content is the Branch Transfers 'Standard Plan Feature' upgrade card, not StockRequestsPage. Either (a) the React route /stock-requests is not registered and the router falls through to a catch-all that renders Branch Transfers, or (b) StockRequestsPage is wrapped in the same feature-flag guard used by Branch Transfers. Sidebar visibility for 'Stock Requests' and 'Branch Transfers' is similarly conditioned. Recommended mitigation: (1) confirm /stock-requests route is wired in App.js at line ~234 to render StockRequestsPage directly; (2) decouple it from the Branch Transfers feature gate; (3) make sidebar entry render independently of the Standard-plan gate (or, if gating is intentional, mention it in the spec so testing can be done on a Standard plan org)."
+}

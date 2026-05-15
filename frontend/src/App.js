@@ -16,6 +16,7 @@ import SetupWizardPage from './pages/SetupWizardPage';
 import DashboardPage from './pages/DashboardPage';
 import BranchesPage from './pages/BranchesPage';
 import BranchTransferPage from './pages/BranchTransferPage';
+import StockRequestsPage from './pages/StockRequestsPage';
 import ApproveTransferPage from './pages/ApproveTransferPage';
 import InternalInvoicesPage from './pages/InternalInvoicesPage';
 import ProductsPage from './pages/ProductsPage';
@@ -231,6 +232,7 @@ function AppRoutes() {
       <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
       <Route path="/branches" element={<ProtectedRoute><BranchesPage /></ProtectedRoute>} />
       <Route path="/branch-transfers" element={<ProtectedRoute><FeatureGate featureKey="branch_transfers"><BranchTransferPage /></FeatureGate></ProtectedRoute>} />
+      <Route path="/stock-requests" element={<ProtectedRoute><FeatureGate featureKey="branch_transfers"><StockRequestsPage /></FeatureGate></ProtectedRoute>} />
       <Route path="/approve-transfer/:id" element={<ProtectedRoute><FeatureGate featureKey="branch_transfers"><ApproveTransferPage /></FeatureGate></ProtectedRoute>} />
       <Route path="/internal-invoices" element={<ProtectedRoute><InternalInvoicesPage /></ProtectedRoute>} />
       <Route path="/products" element={<ProtectedRoute><ProductsPage /></ProtectedRoute>} />

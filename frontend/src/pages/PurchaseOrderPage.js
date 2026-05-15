@@ -1450,6 +1450,11 @@ export default function PurchaseOrderPage() {
                         onClick={() => { setDetailPO(po); setDetailDialog(true); }}>{po.po_number}</TableCell>
                       <TableCell className="font-medium max-w-[120px] truncate">
                         <button onClick={() => openSupplierHistory(po.vendor)} className="hover:text-blue-600 hover:underline">{po.vendor}</button>
+                        {po.source_request_number && (
+                          <div className="text-[9px] text-teal-600 font-mono mt-0.5" data-testid={`po-from-sr-${po.id}`}>
+                            ↩ {po.source_request_number}
+                          </div>
+                        )}
                       </TableCell>
                       <TableCell className="text-xs text-slate-400">{po.dr_number || '—'}</TableCell>
                       <TableCell className="text-slate-500 text-xs">{po.items?.length || 0}</TableCell>
