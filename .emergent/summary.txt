@@ -1,35 +1,36 @@
-<analysis>**original_problem_statement**: Continue executing the multi-phase rollout for the Branch Transfer Overhaul (Phases 1-4) and historical data bridging. The problem scope was expanded during the session to include a robust Payment-Aware Refund Engine (for handling split, partial, and credit refunds correctly without misattributing cash), fixing authentication scoping in terminal mode, creating an inline terms picker for credit checkout, and fine-tuning Dot Matrix receipt printing (tick boxes, font scaling, per-unit discount views).
+<analysis>**original_problem_statement**: Continue executing the multi-phase rollout for the Branch Transfer Overhaul (Phases 1-4) and historical data bridging. Implement a robust Payment-Aware Refund Engine, fix authentication scoping in terminal mode, create an inline terms picker for credit checkout, and fine-tune Dot Matrix receipt printing. The scope expanded to implement an advanced Stock Requests / Triage drop-shipping system.
 
 PRODUCT REQUIREMENTS: 
 - Provide transition accounting tools via Historical Supplier PO and Historical Customer Credit.
 - Smart Price Scanning tools.
 - SMS engine must schedule follow-ups for historical credit.
-- Implement Payment-Aware Refund logic: AR reduction -> Digital -> Cash.
+- Implement Payment-Aware Refund logic.
+- Support Triage routing for inter-branch stock requests allowing fulfillment via direct Supplier PO (drop-ship) or Branch Transfer (BTO) seamlessly.
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
 **what currently exists?**: 
-A highly stable React + FastAPI multi-tenant POS application. The app now includes a Payment-Aware Refund Engine which dynamically processes and logs refunds based on the original payment method, rather than strictly debiting the cash drawer. Terminal History modals securely pass token authorizations. Credit checkout has an inline Terms Picker. Dot Matrix layouts utilize  for precise tick-boxes and optimally scaled layouts. Business regression suite is extremely solid with 186/186 passing tests.
+A highly stable React + FastAPI multi-tenant POS application. It features a strict Capacitor-based terminal gating system, daily closing wizard, rigorous capital moving-average tracking, and a powerful Stock Requests Triage engine that automatically fans out single requests into Branch Transfers and Draft Supplier POs (drop-ships). Business regression suite is immaculate with 254/254 passing tests.
 
 **Last working item**: 
-    - Last item agent was working: Fine-tuning the Dot Matrix receipt printing logic. The agent increased font sizes incrementally (+1.5pt to +2pt), converted the row number () column into a 0.33cm tick-box for manual item checking, enforced  to respect physical dimensions, adjusted the Item/Description column ratio to 65/35, and reformatted the discount column to display per-unit discounts instead of overall line-total discounts.
-    - Status: COMPLETED
+    - Last item agent was working: Fixing a frontend bug on the Purchase Order page where users could not input decimal numbers (e.g., ) into  fields (like quantity/price). The agent removed aggressive  coercion from  handlers, allowing raw strings during typing, and shifted numeric coercion exclusively to the API payload compilation phase.
+    - Status: USER VERIFICATION PENDING
     - Agent Testing Done: Y
-    - Which testing method agent to use? Screenshot tool and manual visual checks.
+    - Which testing method agent to use? Screenshot tool (completed UI verification).
     - User Testing Done: N
 
 **All Pending/In progress Issue list**: 
   - Issue 1: Internal invoice print missing details (P1)
-     - Attempted fixes: None
+     - Attempted fixes: None.
      - Next debug checklist: Modify print layouts to show  + Variance accepted by {verifier}.
      - Why fix this issue and what will be achieved with the fix? Provides paper-trail transparency for branch transfers with accepted variances.
      - Status: NOT STARTED
      - Is recurring issue? N
      - Should Test frontend/backend/both after fix? Frontend/Backend.
   - Issue 2: Frontend missing Invoice Creation Failed badge (Phase 3 UI Polish) (P3)
-     - Attempted fixes: Backend sets  flag natively, but UI doesn't display it yet.
-     - Next debug checklist: . Display Invoice missing — see admin badge on BTO cards if the flag is true.
-     - Why fix this issue and what will be achieved with the fix? Closes the loop on the Phase 3 backend fix, providing visibility to operators.
+     - Attempted fixes: Backend sets flag natively.
+     - Next debug checklist: Modify  to display Invoice missing — see admin badge on BTO cards if the flag is true.
+     - Why fix this issue and what will be achieved with the fix? Closes the loop on Phase 3 backend fix.
      - Status: NOT STARTED
      - Is recurring issue? N
      - Should Test frontend/backend/both after fix? Frontend.
@@ -38,7 +39,7 @@ A highly stable React + FastAPI multi-tenant POS application. The app now includ
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
-    - Supplier Ledger view (Combine regular POs + Historical POs per supplier in a unified view chronologically with running balance) (P0) -> *Note: This remains the highest priority upcoming backlog item once immediate UI bugs/adjustments are cleared.*
+    - Supplier Ledger view (Combine regular POs + Historical POs per supplier in a unified view chronologically with running balance) (P0)
     - Variance Log tab (P1)
     - CSV bulk-import for Historical POs (P1)
     - Tenant-configurable variance threshold (P1)
@@ -60,16 +61,28 @@ collected 0 items
     - Public view requires session PIN toggle at the organization level (P3)
 
 **Completed work in this session**
-- Verified Terminal history modals properly navigating to  via cache clear (DONE)
-- Built Payment-Aware Refund Engine () routing refunds AR -> Digital -> Cash. Integrated into  and  with 24 new BR tests (DONE)
-- Implemented Closed-Day Refund Policy allowing incomplete stock corrections on closed days to properly reverse inventory for auditing (DONE)
-- Fixed Auth Scoping bug on Prod: Added  to  and explicitly passed  to modals (, ) overriding web localStorage (DONE)
-- Added inline  to  for seamless Credit/Partial checkout flow (DONE)
-- Refactored Dot Matrix  layout: font scaling (+2pt), 0.33cm tick-box replacing row numbers,  for rigid column scaling, 65/35 Item-to-Description ratio, and per-unit discount formatting (DONE)
+- Fixed PO Capital Line Discount to properly deduct from item  and implemented Overall-Discount Proration using per-value distribution (DONE).
+- Added Data Maintenance — PO Overall-Discount Capital one-click backfill UI in the Audit Center (DONE).
+- Implemented Stock Requests page and Triage system allowing supplying branches to route items to Branch Transfers or external Drop-Ship POs (DONE).
+- Added DRAFT PO tab and Phantom PO concept (supplying branch tracks mirror POs while receiving branch executes the financial delivery) (DONE).
+- Implemented auto-variance detection, variance back-propagation to the supplying branch, and automated SMS alerts for Phantom POs (DONE).
+- Built chronological Activity Timeline for Stock Requests (DONE).
+- Refactored New Request form to a lightning-fast, keyboard-driven row-by-row input (DONE).
+- Fixed DRAFT PO UX so receiving branches can natively edit quantities upon receipt (Parked PO paradigm) by capturing  precisely at triage time (DONE).
+- Fixed bug causing Triage-generated Branch Transfers to dead-end in 'draft' instead of 'pending_approval' (DONE).
+- Fixed frontend decimal input bug inside  fields on the Purchase Order page (DONE).
 
 **Earlier issues found/mentioned but not fixed**
-   - Issue 1: Verifier identity not consistently stamped on PO cancellation (E12 gap).
-   - Issue 2: Admins see incoming and outgoing requests mixed in the All Branches view without visual badges indicating the direction.
+   - Issue 1: 
+     - Debug checklist: Verifier identity not consistently stamped on PO cancellation (E12 gap).
+     - Why to solve this issue and what will be achieved with this: Audit compliance.
+     - Should Test frontend/backend/both after fix: Backend.
+     - Is recurring issue? N
+   - Issue 2: 
+     - Debug checklist: Admins see incoming and outgoing requests mixed in the All Branches view without visual badges indicating the direction.
+     - Why to solve this issue and what will be achieved with this: UX clarity.
+     - Should Test frontend/backend/both after fix: Frontend.
+     - Is recurring issue? N
 
 **Known issue recurrence from previous fork**
   - Issue recurrence in previous fork: 11 Pre-existing Unit Test Failures in Legacy Test Suite (due to hardcoded dates).
@@ -96,31 +109,34 @@ Tree structure of the entire codebase
 
 
 **Key Technical Concepts**
-- **Payment-Aware Refund Engine**: Refunds do not blindly debit the cash drawer. Logic first applies the refund against any unpaid AR balance, then against digital platforms, and finally physical cash.
-- **Terminal Session Authentication**: Since the terminal interface operates outside of traditional web-login sessions (no localStorage JWT), custom modals interacting with backend APIs *must* accept and map  directly into the  Authorization headers.
-- **Dot Matrix PrintEngine**: Relies strictly on inline CSS, ,  explicit sizing, and calculated column percentages (summing to 100%) for pixel-perfect carbon printing.
+- **Capital Proration**: Overall PO discounts are spread across lines via per-value proportional proration to calculate true  for Moving Average capital calculation.
+- **Stock Request Triage Engine**: 1 Stock Request -> 1 BTO + N grouped Draft POs. Draft POs live on the receiving branch's books but create Phantom POs for the sourcing branch to monitor status and variances.
+- **Testing Architecture**: Exclusively using ============================= test session starts ==============================
+platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
+rootdir: /app
+plugins: asyncio-1.3.0, anyio-4.12.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 0 items
+
+============================ no tests ran in 0.00s ============================= for clean, isolated, JSON-reported testing.
 
 **key DB schema**
-  - : {{grand_total, amount_paid, balance, payment_type}}
-  - : tracks items, , and new physical inventory movements.
+  - : {request_number, status, items, organization_id, from_branch_id, to_branch_id}
+  - : added {status: draft, source_request_id, phantom_for_branch_id, request_snapshot}
 
 **changes in tech stack**
   - None
 
 **All files of reference**
-  - 
-  - 
-  - 
-  - 
-  - 
-  - 
-  - 
-  - 
-  - 
-  - 
+  -  (New triage system implementation)
+  -  (New triage UI)
+  -  (Draft PO receiving, Capital preview proration)
+  -  (Decimal fixes, PO receiving UI)
+  -  (Iter240 Backfill panel)
+  -  (Phantom PO notification templates)
 
 **Areas that need refactoring**:
-- Legacy test suite () pollutes database state and is extremely brittle. Stay out of it. Run ============================= test session starts ==============================
+- Legacy test suite () pollutes database state. Stay out of it. Run ============================= test session starts ==============================
 platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
 rootdir: /app
 plugins: asyncio-1.3.0, anyio-4.12.1
@@ -132,6 +148,8 @@ collected 0 items
 **key api endpoints**
   - 
   - 
+  - 
+  - 
 
 **Critical Info for New Agent**
 - **TESTING CONSTRAINT:** You MUST strictly use the  suite for all backend testing (============================= test session starts ==============================
@@ -141,33 +159,27 @@ plugins: asyncio-1.3.0, anyio-4.12.1
 asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
 collected 0 items
 
-============================ no tests ran in 0.00s =============================). DO NOT execute the root ============================= test session starts ==============================
-platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
-rootdir: /app
-plugins: asyncio-1.3.0, anyio-4.12.1
-asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
-collected 0 items
-
-============================ no tests ran in 0.01s ============================= command. 
-- **Terminal Modal Auth:** Always ensure any new modals or sub-components spawned inside  (or  opened via terminal) explicitly pass down and utilize  in API requests.  defaults to  which fails because terminal mode skips the web login state.
-- **Dot Matrix:** Maintain  on  so browsers don't override the  tick-box width.
+============================ no tests ran in 0.00s =============================). 
+- When working on Purchase Order or Branch Transfer workflows, be very aware of the new  mapping.
+- DRAFT POs now natively capture  directly upon triage (not on mark-ordered), allowing Receiving Branches to edit and receive Draft POs directly like parked receipts and still accurately trigger variance warnings.
+-  fields expect pure string management during  state updates, only parsing to float natively upon form submission to preserve decimal typing.
 
 **documents and test reports created in this job**
-  -  (186 passing tests)
   - 
+  -  (254 passing tests)
   - 
 
 **Last 10 User Messages and any pending HUMAN messages** 
-1. User: Asked to recheck modal for terminal history. (Agent confirmed cache issue, no code changes needed).
-2. User: Requested modal logic to correctly process Return and Refund and Incomplete Stocks on split/partial/credit payments. (Completed).
-3. User: Clarified and enforced the policy to allow incomplete stock corrections on closed days to properly update inventory counts. (Completed).
-4. User: Reported that invoice correction was failing with Not authenticated on production when using credit. (Fixed backend auth dependency and frontend token scoping).
-5. User: Requested an inline terms picker component when selecting Credit/Partial during checkout. (Completed).
-6. User: Requested a 1.5x font size increase on Dot Matrix sales receipts. (Completed, but overshoot).
-7. User: Corrected to +1.5/+2pt font scaling, and requested removal of row numbers to create an empty tick box. (Completed).
-8. User: Requested tick box column be shrunk to 1cm, then 1/3 cm. (Completed).
-9. User: Reported tick box size wasn't visibly updating in print view. (Fixed by applying ).
-10. User: Requested the Item/Description column width ratio be set to 65:35, and that the discount column displays per-unit instead of line-total discount. (Completed).
+1. User: Instructed execution of overall PO discount backfill and Capital breakdown.
+2. User: Asked for options on how to run the new backend backfill endpoint.
+3. User: Chose Option A (One-click UI button inside the Audit Center) over CLI usage.
+4. User: Raised a dilemma about handling branch stock requests where a supplier drop-ships directly on their behalf.
+5. User: Requested plain English explanation of drop-ship fulfillment logic.
+6. User: Proposed an alternative flow (Triage mapping: assigning products to BTO vs external Supplier PO drafts on a single screen).
+7. User: Finalized triage design choices (PO lives on requesting branch's books, no re-routing post-order, existing PIN, one type per line). Added DRAFT PO tab logic.
+8. User: Highlighted UI request form needed to be keyboard-driven/faster (similar to Sales).
+9. User: Found 2 Bugs - Draft PO was a dead end (needed to be editable on receipt) and BTO routed to dead-end draft status.
+10. User: Found 1 Bug - Decimal inputs () snapping back to  in Purchase Order page. (Agent fixed immediately prior to finish).
 
 **Project Health Check:**
 - Broken: Legacy FE unit tests (============================= test session starts ==============================
@@ -183,32 +195,21 @@ collected 0 items
 **3rd Party Integrations**
 - Cloudflare R2 / Boto3 (File Storage) — requires User API Key
 - Resend (Emails) — requires User API Key
+- Twilio/SMS (Notifications) — requires User API Key
 
 **Testing status**
-  - Testing agent used after significant changes: NO (Main agent handled complex ============================= test session starts ==============================
-platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
-rootdir: /app
-plugins: asyncio-1.3.0, anyio-4.12.1
-asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
-collected 0 items
-
-============================ no tests ran in 0.00s ============================= expansion directly, running 186 assertions successfully).
+  - Testing agent used after significant changes: YES (iteration_259)
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: 
-    - 
-    - 
-    - 
-  - Known regressions: None.
+  - Test files created: , , , , , , 
+  - Known regressions: None. (254 passing).
 
 **Credentials to test flow:**
 - See 
 
 **What agent forgot to execute**
-- Nothing. The agent iteratively solved all reported ad-hoc bugs and feature polishings successfully.
+- The agent perfectly completed the decimal typing fix at the very end of the session, validated via codebase tracing, but the user has not yet given explicitly written verified/proceed feedback since it was the final exchange. 
 
 **Debugging checklist for current issue**
-    Issue: Execute Upcoming P0 Task -> Supplier Ledger View
-    1. Look into  logic as a starting point.
-    2. Build a unified chronologically sorted query bridging  and  for a given .
-    3. Ensure  entries are also reflected so a running  column can be properly calculated over time.
-    4. Implement rigorous BR tests inside  to ensure calculation integrity.</analysis>
+    Issue: Wait for User verification on Purchase Order Decimal input fix, then proceed to P0 Upcoming Tasks.
+    1. Check in with the user using  to confirm if the PO decimal logic is working as expected.
+    2. Propose picking up the next P0 task: **Supplier Ledger view** (combining regular POs and Historical POs into a unified chronological ledger).</analysis>

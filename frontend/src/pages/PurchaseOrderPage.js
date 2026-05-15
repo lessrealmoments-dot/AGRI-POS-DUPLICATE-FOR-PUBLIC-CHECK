@@ -401,6 +401,19 @@ export default function PurchaseOrderPage() {
   };
 
   const buildPayload = (validLines, extra = {}) => {
+    // String→number coercion at the boundary. Inputs store raw strings
+    // so users can type intermediate states like "." or "0." without
+    // the value snapping back to 0. The backend wants numbers.
+    const toNum = (v) => {
+      const n = parseFloat(v);
+      return Number.isFinite(n) ? n : 0;
+    };
+    const cleanLines = validLines.map(l => ({
+      ...l,
+      quantity:       toNum(l.quantity),
+      unit_price:     toNum(l.unit_price),
+      discount_value: toNum(l.discount_value),
+    }));
     const base = {
       vendor: header.vendor,
       dr_number: header.dr_number,
@@ -408,11 +421,11 @@ export default function PurchaseOrderPage() {
       purchase_date: header.purchase_date,
       notes: header.notes,
       branch_id: currentBranch.id,
-      items: validLines,
+      items: cleanLines,
       overall_discount_type: header.overall_discount_type,
-      overall_discount_value: parseFloat(header.overall_discount_value) || 0,
-      freight: header.show_freight ? (parseFloat(header.freight) || 0) : 0,
-      tax_rate: header.show_vat ? header.tax_rate : 0,
+      overall_discount_value: toNum(header.overall_discount_value),
+      freight: header.show_freight ? toNum(header.freight) : 0,
+      tax_rate: header.show_vat ? toNum(header.tax_rate) : 0,
       grand_total: computed.grandTotal,
       ...extra,
     };
@@ -732,9 +745,21 @@ export default function PurchaseOrderPage() {
   const saveDetailEdit = async () => {
     if (!detailEditReason.trim()) { toast.error('Please enter a reason for the edit'); return; }
     setDetailSaving(true);
+    // Coerce string inputs (intermediate states like ".2") to numbers
+    // before sending. Matches the boundary-conversion pattern used by
+    // buildPayload for the create path.
+    const toNum = (v) => {
+      const n = parseFloat(v);
+      return Number.isFinite(n) ? n : 0;
+    };
+    const cleanItems = detailEditItems.map(it => ({
+      ...it,
+      quantity:   toNum(it.quantity),
+      unit_price: toNum(it.unit_price),
+    }));
     try {
       const payload = {
-        items: detailEditItems,
+        items: cleanItems,
         dr_number: detailEditDR,
         notes: detailPO.notes,
         edit_reason: detailEditReason,
@@ -1248,11 +1273,11 @@ export default function PurchaseOrderPage() {
                         </td>
                         <td className="px-2 py-1">
                           <CalcInput ref={el => qtyRefs.current[i] = el} className="w-full h-8 px-2 text-sm text-right font-mono border border-transparent hover:border-slate-200 focus:border-[#1A4D2E] focus:outline-none rounded"
- value={line.quantity} onChange={(v) => updateLine(i, 'quantity', parseFloat(v) || 0)} />
+ value={line.quantity} onChange={(v) => updateLine(i, 'quantity', v)} />
                         </td>
                         <td className="px-2 py-1">
                           <CalcInput className="w-full h-8 px-2 text-sm text-right font-mono border border-transparent hover:border-slate-200 focus:border-[#1A4D2E] focus:outline-none rounded"
- value={line.unit_price} onChange={(v) => updateLine(i, 'unit_price', parseFloat(v) || 0)} />
+ value={line.unit_price} onChange={(v) => updateLine(i, 'unit_price', v)} />
                         </td>
                         <td className="px-2 py-1">
                           <div className="flex gap-1">
@@ -1263,7 +1288,7 @@ export default function PurchaseOrderPage() {
                             </select>
                             <CalcInput className="flex-1 h-8 px-2 text-xs text-right font-mono border border-slate-200 hover:border-slate-300 focus:border-[#1A4D2E] focus:outline-none rounded"
  value={line.discount_value || ''} placeholder="0"
- onChange={(v) => updateLine(i, 'discount_value', parseFloat(v) || 0)} />
+ onChange={(v) => updateLine(i, 'discount_value', v)} />
                           </div>
                           {computed.lineDiscounts[i] > 0 && (
                             <p className="text-[9px] text-emerald-600 text-right mt-0.5">-{formatPHP(computed.lineDiscounts[i])}</p>
@@ -1319,7 +1344,7 @@ export default function PurchaseOrderPage() {
                       <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-50 ring-1 ring-emerald-200/60">
                         <Label className="text-xs text-slate-600 shrink-0">VAT %</Label>
                         <CalcInput className="h-7 w-16 font-mono text-sm text-right"
-                          value={header.tax_rate} onChange={(v) => setHeader(h => ({ ...h, tax_rate: parseFloat(v) || 0 }))} />
+                          value={header.tax_rate} onChange={(v) => setHeader(h => ({ ...h, tax_rate: v }))} />
                         <button onClick={() => setHeader(h => ({ ...h, show_vat: false }))}
                           className="text-slate-400 hover:text-red-500"><X size={13} /></button>
                       </div>
@@ -1905,13 +1930,13 @@ export default function PurchaseOrderPage() {
                       <div className="col-span-3">
                         <Label className="text-[9px] text-slate-400">Qty</Label>
                         <CalcInput value={item.quantity}
- onChange={(v) => { const n = [...detailEditItems]; n[i] = { ...n[i], quantity: parseFloat(v) || 0 }; setDetailEditItems(n); }}
+ onChange={(v) => { const n = [...detailEditItems]; n[i] = { ...n[i], quantity: v }; setDetailEditItems(n); }}
  className="h-7 text-sm text-right font-mono" />
                       </div>
                       <div className="col-span-4">
                         <Label className="text-[9px] text-slate-400">Unit Price</Label>
                         <CalcInput value={item.unit_price}
- onChange={(v) => { const n = [...detailEditItems]; n[i] = { ...n[i], unit_price: parseFloat(v) || 0 }; setDetailEditItems(n); }}
+ onChange={(v) => { const n = [...detailEditItems]; n[i] = { ...n[i], unit_price: v }; setDetailEditItems(n); }}
  className="h-7 text-sm text-right font-mono" />
                       </div>
                     </div>
@@ -2180,7 +2205,7 @@ export default function PurchaseOrderPage() {
                 </Select>
               </div>
               <div><Label>Unit</Label><Input value={newProdForm.unit} onChange={e => setNewProdForm(f => ({ ...f, unit: e.target.value }))} /></div>
-              <div><Label>Cost Price</Label><CalcInput value={newProdForm.cost_price} onChange={(v) => setNewProdForm(f => ({ ...f, cost_price: parseFloat(v) || 0 }))} /></div>
+              <div><Label>Cost Price</Label><CalcInput value={newProdForm.cost_price} onChange={(v) => setNewProdForm(f => ({ ...f, cost_price: v }))} /></div>
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setCreateProdDialog(false)}>Cancel</Button>

@@ -480,7 +480,13 @@ function DetailDialog({ requestId, currentBranchId, onClose }) {
   };
 
   const submitTriage = async () => {    if (!pin.trim()) { toast.error('PIN required'); return; }
-    const assigns = Object.values(assignments).filter(a => a.fulfillment_type);
+    // Boundary conversion: assignments hold raw string for unit_price
+    // so users can type intermediate decimal states like "." or "0."
+    // without snap-back. Coerce to number at submission only.
+    const toNum = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; };
+    const assigns = Object.values(assignments)
+      .filter(a => a.fulfillment_type)
+      .map(a => ({ ...a, unit_price: toNum(a.unit_price) }));
     if (!assigns.length) { toast.error('Assign at least one line'); return; }
     setSubmitting(true);
     try {
@@ -717,9 +723,9 @@ function DetailDialog({ requestId, currentBranchId, onClose }) {
                                     testid={`supplier-picker-${it.id}`}
                                   />
                                   <Input
-                                    type="number" placeholder="Price/unit"
-                                    value={a.unit_price || ''}
-                                    onChange={e => updateAssign(it.id, { unit_price: parseFloat(e.target.value) || 0 })}
+                                    type="text" inputMode="decimal" placeholder="Price/unit"
+                                    value={a.unit_price ?? ''}
+                                    onChange={e => updateAssign(it.id, { unit_price: e.target.value })}
                                     className="w-24 h-8 text-xs"
                                     data-testid={`unit-price-${it.id}`}
                                   />
