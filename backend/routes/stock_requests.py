@@ -916,6 +916,108 @@ def compute_phantom_po_variance(po: dict) -> dict:
     }
 
 
+async def _notify_supplying_branch_variance(po: dict, req: dict, variance: dict):
+    """Best-effort SMS to the supplying branch's admins/manager when a
+    phantom PO comes back from the supplier with a non-trivial variance
+    (anything other than 'completed'). Lets Branch B chase the supplier
+    without having to manually scan the request list.
+    """
+    if variance.get("kind") == "completed":
+        return
+    try:
+        from routes.sms import queue_sms
+
+        org_id = po.get("organization_id") or req.get("organization_id") or ""
+        sup_bid = req.get("supplying_branch_id") or ""
+        if not org_id or not sup_bid:
+            return
+
+        proj = {"_id": 0, "id": 1, "full_name": 1, "username": 1,
+                "phone": 1, "phone_number": 1, "role": 1,
+                "branch_id": 1, "branch_ids": 1}
+        recipients = []
+        seen = set()
+
+        admins = await db.users.find(
+            {"organization_id": org_id, "role": "admin", "active": True}, proj
+        ).to_list(50)
+        for u in admins:
+            recipients.append(u)
+            seen.add(u["id"])
+        managers = await db.users.find(
+            {"organization_id": org_id, "role": "manager", "active": True,
+             "$or": [{"branch_id": sup_bid}, {"branch_ids": sup_bid}]}, proj
+        ).to_list(50)
+        for u in managers:
+            if u["id"] in seen:
+                continue
+            recipients.append(u)
+            seen.add(u["id"])
+
+        branch = await _raw_db.branches.find_one(
+            {"id": sup_bid}, {"_id": 0, "name": 1}) or {}
+        org = await _raw_db.organizations.find_one(
+            {"id": org_id}, {"_id": 0, "name": 1}) or {}
+
+        # Build a compact human summary of the worst-offending lines.
+        bad = [iv for iv in variance.get("items_variance", [])
+               if iv["kind"] in ("missing", "under", "extra", "over")]
+        bits = []
+        for iv in bad[:3]:  # cap at 3 lines for SMS length sanity
+            if iv["kind"] == "missing":
+                bits.append(f"{iv['product_name']} missing (ordered {iv['ordered_qty']})")
+            elif iv["kind"] == "extra":
+                bits.append(f"{iv['product_name']} extra (+{iv['received_qty']})")
+            elif iv["kind"] == "under":
+                bits.append(f"{iv['product_name']} short ({iv['received_qty']}/{iv['ordered_qty']})")
+            elif iv["kind"] == "over":
+                bits.append(f"{iv['product_name']} over (+{iv['delta']})")
+        if len(bad) > 3:
+            bits.append(f"+{len(bad)-3} more")
+        summary = "; ".join(bits) if bits else "see PO"
+
+        labels = {
+            "under_delivered": "under-delivery",
+            "over_delivered":  "over-delivery",
+            "extra_items":     "extra items",
+            "missing_items":   "missing items",
+        }
+        kind_label = labels.get(variance["kind"], variance["kind"])
+
+        for rcp in recipients:
+            phone = (rcp.get("phone") or rcp.get("phone_number") or "").strip()
+            if not phone:
+                continue
+            await queue_sms(
+                template_key="phantom_po_variance",
+                customer_id=rcp["id"],
+                customer_name=rcp.get("full_name") or rcp.get("username", "Manager"),
+                phone=phone,
+                variables={
+                    "recipient_name":      rcp.get("full_name") or rcp.get("username", ""),
+                    "po_number":           po.get("po_number", ""),
+                    "vendor":              po.get("vendor", ""),
+                    "request_number":      req.get("request_number", ""),
+                    "variance_kind":       variance["kind"],
+                    "variance_kind_label": kind_label,
+                    "variance_summary":    summary,
+                    "branch_name":         branch.get("name", ""),
+                    "company_name":        org.get("name", "AgriBooks"),
+                },
+                organization_id=org_id,
+                branch_id=sup_bid,
+                branch_name=branch.get("name", ""),
+                trigger="auto",
+                trigger_ref=po.get("id", ""),
+                dedup_key=f"phantom_po_variance:{po.get('id','')}:{rcp['id']}",
+            )
+    except Exception as e:
+        import logging
+        logging.getLogger("stock_requests").warning(
+            f"phantom_po_variance SMS failed: {e}"
+        )
+
+
 async def update_phantom_po_received(po: dict):
     """Hook called from `purchase_orders.receive_purchase_order` whenever a
     PO that was spawned from a stock request transitions to `received`.
@@ -958,6 +1060,9 @@ async def update_phantom_po_received(po: dict):
                                 "variance": variance["kind"]})
             else:
                 updated.append(it)
+
+        # Fire variance SMS to supplying branch (best-effort, no-op on completed).
+        await _notify_supplying_branch_variance(po, req, variance)
 
         # If every child doc is now in a terminal state, mark the request completed.
         all_pos = await db.purchase_orders.find(

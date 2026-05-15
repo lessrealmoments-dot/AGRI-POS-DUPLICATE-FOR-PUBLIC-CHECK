@@ -1,6 +1,25 @@
 # AgriBooks Changelog
 
 
+## Feb 15 2026 — Stock Requests Phase 3+: Variance Alert SMS 🟠 P1
+
+**Closes the loop**: when a supplier ships incorrectly, Branch B is now actively notified instead of having to scan the request list manually.
+
+- **Backend** (`routes/stock_requests.py`):
+  - New `_notify_supplying_branch_variance(po, req, variance)` helper, invoked from `update_phantom_po_received` immediately after stamping variance. Silent on `completed`; fires for `under_delivered`, `over_delivered`, `extra_items`, `missing_items`.
+  - Recipients: org admins + managers on the supplying branch. Phone-required gate (same pattern as other SMS hooks).
+  - SMS variables carry a compact summary (e.g. "Item A short (8/10); Item B missing (ordered 4)") plus `variance_kind` and a human label.
+- **SMS template seeded** (`routes/sms.py` → `DEFAULT_TEMPLATES`):
+  - `phantom_po_variance` — "Heads up <recipient>, PO <po_number> from <vendor> for request <request_number> arrived with <variance_kind_label> — <variance_summary>. Please follow up with the supplier."
+- **Tests** (`test_br_stock_request_variance_sms.py` — 3 scenarios, all green):
+  1. `under_delivered` → supplying manager gets the SMS with correct kind + summary
+  2. `completed` → NO SMS (silence)
+  3. `missing + extra` combined → kind label resolves to "missing items" (precedence preserved at SMS layer)
+
+**Verification**: 243/243 BR tests passing (was 240 + 3 new). Lint clean.
+
+
+
 ## Feb 15 2026 — Stock Requests Phase 3: Variance Detection + SMS template seed 🟠 P1
 
 **What ships**:

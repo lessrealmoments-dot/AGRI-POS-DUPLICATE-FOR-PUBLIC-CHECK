@@ -558,6 +558,22 @@ DEFAULT_TEMPLATES = [
         "trigger": "auto",
         "active": True,
     },
+    {
+        "key": "phantom_po_variance",
+        "name": "Phantom PO Variance Alert (to supplying branch)",
+        "body": (
+            "Heads up <recipient_name>: PO <po_number> from <vendor> for "
+            "request <request_number> arrived with <variance_kind_label> — "
+            "<variance_summary>. Please follow up with the supplier. "
+            "— <company_name>"
+        ),
+        "placeholders": ["recipient_name", "po_number", "vendor",
+                         "request_number", "variance_kind",
+                         "variance_kind_label", "variance_summary",
+                         "branch_name", "company_name"],
+        "trigger": "auto",
+        "active": True,
+    },
     # ── Crop Credit Notifications ────────────────────────────────────────────
     {
         "key": "crop_season_started",

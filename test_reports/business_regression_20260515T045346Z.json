@@ -1,0 +1,45 @@
+{
+  "generated_at": "2026-05-15T04:53:46.175194+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 2,
+  "pass_count": 2,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br_sr_qr.7_admin_pin_accepted",
+      "step": "200_succeeded",
+      "expected": {
+        "state": "ok"
+      },
+      "actual": {
+        "state": "ok"
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "bcc2b884-1c70-465e-a6d6-21f038a781f8",
+        "state": "ok",
+        "approval_status_after": "approved",
+        "approval_method": "manager_pin"
+      },
+      "recorded_at": "2026-05-15T04:53:46.137990+00:00"
+    },
+    {
+      "scenario": "br_sr_qr.7_admin_pin_accepted",
+      "step": "method_recorded",
+      "expected": {
+        "method_is_manager_or_admin": true
+      },
+      "actual": {
+        "method_is_manager_or_admin": true
+      },
+      "status": "PASS",
+      "evidence": {
+        "po_id": "bcc2b884-1c70-465e-a6d6-21f038a781f8",
+        "state": "ok",
+        "approval_status_after": "approved",
+        "approval_method": "manager_pin"
+      },
+      "recorded_at": "2026-05-15T04:53:46.137995+00:00"
+    }
+  ]
+}

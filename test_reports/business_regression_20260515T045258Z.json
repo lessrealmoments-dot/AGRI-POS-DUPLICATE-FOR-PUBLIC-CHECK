@@ -1,0 +1,52 @@
+{
+  "generated_at": "2026-05-15T04:52:58.214781+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 3,
+  "pass_count": 2,
+  "fail_count": 1,
+  "rows": [
+    {
+      "scenario": "br_vsms.1_under",
+      "step": "supplying_manager_sms_fired",
+      "expected": {
+        "template": "phantom_po_variance",
+        "supplying_mgr_alerted": true
+      },
+      "actual": {
+        "template": "phantom_po_variance",
+        "phones": [
+          "+639170009999"
+        ]
+      },
+      "status": "FAIL",
+      "evidence": {},
+      "recorded_at": "2026-05-15T04:52:58.152275+00:00"
+    },
+    {
+      "scenario": "br_vsms.2_completed",
+      "step": "no_variance_sms_on_completed",
+      "expected": {
+        "variance_sms_count": 0
+      },
+      "actual": {
+        "variance_sms_count": 0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T04:52:58.166039+00:00"
+    },
+    {
+      "scenario": "br_vsms.3_precedence",
+      "step": "kind_label_missing_items",
+      "expected": {
+        "kind": "missing_items"
+      },
+      "actual": {
+        "kind": "missing_items"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T04:52:58.179133+00:00"
+    }
+  ]
+}
