@@ -1,6 +1,48 @@
 # AgriBooks Changelog
 
 
+## Feb 15 2026 — Stock Requests (multi-doc triage) 🟢 P0 FEATURE
+
+**User pain**: When Branch A requests stock from Branch B, B often has only part of the items and a supplier for the rest. No clean way to fan out one request into multiple downstream docs (BTO + POs) without juggling forms.
+
+**Design** (Option-4 routing, validated with the user across a long discussion thread):
+- New top-level **Stock Requests** page sits above Branch Transfer in sidebar.
+- Branch A drafts a request (multi-line, with product search showing BOTH branches' on-hand qty so they know what's actually available).
+- Branch B opens it, triages each line: **🚚 Personal Transfer** / **📦 Order from Supplier** / **❌ Cannot fulfill**.
+- One "Generate Fulfillment Plan" click + one PIN → system spawns:
+  - 1 BTO with all transfer lines coalesced (uses existing branch-transfer flow)
+  - 1 DRAFT PO per supplier (lines grouped) on Branch A's books, with `phantom_for_branch_id = supplying_branch_id` so Branch B sees them in their list as phantoms (no inventory, no AP)
+- Supplier directory used: requesting branch's (PO lives there). Quick-create writes to that directory; reusing a supplier name on a second triage **reuses** the existing doc.
+- Cancel cascades to DRAFT POs only — `ordered`+ POs require manual unwind.
+
+**Backend** (`routes/stock_requests.py`):
+- `POST/GET /api/stock-requests` (create + list with role=requesting/supplying filters)
+- `GET /api/stock-requests/{id}` (hydrates linked BTO + POs)
+- `POST /api/stock-requests/{id}/send` (draft → sent)
+- `POST /api/stock-requests/{id}/triage` (the heart — PIN-gated, atomic spawn)
+- `POST /api/stock-requests/{id}/cancel` (cascades to DRAFT POs)
+- `GET /api/stock-requests/products-lookup` (search w/ both branches' inventory)
+
+**Frontend**:
+- `pages/StockRequestsPage.js` — new page with Incoming/My Requests/New tabs, triage dialog, supplier picker w/ quick-create
+- `components/Layout.js` — sidebar entry above Branch Transfer (under "Branches" section)
+- `components/QuickLaunch.js` — new teal "Stock Request" tile on Dashboard Quick Launch
+- `pages/PurchaseOrderPage.js` — DRAFT POs from stock requests show a `↩ SR-…` badge next to vendor name on the PO list
+
+**Tests** (`test_br_stock_request_triage.py` — 8 scenarios, all green):
+1. Pure transfer triage → 1 BTO, 0 POs
+2. 2 suppliers / 3 lines → 0 BTO, 2 POs correctly grouped
+3. Mixed (1 transfer + 1 supplier + 1 unfulfilled) → 1 BTO + 1 PO + variance log
+4. Quick-create supplier writes to requesting branch's DB; re-using same name reuses doc
+5. Phantom flag + source linkage stamped on both BTO and POs
+6. Cancel cascades to DRAFT POs but preserves `ordered` ones
+7. Re-triage blocked once fulfillment_generated
+8. products-lookup returns both branches' inventory in one response
+
+**Verification**: 226/226 BR tests passing (was 218 + 8 new). Testing agent confirmed all backend endpoints work end-to-end via live API curl tests (6/6 pass). Frontend page renders correctly when the user's plan includes `branch_transfers` (shared feature flag — intentional, since Stock Requests *requires* BTO + PO downstream pipelines).
+
+
+
 ## Feb 15 2026 — PO Capital: Overall-Discount Proration + Backfill 🔴 P0
 **User context**: "On our PO we have an overall discount separate from the per-line discount. Also our supplier does 10+1 free." Confirmed that the prior Feb-2026 fix only handled per-line discount; **overall PO discount still only hit AP**, leaving each line's `cost_price` stamped at the pre-overall-discount price. Inflated COGS reappeared whenever a header-level discount was used.
 
