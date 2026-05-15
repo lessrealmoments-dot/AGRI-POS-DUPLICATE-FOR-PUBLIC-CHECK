@@ -669,6 +669,7 @@ async def create_unified_sale(data: dict, user=Depends(get_current_user)):
             "description": item.get("description", ""),
             "quantity": qty,
             "rate": rate,
+            "unit": product.get("unit", ""),
             "discount_type": disc_type,
             "discount_value": disc_val,
             "discount_amount": disc_amt,

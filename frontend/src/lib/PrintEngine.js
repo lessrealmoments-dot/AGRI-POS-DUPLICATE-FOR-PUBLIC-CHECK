@@ -577,7 +577,8 @@ function orderSlipFullPage(data, biz, docCode) {
     const rate = parseFloat(item.rate || item.unit_price || item.price) || 0;
     const disc = parseFloat(item.discount_amount) || 0;
     const total = parseFloat(item.total) || (qty * rate - disc);
-    html += `<tr><td class="c">${i + 1}</td><td>${item.product_name || ''}</td><td class="c">${qty}</td><td class="r">${formatPHP(rate)}</td>`;
+    const unit = item.unit || item.uom || '';
+    html += `<tr><td class="c">${i + 1}</td><td>${item.product_name || ''}</td><td class="c">${qty}${unit ? ' ' + unit : ''}</td><td class="r">${formatPHP(rate)}</td>`;
     if (items.some(it => parseFloat(it.discount_amount) > 0)) html += `<td class="r">${disc > 0 ? formatPHP(disc) : '-'}</td>`;
     html += `<td class="r" style="font-weight:600">${formatPHP(total)}</td></tr>`;
   }
@@ -652,7 +653,8 @@ function trustReceiptFullPage(data, biz, docCode) {
     const qty = parseFloat(item.quantity) || 0;
     const rate = parseFloat(item.rate || item.unit_price || item.price) || 0;
     const total = parseFloat(item.total) || (qty * rate);
-    html += `<tr><td class="c">${i + 1}</td><td>${item.product_name || ''}</td><td class="c">${qty}</td><td class="r">${formatPHP(rate)}</td><td class="r" style="font-weight:600">${formatPHP(total)}</td></tr>`;
+    const unit = item.unit || item.uom || '';
+    html += `<tr><td class="c">${i + 1}</td><td>${item.product_name || ''}</td><td class="c">${qty}${unit ? ' ' + unit : ''}</td><td class="r">${formatPHP(rate)}</td><td class="r" style="font-weight:600">${formatPHP(total)}</td></tr>`;
   }
   html += '</tbody></table>';
 
@@ -726,7 +728,8 @@ function purchaseOrderFullPage(data, biz, docCode) {
     const qty = parseFloat(item.quantity) || 0;
     const rate = parseFloat(item.rate || item.unit_price || item.price) || 0;
     const total = parseFloat(item.total) || (qty * rate);
-    html += `<tr><td class="c">${i + 1}</td><td>${item.product_name || item.description || ''}</td><td class="c">${qty}</td><td class="r">${formatPHP(rate)}</td><td class="r" style="font-weight:600">${formatPHP(total)}</td></tr>`;
+    const unit = item.unit || item.uom || '';
+    html += `<tr><td class="c">${i + 1}</td><td>${item.product_name || item.description || ''}</td><td class="c">${qty}${unit ? ' ' + unit : ''}</td><td class="r">${formatPHP(rate)}</td><td class="r" style="font-weight:600">${formatPHP(total)}</td></tr>`;
   }
   html += '</tbody></table>';
 
@@ -842,7 +845,8 @@ function returnSlipFullPage(data, biz, docCode) {
     const qty = parseFloat(item.quantity) || 0;
     const rate = parseFloat(item.rate || item.unit_price || item.price) || 0;
     const total = parseFloat(item.total) || (qty * rate);
-    html += `<tr><td class="c">${i + 1}</td><td>${item.product_name || ''}</td><td class="c">${qty}</td><td class="r">${formatPHP(rate)}</td><td class="r" style="font-weight:600">${formatPHP(total)}</td></tr>`;
+    const unit = item.unit || item.uom || '';
+    html += `<tr><td class="c">${i + 1}</td><td>${item.product_name || ''}</td><td class="c">${qty}${unit ? ' ' + unit : ''}</td><td class="r">${formatPHP(rate)}</td><td class="r" style="font-weight:600">${formatPHP(total)}</td></tr>`;
   }
   html += '</tbody></table>';
 

@@ -42,7 +42,7 @@
   },
   "regression_proof": {
     "request_method": "POST",
-    "request_url": "https://supplier-ledger-view.preview.emergentagent.com/api/customers/396be500-1d91-40d2-8b11-7a04b5ed1728/receive-payment",
+    "request_url": "https://pos-refund-engine.preview.emergentagent.com/api/customers/396be500-1d91-40d2-8b11-7a04b5ed1728/receive-payment",
     "request_body_json": {"allocations":[{"invoice_id":"4b021f13-daf6-43be-92a6-b2876ee9512c","amount":100,"discount":0}],"method":"Cash","reference":"","date":"2026-05-02","memo":""},
     "discount_pin_field_present": false,
     "discount_pin_field_correct_type": "n/a — field omitted (correct, no PIN required when discount=0)",

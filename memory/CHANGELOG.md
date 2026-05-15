@@ -1,3 +1,51 @@
+## 2026-05-15 — UoM (Unit of Measurement) Bug Fix — End-to-End
+
+### Root Cause
+Backend `sale_items` construction in `/api/unified-sale` did NOT include the
+`unit` field from the product document. This meant:
+1. Stored invoices had no `unit` on line items
+2. The POST response overwrote frontend items (which had `unit`) via spread
+3. Print templates received items with empty `unit`
+
+Additionally, several frontend code paths dropped the `unit` field:
+- Quick Sale → Detailed Sale mode switch
+- Detailed Sale → Quick Sale mode switch
+- Void & Reopen (reopenAsSale)
+- Draft order loading (loadDraftIntoCart)
+- Prepare Order (handlePrepareOrder)
+
+### Fixes Applied
+**Backend** (`/app/backend/routes/sales.py`):
+- Added `"unit": product.get("unit", "")` to `sale_items` dict (line ~666)
+
+**Frontend** (`/app/frontend/src/pages/UnifiedSalesPage.js`):
+- `EMPTY_LINE`: Added `unit: ''` default
+- `switchMode` Quick→Order: Added `unit: c.unit || ''`
+- `switchMode` Order→Quick: Fixed `unit: ''` → `unit: l.unit || ''`
+- `reopenAsSale`: Added `unit: item.unit || ''`
+- `loadDraftIntoCart`: Added `unit: item.unit || ''` to both branches
+- `handlePrepareOrder`: Added `unit` to both quick and order draft items
+
+**Frontend** (`/app/frontend/src/lib/PrintEngine.js`):
+- Added UoM display (appended to QTY cell) in all print templates:
+  - `orderSlipFullPage`, `trustReceiptFullPage`, `purchaseOrderFullPage`,
+    `returnSlipFullPage` — all now show `qty unit` in the Qty column
+
+Note: Dot Matrix templates (`orderSlipDotMatrix`, `trustReceiptDotMatrix`)
+already had the `item.unit` read — they just weren't receiving it from the
+data layer. Now fixed upstream.
+
+**Backward compatibility**: The existing `_hydrate_item_units()` in
+`invoices.py` still backfills `unit` from the products collection for
+historical invoices that were stored without it.
+
+### Testing
+- 254/254 business regression tests passing
+- Frontend compiles without errors
+
+---
+
+
 # AgriBooks Changelog
 
 

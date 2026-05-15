@@ -1,5 +1,5 @@
 {
-  "summary": "Phase 2A Customer Balance Reconciliation Report — backend-only review. Ran the 18 pytest cases in tests/test_phase2a_balance_recon.py and the 27-case Phase 1 regression baseline (test_phase1a_security.py / test_phase1b_inventory.py / test_phase1c_money.py): all 45 PASS. Added a live-API smoke test (tests/test_phase2a_live_api.py) hitting REACT_APP_BACKEND_URL=https://supplier-ledger-view.preview.emergentagent.com — unauth → 401, super-admin login → 200 with a structurally valid empty report. Found one minor response-shape inconsistency in the empty-tenant short-circuit branch of customer_balance_reconciliation.",
+  "summary": "Phase 2A Customer Balance Reconciliation Report — backend-only review. Ran the 18 pytest cases in tests/test_phase2a_balance_recon.py and the 27-case Phase 1 regression baseline (test_phase1a_security.py / test_phase1b_inventory.py / test_phase1c_money.py): all 45 PASS. Added a live-API smoke test (tests/test_phase2a_live_api.py) hitting REACT_APP_BACKEND_URL=https://pos-refund-engine.preview.emergentagent.com — unauth → 401, super-admin login → 200 with a structurally valid empty report. Found one minor response-shape inconsistency in the empty-tenant short-circuit branch of customer_balance_reconciliation.",
   "backend_issues": {
     "critical": [],
     "minor": [

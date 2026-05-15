@@ -10,7 +10,7 @@ import os
 import pytest
 import requests
 
-BASE = os.environ.get("API_URL", "https://supplier-ledger-view.preview.emergentagent.com").rstrip("/")
+BASE = os.environ.get("API_URL", "https://pos-refund-engine.preview.emergentagent.com").rstrip("/")
 EMAIL = "test_org_admin@regression.local"
 PASSWORD = "RegressionPass!2026"
 
