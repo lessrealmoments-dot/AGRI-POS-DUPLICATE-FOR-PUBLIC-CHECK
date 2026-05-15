@@ -172,7 +172,28 @@ async def _apply_po_inventory(po: dict, user: dict, capital_choices: dict = None
         if not pid:
             continue
         qty = float(item.get("quantity", 0))
-        price = float(item.get("unit_price", 0))
+        unit_price = float(item.get("unit_price", 0))
+        # Effective per-unit cost — preserves per-line supplier discount.
+        #
+        # Bug fix Feb 2026: previously `price = unit_price`, ignoring the
+        # line's `discount_amount`. So a PO with "₱1500 less ₱100 = ₱1400"
+        # would correctly debit ₱1400 from payables but stamp the product's
+        # cost_price as ₱1500 — silently inflating COGS and capital. The
+        # discount was only ever reflected on the AP side.
+        #
+        # We prefer the stored line `total` (canonical post-discount sum)
+        # when present, falling back to per-unit derivation. Per-line
+        # discount only — overall PO discount proration is intentionally
+        # out of scope here (rare, and the user can repeat the savings via
+        # capital_choices if needed).
+        line_disc = float(item.get("discount_amount", 0) or 0)
+        stored_total = float(item.get("total", 0) or 0)
+        if stored_total > 0 and qty > 0:
+            price = round(stored_total / qty, 4)
+        elif qty > 0 and line_disc > 0:
+            price = round(unit_price - (line_disc / qty), 4)
+        else:
+            price = unit_price
         product_name = item.get("product_name", pid)
 
         try:
@@ -1628,8 +1649,20 @@ async def get_capital_preview(po_id: str, user=Depends(get_current_user)):
         pid = item.get("product_id")
         if not pid:
             continue
-        new_price = float(item.get("unit_price") or 0)
         qty = float(item.get("quantity") or 0)
+        # Same per-line discount math as `_apply_po_inventory` — the
+        # preview must show what the cost_price WILL be, not the pre-
+        # discount unit_price. Mismatched preview/apply was a separate
+        # symptom of the Feb 2026 capital bug.
+        unit_price = float(item.get("unit_price") or 0)
+        line_disc = float(item.get("discount_amount") or 0)
+        stored_total = float(item.get("total") or 0)
+        if stored_total > 0 and qty > 0:
+            new_price = round(stored_total / qty, 4)
+        elif qty > 0 and line_disc > 0:
+            new_price = round(unit_price - (line_disc / qty), 4)
+        else:
+            new_price = unit_price
 
         product = await db.products.find_one({"id": pid}, {"_id": 0})
         if not product:

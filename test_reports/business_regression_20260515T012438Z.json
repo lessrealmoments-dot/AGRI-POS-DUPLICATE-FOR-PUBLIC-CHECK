@@ -1,0 +1,61 @@
+{
+  "generated_at": "2026-05-15T01:24:38.348451+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 4,
+  "pass_count": 4,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br_po_cap.1_line_discount",
+      "step": "cost_price_reflects_post_discount",
+      "expected": {
+        "cost_price": 1400.0
+      },
+      "actual": {
+        "cost_price": 1400.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T01:24:38.286353+00:00"
+    },
+    {
+      "scenario": "br_po_cap.2_no_discount",
+      "step": "happy_path_unchanged",
+      "expected": {
+        "cost_price": 500.0
+      },
+      "actual": {
+        "cost_price": 500.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T01:24:38.293758+00:00"
+    },
+    {
+      "scenario": "br_po_cap.3_multi_unit_disc",
+      "step": "per_unit_disc_prorated",
+      "expected": {
+        "cost_price": 980.0
+      },
+      "actual": {
+        "cost_price": 980.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T01:24:38.302327+00:00"
+    },
+    {
+      "scenario": "br_po_cap.4_preview_apply_agreement",
+      "step": "preview_shows_post_discount_price",
+      "expected": {
+        "new_price": 1400.0
+      },
+      "actual": {
+        "new_price": 1400.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T01:24:38.306086+00:00"
+    }
+  ]
+}

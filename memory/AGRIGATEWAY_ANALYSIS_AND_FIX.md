@@ -61,14 +61,14 @@ With ASC: processes 10 → 11 → 12. After loop: `lastProcessedSmsId = 12`. Nex
 ### BUG 2 — MINOR: Preview server URL is wrong
 
 **File:** `GatewayPrefs.java`
-**Line:** `public static final String SERVER_PREVIEW = "https://bto-phase-rollout.preview.emergentagent.com";`
+**Line:** `public static final String SERVER_PREVIEW = "https://po-capital-fix.preview.emergentagent.com";`
 
 **The bug:** This hardcoded preview URL doesn't match the actual server. The correct current preview URL is:
-`https://bto-phase-rollout.preview.emergentagent.com`
+`https://po-capital-fix.preview.emergentagent.com`
 
 **The fix:**
 ```java
-public static final String SERVER_PREVIEW = "https://bto-phase-rollout.preview.emergentagent.com";
+public static final String SERVER_PREVIEW = "https://po-capital-fix.preview.emergentagent.com";
 ```
 
 ---
@@ -120,12 +120,12 @@ cursor = resolver.query(SENT_URI, projection, selection, selectionArgs, BaseColu
 
 Find this line:
 ```java
-public static final String SERVER_PREVIEW = "https://bto-phase-rollout.preview.emergentagent.com";
+public static final String SERVER_PREVIEW = "https://po-capital-fix.preview.emergentagent.com";
 ```
 
 Change it to:
 ```java
-public static final String SERVER_PREVIEW = "https://bto-phase-rollout.preview.emergentagent.com";
+public static final String SERVER_PREVIEW = "https://po-capital-fix.preview.emergentagent.com";
 ```
 
 ---
@@ -155,7 +155,7 @@ public static void fetchPendingQueue(Context ctx, StringCallback cb) {
 ## TESTING AFTER THE FIX
 
 1. Build and install the updated APK.
-2. Open the app → Settings → set URL to `https://bto-phase-rollout.preview.emergentagent.com` → login.
+2. Open the app → Settings → set URL to `https://po-capital-fix.preview.emergentagent.com` → login.
 3. **Test Flow 3 fix:** Type a message in the native SMS app to any contact. Open the web dashboard → Messages → Conversations. The message should appear within 15 seconds attributed as "Admin (via device)". Restart the app and verify no duplicate messages appear.
 4. **Test Flow 1:** From the web, compose and send a message. It should be sent by the phone within 15s.
 5. **Test Flow 2:** From another phone, send an SMS to the gateway phone. It should appear in the web Conversations tab.
