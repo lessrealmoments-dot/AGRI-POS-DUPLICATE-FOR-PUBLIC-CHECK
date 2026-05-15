@@ -153,6 +153,88 @@ async def _notify_stock_request_recipients(
             logger.warning(f"queue_sms failed for {rcp.get('phone')}: {e}")
 
 
+# ── Capital-cost helpers ─────────────────────────────────────────────────────
+def _po_overall_discount_amount(po: dict) -> float:
+    """Return the canonical overall discount peso amount for a PO.
+
+    Some legacy docs use `overall_discount` (terminal-verify recompute path),
+    while the create/receive pipeline writes `overall_discount_amount`. We
+    prefer the explicit `_amount` field and fall back to `overall_discount`.
+    """
+    val = po.get("overall_discount_amount")
+    if val is None:
+        val = po.get("overall_discount", 0)
+    try:
+        return float(val or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _po_line_subtotal(po: dict) -> float:
+    """Sum of line totals (post-line-discount, pre-overall-discount)."""
+    sub = po.get("line_subtotal")
+    if sub is None:
+        sub = po.get("subtotal")
+    if sub is None:
+        sub = sum(float(it.get("total") or 0) for it in po.get("items", []))
+    try:
+        return float(sub or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _effective_unit_cost(item: dict, *, line_subtotal: float, overall_disc_amt: float) -> dict:
+    """Compute the effective per-unit landed cost for one PO line.
+
+    Per-value (proportional) overall-discount proration: each line absorbs a
+    share of the overall PO discount equal to its share of the line subtotal.
+    Per-line discount is applied first (already baked into `item.total`).
+
+    Returns: {
+        "unit_price":        float,  # raw sticker, pre-any-discount
+        "line_total":        float,  # post-line-discount line total
+        "line_discount":     float,  # per-line disc (peso)
+        "overall_disc_share":float,  # this line's share of overall PO disc
+        "effective_total":   float,  # post-line + post-overall total
+        "effective_unit":    float,  # effective_total / qty
+    }
+    Falls back gracefully when fields are missing or `line_subtotal == 0`.
+    """
+    qty = float(item.get("quantity") or 0)
+    unit_price = float(item.get("unit_price") or 0)
+    line_disc = float(item.get("discount_amount") or 0)
+    stored_total = float(item.get("total") or 0)
+
+    # Canonical post-line-discount line total
+    if stored_total > 0:
+        line_total = stored_total
+    elif qty > 0:
+        line_total = round(qty * unit_price - line_disc, 4)
+    else:
+        line_total = 0.0
+
+    # Proportional share of overall discount (peso)
+    if overall_disc_amt > 0 and line_subtotal > 0:
+        share = round(line_total / line_subtotal * overall_disc_amt, 4)
+    else:
+        share = 0.0
+
+    effective_total = round(line_total - share, 4)
+    if qty > 0:
+        effective_unit = round(effective_total / qty, 4)
+    else:
+        effective_unit = unit_price
+
+    return {
+        "unit_price": unit_price,
+        "line_total": round(line_total, 4),
+        "line_discount": round(line_disc, 4),
+        "overall_disc_share": share,
+        "effective_total": effective_total,
+        "effective_unit": effective_unit,
+    }
+
+
 # ── Shared inventory-receive helper ──────────────────────────────────────────
 async def _apply_po_inventory(po: dict, user: dict, capital_choices: dict = None):
     """
@@ -167,33 +249,33 @@ async def _apply_po_inventory(po: dict, user: dict, capital_choices: dict = None
     await ensure_org_context(branch_id=branch_id, org_id=po.get("organization_id"))
     po_number = po.get("po_number", "unknown")
 
+    # Pre-compute aggregates once for proportional overall-discount proration.
+    overall_disc_amt = _po_overall_discount_amount(po)
+    line_subtotal = _po_line_subtotal(po)
+
     for idx, item in enumerate(po.get("items", [])):
         pid = item.get("product_id")
         if not pid:
             continue
         qty = float(item.get("quantity", 0))
-        unit_price = float(item.get("unit_price", 0))
-        # Effective per-unit cost — preserves per-line supplier discount.
+        # Effective per-unit cost — preserves per-line supplier discount AND
+        # prorates the overall PO discount proportionally by line value.
         #
-        # Bug fix Feb 2026: previously `price = unit_price`, ignoring the
-        # line's `discount_amount`. So a PO with "₱1500 less ₱100 = ₱1400"
-        # would correctly debit ₱1400 from payables but stamp the product's
-        # cost_price as ₱1500 — silently inflating COGS and capital. The
-        # discount was only ever reflected on the AP side.
+        # Bug-fix history:
+        #   • Feb 2026 (line disc):    per-line `discount_amount` was being
+        #                              dropped on `cost_price`. Fixed.
+        #   • Feb 2026 (overall disc): overall PO discount only hit AP, not
+        #                              the product's cost_price. Fixed via
+        #                              per-value (proportional) proration.
         #
-        # We prefer the stored line `total` (canonical post-discount sum)
-        # when present, falling back to per-unit derivation. Per-line
-        # discount only — overall PO discount proration is intentionally
-        # out of scope here (rare, and the user can repeat the savings via
-        # capital_choices if needed).
-        line_disc = float(item.get("discount_amount", 0) or 0)
-        stored_total = float(item.get("total", 0) or 0)
-        if stored_total > 0 and qty > 0:
-            price = round(stored_total / qty, 4)
-        elif qty > 0 and line_disc > 0:
-            price = round(unit_price - (line_disc / qty), 4)
-        else:
-            price = unit_price
+        # Math: each line absorbs a share of the overall discount equal to
+        # its `line.total / sum(all line.total)` (post-line-disc). This
+        # mirrors GAAP landed-cost allocation and never drives cost_price
+        # negative on mixed-value baskets.
+        eff = _effective_unit_cost(
+            item, line_subtotal=line_subtotal, overall_disc_amt=overall_disc_amt
+        )
+        price = eff["effective_unit"]
         product_name = item.get("product_name", pid)
 
         try:
@@ -1644,25 +1726,23 @@ async def get_capital_preview(po_id: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="PO not found")
 
     po_branch_id = po.get("branch_id", "")
+    # Pre-compute aggregates for proportional overall-discount proration.
+    overall_disc_amt = _po_overall_discount_amount(po)
+    line_subtotal = _po_line_subtotal(po)
     items_preview = []
     for item in po.get("items", []):
         pid = item.get("product_id")
         if not pid:
             continue
         qty = float(item.get("quantity") or 0)
-        # Same per-line discount math as `_apply_po_inventory` — the
-        # preview must show what the cost_price WILL be, not the pre-
-        # discount unit_price. Mismatched preview/apply was a separate
-        # symptom of the Feb 2026 capital bug.
-        unit_price = float(item.get("unit_price") or 0)
-        line_disc = float(item.get("discount_amount") or 0)
-        stored_total = float(item.get("total") or 0)
-        if stored_total > 0 and qty > 0:
-            new_price = round(stored_total / qty, 4)
-        elif qty > 0 and line_disc > 0:
-            new_price = round(unit_price - (line_disc / qty), 4)
-        else:
-            new_price = unit_price
+        # Same proration math as `_apply_po_inventory` — the preview must
+        # show what the cost_price WILL be (post-line + post-overall disc),
+        # not the pre-discount sticker. Mismatched preview/apply was a
+        # separate symptom of the Feb 2026 capital bugs.
+        eff = _effective_unit_cost(
+            item, line_subtotal=line_subtotal, overall_disc_amt=overall_disc_amt
+        )
+        new_price = eff["effective_unit"]
 
         product = await db.products.find_one({"id": pid}, {"_id": 0})
         if not product:
@@ -1715,6 +1795,13 @@ async def get_capital_preview(po_id: str, user=Depends(get_current_user)):
             "projected_moving_avg": projected_moving_avg,
             "needs_warning": needs_warning,
             "price_drop_pct": price_drop_pct,
+            # Cost-build breakdown — Feb 2026. Lets the cashier/manager
+            # see *why* `new_price` is what it is (sticker − line disc −
+            # share of overall disc).
+            "unit_price": eff["unit_price"],
+            "line_discount": eff["line_discount"],
+            "overall_disc_share": eff["overall_disc_share"],
+            "effective_total": eff["effective_total"],
         })
 
     has_warnings = any(i["needs_warning"] for i in items_preview)
@@ -1722,6 +1809,8 @@ async def get_capital_preview(po_id: str, user=Depends(get_current_user)):
         "po_number": po.get("po_number", ""),
         "vendor": po.get("vendor", ""),
         "has_warnings": has_warnings,
+        "overall_discount_amount": overall_disc_amt,
+        "line_subtotal": line_subtotal,
         "items": items_preview,
     }
 
@@ -2654,6 +2743,102 @@ async def get_unpaid_po_summary(user=Depends(get_current_user), branch_id: Optio
         "total_count": len(pos),
     }
 
+
+
+@router.post("/backfill-overall-discount-capital")
+async def backfill_overall_discount_capital(
+    data: dict = None, user=Depends(get_current_user)
+):
+    """One-off backfill — recompute `branch_prices.cost_price` for past
+    received POs that carried an `overall_discount_amount > 0`.
+
+    Until Feb 2026 the overall PO discount only hit AP; line cost_price
+    was stamped using the pre-overall-discount line total. This endpoint
+    walks every received PO in the org with an overall discount, applies
+    the same per-value proration the live receive path now uses, and
+    sets the latest cost_price (idempotent — re-running is safe).
+
+    Strict rules:
+      * Admin/owner only (super-admin gated via perm check).
+      * Only touches POs with `status='received'` AND
+        `overall_discount_amount > 0`.
+      * Only updates the per-branch `branch_prices` doc — never touches
+        movements/journal entries. Future PO receives will continue to
+        push moving-average forward as normal.
+      * Optional `dry_run=true` returns the planned diff WITHOUT writing.
+    """
+    check_perm(user, "purchase_orders", "update")
+    data = data or {}
+    dry_run = bool(data.get("dry_run", False))
+    org_id = user.get("organization_id") or ""
+
+    q = {
+        "status": "received",
+        "overall_discount_amount": {"$gt": 0},
+    }
+    if org_id:
+        q["organization_id"] = org_id
+
+    pos = await db.purchase_orders.find(q, {"_id": 0}).to_list(5000)
+    planned = []        # list of {po_id, product_id, branch_id, old, new}
+    skipped_no_branch = 0
+    written = 0
+
+    for po in pos:
+        branch_id = po.get("branch_id") or ""
+        if not branch_id:
+            skipped_no_branch += 1
+            continue
+        overall_disc_amt = _po_overall_discount_amount(po)
+        line_subtotal = _po_line_subtotal(po)
+        if overall_disc_amt <= 0 or line_subtotal <= 0:
+            continue
+        for item in po.get("items", []):
+            pid = item.get("product_id")
+            if not pid:
+                continue
+            eff = _effective_unit_cost(
+                item,
+                line_subtotal=line_subtotal,
+                overall_disc_amt=overall_disc_amt,
+            )
+            new_cost = eff["effective_unit"]
+            bp = await db.branch_prices.find_one(
+                {"product_id": pid, "branch_id": branch_id}, {"_id": 0}
+            )
+            old_cost = float(bp.get("cost_price") or 0) if bp else 0.0
+            if round(old_cost, 4) == round(new_cost, 4):
+                continue
+            planned.append({
+                "po_id": po.get("id"),
+                "po_number": po.get("po_number"),
+                "product_id": pid,
+                "product_name": item.get("product_name", ""),
+                "branch_id": branch_id,
+                "old_cost": round(old_cost, 4),
+                "new_cost": round(new_cost, 4),
+                "overall_disc_share": eff["overall_disc_share"],
+            })
+            if not dry_run:
+                await db.branch_prices.update_one(
+                    {"product_id": pid, "branch_id": branch_id},
+                    {"$set": {
+                        "cost_price": new_cost,
+                        "source": "overall_discount_backfill",
+                        "updated_at": now_iso(),
+                    }},
+                    upsert=True,
+                )
+                written += 1
+
+    return {
+        "dry_run": dry_run,
+        "scanned_pos": len(pos),
+        "planned_changes": len(planned),
+        "written": written,
+        "skipped_no_branch": skipped_no_branch,
+        "preview": planned[:50],  # cap for response size
+    }
 
 
 @router.post("/{po_id}/mark-reviewed")

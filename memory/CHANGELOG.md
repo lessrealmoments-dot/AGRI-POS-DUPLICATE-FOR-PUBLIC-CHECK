@@ -1,6 +1,33 @@
 # AgriBooks Changelog
 
 
+## Feb 15 2026 — PO Capital: Overall-Discount Proration + Backfill 🔴 P0
+**User context**: "On our PO we have an overall discount separate from the per-line discount. Also our supplier does 10+1 free." Confirmed that the prior Feb-2026 fix only handled per-line discount; **overall PO discount still only hit AP**, leaving each line's `cost_price` stamped at the pre-overall-discount price. Inflated COGS reappeared whenever a header-level discount was used.
+
+**Fix** (`routes/purchase_orders.py`):
+- New pure helper `_effective_unit_cost(item, line_subtotal, overall_disc_amt)` — single source of truth for cost math. Per-value (proportional) allocation: each line absorbs `line_total / line_subtotal × overall_disc_amt`. GAAP landed-cost allocation; never drives cost_price negative on mixed-value baskets.
+- `_apply_po_inventory` + `get_capital_preview` both call the helper → preview/apply agreement guaranteed.
+- Preview response now exposes the full breakdown: `unit_price`, `line_discount`, `overall_disc_share`, `effective_total` (per item) + `overall_discount_amount`, `line_subtotal` (per PO).
+- New admin endpoint `POST /api/purchase-orders/backfill-overall-discount-capital` — walks past received POs with overall_discount > 0 and corrects historical `branch_prices.cost_price` via the same proration. Supports `dry_run=true`. Idempotent.
+
+**Frontend** (`pages/PurchaseOrderPage.js`):
+- Smart Capital dialog now shows a sky-blue banner when an overall discount is present, explaining how it's distributed.
+- Each item row gets an inline cost-build breakdown beneath the New PO Price: `₱unit − ₱line_disc/pc − ₱share` so managers see exactly where every peso landed.
+
+**Tests** (`test_br_po_capital_overall_discount.py` — 7 scenarios):
+1. Mixed-value basket (₱10,000 premium + ₱1,000 cheap, ₱1,100 overall disc) → premium=9000, cheap=90.
+2. Combined per-line + overall (10 × 100 less ₱10/pc less ₱100 overall) → 80.
+3. "10+1 free" encoded as 2 lines → moving-average = ₱90.91.
+4. "10+1 free" + per-line disc → moving-average = ₱81.82.
+5. capital-preview ≡ apply (preview returns same `effective_unit` + exposes `overall_disc_share`).
+6. Backfill endpoint corrects pre-fix rows then is idempotent on re-run.
+7. Helper pure-math contract test (locks formula).
+
+**218 BR tests passing** (was 207 + 11 new = 218 ✓). Lint clean. Full BR suite no longer shows the previously-flaky `test_br_payables_includes_historical` errors on suite runs.
+
+
+
+
 ## Feb 14 2026 — Closing Wizard (Group / Batch) Audit + Fix 🔴 P0
 **User report**: Batch-closing ~10 days of ₱1.5M cash sales showed `expected_counter = 0`. Single-day close worked fine.
 

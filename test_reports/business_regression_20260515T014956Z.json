@@ -1,0 +1,78 @@
+{
+  "generated_at": "2026-05-15T01:49:56.238956+00:00",
+  "pytest_exitstatus": 1,
+  "row_count": 5,
+  "pass_count": 5,
+  "fail_count": 0,
+  "rows": [
+    {
+      "scenario": "br_po_ocap.1_proportional",
+      "step": "overall_disc_distributed_by_value",
+      "expected": {
+        "premium": 9000.0,
+        "cheap": 90.0
+      },
+      "actual": {
+        "premium": 9000.0,
+        "cheap": 90.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T01:49:55.984313+00:00"
+    },
+    {
+      "scenario": "br_po_ocap.2_line_plus_overall",
+      "step": "both_discounts_compose",
+      "expected": {
+        "cost_price": 80.0
+      },
+      "actual": {
+        "cost_price": 80.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T01:49:55.993718+00:00"
+    },
+    {
+      "scenario": "br_po_ocap.3_ten_plus_one_free",
+      "step": "moving_avg_pulls_to_90_91",
+      "expected": {
+        "moving_avg": 90.91
+      },
+      "actual": {
+        "moving_avg": 90.91
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T01:49:56.004947+00:00"
+    },
+    {
+      "scenario": "br_po_ocap.4_ten_plus_one_with_line_disc",
+      "step": "moving_avg_pulls_to_81_82",
+      "expected": {
+        "moving_avg": 81.82
+      },
+      "actual": {
+        "moving_avg": 81.82
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T01:49:56.015484+00:00"
+    },
+    {
+      "scenario": "br_po_ocap.5_preview_apply_agreement",
+      "step": "preview_includes_overall_share",
+      "expected": {
+        "new_price": 80.0,
+        "overall_disc_share": 100.0
+      },
+      "actual": {
+        "new_price": 80.0,
+        "overall_disc_share": 100.0
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T01:49:56.018462+00:00"
+    }
+  ]
+}

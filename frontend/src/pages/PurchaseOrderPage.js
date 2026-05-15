@@ -2378,6 +2378,22 @@ export default function PurchaseOrderPage() {
               priced <strong>lower than their current capital</strong>. Choose how to update each product's capital.
             </div>
 
+            {/* Overall-discount banner — Feb 2026.
+                When the PO carries an `overall_discount_amount`, the capital
+                math prorates it by line value. Surface this so the manager
+                can see *where* the savings landed. */}
+            {capitalPreview.overall_discount_amount > 0 && (
+              <div data-testid="capital-preview-overall-disc-banner"
+                   className="bg-sky-50 border border-sky-200 rounded-lg p-2.5 text-xs text-sky-900 flex items-center gap-2">
+                <Receipt size={13} className="text-sky-600 shrink-0" />
+                <span>
+                  Overall PO discount of <strong>{formatPHP(capitalPreview.overall_discount_amount)}</strong>
+                  {" "}is being distributed across all lines proportional to value
+                  (line value ÷ subtotal × overall disc).
+                </span>
+              </div>
+            )}
+
             {/* Bulk actions */}
             <div className="flex gap-2">
               <Button size="sm" variant="outline" className="text-xs border-slate-300"
@@ -2430,6 +2446,21 @@ export default function PurchaseOrderPage() {
                           <span className="text-emerald-700 flex items-center justify-end gap-1">
                             <TrendingUp size={12} />₱{item.new_price.toFixed(2)}
                           </span>
+                        )}
+                        {/* Cost-build breakdown — only render when at least
+                            one of the two discounts is non-zero, otherwise
+                            the row stays clean. */}
+                        {((item.line_discount || 0) > 0 || (item.overall_disc_share || 0) > 0) && (
+                          <div data-testid={`capital-breakdown-${item.product_id}`}
+                               className="text-[10px] text-slate-400 font-normal mt-0.5 leading-tight">
+                            ₱{(item.unit_price || 0).toFixed(2)}
+                            {(item.line_discount || 0) > 0 && (
+                              <> − ₱{(item.line_discount / (item.qty || 1)).toFixed(2)}/pc</>
+                            )}
+                            {(item.overall_disc_share || 0) > 0 && (
+                              <> − ₱{(item.overall_disc_share / (item.qty || 1)).toFixed(2)} share</>
+                            )}
+                          </div>
                         )}
                       </td>
                       <td className="px-3 py-2.5 text-right font-mono text-slate-500">
