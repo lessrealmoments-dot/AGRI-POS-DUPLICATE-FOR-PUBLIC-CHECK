@@ -1,0 +1,104 @@
+{
+  "generated_at": "2026-05-15T04:59:06.763482+00:00",
+  "pytest_exitstatus": 0,
+  "row_count": 6,
+  "pass_count": 4,
+  "fail_count": 2,
+  "rows": [
+    {
+      "scenario": "br_tl.1_created",
+      "step": "only_request_created",
+      "expected": {
+        "kinds": [
+          "request.created"
+        ]
+      },
+      "actual": {
+        "kinds": [
+          "request.created"
+        ]
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T04:59:06.661189+00:00"
+    },
+    {
+      "scenario": "br_tl.2_sent",
+      "step": "created_then_sent",
+      "expected": {
+        "kinds": [
+          "request.created",
+          "request.sent"
+        ]
+      },
+      "actual": {
+        "kinds": [
+          "request.created",
+          "request.sent"
+        ]
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T04:59:06.664020+00:00"
+    },
+    {
+      "scenario": "br_tl.3_triage",
+      "step": "bto_and_pos_events_present",
+      "expected": {
+        "has_bto": true,
+        "po_created_count": 2,
+        "has_triage": true
+      },
+      "actual": {
+        "has_bto": true,
+        "po_created_count": 2,
+        "has_triage": true
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T04:59:06.679757+00:00"
+    },
+    {
+      "scenario": "br_tl.4_ordered_detail",
+      "step": "supplier_ref_and_eta_in_detail",
+      "expected": {
+        "detail_has_ref": true,
+        "detail_has_eta": true
+      },
+      "actual": {
+        "detail": "ref ACM-2026-9 \u00b7 ETA 2026-02-25"
+      },
+      "status": "FAIL",
+      "evidence": {},
+      "recorded_at": "2026-05-15T04:59:06.702189+00:00"
+    },
+    {
+      "scenario": "br_tl.5_received_variance",
+      "step": "variance_kind_in_detail",
+      "expected": {
+        "detail_contains": "under delivered"
+      },
+      "actual": {
+        "detail": "variance: under delivered"
+      },
+      "status": "FAIL",
+      "evidence": {},
+      "recorded_at": "2026-05-15T04:59:06.719212+00:00"
+    },
+    {
+      "scenario": "br_tl.6_cancel_event",
+      "step": "cancelled_present_with_reason",
+      "expected": {
+        "present": true,
+        "reason": "test"
+      },
+      "actual": {
+        "present": true,
+        "reason": "test"
+      },
+      "status": "PASS",
+      "evidence": {},
+      "recorded_at": "2026-05-15T04:59:06.722950+00:00"
+    }
+  ]
+}

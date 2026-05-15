@@ -396,12 +396,20 @@ function DetailDialog({ requestId, currentBranchId, onClose }) {
   const [orderingPoId, setOrderingPoId] = useState(null);
   const [orderForm, setOrderForm] = useState({ pin: '', supplier_ref: '', expected_delivery_date: '', notes: '' });
   const [orderSubmitting, setOrderSubmitting] = useState(false);
+  // Phase 3+ — Timeline
+  const [timeline, setTimeline] = useState([]);
+  const [timelineLoading, setTimelineLoading] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
+    setTimelineLoading(true);
     try {
-      const res = await api.get(`/stock-requests/${requestId}`);
+      const [res, tlRes] = await Promise.all([
+        api.get(`/stock-requests/${requestId}`),
+        api.get(`/stock-requests/${requestId}/timeline`),
+      ]);
       setDoc(res.data);
+      setTimeline(tlRes.data?.events || []);
       // Init blank assignments for triage UI
       const init = {};
       (res.data.items || []).forEach(it => {
@@ -418,6 +426,7 @@ function DetailDialog({ requestId, currentBranchId, onClose }) {
       toast.error(e.response?.data?.detail || 'Failed to load request');
     }
     setLoading(false);
+    setTimelineLoading(false);
   }, [requestId]);
 
   useEffect(() => { reload(); }, [reload]);
@@ -727,10 +736,71 @@ function DetailDialog({ requestId, currentBranchId, onClose }) {
             {!canTriage && doc.status === 'sent' && !isSupplyingBranch && (
               <p className="text-xs text-slate-400 italic">Waiting on the supplying branch to triage.</p>
             )}
+
+            {/* ── Activity Timeline (Phase 3+) ────────────────────────── */}
+            <Timeline events={timeline} loading={timelineLoading} />
           </>
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/* ── Activity Timeline ────────────────────────────────────────────────── */
+const KIND_STYLE = {
+  'request.created':   { color: 'bg-slate-400',   Icon: Plus },
+  'request.sent':      { color: 'bg-amber-500',   Icon: Send },
+  'request.triaged':   { color: 'bg-sky-500',     Icon: Check },
+  'request.cancelled': { color: 'bg-rose-500',    Icon: X },
+  'request.completed': { color: 'bg-emerald-500', Icon: Check },
+  'bto.created':       { color: 'bg-amber-500',   Icon: Truck },
+  'bto.sent':          { color: 'bg-amber-600',   Icon: Truck },
+  'bto.received':      { color: 'bg-emerald-500', Icon: Check },
+  'bto.cancelled':     { color: 'bg-rose-500',    Icon: X },
+  'po.created':        { color: 'bg-slate-400',   Icon: FileText },
+  'po.ordered':        { color: 'bg-teal-500',    Icon: Send },
+  'po.received':       { color: 'bg-emerald-500', Icon: Check },
+  'po.cancelled':      { color: 'bg-rose-500',    Icon: X },
+};
+
+function Timeline({ events, loading }) {
+  if (loading && !events.length) {
+    return <div className="text-xs text-slate-400 py-4 text-center">Loading timeline…</div>;
+  }
+  if (!events.length) return null;
+  return (
+    <div className="pt-2" data-testid="timeline">
+      <p className="text-xs font-semibold text-slate-700 mb-2 flex items-center gap-1.5">
+        <RefreshCw size={11} className="text-slate-400" /> Activity
+      </p>
+      <div className="relative pl-6 space-y-2.5 border-l-2 border-slate-100 ml-2">
+        {events.map((e, i) => {
+          const style = KIND_STYLE[e.kind] || { color: 'bg-slate-400', Icon: Check };
+          const Icon = style.Icon;
+          return (
+            <div key={i} className="relative" data-testid={`timeline-event-${e.kind}`}>
+              <div className={`absolute -left-[27px] top-0.5 w-4 h-4 rounded-full ${style.color} flex items-center justify-center ring-2 ring-white`}>
+                <Icon size={9} className="text-white" />
+              </div>
+              <div className="text-xs">
+                <div className="flex items-baseline gap-2 flex-wrap">
+                  <span className="font-medium text-slate-800">{e.label}</span>
+                  {e.actor && (
+                    <span className="text-[10px] text-slate-500">· {e.actor}</span>
+                  )}
+                  <span className="text-[10px] text-slate-400 ml-auto font-mono">
+                    {fmtDateTime(e.at)}
+                  </span>
+                </div>
+                {e.detail && (
+                  <p className="text-[11px] text-slate-500 mt-0.5">{e.detail}</p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

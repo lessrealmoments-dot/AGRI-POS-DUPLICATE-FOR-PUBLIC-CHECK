@@ -592,6 +592,137 @@ async def cancel_request(request_id: str, data: dict = None,
 
 
 
+# ── Timeline (Phase 3+) ─────────────────────────────────────────────────────
+@router.get("/{request_id}/timeline")
+async def get_request_timeline(request_id: str, user=Depends(get_current_user)):
+    """Aggregate every stamped event for the request + child docs into a
+    single chronological feed. No new data is recorded — purely a
+    presentation-layer roll-up over events already on stock_requests,
+    branch_transfer_orders, and purchase_orders.
+    """
+    check_perm(user, "branch_transfers", "view")
+    req = await db.stock_requests.find_one({"id": request_id}, {"_id": 0})
+    if not req:
+        raise HTTPException(404, "Stock request not found.")
+
+    events = []
+    req_ref = {"type": "request", "id": request_id,
+               "number": req.get("request_number", "")}
+
+    if req.get("created_at"):
+        events.append({"at": req["created_at"], "kind": "request.created",
+                       "label": "Stock request created",
+                       "actor": req.get("created_by_name", ""),
+                       "detail": f"{len(req.get('items', []))} line(s)",
+                       "doc_ref": req_ref})
+    if req.get("sent_at"):
+        events.append({"at": req["sent_at"], "kind": "request.sent",
+                       "label": "Sent to supplying branch",
+                       "actor": req.get("sent_by") or req.get("created_by_name", ""),
+                       "detail": "", "doc_ref": req_ref})
+    if req.get("triaged_at"):
+        summary = req.get("fulfillment_summary") or {}
+        bits = []
+        if summary.get("bto_number"):
+            bits.append(f"BTO {summary['bto_number']}")
+        if summary.get("po_details"):
+            bits.append(f"{len(summary['po_details'])} PO(s)")
+        events.append({"at": req["triaged_at"], "kind": "request.triaged",
+                       "label": "Triaged into fulfillment plan",
+                       "actor": req.get("triaged_by", ""),
+                       "detail": " + ".join(bits) if bits else "",
+                       "doc_ref": req_ref})
+    if req.get("cancelled_at"):
+        events.append({"at": req["cancelled_at"], "kind": "request.cancelled",
+                       "label": "Request cancelled",
+                       "actor": req.get("cancelled_by", ""),
+                       "detail": req.get("cancel_reason", ""),
+                       "doc_ref": req_ref})
+    if req.get("completed_at"):
+        events.append({"at": req["completed_at"], "kind": "request.completed",
+                       "label": "Request completed", "actor": "",
+                       "detail": "All child docs reached a terminal state.",
+                       "doc_ref": req_ref})
+
+    bto_id = (req.get("fulfillment_summary") or {}).get("bto_id")
+    if bto_id:
+        bto = await db.branch_transfer_orders.find_one(
+            {"id": bto_id}, {"_id": 0}
+        )
+        if bto:
+            bto_ref = {"type": "bto", "id": bto_id,
+                       "number": bto.get("order_number", "")}
+            if bto.get("created_at"):
+                events.append({"at": bto["created_at"], "kind": "bto.created",
+                               "label": "Branch Transfer created",
+                               "actor": bto.get("created_by_name", ""),
+                               "detail": f"{len(bto.get('items', []))} line(s)",
+                               "doc_ref": bto_ref})
+            if bto.get("sent_at"):
+                events.append({"at": bto["sent_at"], "kind": "bto.sent",
+                               "label": "BTO shipped",
+                               "actor": bto.get("sent_by_name") or bto.get("sent_by") or "",
+                               "detail": "", "doc_ref": bto_ref})
+            if bto.get("received_at"):
+                events.append({"at": bto["received_at"], "kind": "bto.received",
+                               "label": "BTO received at destination",
+                               "actor": bto.get("received_by_name") or bto.get("received_by") or "",
+                               "detail": "", "doc_ref": bto_ref})
+            if bto.get("cancelled_at"):
+                events.append({"at": bto["cancelled_at"], "kind": "bto.cancelled",
+                               "label": "BTO cancelled",
+                               "actor": bto.get("cancelled_by", ""),
+                               "detail": "", "doc_ref": bto_ref})
+
+    po_ids = (req.get("fulfillment_summary") or {}).get("po_ids") or []
+    if po_ids:
+        pos = await db.purchase_orders.find(
+            {"id": {"$in": po_ids}}, {"_id": 0}
+        ).to_list(100)
+        for po in pos:
+            po_ref = {"type": "po", "id": po["id"],
+                      "number": po.get("po_number", ""),
+                      "vendor": po.get("vendor", "")}
+            if po.get("created_at"):
+                events.append({"at": po["created_at"], "kind": "po.created",
+                               "label": f"DRAFT PO created · {po.get('vendor','')}",
+                               "actor": po.get("created_by_name", ""),
+                               "detail": f"{len(po.get('items', []))} line(s)",
+                               "doc_ref": po_ref})
+            if po.get("ordered_at"):
+                bits = []
+                if po.get("supplier_ref"):
+                    bits.append(f"ref {po['supplier_ref']}")
+                if po.get("expected_delivery_date"):
+                    bits.append(f"ETA {po['expected_delivery_date']}")
+                events.append({"at": po["ordered_at"], "kind": "po.ordered",
+                               "label": f"PO marked Ordered · {po.get('vendor','')}",
+                               "actor": po.get("ordered_by_name", ""),
+                               "detail": " · ".join(bits),
+                               "doc_ref": po_ref})
+            if po.get("received_date"):
+                vk = po.get("received_variance_kind") or ""
+                bits = []
+                if vk and vk != "completed":
+                    bits.append(f"variance: {vk.replace('_',' ')}")
+                events.append({"at": po["received_date"], "kind": "po.received",
+                               "label": f"PO received · {po.get('vendor','')}",
+                               "actor": "",
+                               "detail": " · ".join(bits),
+                               "doc_ref": po_ref})
+            if po.get("cancelled_at"):
+                events.append({"at": po["cancelled_at"], "kind": "po.cancelled",
+                               "label": f"PO cancelled · {po.get('vendor','')}",
+                               "actor": po.get("cancelled_by", ""),
+                               "detail": po.get("cancel_reason", ""),
+                               "doc_ref": po_ref})
+
+    events.sort(key=lambda e: (e.get("at") or "9999"))
+    return {"events": events, "count": len(events)}
+
+
+
+
 # ── Mark Phantom PO Ordered (Phase 2) ───────────────────────────────────────
 async def _notify_requesting_branch_po_ordered(po: dict, req: dict):
     """Best-effort SMS to the requesting branch's admins/manager when
@@ -1079,12 +1210,14 @@ async def update_phantom_po_received(po: dict):
         all_pos_done = all(p["status"] in ("received", "cancelled") for p in all_pos) if all_pos else True
         bto_done = (bto is None) or (bto.get("status") in ("completed", "received", "cancelled"))
         new_request_status = req["status"]
+        update_extra = {}
         if all_pos_done and bto_done and req["status"] == "fulfillment_generated":
             new_request_status = "completed"
+            update_extra["completed_at"] = now_iso()
 
         await db.stock_requests.update_one(
             {"id": request_id},
-            {"$set": {"items": updated, "status": new_request_status}},
+            {"$set": {"items": updated, "status": new_request_status, **update_extra}},
         )
     except Exception as e:
         import logging

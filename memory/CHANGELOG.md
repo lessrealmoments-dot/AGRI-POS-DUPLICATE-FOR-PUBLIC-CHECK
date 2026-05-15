@@ -1,6 +1,34 @@
 # AgriBooks Changelog
 
 
+## Feb 15 2026 — Stock Requests Phase 3+: Activity Timeline 🟠 P1
+
+**Why**: stakeholders need a single chronological feed of "what happened" across the request and its spawned BTO + POs — instead of clicking each linked doc to piece events together.
+
+- **Backend** (`routes/stock_requests.py`):
+  - New `GET /api/stock-requests/{id}/timeline` — purely a presentation roll-up over already-stamped fields on `stock_requests`, `branch_transfer_orders`, and `purchase_orders`. Returns events sorted chronologically.
+  - Event kinds: `request.created/sent/triaged/cancelled/completed`, `bto.created/sent/received/cancelled`, `po.created/ordered/received/cancelled`.
+  - Each event carries `{at, kind, label, actor, detail, doc_ref}` — `actor` is the verifier/creator's display name, `detail` is a short context string (line counts, supplier_ref + ETA on `po.ordered`, variance kind on `po.received`).
+  - Stamping fix: when a request auto-completes after all child docs reach terminal status, `completed_at` is now stored.
+
+- **Frontend** (`pages/StockRequestsPage.js`):
+  - New `Timeline` component rendered at the bottom of the detail dialog.
+  - Visual: vertical timeline w/ coloured dots per event kind (slate=created, amber=transfer, teal=ordered, emerald=success, rose=cancelled, sky=triaged).
+  - Each event shows label + actor + timestamp; detail shown as muted sub-line.
+  - Timeline auto-refreshes alongside `get_request` on any action that mutates the request (triage, mark-ordered, cancel).
+
+- **Tests** (`test_br_stock_request_timeline.py` — 6 scenarios, all green):
+  1. Brand-new request → 1 event (`request.created`)
+  2. After send → 2 events, chronologically sorted
+  3. Triage spawning 1 BTO + 2 POs → `bto.created` + 2× `po.created` + `request.triaged` all present
+  4. Mark-ordered → `po.ordered` detail contains supplier_ref + ETA
+  5. Receive with variance → `po.received` detail flags "under delivered"
+  6. Cancel → `request.cancelled` with reason in detail
+
+**Verification**: 249/249 BR tests passing (was 243 + 6 new). Lint clean on both backend and frontend.
+
+
+
 ## Feb 15 2026 — Stock Requests Phase 3+: Variance Alert SMS 🟠 P1
 
 **Closes the loop**: when a supplier ships incorrectly, Branch B is now actively notified instead of having to scan the request list manually.
