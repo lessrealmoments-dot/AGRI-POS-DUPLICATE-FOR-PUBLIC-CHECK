@@ -1,3 +1,36 @@
+# AgriBooks — Current State (May 2026)
+
+## Active Feature: Telegram Bot Integration
+See `/app/memory/TELEGRAM_FEATURE_SPEC.md` for full specification.
+Priority: Build Telegram platform first, then wire hooks, then slow-moving stock.
+
+## Recently Completed (This Session)
+- UoM bug fix (backend + frontend + all print templates)
+- Sort for Loading button on Detailed Sale (category + heavy UoM priority)
+- Smart Price Scan Capital Change fix (always saves branch prices on confirm)
+- Stock Request BTO now creates as draft (not pending_approval)
+- PO Draft Orders panel (Load & Edit, like Sales draft orders)
+
+## Pending Issues
+- Issue 1: Internal invoice print missing variance details (P1)
+- Issue 2: Frontend missing "Invoice Creation Failed" badge on BTO cards (P3)
+- Issue 3: Verifier identity not stamped on PO cancellation (P2)
+- Issue 4: Admin "All Branches" view shows incoming/outgoing mixed (P3)
+
+## Upcoming Tasks (Priority Order)
+1. **Telegram Bot Integration** (P0 — user-requested, active)
+2. Supplier Ledger view (P0)
+3. Slow-Moving Stock Detection + Report (P1, ties into Telegram)
+4. Variance Log tab (P1)
+5. CSV bulk-import for Historical POs (P1)
+
+## Testing Constraint
+ONLY run `pytest tests/business_regression/` — legacy test suite has 11 pre-existing failures.
+Current: 254/254 passing.
+
+---
+
+
 # AgriBooks PRD
 
 
