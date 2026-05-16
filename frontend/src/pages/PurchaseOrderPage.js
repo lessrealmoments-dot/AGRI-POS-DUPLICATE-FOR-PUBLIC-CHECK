@@ -29,7 +29,7 @@ import {
   Search, History, ArrowRight, Receipt, UserPlus, Package,
   Wallet, Banknote, CreditCard, AlertTriangle, ChevronDown, RefreshCw,
   ShieldCheck, Clock, Pencil, Upload, ImageIcon, TrendingDown, TrendingUp, Printer,
-  Smartphone, Lock, PauseCircle, Inbox, RotateCcw, Wifi, WifiOff, Send, Shield
+  Smartphone, Lock, PauseCircle, Inbox, RotateCcw, Wifi, WifiOff, Send, Shield, ClipboardList
 } from 'lucide-react';
 import {
   buildParkPOPayload, parkPO, loadParkedPOs,
@@ -211,6 +211,10 @@ export default function PurchaseOrderPage() {
   const [parkLabel, setParkLabel] = useState('');
   const [parkSaving, setParkSaving] = useState(false);
   const [discardPinPrompt, setDiscardPinPrompt] = useState({ open: false, parkId: null, pin: '' });
+
+  // ── Draft PO editing (load existing draft into form) ──────────────────
+  const [activeDraftPOId, setActiveDraftPOId] = useState(null);
+  const [draftOrdersOpen, setDraftOrdersOpen] = useState(false);
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
   useEffect(() => {
     const onUp = () => setIsOnline(true);
@@ -389,6 +393,46 @@ export default function PurchaseOrderPage() {
     setSupplyBranchId('');
     setShowRetailToggle(isAdmin);
     setCreateReceiptData(null);
+    setActiveDraftPOId(null);
+  };
+
+  // ── Load draft PO into form for editing ────────────────────────────────
+  const loadDraftPO = (po) => {
+    const filled = (po.items || []).map(it => ({
+      product_id: it.product_id || '',
+      product_name: it.product_name || '',
+      sku: it.sku || '',
+      quantity: it.quantity ?? 1,
+      unit_price: it.unit_price ?? 0,
+      unit: it.unit || '',
+      discount_type: it.discount_type || 'amount',
+      discount_value: it.discount_value ?? 0,
+      discount_amount: it.discount_amount ?? 0,
+      total: it.total ?? 0,
+    }));
+    setLines(filled.length ? [...filled, { ...EMPTY_LINE }] : [{ ...EMPTY_LINE }]);
+    setHeader(h => ({
+      ...h,
+      vendor: po.vendor || '',
+      dr_number: po.dr_number || '',
+      po_number: po.po_number || '',
+      purchase_date: po.purchase_date || today,
+      notes: po.notes || '',
+      show_freight: (po.freight || 0) > 0,
+      freight: po.freight || 0,
+      overall_discount_type: po.overall_discount_type || 'amount',
+      overall_discount_value: po.overall_discount_value || '',
+      show_vat: (po.tax_rate || 0) > 0,
+      tax_rate: po.tax_rate || 12,
+      payment_type: po.po_type === 'terms' ? 'terms' : 'cash',
+      terms_label: po.terms_label || 'Net 30',
+      terms_days: po.terms_days || 30,
+    }));
+    setSupplierSearch(po.vendor || '');
+    setActiveDraftPOId(po.id);
+    setTab('create');
+    setDraftOrdersOpen(false);
+    toast.success(`Loaded draft: ${po.po_number}`);
   };
 
   // ── Validate ───────────────────────────────────────────────────────────
@@ -441,10 +485,18 @@ export default function PurchaseOrderPage() {
     const valid = validate(); if (!valid) return;
     setSaving(true);
     try {
-      const res = await api.post('/purchase-orders', buildPayload(valid, { po_type: 'draft' }));
-      toast.success(`Draft PO ${res.data.po_number} saved`);
-      setRefPrompt({ open: true, number: res.data.po_number, vendor: header.vendor });
-      resetForm(); fetchOrders(); setTab('list');
+      if (activeDraftPOId) {
+        // Re-save existing draft
+        const payload = buildPayload(valid, { po_type: 'draft' });
+        const res = await api.put(`/purchase-orders/${activeDraftPOId}`, payload);
+        toast.success(`Draft ${res.data.po_number || header.po_number} updated`);
+        resetForm(); fetchOrders(); setTab('list');
+      } else {
+        const res = await api.post('/purchase-orders', buildPayload(valid, { po_type: 'draft' }));
+        toast.success(`Draft PO ${res.data.po_number} saved`);
+        setRefPrompt({ open: true, number: res.data.po_number, vendor: header.vendor });
+        resetForm(); fetchOrders(); setTab('list');
+      }
     } catch (e) {
       const detail = e.response?.data?.detail;
       const msg = typeof detail === 'string' ? detail
@@ -1103,6 +1155,23 @@ export default function PurchaseOrderPage() {
             )}
           </Button>
 
+          {/* Draft POs quick access */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => { setDraftOrdersOpen(true); fetchOrders(); }}
+            data-testid="draft-pos-btn"
+            title="View and resume draft POs"
+            className="h-9"
+          >
+            <ClipboardList size={14} className="mr-1" /> Draft Orders
+            {draftCount > 0 && (
+              <Badge className="ml-1.5 text-[10px] h-4 px-1.5 bg-amber-100 text-amber-700 hover:bg-amber-100" data-testid="draft-po-count-badge">
+                {draftCount}
+              </Badge>
+            )}
+          </Button>
+
           <Button
             variant="outline"
             size="sm"
@@ -1402,9 +1471,16 @@ export default function PurchaseOrderPage() {
                   </div>
 
                   <div className="grid grid-cols-3 gap-2 pt-1">
+                    {activeDraftPOId && (
+                      <div className="col-span-3 flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700 font-medium mb-1">
+                        <ClipboardList size={11} />
+                        Editing Draft: <span className="font-mono font-bold">{header.po_number || '...'}</span>
+                        <button onClick={resetForm} className="ml-auto text-slate-400 hover:text-slate-600"><X size={12} /></button>
+                      </div>
+                    )}
                     <Button variant="outline" size="sm" onClick={handleSaveDraft} disabled={saving}
                       data-testid="save-draft-btn" className="flex flex-col h-14 gap-0.5">
-                      <Save size={16} /><span className="text-[10px] leading-tight text-center">Save Draft</span>
+                      <Save size={16} /><span className="text-[10px] leading-tight text-center">{activeDraftPOId ? 'Update Draft' : 'Save Draft'}</span>
                     </Button>
                     <Button size="sm" onClick={openTermsDialog} disabled={saving}
                       data-testid="receive-terms-btn"
@@ -1528,6 +1604,13 @@ export default function PurchaseOrderPage() {
                       </TableCell>
                       <TableCell>
                         <div className="flex gap-1 flex-wrap">
+                          {po.status === 'draft' && (
+                            <Button size="sm" variant="outline" onClick={() => loadDraftPO(po)}
+                              className="h-7 text-[11px] text-blue-600 border-blue-200 hover:bg-blue-50"
+                              data-testid={`edit-draft-po-${po.id}`}>
+                              <Pencil size={11} className="mr-0.5" /> Edit
+                            </Button>
+                          )}
                           {(po.status === 'draft' || po.status === 'ordered') && (
                             <Button size="sm" variant="outline" onClick={() => receivePO(po.id)}
                               className="h-7 text-[11px]" data-testid={`receive-po-${po.id}`}>
@@ -2701,8 +2784,82 @@ export default function PurchaseOrderPage() {
       </DialogContent>
     </Dialog>
 
+    {/* ── Draft Orders Dialog ─────────────────────────────────────────── */}
+    <Dialog open={draftOrdersOpen} onOpenChange={setDraftOrdersOpen}>
+      <DialogContent data-testid="draft-pos-dialog" className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ClipboardList size={18} className="text-amber-600" /> Draft Purchase Orders
+            {draftCount > 0 && (
+              <Badge className="ml-1 bg-amber-100 text-amber-700 hover:bg-amber-100">{draftCount}</Badge>
+            )}
+          </DialogTitle>
+          <DialogDescription>
+            Saved drafts ready to edit. Load one to modify items, prices, and quantities before receiving.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="max-h-[60vh] overflow-y-auto -mx-6 px-6 divide-y divide-slate-100">
+          {orders.filter(o => o.status === 'draft').length === 0 ? (
+            <div className="text-center py-8 text-slate-400 text-sm">
+              No draft POs right now.
+            </div>
+          ) : orders.filter(o => o.status === 'draft').map((po) => (
+            <div key={po.id} className="py-3 flex items-start gap-3" data-testid={`draft-po-row-${po.id}`}>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-mono font-bold text-sm text-[#1A4D2E]">{po.po_number}</span>
+                  <Badge variant="outline" className="text-[9px] py-0 px-1.5">
+                    <Truck size={9} className="mr-0.5" /> {po.vendor || 'No supplier'}
+                  </Badge>
+                  {po.source_request_number && (
+                    <Badge className="text-[9px] py-0 px-1.5 bg-teal-50 text-teal-700 hover:bg-teal-50">
+                      SR: {po.source_request_number}
+                    </Badge>
+                  )}
+                </div>
+                <div className="flex gap-3 mt-0.5 text-[11px] text-slate-500">
+                  <span>{(po.items?.length || 0)} items</span>
+                  <span>·</span>
+                  <span className="font-semibold text-slate-700">{formatPHP(po.grand_total || 0)}</span>
+                  <span>·</span>
+                  <span>{po.purchase_date || po.created_at?.slice(0, 10) || ''}</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <Button
+                  size="sm"
+                  onClick={() => loadDraftPO(po)}
+                  data-testid={`load-draft-po-${po.id}`}
+                  className="bg-[#1A4D2E] hover:bg-[#14532d] text-white h-8"
+                >
+                  <Pencil size={12} className="mr-1" /> Load & Edit
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => receivePO(po.id)}
+                  data-testid={`receive-draft-po-${po.id}`}
+                  className="h-8 text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+                >
+                  <Check size={12} className="mr-1" /> Receive
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex justify-end pt-2">
+          <Button variant="outline" size="sm" onClick={fetchOrders} disabled={!isOnline}>
+            <RefreshCw size={12} className="mr-1" /> Refresh
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+
     {/* ── Discard PIN prompt (other-user parks only) ──────────────────── */}
     <Dialog open={discardPinPrompt.open} onOpenChange={(o) => !o && setDiscardPinPrompt({ open: false, parkId: null, pin: '' })}>
+
       <DialogContent data-testid="discard-park-po-pin-dialog" className="max-w-sm">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">

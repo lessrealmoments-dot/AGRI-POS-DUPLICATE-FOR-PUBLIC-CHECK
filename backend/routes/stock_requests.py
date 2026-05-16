@@ -387,12 +387,10 @@ async def triage_request(
             "from_branch_id":  sup_bid,
             "to_branch_id":    req_bid,
             "items":           bto_items,
-            # Stock-Request BTOs land in `pending_approval` so the
-            # requesting branch (Branch A) sees them in their Requests
-            # tab and can edit qty / approve / decline on phone. Without
-            # this flag the BTO would default to status='draft' which is
-            # a dead-end state that nobody ever revisits.
-            "requires_approval": True,
+            # Stock-Request BTOs start as draft so the fulfilling branch can
+            # review, edit quantities, add/remove products, and set transfer
+            # prices before sending. The standard BT flow applies from here:
+            # draft → send → receive.
             "notes":           f"Auto-generated from stock request {req['request_number']}",
             "source_request_id":     request_id,
             "source_request_number": req["request_number"],

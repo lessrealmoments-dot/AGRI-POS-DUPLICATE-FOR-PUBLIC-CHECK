@@ -1,8 +1,8 @@
 """
 br_stock_request_parked_receipt — pins the Feb 2026 Phase-3+ fixes that
 make Stock-Request DRAFT POs behave like parked receipts AND ensure the
-BTO from triage lands in the *Requests* tab (pending_approval) instead
-of the dead-end Drafts.
+BTO from triage lands as an editable `draft` so the fulfilling branch
+can review, add/remove items, and set prices before sending.
 
 Behavior pinned:
   1. Snapshot is captured at TRIAGE time, not at Mark-Ordered.
@@ -10,9 +10,9 @@ Behavior pinned:
   3. Branch A can receive a DRAFT PO directly (without mark-ordered),
      and variance is still computed correctly against the triage
      snapshot.
-  4. The BTO spawned from triage lands in `pending_approval`, NOT the
-     dead-end `draft`, so the requesting branch sees it in the
-     Requests tab and can edit/approve/decline on phone.
+  4. The BTO spawned from triage lands in `draft` (editable in BT
+     composer), so the fulfilling branch can add/remove products and
+     set transfer prices before sending.
 """
 import pytest
 
@@ -205,7 +205,8 @@ async def test_pr_3_receive_draft_direct(tenant, record_result):
 
 
 # ═════════════════════════════════════════════════════════════════════
-# Test 4 — BTO from triage lands in `pending_approval`, NOT draft.
+# Test 4 — BTO from triage lands in `draft` so the fulfilling branch
+# can review, edit items, and set transfer prices before sending.
 # ═════════════════════════════════════════════════════════════════════
 @pytest.mark.asyncio
 async def test_pr_4_bto_lands_in_pending_approval(tenant, record_result):
@@ -221,14 +222,14 @@ async def test_pr_4_bto_lands_in_pending_approval(tenant, record_result):
         {"id": res["bto_id"]}, {"_id": 0}
     )
     record_result(
-        scenario="br_pr.4_bto_lands_in_pending_approval",
-        step="not_dead_end_draft",
-        expected={"status": "pending_approval"},
+        scenario="br_pr.4_bto_lands_in_draft",
+        step="editable_draft",
+        expected={"status": "draft"},
         actual={"status": bto.get("status")},
     )
     assert bto is not None
-    assert bto["status"] == "pending_approval", (
-        f"BTO should land in pending_approval (visible in Requests tab), "
+    assert bto["status"] == "draft", (
+        f"BTO should land in draft (editable in BT composer), "
         f"got {bto.get('status')!r}"
     )
 

@@ -1,3 +1,37 @@
+## 2026-05-16 — Stock Request BTO Fix + PO Draft Orders Panel
+
+### Bug Fix: Stock Request BTO Goes to Draft (Not Approval)
+When triaging a stock request with "Personal Fulfillment" (branch transfer),
+the BTO now creates as `draft` instead of `pending_approval`. This lets the
+fulfilling branch review, edit items, add/remove products, and set transfer
+prices in the BT composer before sending.
+
+**Changed:** `/app/backend/routes/stock_requests.py` — removed
+`requires_approval: True` from the BTO payload.
+
+### Feature: PO Draft Orders Panel
+Added a quick-access "Draft Orders" panel to the Purchase Orders page,
+similar to Sales → Draft Orders:
+
+- **"Draft Orders" button** in PO header bar with badge count
+- **Draft Orders dialog** — lists all draft POs with Load & Edit / Receive
+- **"Load & Edit" button** on draft POs in the PO list table
+- **Draft editing flow** — loads draft into PO form, user edits, re-saves
+  via "Update Draft" or finalizes via Cash/Terms receive
+- **"Editing Draft: PO-XXX" indicator** when a draft is loaded
+
+This enables Stock Request-generated draft POs (from supplier_po triage)
+to be loaded, modified (add/remove products, change prices), and then
+received — exactly like the Sales draft orders pattern.
+
+### Files Changed
+- `/app/backend/routes/stock_requests.py` (BTO status fix)
+- `/app/frontend/src/pages/PurchaseOrderPage.js` (Draft panel + edit flow)
+- `/app/backend/tests/.../test_br_stock_request_parked_receipt.py` (test updated)
+
+---
+
+
 ## 2026-05-15 — Smart Price Scan: Capital Change Fix
 
 ### Bug
